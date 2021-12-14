@@ -169,15 +169,20 @@ func (s *Server) init() error {
 		return err
 	}
 
-	if err := s.querynode.Register(); err != nil {
-		return err
-	}
 	return nil
 }
 
 // start starts QueryNode's grpc service.
 func (s *Server) start() error {
-	return s.querynode.Start()
+	if err := s.querynode.Start(); err != nil {
+		log.Error("QueryNode start failed", zap.Error(err))
+		return err
+	}
+	if err := s.querynode.Register(); err != nil {
+		log.Error("QueryNode register service failed", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // startGrpcLoop starts the grpc loop of QueryNode component.

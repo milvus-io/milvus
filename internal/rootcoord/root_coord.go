@@ -912,12 +912,25 @@ func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, ts typeu
 
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
+	c.session.Register()
+	go c.session.LivenessCheck(c.ctx, func() {
+		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
+		if err := c.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	})
+	return nil
+}
+
+func (c *Core) initSession() error {
 	c.session = sessionutil.NewSession(c.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	c.session.Init(typeutil.RootCoordRole, Params.Address, true)
-	Params.SetLogger(typeutil.UniqueID(-1))
+	Params.SetLogger(c.session.ServerID)
 	return nil
 }
 
@@ -930,6 +943,11 @@ func (c *Core) Init() error {
 		}
 	}
 	c.initOnce.Do(func() {
+		if err := c.initSession(); err != nil {
+			initError = err
+			log.Error("RootCoord init session failed", zap.Error(err))
+			return
+		}
 		connectEtcdFn := func() error {
 			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
 				log.Error("RootCoord failed to new Etcd client", zap.Any("reason", initError))
@@ -1171,14 +1189,6 @@ func (c *Core) Start() error {
 		go c.tsLoop()
 		go c.chanTimeTick.startWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
-		go c.session.LivenessCheck(c.ctx, func() {
-			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
-			if err := c.Stop(); err != nil {
-				log.Fatal("failed to stop server", zap.Error(err))
-			}
-			// manually send signal to starter goroutine
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-		})
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
 

@@ -2276,11 +2276,11 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 		return newMockRootCoordService(), nil
 	}
 	assert.Nil(t, err)
-	err = svr.Register()
-	assert.Nil(t, err)
 	err = svr.Init()
 	assert.Nil(t, err)
 	err = svr.Start()
+	assert.Nil(t, err)
+	err = svr.Register()
 	assert.Nil(t, err)
 	return svr
 }

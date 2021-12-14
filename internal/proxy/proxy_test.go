@@ -419,11 +419,6 @@ func TestProxy(t *testing.T) {
 	Params.Init()
 	log.Info("Initialize parameter table of proxy")
 
-	// register proxy
-	err = proxy.Register()
-	assert.NoError(t, err)
-	log.Info("Register proxy done")
-
 	rootCoordClient, err := rcc.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = rootCoordClient.Init()
@@ -468,6 +463,11 @@ func TestProxy(t *testing.T) {
 	err = proxy.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, internalpb.StateCode_Healthy, proxy.stateCode.Load().(internalpb.StateCode))
+
+	// register proxy
+	err = proxy.Register()
+	assert.NoError(t, err)
+	log.Info("Register proxy done")
 	defer func() {
 		err := proxy.Stop()
 		assert.NoError(t, err)

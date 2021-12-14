@@ -126,11 +126,21 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
 	return node
 }
 
+func (node *QueryNode) initSession() error {
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if node.session == nil {
+		return fmt.Errorf("session is nil, the etcd client connection may have failed")
+	}
+	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
+	Params.QueryNodeID = node.session.ServerID
+	Params.SetLogger(Params.QueryNodeID)
+	log.Debug("QueryNode", zap.Int64("nodeID", Params.QueryNodeID), zap.String("node address", node.session.Address))
+	return nil
+}
+
 // Register register query node at etcd
 func (node *QueryNode) Register() error {
-	log.Debug("query node session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints))
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodePort, 10), false)
+	node.session.Register()
 	// start liveness check
 	go node.session.LivenessCheck(node.queryNodeLoopCtx, func() {
 		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
@@ -141,13 +151,6 @@ func (node *QueryNode) Register() error {
 		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 
-	Params.QueryNodeID = node.session.ServerID
-	Params.SetLogger(Params.QueryNodeID)
-	log.Debug("query nodeID", zap.Int64("nodeID", Params.QueryNodeID))
-	log.Debug("query node address", zap.String("address", node.session.Address))
-
-	// This param needs valid QueryNodeID
-	Params.initMsgChannelSubName()
 	//TODO Reset the logger
 	//Params.initLogCfg()
 	return nil
@@ -174,6 +177,13 @@ func (node *QueryNode) Init() error {
 	var initError error = nil
 	node.initOnce.Do(func() {
 		//ctx := context.Background()
+		log.Debug("QueryNode session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints))
+		err := node.initSession()
+		if err != nil {
+			log.Error("QueryNode init session failed", zap.Error(err))
+			initError = err
+			return
+		}
 		connectEtcdFn := func() error {
 			etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 			if err != nil {
@@ -186,7 +196,7 @@ func (node *QueryNode) Init() error {
 			zap.Any("EtcdEndpoints", Params.EtcdEndpoints),
 			zap.Any("MetaRootPath", Params.MetaRootPath),
 		)
-		err := retry.Do(node.queryNodeLoopCtx, connectEtcdFn, retry.Attempts(300))
+		err = retry.Do(node.queryNodeLoopCtx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
 			log.Debug("queryNode try to connect etcd failed", zap.Error(err))
 			initError = err
@@ -241,6 +251,8 @@ func (node *QueryNode) Init() error {
 			zap.Any("IP", Params.QueryNodeIP),
 			zap.Any("Port", Params.QueryNodePort),
 		)
+		// This param needs valid QueryNodeID
+		Params.initMsgChannelSubName()
 	})
 
 	return initError

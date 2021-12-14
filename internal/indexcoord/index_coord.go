@@ -120,12 +120,25 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 
 // Register register IndexCoord role at etcd.
 func (i *IndexCoord) Register() error {
+	i.session.Register()
+	go i.session.LivenessCheck(i.loopCtx, func() {
+		log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
+		if err := i.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	})
+	return nil
+}
+
+func (i *IndexCoord) initSession() error {
 	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
 	i.session.Init(typeutil.IndexCoordRole, Params.Address, true)
-	Params.SetLogger(typeutil.UniqueID(-1))
+	Params.SetLogger(i.session.ServerID)
 	return nil
 }
 
@@ -134,8 +147,15 @@ func (i *IndexCoord) Init() error {
 	var initErr error = nil
 	Params.InitOnce()
 	i.initOnce.Do(func() {
-		log.Debug("IndexCoord", zap.Strings("etcd endpoints", Params.EtcdEndpoints))
 		i.UpdateStateCode(internalpb.StateCode_Initializing)
+		log.Debug("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(internalpb.StateCode)))
+
+		err := i.initSession()
+		if err != nil {
+			log.Error(err.Error())
+			initErr = err
+			return
+		}
 
 		connectEtcdFn := func() error {
 			etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
@@ -150,7 +170,7 @@ func (i *IndexCoord) Init() error {
 			return err
 		}
 		log.Debug("IndexCoord try to connect etcd")
-		err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
+		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
 			log.Error("IndexCoord try to connect etcd failed", zap.Error(err))
 			initErr = err
@@ -249,15 +269,6 @@ func (i *IndexCoord) Start() error {
 
 		i.loopWg.Add(1)
 		go i.watchMetaLoop()
-
-		go i.session.LivenessCheck(i.loopCtx, func() {
-			log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
-			if err := i.Stop(); err != nil {
-				log.Fatal("failed to stop server", zap.Error(err))
-			}
-			// manually send signal to starter goroutine
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-		})
 
 		startErr = i.sched.Start()
 

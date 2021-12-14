@@ -88,14 +88,7 @@ func (s *Server) init() error {
 	datacoord.Params.Port = Params.Port
 	datacoord.Params.Address = Params.Address
 
-	err := s.dataCoord.Register()
-	if err != nil {
-		log.Debug("DataCoord Register etcd failed", zap.Error(err))
-		return err
-	}
-	log.Debug("DataCoord Register etcd success")
-
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		log.Debug("DataCoord startGrpc failed", zap.Error(err))
 		return err
@@ -161,7 +154,17 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) start() error {
-	return s.dataCoord.Start()
+	err := s.dataCoord.Start()
+	if err != nil {
+		log.Error("DataCoord start failed", zap.Error(err))
+		return err
+	}
+	err = s.dataCoord.Register()
+	if err != nil {
+		log.Debug("DataCoord register service failed", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // Stop stops the DataCoord server gracefully.

@@ -436,9 +436,10 @@ func TestRootCoordInit(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 
-	err = core.Register()
-	assert.Nil(t, err)
 	err = core.Init()
+	assert.Nil(t, err)
+
+	err = core.Register()
 	assert.Nil(t, err)
 
 	// inject kvBaseCreate fail
@@ -450,13 +451,14 @@ func TestRootCoordInit(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 
-	err = core.Register()
-	assert.Nil(t, err)
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		return nil, retry.Unrecoverable(errors.New("injected"))
 	}
 	err = core.Init()
 	assert.NotNil(t, err)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	// inject metaKV create fail
 	core, err = NewCore(ctx, coreFactory)
@@ -467,8 +469,6 @@ func TestRootCoordInit(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 
-	err = core.Register()
-	assert.Nil(t, err)
 	core.kvBaseCreate = func(root string) (kv.TxnKV, error) {
 		if root == Params.MetaRootPath {
 			return nil, retry.Unrecoverable(errors.New("injected"))
@@ -477,6 +477,9 @@ func TestRootCoordInit(t *testing.T) {
 	}
 	err = core.Init()
 	assert.NotNil(t, err)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	// inject newSuffixSnapshot failure
 	core, err = NewCore(ctx, coreFactory)
@@ -487,13 +490,14 @@ func TestRootCoordInit(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 
-	err = core.Register()
-	assert.Nil(t, err)
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		return nil, nil
 	}
 	err = core.Init()
 	assert.NotNil(t, err)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 	// inject newMetaTable failure
 	core, err = NewCore(ctx, coreFactory)
@@ -504,14 +508,15 @@ func TestRootCoordInit(t *testing.T) {
 	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 
-	err = core.Register()
-	assert.Nil(t, err)
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		kv := memkv.NewMemoryKV()
 		return &loadPrefixFailKV{TxnKV: kv}, nil
 	}
 	err = core.Init()
 	assert.NotNil(t, err)
+
+	err = core.Register()
+	assert.Nil(t, err)
 
 }
 
@@ -542,9 +547,6 @@ func TestRootCoord(t *testing.T) {
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 	Params.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
 	Params.DeltaChannelName = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
-
-	err = core.Register()
-	assert.Nil(t, err)
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
@@ -622,6 +624,9 @@ func TestRootCoord(t *testing.T) {
 	}
 
 	err = core.Start()
+	assert.Nil(t, err)
+
+	err = core.Register()
 	assert.Nil(t, err)
 
 	time.Sleep(100 * time.Millisecond)
@@ -2213,9 +2218,6 @@ func TestRootCoord2(t *testing.T) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
 	assert.Nil(t, err)
@@ -2245,6 +2247,9 @@ func TestRootCoord2(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = core.Start()
+	assert.Nil(t, err)
+
+	err = core.Register()
 	assert.Nil(t, err)
 
 	m := map[string]interface{}{
@@ -2481,9 +2486,6 @@ func TestCheckFlushedSegments(t *testing.T) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
 	assert.Nil(t, err)
@@ -2513,6 +2515,9 @@ func TestCheckFlushedSegments(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = core.Start()
+	assert.Nil(t, err)
+
+	err = core.Register()
 	assert.Nil(t, err)
 
 	m := map[string]interface{}{
@@ -2638,9 +2643,6 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
 	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
 	assert.Nil(t, err)
@@ -2670,6 +2672,9 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = core.Start()
+	assert.Nil(t, err)
+
+	err = core.Register()
 	assert.Nil(t, err)
 
 	m := map[string]interface{}{

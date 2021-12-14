@@ -109,11 +109,7 @@ func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 
 // Register registers proxy at etcd
 func (node *Proxy) Register() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
-	Params.ProxyID = node.session.ServerID
-	Params.SetLogger(Params.ProxyID)
-	Params.initProxySubName()
+	node.session.Register()
 	go node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Proxy disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
 		if err := node.Stop(); err != nil {
@@ -126,8 +122,25 @@ func (node *Proxy) Register() error {
 	return nil
 }
 
+func (node *Proxy) initSession() error {
+	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if node.session == nil {
+		return errors.New("new session failed, maybe etcd cannot be connected")
+	}
+	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
+	Params.ProxyID = node.session.ServerID
+	Params.SetLogger(Params.ProxyID)
+	return nil
+}
+
 // Init initialize proxy.
 func (node *Proxy) Init() error {
+	err := node.initSession()
+	if err != nil {
+		log.Error("Proxy init session failed", zap.Error(err))
+		return err
+	}
+	Params.initProxySubName()
 	// wait for datacoord state changed to Healthy
 	if node.dataCoord != nil {
 		log.Debug("Proxy wait for dataCoord ready")
@@ -185,7 +198,7 @@ func (node *Proxy) Init() error {
 	m := map[string]interface{}{
 		"PulsarAddress": Params.PulsarAddress,
 		"PulsarBufSize": 1024}
-	err := node.msFactory.SetParams(m)
+	err = node.msFactory.SetParams(m)
 	if err != nil {
 		return err
 	}

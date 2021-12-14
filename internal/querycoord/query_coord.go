@@ -19,15 +19,14 @@ package querycoord
 import (
 	"context"
 	"errors"
-	"math"
-	"sort"
-	"syscall"
-
 	"fmt"
+	"math"
 	"math/rand"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -95,16 +94,32 @@ type QueryCoord struct {
 
 // Register register query service at etcd
 func (qc *QueryCoord) Register() error {
-	log.Debug("query coord session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints), zap.String("address", Params.Address))
+	qc.session.Register()
+	go qc.session.LivenessCheck(qc.loopCtx, func() {
+		log.Error("Query Coord disconnected from etcd, process will exit", zap.Int64("Server Id", qc.session.ServerID))
+		if err := qc.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	})
+	return nil
+}
+
+func (qc *QueryCoord) initSession() error {
 	qc.session = sessionutil.NewSession(qc.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if qc.session == nil {
+		return fmt.Errorf("session is nil, the etcd client connection may have failed")
+	}
 	qc.session.Init(typeutil.QueryCoordRole, Params.Address, true)
 	Params.NodeID = uint64(qc.session.ServerID)
-	Params.SetLogger(typeutil.UniqueID(-1))
+	Params.SetLogger(qc.session.ServerID)
 	return nil
 }
 
 // Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
+	log.Debug("query coord session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints), zap.String("address", Params.Address))
 	log.Debug("query coordinator start init")
 	//connect etcd
 	connectEtcdFn := func() error {
@@ -117,6 +132,12 @@ func (qc *QueryCoord) Init() error {
 	}
 	var initError error = nil
 	qc.initOnce.Do(func() {
+		err := qc.initSession()
+		if err != nil {
+			log.Error("QueryCoord init session failed", zap.Error(err))
+			initError = err
+			return
+		}
 		log.Debug("query coordinator try to connect etcd")
 		initError = retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if initError != nil {
@@ -194,8 +215,6 @@ func (qc *QueryCoord) Start() error {
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
 
-	qc.UpdateStateCode(internalpb.StateCode_Healthy)
-
 	qc.loopWg.Add(1)
 	go qc.watchNodeLoop()
 
@@ -207,14 +226,7 @@ func (qc *QueryCoord) Start() error {
 		go qc.loadBalanceSegmentLoop()
 	}
 
-	go qc.session.LivenessCheck(qc.loopCtx, func() {
-		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("Server Id", qc.session.ServerID))
-		if err := qc.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
-		}
-		// manually send signal to starter goroutine
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-	})
+	qc.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	return nil
 }

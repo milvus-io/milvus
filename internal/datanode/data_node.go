@@ -174,13 +174,8 @@ func (node *DataNode) SetNodeID(id UniqueID) {
 
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
-	Params.NodeID = node.session.ServerID
-	node.NodeID = node.session.ServerID
-	Params.SetLogger(Params.NodeID)
-	// Start node watch node
-	go node.StartWatchChannels(node.ctx)
+	node.session.Register()
+
 	// Start liveness check
 	go node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
@@ -191,13 +186,18 @@ func (node *DataNode) Register() error {
 		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 
-	Params.initMsgChannelSubName()
-	//TODO reset
-	//Params.initLogCfg()
-	log.Debug("DataNode Init",
-		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
-	)
+	return nil
+}
 
+func (node *DataNode) initSession() error {
+	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if node.session == nil {
+		return errors.New("failed to initialize session")
+	}
+	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	Params.NodeID = node.session.ServerID
+	node.NodeID = node.session.ServerID
+	Params.SetLogger(Params.NodeID)
 	return nil
 }
 
@@ -206,6 +206,17 @@ func (node *DataNode) Init() error {
 	log.Debug("DataNode Init",
 		zap.String("SegmentStatisticsChannelName", Params.SegmentStatisticsChannelName),
 		zap.String("TimeTickChannelName", Params.TimeTickChannelName),
+	)
+	if err := node.initSession(); err != nil {
+		log.Error("DataNode init session failed", zap.Error(err))
+		return err
+	}
+
+	Params.initMsgChannelSubName()
+	//TODO reset
+	//Params.initLogCfg()
+	log.Debug("DataNode Init",
+		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
 	)
 
 	return nil
@@ -441,6 +452,9 @@ func (node *DataNode) Start() error {
 	go node.BackGroundGC(node.clearSignal)
 
 	go node.compactionExecutor.start(node.ctx)
+
+	// Start node watch node
+	go node.StartWatchChannels(node.ctx)
 
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()

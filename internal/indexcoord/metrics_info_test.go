@@ -31,12 +31,12 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	ic, err := NewIndexCoord(ctx)
 	assert.Nil(t, err)
 	Params.Init()
-	err = ic.Register()
-	assert.Nil(t, err)
 
 	err = ic.Init()
 	assert.Nil(t, err)
 	err = ic.Start()
+	assert.Nil(t, err)
+	err = ic.Register()
 	assert.Nil(t, err)
 
 	t.Run("getSystemInfoMetrics", func(t *testing.T) {

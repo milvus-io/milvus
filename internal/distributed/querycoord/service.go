@@ -108,10 +108,6 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("querycoord")
 	s.closer = closer
 
-	if err := s.queryCoord.Register(); err != nil {
-		return err
-	}
-
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -261,7 +257,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 // start starts QueryCoord's grpc service.
 func (s *Server) start() error {
-	return s.queryCoord.Start()
+	err := s.queryCoord.Start()
+	if err != nil {
+		return err
+	}
+	return s.queryCoord.Register()
 }
 
 // Stop stops QueryCoord's grpc service.

@@ -63,10 +63,10 @@ func TestIndexCoord(t *testing.T) {
 	ic.assignTaskInterval = 200 * time.Millisecond
 	ic.taskLimit = 20
 	Params.Init()
-	err = ic.Register()
-	assert.Nil(t, err)
 
 	err = ic.Init()
+	assert.Nil(t, err)
+	err = ic.Register()
 	assert.Nil(t, err)
 	err = ic.Start()
 	assert.Nil(t, err)

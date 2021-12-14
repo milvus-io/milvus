@@ -133,13 +133,6 @@ func (s *Server) init() error {
 		}
 	}()
 
-	err = s.indexnode.Register()
-	if err != nil {
-		log.Error("IndexNode Register etcd failed", zap.Error(err))
-		return err
-	}
-	log.Debug("IndexNode Register etcd success")
-
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -154,6 +147,7 @@ func (s *Server) init() error {
 		log.Error("IndexNode Init failed", zap.Error(err))
 		return err
 	}
+
 	return nil
 }
 
@@ -163,6 +157,12 @@ func (s *Server) start() error {
 	if err != nil {
 		return err
 	}
+	err = s.indexnode.Register()
+	if err != nil {
+		log.Error("IndexNode Register etcd failed", zap.Error(err))
+		return err
+	}
+	log.Debug("IndexNode Register etcd success")
 	return nil
 }
 

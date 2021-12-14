@@ -100,9 +100,6 @@ func TestGrpcService(t *testing.T) {
 	core, ok := (svr.rootCoord).(*rootcoord.Core)
 	assert.True(t, ok)
 
-	err = core.Register()
-	assert.Nil(t, err)
-
 	err = svr.startGrpc(Params.Port)
 	assert.Nil(t, err)
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
@@ -121,6 +118,8 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
+
+	rootcoord.Params.Address = Params.Address
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -215,10 +214,6 @@ func TestGrpcService(t *testing.T) {
 	core.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
 		return nil
 	}
-
-	rootcoord.Params.Address = Params.Address
-	err = svr.rootCoord.Register()
-	assert.Nil(t, err)
 
 	err = svr.start()
 	assert.Nil(t, err)
