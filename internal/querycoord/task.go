@@ -369,7 +369,6 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
 	watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
 	channelsToWatch := make([]string, 0)
-	segmentsToLoad := make([]UniqueID, 0)
 	var watchDeltaChannels []*datapb.VchannelInfo
 	for _, partitionID := range toLoadPartitionIDs {
 		dmChannelInfos, binlogs, err := getRecoveryInfo(lct.ctx, lct.dataCoord, collectionID, partitionID)
@@ -411,7 +410,6 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				CollectionID:  collectionID,
 			}
 
-			segmentsToLoad = append(segmentsToLoad, segmentID)
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
 
@@ -737,7 +735,6 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		lpt.meta.addPartition(collectionID, id)
 	}
 
-	segmentsToLoad := make([]UniqueID, 0)
 	loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
 	channelsToWatch := make([]string, 0)
 	watchDmReqs := make([]*querypb.WatchDmChannelsRequest, 0)
@@ -781,7 +778,6 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				LoadCondition: querypb.TriggerCondition_grpcRequest,
 				CollectionID:  collectionID,
 			}
-			segmentsToLoad = append(segmentsToLoad, segmentID)
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
 
