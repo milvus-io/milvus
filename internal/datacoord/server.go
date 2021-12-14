@@ -632,6 +632,8 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 	return nil
 }
 
+// startFlushLoop starts a goroutine to handle post func process
+// which is to notify `RootCoord` that this segment is flushed
 func (s *Server) startFlushLoop(ctx context.Context) {
 	go func() {
 		defer logutil.LogPanic()
