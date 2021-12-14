@@ -392,7 +392,7 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("query coordinator start watch segment loop")
+	log.Debug("QueryCoord start watch segment loop")
 
 	watchChan := qc.kvClient.WatchWithRevision(handoffSegmentPrefix, qc.indexChecker.revision+1)
 
