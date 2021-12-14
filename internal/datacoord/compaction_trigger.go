@@ -304,7 +304,7 @@ func (t *compactionTrigger) globalMergeCompaction(signal *compactionSignal, isFo
 		_, has := colls[segment.GetCollectionID()]
 		return (has || len(collections) == 0) && // if filters collection
 			isSegmentHealthy(segment) &&
-			segment.State == commonpb.SegmentState_Flushed && // flushed only
+			isFlush(segment) &&
 			!segment.isCompacting // not compacting now
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 	plans := make([]*datapb.CompactionPlan, 0)
@@ -354,7 +354,7 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 	segments := t.meta.GetSegmentsByChannel(channel)
 	res := make([]*SegmentInfo, 0)
 	for _, s := range segments {
-		if s.GetState() != commonpb.SegmentState_Flushed || s.GetInsertChannel() != channel ||
+		if !isFlush(s) || s.GetInsertChannel() != channel ||
 			s.GetPartitionID() != partitionID || s.isCompacting {
 			continue
 		}
@@ -375,11 +375,16 @@ func (t *compactionTrigger) shouldDoMergeCompaction(segments []*SegmentInfo) boo
 
 func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
 	// TODO context
-	id, err := t.allocator.allocID(context.Background())
+	id, err := t.allocator.allocID(context.TODO())
+	if err != nil {
+		return err
+	}
+	ts, err := t.allocator.allocTimestamp(context.TODO())
 	if err != nil {
 		return err
 	}
 	plan.PlanID = id
+	plan.StartTime = ts
 	plan.TimeoutInSeconds = maxCompactionTimeoutInSeconds
 	return nil
 }
@@ -443,4 +448,8 @@ func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool,
 		return nil, err
 	}
 	return plan, t.compactionHandler.execCompactionPlan(signal, plan)
+}
+
+func isFlush(segment *SegmentInfo) bool {
+	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
 }
