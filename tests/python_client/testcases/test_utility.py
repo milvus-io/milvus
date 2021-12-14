@@ -292,7 +292,7 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "describe collection failed: can't find collection:"}
+        error = {ct.err_code: 1, ct.err_msg: f"DescribeCollection failed: can't find collection: {c_name}"}
         self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
