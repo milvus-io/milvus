@@ -152,10 +152,10 @@ In Milvus, segment is the basic read-write and search unit of data. After consum
 nodes will store the data in the object storage in the unit of segment (in the actual implementation, the segment will
 be divided into multiple small files for writing). In Milvus, segment is uniquely identified by segment ID, and the
 allocation logic of segment ID is the responsibility of the Data Coordinator. The SegmentID to which each row of data is
-written needs to be determined before writing to DmChannel. For a write operation, the proxy will hash each row of data
+written needs to be determined before writing to DmChannel. For a write operation, Proxy will hash each row of data
 again according to the hash value of its primary key, and then determine into which DmChannel each row of data enters. After
-collecting the number of pieces to be written by each DmChannel, apply to the data coordinator for which SegmentIDs the
-newly written data of these dmchannels belong. In the specific implementation, the proxy needs to preallocate some
+collecting the number of pieces to be written by each DmChannel, it applies to the data coordinator for which SegmentIDs the
+newly written data of these dmchannels belong to. In the specific implementation, the proxy needs to preallocate some
 quotas to the Data Coordinator to avoid frequent direct GRPC communication with the Data Coordinator.
 
 One consideration for uniformly assigning SegmentIDs by Data Coordinator is that Data Coordinator is responsible for
