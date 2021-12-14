@@ -65,31 +65,39 @@ func (handler *componentsHealthzHandler) ServeHTTP(w http.ResponseWriter, r *htt
 	states, err := handler.component.GetComponentStates(context.Background(), &internalpb.GetComponentStatesRequest{})
 
 	if err != nil {
+		log.Warn("failed to get component states", zap.Error(err))
 		unhealthyHandler(w, r, err.Error())
 		return
 	}
 
 	if states == nil {
+		log.Warn("failed to get component states, states is nil")
 		unhealthyHandler(w, r, "failed to get states")
 		return
 	}
 
 	if states.Status == nil {
+		log.Warn("failed to get component states, states.Status is nil")
 		unhealthyHandler(w, r, "failed to get status")
 		return
 	}
 
 	if states.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn("failed to get component states",
+			zap.String("ErrorCode", states.Status.ErrorCode.String()),
+			zap.String("Reason", states.Status.Reason))
 		unhealthyHandler(w, r, states.Status.Reason)
 		return
 	}
 
 	if states.State == nil {
+		log.Warn("failed to get component states, states.State is nil")
 		unhealthyHandler(w, r, "failed to get state")
 		return
 	}
 
 	if states.State.StateCode != internalpb.StateCode_Healthy {
+		log.Warn("component is unhealthy", zap.String("state", states.State.StateCode.String()))
 		unhealthyHandler(w, r, fmt.Sprintf("state: %s", states.State.StateCode.String()))
 		return
 	}
