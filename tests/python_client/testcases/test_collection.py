@@ -929,9 +929,10 @@ class TestCollectionParams(TestcaseBase):
         error = {ct.err_code: -1, ct.err_msg: f"expected one of: int, long"}
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=error_type_shards_num,
                                              check_task=CheckTasks.err_res,
-                                             check_items=error)  
-                                                                                      
-    @pytest.mark.tags(CaseLabel.L2)
+                                             check_items=error)
+
+    @pytest.mark.xfail(reason="Issue 13321")
+    @pytest.mark.tags(CaseLabel.L1)
     def test_create_collection_maximum_fields(self):
         """
         target: test create collection with maximum fields
@@ -940,18 +941,19 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        int_fields=[]
-        limit_num=254
+        int_fields = []
+        limit_num = ct.max_field_num - 2
         for i in range(limit_num):
-            field_name =cf.gen_unique_str("field_name")
-            field=cf.gen_int64_field(name=field_name)
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
             int_fields.append(field)
         int_fields.append(cf.gen_float_vec_field())
         int_fields.append(cf.gen_int64_field(is_primary=True))
         schema = cf.gen_collection_schema(fields=int_fields)
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
-    
+
+    @pytest.mark.xfail(reason="Issue 13321")
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_collection_over_maximum_fields(self):
         """
@@ -961,11 +963,11 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        int_fields=[]
-        limit_num=256
+        int_fields = []
+        limit_num = ct.max_field_num
         for i in range(limit_num):
-            field_name =cf.gen_unique_str("field_name")
-            field=cf.gen_int64_field(name=field_name)
+            int_field_name = cf.gen_unique_str("field_name")
+            field = cf.gen_int64_field(name=int_field_name)
             int_fields.append(field)
         int_fields.append(cf.gen_float_vec_field())
         int_fields.append(cf.gen_int64_field(is_primary=True))
