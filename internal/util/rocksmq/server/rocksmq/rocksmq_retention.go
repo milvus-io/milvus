@@ -135,10 +135,10 @@ func (ri *retentionInfo) Stop() {
 // 4. delete message by range of page id;
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
-	var deletedAckedSize int64 = 0
-	var startID UniqueID = 0
-	var pageStartID UniqueID = 0
-	var pageEndID UniqueID = 0
+	var deletedAckedSize int64
+	var startID UniqueID
+	var pageStartID UniqueID
+	var pageEndID UniqueID
 	var err error
 
 	fixedAckedTsKey, _ := constructKey(AckedTsTitle, topic)

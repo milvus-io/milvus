@@ -142,7 +142,7 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	m.RLock()
 	defer m.RUnlock()
-	var ret int64 = 0
+	var ret int64
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
 		if isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID {
@@ -595,7 +595,7 @@ func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []Un
 func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) int64 {
 	m.RLock()
 	defer m.RUnlock()
-	var ret int64 = 0
+	var ret int64
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
 		if isSegmentHealthy(segment) && segment.CollectionID == collectionID && segment.PartitionID == partitionID {

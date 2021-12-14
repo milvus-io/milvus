@@ -168,7 +168,7 @@ func (t *flushTaskRunner) waitFinish(notifyFunc notifyMetaFunc, postFunc taskPos
 	<-t.startSignal
 
 	pack := t.getFlushPack()
-	var postInjection postInjectionFunc = nil
+	var postInjection postInjectionFunc
 	select {
 	case injection := <-t.injectSignal:
 		// notify injected

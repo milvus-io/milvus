@@ -1147,7 +1147,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		}
 		if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
 			exist := false
-			var dim int64 = 0
+			var dim int64
 			for _, param := range field.TypeParams {
 				if param.Key == "dim" {
 					exist = true
@@ -1798,7 +1798,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
-	var skipDupCnt int64 = 0
+	var skipDupCnt int64
 	var realTopK int64 = -1
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, len(searchResultData))
@@ -2283,7 +2283,7 @@ func (qt *queryTask) Execute(ctx context.Context) error {
 
 func mergeRetrieveResults(retrieveResults []*internalpb.RetrieveResults) (*milvuspb.QueryResults, error) {
 	var ret *milvuspb.QueryResults
-	var skipDupCnt int64 = 0
+	var skipDupCnt int64
 	var idSet = make(map[int64]struct{})
 
 	// merge results and remove duplicates

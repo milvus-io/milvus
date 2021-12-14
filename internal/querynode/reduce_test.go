@@ -90,7 +90,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	assert.Nil(t, err)
 
-	var offset int64 = 0
+	var offset int64
 	for index := range placeholderGroups {
 		hitBolbSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		assert.Nil(t, err)

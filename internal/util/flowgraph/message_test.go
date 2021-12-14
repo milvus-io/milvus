@@ -95,7 +95,7 @@ func TestMsgStreamMsg(t *testing.T) {
 		Ctx: context.TODO(),
 	}
 
-	var timestampMin Timestamp = 0
+	var timestampMin Timestamp
 	var timestampMax Timestamp = 100
 	streamMsg := &MsgStreamMsg{
 		tsMessages:     messages,

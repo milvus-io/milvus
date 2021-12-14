@@ -43,7 +43,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	var muList sync.Mutex = sync.Mutex{}
+	var muList = sync.Mutex{}
 
 	s := NewSession(ctx, metaRoot, etcdEndpoints)
 	res := make([]int64, 0)
@@ -114,7 +114,7 @@ func TestUpdateSessions(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	var muList sync.Mutex = sync.Mutex{}
+	var muList = sync.Mutex{}
 
 	s := NewSession(ctx, metaRoot, etcdEndpoints)
 

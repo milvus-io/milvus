@@ -1052,7 +1052,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		return nil, fieldSchema, err
 	}
 
-	var dupIdx typeutil.UniqueID = 0
+	var dupIdx typeutil.UniqueID
 	for _, f := range collMeta.FieldIndexes {
 		if info, ok := mt.indexID2Meta[f.IndexID]; ok {
 			if info.IndexName == idxInfo.IndexName {

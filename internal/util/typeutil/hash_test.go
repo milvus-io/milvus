@@ -21,7 +21,7 @@ import (
 
 func TestUint64(t *testing.T) {
 	var i int64 = -1
-	var u uint64 = uint64(i)
+	var u = uint64(i)
 	t.Log(i)
 	t.Log(u)
 }
@@ -48,7 +48,7 @@ func TestHash32_Uint64(t *testing.T) {
 }
 
 func TestHash32_String(t *testing.T) {
-	var u string = "ok"
+	var u = "ok"
 	h, err := Hash32String(u)
 	assert.Nil(t, err)
 

@@ -35,7 +35,7 @@ const (
 	maxOperationsPerTxn = 128
 )
 
-var errUnknownOpType error = errors.New("unknown operation type")
+var errUnknownOpType = errors.New("unknown operation type")
 
 // ChannelOpType type alias uses int8 stands for Channel operation type
 type ChannelOpType int8

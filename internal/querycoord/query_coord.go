@@ -115,7 +115,7 @@ func (qc *QueryCoord) Init() error {
 		qc.kvClient = etcdKV
 		return nil
 	}
-	var initError error = nil
+	var initError error
 	qc.initOnce.Do(func() {
 		log.Debug("query coordinator try to connect etcd")
 		initError = retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
@@ -493,7 +493,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 			memoryInsufficient := false
 			loadBalanceTasks := make([]*loadBalanceTask, 0)
 			for {
-				var selectedSegmentInfo *querypb.SegmentInfo = nil
+				var selectedSegmentInfo *querypb.SegmentInfo
 				sort.Slice(onlineNodeIDs, func(i, j int) bool {
 					return nodeID2MemUsageRate[onlineNodeIDs[i]] > nodeID2MemUsageRate[onlineNodeIDs[j]]
 				})
@@ -579,7 +579,7 @@ func chooseSegmentToBalance(sourceNodeID int64, dstNodeID int64,
 	nodeID2MemUsageRate map[int64]float64) (*querypb.SegmentInfo, error) {
 	memoryInsufficient := true
 	minMemDiffPercentage := 1.0
-	var selectedSegmentInfo *querypb.SegmentInfo = nil
+	var selectedSegmentInfo *querypb.SegmentInfo
 	for _, info := range segmentInfos {
 		dstNodeMemUsageAfterBalance := nodeID2MemUsage[dstNodeID] + uint64(info.MemSize)
 		dstNodeMemUsageRateAfterBalance := float64(dstNodeMemUsageAfterBalance) / float64(nodeID2TotalMem[dstNodeID])

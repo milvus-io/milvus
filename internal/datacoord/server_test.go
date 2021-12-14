@@ -1997,7 +1997,7 @@ func TestOptions(t *testing.T) {
 	})
 	t.Run("SetDataNodeCreator", func(t *testing.T) {
 		var target int64
-		var val int64 = rand.Int63()
+		var val = rand.Int63()
 		opt := SetDataNodeCreator(func(context.Context, string) (types.DataNode, error) {
 			target = val
 			return nil, nil

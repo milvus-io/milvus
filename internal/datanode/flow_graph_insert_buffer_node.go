@@ -503,7 +503,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 
 			fieldData := idata.Data[field.FieldID].(*storage.FloatVectorFieldData)
 			for _, r := range blobReaders {
-				var v []float32 = make([]float32, dim)
+				var v = make([]float32, dim)
 
 				readBinary(r, &v, field.DataType)
 
@@ -535,7 +535,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 			fieldData := idata.Data[field.FieldID].(*storage.BinaryVectorFieldData)
 
 			for _, r := range blobReaders {
-				var v []byte = make([]byte, dim/8)
+				var v = make([]byte, dim/8)
 				readBinary(r, &v, field.DataType)
 
 				fieldData.Data = append(fieldData.Data, v...)

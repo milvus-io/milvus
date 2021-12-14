@@ -143,7 +143,7 @@ func GetPulsarConfig(protocol, ip, port, url string, args ...int64) (map[string]
 	}
 
 	var attempt uint = 10
-	var interval time.Duration = time.Second
+	var interval = time.Second
 	if len(args) > 0 && args[0] > 0 {
 		attempt = uint(args[0])
 	}

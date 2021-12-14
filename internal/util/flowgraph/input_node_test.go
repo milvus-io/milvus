@@ -60,7 +60,7 @@ func TestInputNode(t *testing.T) {
 
 func Test_NewInputNode(t *testing.T) {
 	nodeName := "input_node"
-	var maxQueueLength int32 = 0
+	var maxQueueLength int32
 	var maxParallelism int32 = 100
 	node := NewInputNode(nil, nodeName, maxQueueLength, maxParallelism)
 	assert.NotNil(t, node)

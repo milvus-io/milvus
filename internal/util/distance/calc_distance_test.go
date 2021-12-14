@@ -62,7 +62,7 @@ func DistanceL2(left, right []float32) float32 {
 	if len(left) != len(right) {
 		panic("array dimension not equal")
 	}
-	var sum float32 = 0.0
+	var sum float32
 	for i := 0; i < len(left); i++ {
 		gap := left[i] - right[i]
 		sum += gap * gap
@@ -75,7 +75,7 @@ func DistanceIP(left, right []float32) float32 {
 	if len(left) != len(right) {
 		panic("array dimension not equal")
 	}
-	var sum float32 = 0.0
+	var sum float32
 	for i := 0; i < len(left); i++ {
 		sum += left[i] * right[i]
 	}
