@@ -62,7 +62,7 @@
 1. `RC` depends on `DC` and `IC`, if the grpc call failed, it needs to reconnect.
 2. `RC` does not listen to the status of the `DC` and `IC` in real time.
 
-### 2.7 Add virtual channel assignment when creating collection
+### 2.7 Add virtual channel assignment when creating a collection
 
 1. Add a new field, "number of shards" in the `create collection` request. The "num of shards" tells the `RC` to create the number of virtual channels for this collection.
 2. In the current implementation, virtual channels and physical channels have a one-to-one relationship, and the total number of physical channels increases as the number of virtual channels increases; later, the total number of physical channels needs to be fixed, and multiple virtual channels share one physical channel.
