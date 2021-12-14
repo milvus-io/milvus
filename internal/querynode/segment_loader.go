@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 const timeoutForEachRead = 10 * time.Second
@@ -615,13 +616,11 @@ func (loader *segmentLoader) estimateSegmentSize(segment *Segment,
 }
 
 func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentSizes map[UniqueID]int64) error {
-	usedMem, err := getUsedMemory()
-	if err != nil {
-		return err
-	}
-	totalMem, err := getTotalMemory()
-	if err != nil {
-		return err
+	usedMem := metricsinfo.GetUsedMemoryCount()
+	totalMem := metricsinfo.GetMemoryCount()
+
+	if usedMem == 0 || totalMem == 0 {
+		return errors.New(fmt.Sprintln("get memory failed when checkSegmentSize, collectionID = ", collectionID))
 	}
 
 	segmentTotalSize := int64(0)

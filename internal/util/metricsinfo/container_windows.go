@@ -15,18 +15,18 @@ import (
 	"errors"
 )
 
-// IfServiceInContainer checks if the service is running inside a container
+// inContainer checks if the service is running inside a container
 // It should be always false while under windows.
-func InContainer() (bool, error) {
+func inContainer() (bool, error) {
 	return false, nil
 }
 
-// GetContainerMemLimit returns memory limit and error
-func GetContainerMemLimit() (uint64, error) {
+// getContainerMemLimit returns memory limit and error
+func getContainerMemLimit() (uint64, error) {
 	return 0, errors.New("Not supported")
 }
 
-// GetContainerMemUsed returns memory usage and error
-func GetContainerMemUsed() (uint64, error) {
+// getContainerMemUsed returns memory usage and error
+func getContainerMemUsed() (uint64, error) {
 	return 0, errors.New("Not supported")
 }

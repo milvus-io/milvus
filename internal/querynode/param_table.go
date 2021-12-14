@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -44,8 +43,7 @@ type ParamTable struct {
 	QueryNodePort int64
 	QueryNodeID   UniqueID
 	// TODO: remove cacheSize
-	CacheSize   int64 // deprecated
-	InContainer bool
+	CacheSize int64 // deprecated
 
 	// channel prefix
 	ClusterChannelPrefix     string
@@ -118,7 +116,6 @@ func (p *ParamTable) Init() {
 	p.BaseTable.Init()
 
 	p.initCacheSize()
-	p.initInContainer()
 
 	p.initMinioEndPoint()
 	p.initMinioAccessKeyID()
@@ -176,15 +173,6 @@ func (p *ParamTable) initCacheSize() {
 		return
 	}
 	p.CacheSize = value
-}
-
-func (p *ParamTable) initInContainer() {
-	var err error
-	p.InContainer, err = metricsinfo.InContainer()
-	if err != nil {
-		panic(err)
-	}
-	log.Debug("init InContainer", zap.Any("is query node running inside a container? :", p.InContainer))
 }
 
 // ---------------------------------------------------------- minio

@@ -18,19 +18,19 @@ import (
 )
 
 func TestInContainer(t *testing.T) {
-	_, err := InContainer()
+	_, err := inContainer()
 	assert.NoError(t, err)
 }
 
 func TestGetContainerMemLimit(t *testing.T) {
-	limit, err := GetContainerMemLimit()
+	limit, err := getContainerMemLimit()
 	assert.NoError(t, err)
 	assert.True(t, limit > 0)
 	t.Log("limit memory:", limit)
 }
 
 func TestGetContainerMemUsed(t *testing.T) {
-	used, err := GetContainerMemUsed()
+	used, err := getContainerMemUsed()
 	assert.NoError(t, err)
 	assert.True(t, used > 0)
 	t.Log("used memory:", used)
