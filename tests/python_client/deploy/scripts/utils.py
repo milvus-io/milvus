@@ -2,7 +2,7 @@
 import copy
 import time
 from pymilvus import (
-    connections, FieldSchema, CollectionSchema, DataType,
+    FieldSchema, CollectionSchema, DataType,
     Collection, list_collections,
 )
 
