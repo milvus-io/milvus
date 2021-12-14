@@ -296,7 +296,7 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
 			zap.Int64("expected ID", replica.collectionID))
-		return fmt.Errorf("Mismatch collection, ID=%d", collID)
+		return fmt.Errorf("mismatch collection, ID=%d", collID)
 	}
 
 	log.Debug("Add Normal segment",
