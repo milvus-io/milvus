@@ -33,14 +33,13 @@ package logutil
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestZapWrapper(t *testing.T) {
-	proxy.Params.Init()
-
-	SetupLogger(&proxy.Params.Log)
+	logCfg := &log.Config{}
+	SetupLogger(logCfg)
 
 	wrapper := GetZapWrapper()
 	assert.NotNil(t, wrapper)
