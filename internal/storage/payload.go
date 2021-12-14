@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// PayloadWriterInterface abstracts PayloadWriter
 type PayloadWriterInterface interface {
 	AddDataToPayload(msgs interface{}, dim ...int) error
 	AddBoolToPayload(msgs []bool) error
@@ -49,6 +50,7 @@ type PayloadWriterInterface interface {
 	Close()
 }
 
+// PayloadReaderInterface abstracts PayloadReader
 type PayloadReaderInterface interface {
 	GetDataFromPayload(idx ...int) (interface{}, int, error)
 	GetBoolFromPayload() ([]bool, error)
