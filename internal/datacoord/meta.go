@@ -463,7 +463,7 @@ func (m *meta) saveDropSegmentAndRemove(channel string, modSegments map[int64]*S
 		delete(modSegments, id)
 		segBytes, err := proto.Marshal(s.SegmentInfo)
 		if err != nil {
-			return fmt.Errorf("DataCoord UpdateDropChannelSegmentInfo segmentID:%d, marshal failed:%w", s.GetID(), err)
+			return fmt.Errorf("dataCoord UpdateDropChannelSegmentInfo segmentID:%d, marshal failed:%w", s.GetID(), err)
 		}
 		kv[key] = string(segBytes)
 		update = append(update, s)
