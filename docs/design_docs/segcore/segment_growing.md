@@ -7,7 +7,7 @@ Growing segment has the following additional interfaces:
 2. `Insert(reseveredOffset, size, ...Data...)`: write `...Data...` into range `[reseveredOffset, reseveredOffset + size)`. This interface is allowed to be called concurrently.
 
    1. `...Data...` contains row_ids, timestamps two system attributes, and other columns
-   2. data columns can be stored either row based or column based.
+   2. data columns can be stored either row-based or column based.
    3. `PreDelete & Delete(reseveredOffset, row_ids, timestamps)` is a delete interface similar to insert interface.
 
 Growing segment stores data in the form of chunk. The number of rows in each chunk is restricted by configs.
