@@ -10,7 +10,7 @@ Each Search Result is nq * topk two-dimensional structure，as the illustration 
 
 For each query, the topk hit results are in descending order of score. The larger the score, the more similar the hit result is to the vector to be queried. The hit results of different queries are independent of each other.
 
-Therefore, we will only discuss how the proxy merges the results for one query result. For nq query results, we can loop through nq or process them in parallel.
+Therefore, we will only discuss how Proxy merges the results for one query result. For nq query results, we can loop through nq or process them in parallel.
 
 So the problem degenerates to how to get the maximum number of 10 (TOPK) results from these four sorted arrays. As shown in the figure below:
 ![final_result](./figs/reduce_results.png)
