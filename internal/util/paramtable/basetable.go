@@ -48,9 +48,9 @@ type BaseTable struct {
 	params    *memkv.MemoryKV
 	configDir string
 
-	RoleName          string
-	Log               log.Config
-	LogConfigFunction func(log.Config)
+	RoleName   string
+	Log        log.Config
+	LogCfgFunc func(log.Config)
 }
 
 func (gp *BaseTable) Init() {
@@ -451,7 +451,7 @@ func (gp *BaseTable) InitLogCfg() {
 }
 
 func (gp *BaseTable) SetLogConfig(f func(log.Config)) {
-	gp.LogConfigFunction = f
+	gp.LogCfgFunc = f
 }
 
 func (gp *BaseTable) SetLogger(id UniqueID) {
@@ -470,7 +470,7 @@ func (gp *BaseTable) SetLogger(id UniqueID) {
 		gp.Log.File.Filename = ""
 	}
 
-	if gp.LogConfigFunction != nil {
-		gp.LogConfigFunction(gp.Log)
+	if gp.LogCfgFunc != nil {
+		gp.LogCfgFunc(gp.Log)
 	}
 }

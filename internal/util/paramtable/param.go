@@ -17,8 +17,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	"github.com/milvus-io/milvus/internal/log"
 )
 
 // Params is a package scoped variable of type BaseParamTable.
@@ -41,8 +39,6 @@ type BaseParamTable struct {
 	EtcdDataDir    string
 
 	initOnce sync.Once
-
-	LogConfig *log.Config
 }
 
 // Init is an override method of BaseTable's Init. It mainly calls the
@@ -59,7 +55,6 @@ func (p *BaseParamTable) LoadCfgToMemory() {
 	p.initEtcdConf()
 	p.initMetaRootPath()
 	p.initKvRootPath()
-	p.initLogCfg()
 }
 
 func (p *BaseParamTable) initEtcdConf() {
@@ -119,25 +114,4 @@ func (p *BaseParamTable) initKvRootPath() {
 		panic(err)
 	}
 	p.KvRootPath = rootPath + "/" + subPath
-}
-
-func (p *BaseParamTable) initLogCfg() {
-	p.LogConfig = &log.Config{}
-	format, err := p.Load("log.format")
-	if err != nil {
-		panic(err)
-	}
-	p.LogConfig.Format = format
-	level, err := p.Load("log.level")
-	if err != nil {
-		panic(err)
-	}
-	p.LogConfig.Level = level
-	p.LogConfig.File.MaxSize = p.ParseInt("log.file.maxSize")
-	p.LogConfig.File.MaxBackups = p.ParseInt("log.file.maxBackups")
-	p.LogConfig.File.MaxDays = p.ParseInt("log.file.maxAge")
-	p.LogConfig.File.RootPath, err = p.Load("log.file.rootPath")
-	if err != nil {
-		panic(err)
-	}
 }
