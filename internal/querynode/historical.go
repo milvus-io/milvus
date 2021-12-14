@@ -68,6 +68,7 @@ func (h *historical) start() {
 	go h.watchGlobalSegmentMeta()
 }
 
+// close would release all resources in historical
 func (h *historical) close() {
 	// free collectionReplica
 	h.replica.freeAll()
