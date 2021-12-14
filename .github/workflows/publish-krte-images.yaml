@@ -56,7 +56,7 @@ jobs:
           sed -i "s#krte:.*#krte:${TAG}#g" ./build/ci/jenkins/pod/rte.yaml
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add krte.yaml
+          git add rte.yaml
           git commit -m "Update KRTE image changes"
       - name: Create Pull Request
         id: cpr
