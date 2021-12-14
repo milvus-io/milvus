@@ -35,8 +35,8 @@ import (
 )
 
 // Meta is used to record the state of the index.
-// revision: The number of times IndexMeta has been changed in ETCD. It's the same as Event.Kv.Version in ETCD.
-// indexMeta:A structure that records the state of the index defined by proto.
+// revision: The number of times IndexMeta has been changed in etcd. It's the same as Event.Kv.Version in etcd.
+// indexMeta: A structure that records the state of the index defined by proto.
 type Meta struct {
 	indexMeta *indexpb.IndexMeta
 	revision  int64
