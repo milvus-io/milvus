@@ -33,9 +33,7 @@ if [ ! -d ${CMAKE_BUILD} ];then
     mkdir ${CMAKE_BUILD}
 fi
 
-if [ !-d ${OUTPUT_LIB} ];then
-    mkdir ${OUTPUT_LIB}
-fi
+mkdir -p ${OUTPUT_LIB}
 
 BUILD_TYPE="Debug"
 CUSTOM_THIRDPARTY_PATH=""
