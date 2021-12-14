@@ -16,6 +16,7 @@
 
 package querynode
 
+// indexInfo stores index info, such as name, id, index params and so on
 type indexInfo struct {
 	indexName   string
 	indexID     UniqueID
