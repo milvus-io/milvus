@@ -12,7 +12,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 # Exit immediately for non zero status
-set -e
+# set -e
 
 # Print commands
 set -x
@@ -84,3 +84,8 @@ else
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"
 fi
+
+exitcode=$?
+kubectl get pods -n ${MILVUS_HELM_NAMESPACE} | grep ${MILVUS_HELM_RELEASE_NAME}
+kubectl get pvc -n ${MILVUS_HELM_NAMESPACE} |  grep ${MILVUS_HELM_RELEASE_NAME} | awk '{$3=null;print $0}'
+exit ${exitcode}
