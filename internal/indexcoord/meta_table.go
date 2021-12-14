@@ -528,6 +528,7 @@ func (mt *metaTable) GetNodeTaskStats() map[UniqueID]int {
 	return nodePriority
 }
 
+// GetIndexMetaByIndexBuildID get the index meta of the specified indexBuildID.
 func (mt *metaTable) GetIndexMetaByIndexBuildID(indexBuildID UniqueID) *indexpb.IndexMeta {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
