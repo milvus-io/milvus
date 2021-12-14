@@ -354,6 +354,7 @@ func (s *Server) CreatePartition(ctx context.Context, request *milvuspb.CreatePa
 	return s.proxy.CreatePartition(ctx, request)
 }
 
+// DropPartition notifies Proxy to drop a partition
 func (s *Server) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return s.proxy.DropPartition(ctx, request)
 }
