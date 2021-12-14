@@ -483,6 +483,8 @@ func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID)
 	return false, -1
 }
 
+// LoadMetaFromETCD load the meta of specified indexBuildID from ETCD.
+// If the version of meta in memory is greater equal to the version in ETCD, no need to reload.
 func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
