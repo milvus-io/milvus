@@ -1,5 +1,6 @@
 # import docker
 import copy
+import time
 from pymilvus import (
     connections, FieldSchema, CollectionSchema, DataType,
     Collection, list_collections,
@@ -64,7 +65,6 @@ def get_collections():
 
 def create_collections_and_insert_data():
     import random
-    import time
     dim = 128
     default_fields = [
         FieldSchema(name="count", dtype=DataType.INT64, is_primary=True),
@@ -94,10 +94,10 @@ def create_collections_and_insert_data():
                 ]
             )
             end_time = time.time()
-            print(f"[{j+1}/{times}] insert {nb} data, time: {end_time - start_time}")
+            print(f"[{j+1}/{times}] insert {nb} data, time: {end_time - start_time:.4f}")
             total_time += end_time - start_time
 
-        print("end insert, time:", total_time)
+        print(f"end insert, time: {total_time:.4f}")
         print("Get collection entities")
         start_time = time.time()
         print(f"collection entities: {collection.num_entities}")
@@ -122,7 +122,9 @@ def create_index():
         index["params"] = index_params_map[name]
         if name in ["BIN_FLAT", "BIN_IVF_FLAT"]:
             index["metric_type"] = "HAMMING"
+        t0 = time.time()
         c.create_index(field_name="float_vector", index_params=index)
+        print(f"create index time: {time.time() - t0:.4f}")
 
 
 def load_and_search():
@@ -131,15 +133,15 @@ def load_and_search():
     for name in col_list:
         c = Collection(name=name)
         print(f"collection name: {name}")
+        t0 = time.time()
         c.load()
+        print(f"load time: {time.time() - t0:.4f}")
         topK = 5
         vectors = [[0.0 for _ in range(128)] for _ in range(3000)]
         index_type = name
         search_params = gen_search_param(index_type)[0]
         print(search_params)
         # search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
-
-        import time
         start_time = time.time()
         print(f"\nSearch...")
         # define output_fields of search result
@@ -155,7 +157,7 @@ def load_and_search():
                 print(hit, hit.entity.get("random_value"))
             ids = hits.ids
             print(ids)
-        print("search latency = %.4fs" % (end_time - start_time))
+        print("search latency: %.4fs" % (end_time - start_time))
         t0 = time.time()
         expr = "count in [2,4,6,8]"
         output_fields = ["count", "random_value"]
@@ -164,7 +166,7 @@ def load_and_search():
         for r in sorted_res:
             print(r)
         t1 = time.time()
-        print("query latency = %.4fs" % (t1 -t0))
+        print("query latency: %.4fs" % (t1 -t0))
         # c.release()
         print("###########")
     print("search data ends")
