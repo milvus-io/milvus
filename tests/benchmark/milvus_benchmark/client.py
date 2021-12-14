@@ -135,7 +135,7 @@ class MilvusClient(object):
                 elif other_field_name.startswith("double"):
                     field_type = DataType.DOUBLE
                 else:
-                    raise Exception("Field name not supported")
+                    raise Exception("Create collection: Field name not supported")
                 fields.append({"name": other_field_name, "type": field_type})
         create_param = {
             "fields": fields,
