@@ -18,11 +18,14 @@ service MilvusService {
 }
 
 message CreateIndexRequest {
-  common.MsgBase base = 1; // must
+  common.MsgBase base = 1;
   string db_name = 2;
-  string collection_name = 3; // must
-  string field_name = 4; // must
-  repeated common.KeyValuePair extra_params = 5; // must
+  string collection_name = 3;
+  string field_name = 4;
+  int64 dbID = 5;
+  int64 collectionID = 6;
+  int64 fieldID = 7;
+  repeated common.KeyValuePair extra_params = 8;
 }
 ```
 
