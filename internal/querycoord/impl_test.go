@@ -35,6 +35,63 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
+func waitLoadPartitionDone(ctx context.Context, queryCoord *QueryCoord, collectionID UniqueID, partitionIDs []UniqueID) error {
+	for {
+		showPartitionReq := &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowPartitions,
+			},
+			CollectionID: collectionID,
+			PartitionIDs: partitionIDs,
+		}
+
+		res, err := queryCoord.ShowPartitions(ctx, showPartitionReq)
+		if err != nil || res.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New("showPartitions failed")
+		}
+
+		loadDone := true
+		for _, percent := range res.InMemoryPercentages {
+			if percent < 100 {
+				loadDone = false
+			}
+		}
+		if loadDone {
+			break
+		}
+	}
+
+	return nil
+}
+
+func waitLoadCollectionDone(ctx context.Context, queryCoord *QueryCoord, collectionID UniqueID) error {
+	for {
+		showCollectionReq := &querypb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ShowPartitions,
+			},
+			CollectionIDs: []UniqueID{collectionID},
+		}
+
+		res, err := queryCoord.ShowCollections(ctx, showCollectionReq)
+		if err != nil || res.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New("showCollection failed")
+		}
+
+		loadDone := true
+		for _, percent := range res.InMemoryPercentages {
+			if percent < 100 {
+				loadDone = false
+			}
+		}
+		if loadDone {
+			break
+		}
+	}
+
+	return nil
+}
+
 func TestGrpcTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
@@ -130,6 +187,41 @@ func TestGrpcTask(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("Test ReleaseEmptyPartitions", func(t *testing.T) {
+		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleasePartitions,
+			},
+			CollectionID: defaultCollectionID,
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleaseNotExistPartition", func(t *testing.T) {
+		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleasePartitions,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{-1},
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleasePartition", func(t *testing.T) {
+		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleasePartitions,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
 	t.Run("Test LoadCollection", func(t *testing.T) {
 		status, err := queryCoord.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -142,18 +234,18 @@ func TestGrpcTask(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("Test LoadParAfterLoadCol", func(t *testing.T) {
-		status, err := queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_LoadPartitions,
-			},
-			CollectionID: defaultCollectionID,
-			PartitionIDs: []UniqueID{defaultPartitionID},
-			Schema:       genCollectionSchema(defaultCollectionID, false),
-		})
-		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-		assert.Nil(t, err)
-	})
+	//t.Run("Test LoadParAfterLoadCol", func(t *testing.T) {
+	//	status, err := queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
+	//		Base: &commonpb.MsgBase{
+	//			MsgType: commonpb.MsgType_LoadPartitions,
+	//		},
+	//		CollectionID: defaultCollectionID,
+	//		PartitionIDs: []UniqueID{defaultPartitionID},
+	//		Schema:       genCollectionSchema(defaultCollectionID, false),
+	//	})
+	//	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	//	assert.Nil(t, err)
+	//})
 
 	t.Run("Test ShowCollections", func(t *testing.T) {
 		res, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
@@ -204,41 +296,6 @@ func TestGrpcTask(t *testing.T) {
 				MsgType: commonpb.MsgType_ReleasePartitions,
 			},
 			CollectionID: -1,
-			PartitionIDs: []UniqueID{defaultPartitionID},
-		})
-		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-		assert.Nil(t, err)
-	})
-
-	t.Run("Test ReleaseEmptyPartitions", func(t *testing.T) {
-		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_ReleasePartitions,
-			},
-			CollectionID: defaultCollectionID,
-		})
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-		assert.Nil(t, err)
-	})
-
-	t.Run("Test ReleaseNotExistPartition", func(t *testing.T) {
-		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_ReleasePartitions,
-			},
-			CollectionID: defaultCollectionID,
-			PartitionIDs: []UniqueID{-1},
-		})
-		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-		assert.Nil(t, err)
-	})
-
-	t.Run("Test ReleasePartition", func(t *testing.T) {
-		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_ReleasePartitions,
-			},
-			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 		})
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
@@ -403,6 +460,41 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 	assert.Nil(t, err)
 	queryCoord.scheduler.taskIDAllocator = failedAllocator
 
+	t.Run("Test ReleaseCollection", func(t *testing.T) {
+		status, err := queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ReleaseCollection,
+			},
+			CollectionID: defaultCollectionID,
+		})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	queryCoord.scheduler.taskIDAllocator = taskIDAllocator
+	status, err = queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	})
+
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	status, err = queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	})
+
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	queryCoord.scheduler.taskIDAllocator = failedAllocator
+
 	t.Run("Test ReleasePartition", func(t *testing.T) {
 		status, err := queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
 			Base: &commonpb.MsgBase{
@@ -410,17 +502,6 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
-		})
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-		assert.Nil(t, err)
-	})
-
-	t.Run("Test ReleaseCollection", func(t *testing.T) {
-		status, err := queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_ReleaseCollection,
-			},
-			CollectionID: defaultCollectionID,
 		})
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 		assert.Nil(t, err)
@@ -710,4 +791,517 @@ func TestQueryCoord_GetComponentStates(t *testing.T) {
 	resp, err = n.GetComponentStates(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+}
+
+func Test_RepeatedLoadSameCollection(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadCollectionReq := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	//first load defaultCollectionID
+	status, err := queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadCollectionDone(ctx, queryCoord, defaultCollectionID)
+
+	// second load defaultCollectionID
+	status, err = queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_LoadCollectionAndLoadPartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadCollectionReq := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	//first load defaultCollectionID
+	status, err := queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadCollectionDone(ctx, queryCoord, defaultCollectionID)
+
+	// second load defaultPartitionID
+	status, err = queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_RepeatedLoadSamePartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	//first load defaultPartitionID
+	status, err := queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadPartitionDone(ctx, queryCoord, defaultCollectionID, []UniqueID{defaultPartitionID})
+
+	// second load defaultPartitionID
+	status, err = queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_RepeatedLoadDifferentPartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	//first load defaultPartitionID
+	status, err := queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadPartitionDone(ctx, queryCoord, defaultCollectionID, []UniqueID{defaultPartitionID})
+
+	// second load defaultPartitionID+1
+	loadPartitionReq.PartitionIDs = []UniqueID{defaultPartitionID + 1}
+	status, err = queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_LoadPartitionsAndLoadCollection(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadCollectionReq := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	//first load defaultPartitionID
+	status, err := queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadPartitionDone(ctx, queryCoord, defaultCollectionID, []UniqueID{defaultPartitionID})
+
+	// second load defaultCollectionID
+	status, err = queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_LoadAndReleaseCollection(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadCollectionReq := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	releaseCollectionReq := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	}
+
+	//first load defaultCollectionID
+	status, err := queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadCollectionDone(ctx, queryCoord, defaultCollectionID)
+
+	// second release defaultCollectionID
+	status, err = queryCoord.ReleaseCollection(ctx, releaseCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_LoadAndReleasePartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	releasePartitionReq := &querypb.ReleasePartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleasePartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	//first load defaultPartitionID
+	status, err := queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadPartitionDone(ctx, queryCoord, defaultCollectionID, []UniqueID{defaultPartitionID})
+
+	// second release defaultPartitionID
+	status, err = queryCoord.ReleasePartitions(ctx, releasePartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_LoadCollectionAndReleasePartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadCollectionReq := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	releasePartitionReq := &querypb.ReleasePartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleasePartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	//first load defaultCollectionID
+	status, err := queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadCollectionDone(ctx, queryCoord, defaultCollectionID)
+
+	// second release defaultPartitionID
+	status, err = queryCoord.ReleasePartitions(ctx, releasePartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_LoadPartitionsAndReleaseCollection(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+	releaseCollectionReq := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	}
+
+	//first load defaultPartitionID
+	status, err := queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadPartitionDone(ctx, queryCoord, defaultCollectionID, []UniqueID{defaultPartitionID})
+
+	// second release defaultCollectionID
+	status, err = queryCoord.ReleaseCollection(ctx, releaseCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_RepeatedReleaseCollection(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadCollectionReq := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID: defaultCollectionID,
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	releaseCollectionReq := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	}
+
+	// load defaultCollectionID
+	status, err := queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadCollectionDone(ctx, queryCoord, defaultCollectionID)
+
+	// first release defaultCollectionID
+	status, err = queryCoord.ReleaseCollection(ctx, releaseCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	// second release defaultCollectionID
+	status, err = queryCoord.ReleaseCollection(ctx, releaseCollectionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_RepeatedReleaseSamePartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	releasePartitionReq := &querypb.ReleasePartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleasePartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	// load defaultPartitionID
+	status, err := queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadPartitionDone(ctx, queryCoord, defaultCollectionID, []UniqueID{defaultPartitionID})
+
+	// first release defaultPartitionID
+	status, err = queryCoord.ReleasePartitions(ctx, releasePartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	// second release defaultPartitionID
+	status, err = queryCoord.ReleasePartitions(ctx, releasePartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func Test_RepeatedReleaseDifferentPartitions(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	loadPartitionReq := &querypb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadPartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID, defaultPartitionID + 1},
+		Schema:       genCollectionSchema(defaultCollectionID, false),
+	}
+
+	releasePartitionReq := &querypb.ReleasePartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleasePartitions,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	// load defaultPartitionID and defaultPartitionID+1
+	status, err := queryCoord.LoadPartitions(ctx, loadPartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+	waitLoadPartitionDone(ctx, queryCoord, defaultCollectionID, []UniqueID{defaultPartitionID, defaultPartitionID + 1})
+
+	// first release defaultPartitionID
+	status, err = queryCoord.ReleasePartitions(ctx, releasePartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	// second release defaultPartitionID+1
+	releasePartitionReq.PartitionIDs = []UniqueID{defaultPartitionID + 1}
+	status, err = queryCoord.ReleasePartitions(ctx, releasePartitionReq)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Nil(t, err)
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
 }

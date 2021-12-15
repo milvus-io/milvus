@@ -825,6 +825,7 @@ class TestUtilityBase(TestcaseBase):
         assert res == exp_res
 
     @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_loading_progress_with_release_partition(self):
         """
         target: test loading progress after release part partitions

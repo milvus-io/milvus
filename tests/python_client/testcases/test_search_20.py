@@ -476,6 +476,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     "into memory" % collection_w.name})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_search_release_partition(self):
         """
         target: test the scenario which search the released collection
@@ -544,6 +545,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_search_partition_deleted(self):
         """
         target: test search deleted partition
@@ -973,6 +975,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_search_before_after_delete(self, nq, dim, auto_id, _async):
         """
         target: test search function before and after deletion
@@ -1020,6 +1023,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_search_partition_after_release_one(self, nq, dim, auto_id, _async):
         """
         target: test search function before and after release
@@ -1067,6 +1071,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_search_partition_after_release_all(self, nq, dim, auto_id, _async):
         """
         target: test search function before and after release
@@ -1142,6 +1147,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 6997")
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_search_partition_after_release_load(self, nb, nq, dim, auto_id, _async):
         """
         target: search the pre-released collection after load

@@ -2922,6 +2922,7 @@ class TestLoadCollection:
         """
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_load_collection_release_part_partitions(self, connect, collection):
         """
         target: test release part partitions after load collection
@@ -2942,6 +2943,7 @@ class TestLoadCollection:
         assert len(res[0]) == default_top_k
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_load_collection_release_all_partitions(self, connect, collection):
         """
         target: test release all partitions after load collection

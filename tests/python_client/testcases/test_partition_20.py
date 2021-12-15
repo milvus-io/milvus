@@ -235,6 +235,7 @@ class TestPartitionParams(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_partition_release(self):
         """
         target: verify release partition

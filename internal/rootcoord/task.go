@@ -630,10 +630,11 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
 
 	//notify query service to release partition
-	if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
-		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
-		return err
-	}
+	// TODO::xige-16, reOpen when queryCoord support release partitions after load collection
+	//if err = t.core.CallReleasePartitionService(t.core.ctx, ts, 0, collInfo.ID, []typeutil.UniqueID{partID}); err != nil {
+	//	log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
+	//	return err
+	//}
 
 	// Update DDOperation in etcd
 	return t.core.setDdMsgSendFlag(true)
