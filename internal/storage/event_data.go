@@ -68,7 +68,7 @@ func (data *descriptorEventData) AddExtra(k string, v interface{}) {
 }
 
 // FinishExtra marshal extras to json format.
-// Call before GetMemoryUsageInBytes to get a accurate length of description event.
+// Call before GetMemoryUsageInBytes to get an accurate length of description event.
 func (data *descriptorEventData) FinishExtra() error {
 	var err error
 
