@@ -65,7 +65,7 @@ func (c *Cluster) UnRegister(node *NodeInfo) error {
 	return c.channelManager.DeleteNode(node.NodeID)
 }
 
-// Watch try to add a channel in datanode cluster
+// Watch tries to add a channel in datanode cluster
 func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
 	return c.channelManager.Watch(&channel{Name: ch, CollectionID: collectionID})
 }
