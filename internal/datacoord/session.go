@@ -64,7 +64,7 @@ func (n *Session) GetOrCreateClient(ctx context.Context) (types.DataNode, error)
 	}
 
 	if n.clientCreator == nil {
-		return nil, fmt.Errorf("unable to create client for %s beacause of a nil client creator", n.info.Address)
+		return nil, fmt.Errorf("unable to create client for %s because of a nil client creator", n.info.Address)
 	}
 
 	err := n.initClient(ctx)
