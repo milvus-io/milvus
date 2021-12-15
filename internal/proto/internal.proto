@@ -222,21 +222,6 @@ message LoadIndex {
   repeated common.KeyValuePair index_params = 6;
 }
 
-message SegmentStatisticsUpdates {
-  int64 SegmentID = 1;
-  int64 MemorySize = 2;
-  int64 NumRows = 3;
-  uint64 create_time = 4;
-  uint64 end_time = 5;
-  internal.MsgPosition start_position = 6;
-  internal.MsgPosition end_position = 7;
-}
-
-message SegmentStatistics {
-  common.MsgBase base = 1;
-  repeated SegmentStatisticsUpdates SegStats = 2;
-}
-
 message IndexStats {
   repeated common.KeyValuePair index_params = 1;
   int64 num_related_segments = 2;

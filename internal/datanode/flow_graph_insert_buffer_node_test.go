@@ -110,13 +110,6 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 
 	_, err = newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
 	assert.Error(t, err)
-
-	c.msFactory = &CDFMsFactory{
-		Factory: msFactory,
-		cd:      1,
-	}
-	_, err = newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
-	assert.Error(t, err)
 }
 
 type mockMsg struct{}
@@ -142,7 +135,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		for _, test := range invalidInTests {
 			te.Run(test.description, func(t0 *testing.T) {
 				ibn := &insertBufferNode{
-					ttMerger: newMergedTimeTickerSender(func(Timestamp) error { return nil }),
+					ttMerger: newMergedTimeTickerSender(func(Timestamp, []int64) error { return nil }),
 				}
 				rt := ibn.Operate(test.in)
 				assert.Empty(t0, rt)

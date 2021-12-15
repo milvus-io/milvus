@@ -609,69 +609,6 @@ func (qs *QueryNodeStatsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return queryNodeSegStatsMsg, nil
 }
 
-/////////////////////////////////////////SegmentStatisticsMsg//////////////////////////////////////////
-
-// SegmentStatisticsMsg is a message pack that contains segment statistic
-type SegmentStatisticsMsg struct {
-	BaseMsg
-	internalpb.SegmentStatistics
-}
-
-// interface implementation validation
-var _ TsMsg = &SegmentStatisticsMsg{}
-
-// TraceCtx returns the context of opentracing
-func (ss *SegmentStatisticsMsg) TraceCtx() context.Context {
-	return ss.BaseMsg.Ctx
-}
-
-// SetTraceCtx is used to set context for opentracing
-func (ss *SegmentStatisticsMsg) SetTraceCtx(ctx context.Context) {
-	ss.BaseMsg.Ctx = ctx
-}
-
-// ID returns the ID of this message pack
-func (ss *SegmentStatisticsMsg) ID() UniqueID {
-	return ss.Base.MsgID
-}
-
-// Type returns the type of this message pack
-func (ss *SegmentStatisticsMsg) Type() MsgType {
-	return ss.Base.MsgType
-}
-
-// SourceID indicated which component generated this message
-func (ss *SegmentStatisticsMsg) SourceID() int64 {
-	return ss.Base.SourceID
-}
-
-// Marshal is used to serializing a message pack to byte array
-func (ss *SegmentStatisticsMsg) Marshal(input TsMsg) (MarshalType, error) {
-	segStatsTask := input.(*SegmentStatisticsMsg)
-	segStats := &segStatsTask.SegmentStatistics
-	mb, err := proto.Marshal(segStats)
-	if err != nil {
-		return nil, err
-	}
-	return mb, nil
-}
-
-// Unmarshal is used to deserializing a message pack from byte array
-func (ss *SegmentStatisticsMsg) Unmarshal(input MarshalType) (TsMsg, error) {
-	segStats := internalpb.SegmentStatistics{}
-	in, err := convertToByteArray(input)
-	if err != nil {
-		return nil, err
-	}
-	err = proto.Unmarshal(in, &segStats)
-	if err != nil {
-		return nil, err
-	}
-	segStatsMsg := &SegmentStatisticsMsg{SegmentStatistics: segStats}
-
-	return segStatsMsg, nil
-}
-
 /////////////////////////////////////////CreateCollection//////////////////////////////////////////
 
 // CreateCollectionMsg is a message pack that contains create collection request

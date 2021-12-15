@@ -12,7 +12,7 @@ func TestMergedTimeTicker(t *testing.T) {
 	var ticks []uint64
 	var mut sync.Mutex
 
-	mt := newMergedTimeTickerSender(func(ts Timestamp) error {
+	mt := newMergedTimeTickerSender(func(ts Timestamp, _ []int64) error {
 		mut.Lock()
 		defer mut.Unlock()
 		ticks = append(ticks, ts)
@@ -21,7 +21,7 @@ func TestMergedTimeTicker(t *testing.T) {
 
 	for i := 1; i < 100; i++ {
 		time.Sleep(time.Millisecond * 10)
-		mt.bufferTs(uint64(i))
+		mt.bufferTs(uint64(i), nil)
 	}
 	mt.close()
 	mut.Lock()
@@ -35,7 +35,7 @@ func TestMergedTimeTicker_close10000(t *testing.T) {
 	batchSize := 10000
 	wg.Add(batchSize)
 	for i := 0; i < batchSize; i++ {
-		mt := newMergedTimeTickerSender(func(ts Timestamp) error {
+		mt := newMergedTimeTickerSender(func(ts Timestamp, _ []int64) error {
 			return nil
 		})
 		go func(mt *mergedTimeTickerSender) {

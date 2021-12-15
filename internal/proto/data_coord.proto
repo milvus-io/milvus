@@ -253,6 +253,12 @@ message DataNodeTtMsg {
     common.MsgBase base =1;
     string channel_name = 2;
     uint64 timestamp = 3;
+    repeated SegmentStats segments_stats = 4;
+}
+
+message SegmentStats {
+  int64 SegmentID = 1;
+  int64 NumRows = 2;
 }
 
 enum ChannelWatchState {

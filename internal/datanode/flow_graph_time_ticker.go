@@ -19,22 +19,22 @@ package datanode
 import (
 	"sync"
 	"time"
-
-	"go.uber.org/atomic"
 )
 
-type sendTimeTick func(Timestamp) error
+type sendTimeTick func(Timestamp, []int64) error
 
 // mergedTimeTickerSender reduces time ticker sending rate when datanode is doing `fast-forwarding`
 // it makes sure time ticker send at most 10 times a second (1tick/100millisecond)
 // and the last time tick is always sent
 type mergedTimeTickerSender struct {
-	ts   atomic.Uint64 // current ts value
-	cond *sync.Cond    // condition to send timeticker
-	send sendTimeTick  // actual sender logic
+	ts         uint64
+	segmentIDs map[int64]struct{}
+	lastSent   time.Time
+	mu         sync.Mutex
 
-	lastSent  time.Time
-	lastMut   sync.RWMutex
+	cond *sync.Cond   // condition to send timeticker
+	send sendTimeTick // actual sender logic
+
 	wg        sync.WaitGroup
 	closeCh   chan struct{}
 	closeOnce sync.Once
@@ -42,12 +42,12 @@ type mergedTimeTickerSender struct {
 
 func newMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender {
 	mt := &mergedTimeTickerSender{
-		cond:    sync.NewCond(&sync.Mutex{}),
-		send:    send,
-		closeCh: make(chan struct{}),
+		ts:         0, // 0 for not tt send
+		segmentIDs: make(map[int64]struct{}),
+		cond:       sync.NewCond(&sync.Mutex{}),
+		send:       send,
+		closeCh:    make(chan struct{}),
 	}
-	mt.ts.Store(0) // 0 for not tt send
-
 	mt.wg.Add(2)
 	go mt.tick()
 	go mt.work()
@@ -55,10 +55,13 @@ func newMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender {
 	return mt
 }
 
-func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp) {
-	mt.ts.Store(ts)
-	mt.lastMut.RLock()
-	defer mt.lastMut.RUnlock()
+func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp, segmentIDs []int64) {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+	mt.ts = ts
+	for _, sid := range segmentIDs {
+		mt.segmentIDs[sid] = struct{}{}
+	}
 
 	if !mt.lastSent.IsZero() && time.Since(mt.lastSent) > time.Millisecond*100 {
 		mt.cond.L.Lock()
@@ -94,7 +97,7 @@ func (mt *mergedTimeTickerSender) isClosed() bool {
 
 func (mt *mergedTimeTickerSender) work() {
 	defer mt.wg.Done()
-	ts, lastTs := uint64(0), uint64(0)
+	lastTs := uint64(0)
 	for {
 		mt.cond.L.Lock()
 		if mt.isClosed() {
@@ -102,15 +105,21 @@ func (mt *mergedTimeTickerSender) work() {
 			return
 		}
 		mt.cond.Wait()
-		ts = mt.ts.Load()
 		mt.cond.L.Unlock()
-		if ts != lastTs {
-			mt.send(ts)
-			lastTs = ts
-			mt.lastMut.Lock()
+
+		mt.mu.Lock()
+		if mt.ts != lastTs {
+			var sids []int64
+			for sid := range mt.segmentIDs {
+				sids = append(sids, sid)
+			}
+			mt.segmentIDs = make(map[int64]struct{})
+			lastTs = mt.ts
 			mt.lastSent = time.Now()
-			mt.lastMut.Unlock()
+
+			mt.send(mt.ts, sids)
 		}
+		mt.mu.Unlock()
 	}
 }
 

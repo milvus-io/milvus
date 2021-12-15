@@ -510,50 +510,6 @@ func TestQueryNodeStatsMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	assert.Nil(t, tsMsg)
 }
 
-func TestSegmentStatisticsMsg(t *testing.T) {
-	segmentStatisticsMsg := &SegmentStatisticsMsg{
-		BaseMsg: generateBaseMsg(),
-		SegmentStatistics: internalpb.SegmentStatistics{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SegmentStatistics,
-				MsgID:     1,
-				Timestamp: 2,
-				SourceID:  3,
-			},
-			SegStats: []*internalpb.SegmentStatisticsUpdates{},
-		},
-	}
-
-	assert.NotNil(t, segmentStatisticsMsg.TraceCtx())
-
-	ctx := context.Background()
-	segmentStatisticsMsg.SetTraceCtx(ctx)
-	assert.Equal(t, ctx, segmentStatisticsMsg.TraceCtx())
-
-	assert.Equal(t, int64(1), segmentStatisticsMsg.ID())
-	assert.Equal(t, commonpb.MsgType_SegmentStatistics, segmentStatisticsMsg.Type())
-	assert.Equal(t, int64(3), segmentStatisticsMsg.SourceID())
-
-	bytes, err := segmentStatisticsMsg.Marshal(segmentStatisticsMsg)
-	assert.Nil(t, err)
-
-	tsMsg, err := segmentStatisticsMsg.Unmarshal(bytes)
-	assert.Nil(t, err)
-
-	segmentStatisticsMsg2, ok := tsMsg.(*SegmentStatisticsMsg)
-	assert.True(t, ok)
-	assert.Equal(t, int64(1), segmentStatisticsMsg2.ID())
-	assert.Equal(t, commonpb.MsgType_SegmentStatistics, segmentStatisticsMsg2.Type())
-	assert.Equal(t, int64(3), segmentStatisticsMsg2.SourceID())
-}
-
-func TestSegmentStatisticsMsg_Unmarshal_IllegalParameter(t *testing.T) {
-	segmentStatisticsMsg := &SegmentStatisticsMsg{}
-	tsMsg, err := segmentStatisticsMsg.Unmarshal(10)
-	assert.NotNil(t, err)
-	assert.Nil(t, tsMsg)
-}
-
 func TestCreateCollectionMsg(t *testing.T) {
 	createCollectionMsg := &CreateCollectionMsg{
 		BaseMsg: generateBaseMsg(),

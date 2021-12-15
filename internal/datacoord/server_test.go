@@ -194,6 +194,8 @@ func TestFlush(t *testing.T) {
 		resp, err := svr.Flush(context.TODO(), req)
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		svr.meta.SetCurrentRows(segID, 1)
 		ids, err := svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(ids))
@@ -248,15 +250,6 @@ func TestGetTimeTickChannel(t *testing.T) {
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.EqualValues(t, Params.TimeTickChannelName, resp.Value)
-}
-
-func TestGetStatisticsChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	resp, err := svr.GetStatisticsChannel(context.TODO())
-	assert.Nil(t, err)
-	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.EqualValues(t, Params.StatisticsChannelName, resp.Value)
 }
 
 func TestGetSegmentStates(t *testing.T) {
@@ -720,55 +713,6 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 	}
 }
 
-func TestChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-
-	t.Run("Test StatsChannel", func(t *testing.T) {
-		const segID = 0
-		const rowNum = int64(100)
-
-		segInfo := &datapb.SegmentInfo{
-			ID: segID,
-		}
-		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
-		assert.Nil(t, err)
-
-		stats := &internalpb.SegmentStatisticsUpdates{
-			SegmentID: segID,
-			NumRows:   rowNum,
-		}
-		genMsg := func(msgType commonpb.MsgType, t Timestamp) *msgstream.SegmentStatisticsMsg {
-			return &msgstream.SegmentStatisticsMsg{
-				BaseMsg: msgstream.BaseMsg{
-					HashValues: []uint32{0},
-				},
-				SegmentStatistics: internalpb.SegmentStatistics{
-					Base: &commonpb.MsgBase{
-						MsgType:   msgType,
-						MsgID:     0,
-						Timestamp: t,
-						SourceID:  0,
-					},
-					SegStats: []*internalpb.SegmentStatisticsUpdates{stats},
-				},
-			}
-		}
-
-		statsStream, _ := svr.msFactory.NewMsgStream(svr.ctx)
-		statsStream.AsProducer([]string{Params.StatisticsChannelName})
-		statsStream.Start()
-		defer statsStream.Close()
-
-		msgPack := msgstream.MsgPack{}
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 123))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentInfo, 234))
-		msgPack.Msgs = append(msgPack.Msgs, genMsg(commonpb.MsgType_SegmentStatistics, 345))
-		err = statsStream.Produce(&msgPack)
-		assert.Nil(t, err)
-	})
-}
-
 type spySegmentManager struct {
 	spyCh chan struct{}
 }
@@ -1143,6 +1087,10 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
+		msg.SegmentsStats = append(msg.SegmentsStats, &datapb.SegmentStats{
+			SegmentID: assign.GetSegID(),
+			NumRows:   1,
+		})
 		msgPack.Msgs = append(msgPack.Msgs, msg)
 		err = ttMsgStream.Produce(&msgPack)
 		assert.Nil(t, err)
@@ -1217,6 +1165,10 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
+		msg.SegmentsStats = append(msg.SegmentsStats, &datapb.SegmentStats{
+			SegmentID: assign.GetSegID(),
+			NumRows:   1,
+		})
 		msgPack.Msgs = append(msgPack.Msgs, msg)
 		err = ttMsgStream.Produce(&msgPack)
 		assert.Nil(t, err)
@@ -2250,7 +2202,6 @@ func TestGetFlushState(t *testing.T) {
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
 	Params.Init()
 	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())
-	Params.StatisticsChannelName = Params.StatisticsChannelName + strconv.Itoa(rand.Int())
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
