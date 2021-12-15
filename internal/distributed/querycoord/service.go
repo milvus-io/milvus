@@ -40,9 +40,13 @@ import (
 	qc "github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"google.golang.org/grpc/keepalive"
 )
+
+var Params paramtable.GrpcServerConfig
 
 // Server is the grpc server of QueryCoord.
 type Server struct {
@@ -99,10 +103,10 @@ func (s *Server) Run() error {
 
 // init initializes QueryCoord's grpc service.
 func (s *Server) init() error {
-	Params.Init()
+	Params.InitOnce(typeutil.QueryCoordRole)
 
 	qc.Params.InitOnce()
-	qc.Params.Address = Params.Address
+	qc.Params.Address = Params.GetAddress()
 	qc.Params.Port = Params.Port
 
 	closer := trace.InitTracing("querycoord")
@@ -266,7 +270,7 @@ func (s *Server) start() error {
 
 // Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("QueryCoord stop", zap.String("Address", Params.Address))
+	log.Debug("QueryCoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err

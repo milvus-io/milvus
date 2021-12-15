@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -31,8 +30,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GrpcClientConfig
 
 // Client is the datacoord grpc client
 type Client struct {
@@ -48,7 +51,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	Params.Init()
+	Params.InitOnce(typeutil.DataCoordRole)
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase{
 			ClientMaxRecvSize: Params.ClientMaxRecvSize,

@@ -100,15 +100,6 @@ func Test_CheckGrpcReady(t *testing.T) {
 	cancel()
 }
 
-func Test_CheckPortAvailable(t *testing.T) {
-	num := 10
-
-	for i := 0; i < num; i++ {
-		port := GetAvailablePort()
-		assert.Equal(t, CheckPortAvailable(port), true)
-	}
-}
-
 func Test_GetLocalIP(t *testing.T) {
 	ip := GetLocalIP()
 	assert.NotNil(t, ip)

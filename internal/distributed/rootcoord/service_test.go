@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,13 +69,9 @@ func TestGrpcService(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	Params.Init()
+	Params.InitOnce(typeutil.RootCoordRole)
 	Params.Port = (randVal % 100) + 10000
-	parts := strings.Split(Params.Address, ":")
-	if len(parts) == 2 {
-		Params.Address = parts[0] + ":" + strconv.Itoa(Params.Port)
-		t.Log("newParams.Address:", Params.Address)
-	}
+	t.Log("newParams.Address:", Params.GetAddress())
 
 	ctx := context.Background()
 	msFactory := msgstream.NewPmsFactory()
@@ -95,7 +89,7 @@ func TestGrpcService(t *testing.T) {
 	rootcoord.Params.DefaultPartitionName = "_default"
 	rootcoord.Params.DefaultIndexName = "_default"
 
-	t.Logf("master service port = %d", Params.Port)
+	t.Logf("service port = %d", Params.Port)
 
 	core, ok := (svr.rootCoord).(*rootcoord.Core)
 	assert.True(t, ok)
@@ -119,7 +113,7 @@ func TestGrpcService(t *testing.T) {
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
-	rootcoord.Params.Address = Params.Address
+	rootcoord.Params.Address = Params.GetAddress()
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -895,7 +889,7 @@ func TestRun(t *testing.T) {
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	Params.Init()
+	Params.InitOnce(typeutil.RootCoordRole)
 	Params.Port = 1000000
 	err := svr.Run()
 	assert.NotNil(t, err)

@@ -28,6 +28,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	dn "github.com/milvus-io/milvus/internal/datanode"
 	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
@@ -42,9 +43,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"google.golang.org/grpc/keepalive"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GrpcServerConfig
 
 type Server struct {
 	datanode    types.DataNodeComponent
@@ -88,7 +92,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 
 func (s *Server) startGrpc() error {
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.listener)
+	go s.startGrpcLoop(Params.Listener)
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	return err
@@ -154,7 +158,7 @@ func (s *Server) Run() error {
 
 // Stop stops Datanode's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("Datanode stop", zap.String("Address", Params.Address))
+	log.Debug("Datanode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
@@ -191,7 +195,7 @@ func (s *Server) Stop() error {
 // init initializes Datanode's grpc service.
 func (s *Server) init() error {
 	ctx := context.Background()
-	Params.Init()
+	Params.InitOnce(typeutil.DataNodeRole)
 
 	dn.Params.InitOnce()
 	dn.Params.Port = Params.Port

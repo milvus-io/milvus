@@ -26,11 +26,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestIndexCoordClient(t *testing.T) {
-	Params.Init()
+	Params.InitOnce(typeutil.IndexCoordRole)
 	ctx := context.Background()
 	server, err := grpcindexcoord.NewServer(ctx)
 	assert.Nil(t, err)
