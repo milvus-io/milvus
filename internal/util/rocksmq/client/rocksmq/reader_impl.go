@@ -24,6 +24,7 @@ type reader struct {
 	subscriptionRolePrefix  string
 }
 
+// newReader create a rocksmq reader from reader options
 func newReader(c *client, readerOptions *ReaderOptions) (*reader, error) {
 	if c == nil {
 		return nil, newError(InvalidConfiguration, "client is nil")
