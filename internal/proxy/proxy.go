@@ -55,6 +55,7 @@ const channelMgrTickerInterval = 100 * time.Millisecond
 // make sure Proxy implements types.Proxy
 var _ types.Proxy = (*Proxy)(nil)
 
+// Proxy of milvus
 type Proxy struct {
 	ctx    context.Context
 	cancel func()
