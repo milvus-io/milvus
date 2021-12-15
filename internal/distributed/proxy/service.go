@@ -340,6 +340,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, request *milvuspb.Releas
 	return s.proxy.ReleaseCollection(ctx, request)
 }
 
+// DescribeCollection notifies Proxy to describe a collection
 func (s *Server) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return s.proxy.DescribeCollection(ctx, request)
 }
