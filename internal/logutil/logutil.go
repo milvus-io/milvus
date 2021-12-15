@@ -17,6 +17,7 @@
 package logutil
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -146,4 +147,53 @@ func SetupLogger(cfg *log.Config) {
 // GetZapWrapper returns the stored zapWrapper object.
 func GetZapWrapper() *zapWrapper {
 	return _globalZapWrapper.Load().(*zapWrapper)
+}
+
+type logKey int
+
+const logCtxKey logKey = iota
+
+func WithField(ctx context.Context, key string, value string) context.Context {
+	logger := log.L()
+	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
+		logger = ctxLogger
+	}
+
+	return context.WithValue(ctx, logCtxKey, logger.With(zap.String(key, value)))
+}
+
+func WithReqID(ctx context.Context, reqID int64) context.Context {
+	logger := log.L()
+	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
+		logger = ctxLogger
+	}
+
+	return context.WithValue(ctx, logCtxKey, logger.With(zap.Int64("reqID", reqID)))
+}
+
+func WithModule(ctx context.Context, module string) context.Context {
+	logger := log.L()
+	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
+		logger = ctxLogger
+	}
+
+	return context.WithValue(ctx, logCtxKey, logger.With(zap.String("module", module)))
+}
+
+func WithLogger(ctx context.Context, logger *zap.Logger) context.Context {
+	if logger == nil {
+		logger = log.L()
+	}
+	return context.WithValue(ctx, logCtxKey, logger)
+}
+
+func Logger(ctx context.Context) *zap.Logger {
+	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
+		return ctxLogger
+	}
+	return log.L()
+}
+
+func BgLogger() *zap.Logger {
+	return log.L()
 }
