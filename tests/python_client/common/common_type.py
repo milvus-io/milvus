@@ -46,10 +46,9 @@ max_dim = 32768
 gracefulTime = 1
 default_nlist = 128
 compact_segment_num_threshold = 10
-# compact_delta_binlog_ratio is 0.2
-compact_delta_ratio_reciprocal = 5
+compact_delta_ratio_reciprocal = 5  # compact_delta_binlog_ratio is 0.2
 compact_retention_duration = 20  # compaction travel time retention range 20s
-max_field_num = 256
+max_field_num = 256  # Maximum number of fields in a collection
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = "Milvus"
