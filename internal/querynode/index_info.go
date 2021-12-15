@@ -35,6 +35,7 @@ func newIndexInfo() *indexInfo {
 	}
 }
 
+// setIndexName sets the name of index
 func (info *indexInfo) setIndexName(name string) {
 	info.indexName = name
 }
