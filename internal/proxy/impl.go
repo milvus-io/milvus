@@ -480,14 +480,18 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		chMgr:                    node.chMgr,
 	}
 
-	log.Debug("ReleaseCollection received",
+	method := "ReleaseCollection"
+
+	log.Debug(
+		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(rct); err != nil {
-		log.Debug("ReleaseCollection failed to enqueue",
+		log.Warn(
+			rpcFailedToEnqueue(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -500,7 +504,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		}, nil
 	}
 
-	log.Debug("ReleaseCollection enqueued",
+	log.Debug(
+		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", rct.ID()),
@@ -510,7 +515,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		zap.String("collection", request.CollectionName))
 
 	if err := rct.WaitToFinish(); err != nil {
-		log.Debug("ReleaseCollection failed to WaitToFinish",
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -526,7 +532,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		}, nil
 	}
 
-	log.Debug("ReleaseCollection done",
+	log.Debug(
+		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", rct.ID()),
