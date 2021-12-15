@@ -34,7 +34,7 @@ func NewLocalChunkManager(localPath string) *LocalChunkManager {
 	}
 }
 
-// GetPath returns the path of local data if exist.
+// GetPath returns the path of local data if exists.
 func (lcm *LocalChunkManager) GetPath(key string) (string, error) {
 	if !lcm.Exist(key) {
 		return "", errors.New("local file cannot be found with key:" + key)
@@ -70,7 +70,7 @@ func (lcm *LocalChunkManager) Exist(key string) bool {
 	return true
 }
 
-// Read reads the local storage data if exist.
+// Read reads the local storage data if exists.
 func (lcm *LocalChunkManager) Read(key string) ([]byte, error) {
 	filePath := path.Join(lcm.localPath, key)
 	file, err := os.Open(path.Clean(filePath))
@@ -84,7 +84,7 @@ func (lcm *LocalChunkManager) Read(key string) ([]byte, error) {
 	return content, file.Close()
 }
 
-// ReadAt reads specific position data of local storage if exist.
+// ReadAt reads specific position data of local storage if exists.
 func (lcm *LocalChunkManager) ReadAt(key string, p []byte, off int64) (n int, err error) {
 	path := path.Join(lcm.localPath, key)
 	at, err := mmap.Open(path)
