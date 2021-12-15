@@ -2493,6 +2493,11 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropAlias")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	dat := &DropAliasTask{
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
@@ -2500,35 +2505,67 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		rootCoord:        node.rootCoord,
 	}
 
-	err := node.sched.ddQueue.Enqueue(dat)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
+	method := "DropAlias"
 
-	log.Debug("DropAlias",
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
-		zap.Int64("msgID", request.Base.MsgID),
-		zap.Uint64("timestamp", request.Base.Timestamp),
+		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias))
-	defer func() {
-		log.Debug("DropAlias Done",
-			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole),
-			zap.Int64("msgID", request.Base.MsgID),
-			zap.Uint64("timestamp", request.Base.Timestamp),
-			zap.String("alias", request.Alias))
-	}()
 
-	err = dat.WaitToFinish()
-	if err != nil {
+	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.String("db", request.DbName),
+			zap.String("alias", request.Alias))
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", dat.ID()),
+		zap.Uint64("BeginTs", dat.BeginTs()),
+		zap.Uint64("EndTs", dat.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("alias", request.Alias))
+
+	if err := dat.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.Int64("MsgID", dat.ID()),
+			zap.Uint64("BeginTs", dat.BeginTs()),
+			zap.Uint64("EndTs", dat.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("alias", request.Alias))
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", dat.ID()),
+		zap.Uint64("BeginTs", dat.BeginTs()),
+		zap.Uint64("EndTs", dat.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("alias", request.Alias))
 
 	return dat.result, nil
 }
