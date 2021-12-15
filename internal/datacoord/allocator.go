@@ -19,10 +19,9 @@ package datacoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/types"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 // allocator is the interface for allocating `UniqueID` or `Timestamp`
