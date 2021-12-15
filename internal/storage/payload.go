@@ -34,6 +34,7 @@ import (
 type PayloadWriterInterface interface {
 	AddDataToPayload(msgs interface{}, dim ...int) error
 	AddBoolToPayload(msgs []bool) error
+	AddByteToPayload(msgs []byte) error
 	AddInt8ToPayload(msgs []int8) error
 	AddInt16ToPayload(msgs []int16) error
 	AddInt32ToPayload(msgs []int32) error
@@ -54,6 +55,7 @@ type PayloadWriterInterface interface {
 type PayloadReaderInterface interface {
 	GetDataFromPayload(idx ...int) (interface{}, int, error)
 	GetBoolFromPayload() ([]bool, error)
+	GetByteFromPayload() ([]byte, error)
 	GetInt8FromPayload() ([]int8, error)
 	GetInt16FromPayload() ([]int16, error)
 	GetInt32FromPayload() ([]int32, error)
@@ -174,6 +176,18 @@ func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 
 	status := C.AddBooleanToPayload(w.payloadWriterPtr, cMsgs, cLength)
 	return HandleCStatus(&status, "AddBoolToPayload failed")
+}
+
+func (w *PayloadWriter) AddByteToPayload(msgs []byte) error {
+	length := len(msgs)
+	if length <= 0 {
+		return errors.New("can't add empty msgs into payload")
+	}
+	cMsgs := (*C.int8_t)(unsafe.Pointer(&msgs[0]))
+	cLength := C.int(length)
+
+	status := C.AddInt8ToPayload(w.payloadWriterPtr, cMsgs, cLength)
+	return HandleCStatus(&status, "AddInt8ToPayload failed")
 }
 
 func (w *PayloadWriter) AddInt8ToPayload(msgs []int8) error {
@@ -420,6 +434,24 @@ func (r *PayloadReader) GetBoolFromPayload() ([]bool, error) {
 	}
 
 	slice := (*[1 << 28]bool)(unsafe.Pointer(cMsg))[:cSize:cSize]
+	return slice, nil
+}
+
+// GetByteFromPayload returns byte slice from payload
+func (r *PayloadReader) GetByteFromPayload() ([]byte, error) {
+	if r.colType != schemapb.DataType_Int8 {
+		return nil, errors.New("incorrect data type")
+	}
+
+	var cMsg *C.int8_t
+	var cSize C.int
+
+	status := C.GetInt8FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
+	if err := HandleCStatus(&status, "GetInt8FromPayload failed"); err != nil {
+		return nil, err
+	}
+
+	slice := (*[1 << 28]byte)(unsafe.Pointer(cMsg))[:cSize:cSize]
 	return slice, nil
 }
 
