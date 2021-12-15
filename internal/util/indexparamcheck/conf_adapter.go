@@ -265,6 +265,7 @@ func newBinIDMAPConfAdapter() *BinIDMAPConfAdapter {
 	return &BinIDMAPConfAdapter{}
 }
 
+// BinIVFConfAdapter checks if a bin IFV index can be built.
 type BinIVFConfAdapter struct {
 }
 
