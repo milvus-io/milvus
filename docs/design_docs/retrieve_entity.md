@@ -33,7 +33,7 @@ Once DataNode receives a Flush command from DataCoord, it sorts the data in the 
 - Key of statistics file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/stats_${log_idx}`
 - Key of bloom filter file: `${tenant}/insert_log/${collection_id}/${partition_id}/${segment_id}/${field_id}/bf_${log_idx}`
 
-QueryNode maintains mapping from primary key to entities in each segment. This mapping updates every time an insert request is processed.
+QueryNode maintains a mapping from primary key to entities in each segment. This mapping updates every time an insert request is processed.
 
 After receiving the Get request from the client, the Proxy sends the request to the `search` channel and waits for the result returned from the `searchResult` channel.
 
