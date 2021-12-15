@@ -1248,9 +1248,11 @@ func (codec *IndexFileBinlogCodec) Deserialize(blobs []*Blob) (
 	return datas, indexParams, indexName, indexID, err
 }
 
+// IndexCodec can serialize and deserialize index
 type IndexCodec struct {
 }
 
+// NewIndexCodec creates IndexCodec
 func NewIndexCodec() *IndexCodec {
 	return &IndexCodec{}
 }
