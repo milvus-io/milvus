@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1639489221240,
+  "iteration": 1639531529303,
   "links": [],
   "panels": [
     {
@@ -3855,6 +3855,104 @@
         "align": false,
         "alignLevel": null
       }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "$datasource",
+      "description": "Number of heap bytes released to OS.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 81
+      },
+      "hiddenSeries": false,
+      "id": 123218,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "7.5.4",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "go_memstats_heap_released_bytes{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}",
+          "interval": "",
+          "intervalFactor": 2,
+          "legendFormat": "{{pod}}",
+          "queryType": "randomWalk",
+          "refId": "A"
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Go Heap released",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "decimals": null,
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": "0",
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
     }
   ],
   "refresh": false,
@@ -3942,7 +4040,8 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "isNone": true,
+          "selected": true,
           "text": "None",
           "value": ""
         },
@@ -3973,13 +4072,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": [
-            "None"
-          ],
-          "value": [
-            ""
-          ]
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -4008,7 +4104,7 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
             "None"
           ],
@@ -4076,5 +4172,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 201
+  "version": 206
 }
