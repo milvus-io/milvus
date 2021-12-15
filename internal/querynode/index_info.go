@@ -39,6 +39,7 @@ func (info *indexInfo) setIndexName(name string) {
 	info.indexName = name
 }
 
+// setIndexID sets the id of index
 func (info *indexInfo) setIndexID(id UniqueID) {
 	info.indexID = id
 }
