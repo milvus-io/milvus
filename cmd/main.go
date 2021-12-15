@@ -31,19 +31,11 @@ import (
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
-	roleRootCoord  = "rootcoord"
-	roleQueryCoord = "querycoord"
-	roleIndexCoord = "indexcoord"
-	roleDataCoord  = "datacoord"
-	roleProxy      = "proxy"
-	roleQueryNode  = "querynode"
-	roleIndexNode  = "indexnode"
-	roleDataNode   = "datanode"
-	roleMixture    = "mixture"
-	roleStandalone = "standalone"
+	roleMixture = "mixture"
 )
 
 // inject variable at build-time
@@ -214,10 +206,10 @@ func main() {
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
 
 	var enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord bool
-	flags.BoolVar(&enableRootCoord, roleRootCoord, false, "enable root coordinator")
-	flags.BoolVar(&enableQueryCoord, roleQueryCoord, false, "enable query coordinator")
-	flags.BoolVar(&enableIndexCoord, roleIndexCoord, false, "enable index coordinator")
-	flags.BoolVar(&enableDataCoord, roleDataCoord, false, "enable data coordinator")
+	flags.BoolVar(&enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
+	flags.BoolVar(&enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
+	flags.BoolVar(&enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
+	flags.BoolVar(&enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
 
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage of %s:\n", os.Args[0])
@@ -243,28 +235,23 @@ func main() {
 	var localMsg = false
 	role := roles.MilvusRoles{}
 	switch serverType {
-	case roleRootCoord:
+	case typeutil.RootCoordRole:
 		role.EnableRootCoord = true
-	case roleProxy:
+	case typeutil.ProxyRole:
 		role.EnableProxy = true
-	case roleQueryCoord:
+	case typeutil.QueryCoordRole:
 		role.EnableQueryCoord = true
-	case roleQueryNode:
+	case typeutil.QueryNodeRole:
 		role.EnableQueryNode = true
-	case roleDataCoord:
+	case typeutil.DataCoordRole:
 		role.EnableDataCoord = true
-	case roleDataNode:
+	case typeutil.DataNodeRole:
 		role.EnableDataNode = true
-	case roleIndexCoord:
+	case typeutil.IndexCoordRole:
 		role.EnableIndexCoord = true
-	case roleIndexNode:
+	case typeutil.IndexNodeRole:
 		role.EnableIndexNode = true
-	case roleMixture:
-		role.EnableRootCoord = enableRootCoord
-		role.EnableQueryCoord = enableQueryCoord
-		role.EnableDataCoord = enableDataCoord
-		role.EnableIndexCoord = enableIndexCoord
-	case roleStandalone:
+	case typeutil.StandaloneRole:
 		role.EnableRootCoord = true
 		role.EnableProxy = true
 		role.EnableQueryCoord = true
@@ -274,6 +261,11 @@ func main() {
 		role.EnableIndexCoord = true
 		role.EnableIndexNode = true
 		localMsg = true
+	case roleMixture:
+		role.EnableRootCoord = enableRootCoord
+		role.EnableQueryCoord = enableQueryCoord
+		role.EnableDataCoord = enableDataCoord
+		role.EnableIndexCoord = enableIndexCoord
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n", serverType)
 		os.Exit(-1)
