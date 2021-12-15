@@ -196,6 +196,7 @@ def search_param_analysis(vector_query, filter_query):
         logger.error("[search_param_analysis] vector not dict or len != 1: %s" % str(vector))
         return False
 
+    expression = None
     if isinstance(filter_query, list) and len(filter_query) != 0 and "range" in filter_query[0]:
         filter_range = filter_query[0]["range"]
         if isinstance(filter_range, dict) and len(filter_range) == 1:
@@ -214,9 +215,9 @@ def search_param_analysis(vector_query, filter_query):
         else:
             logger.error("[search_param_analysis] filter_range not dict or len != 1: %s" % str(filter_range))
             return False
-    else:
+    # else:
         # logger.debug("[search_param_analysis] range not in filter_query: %s" % str(filter_query))
-        expression = None
+        # expression = None
 
     result = {
         "data": data,
