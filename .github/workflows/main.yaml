@@ -3,7 +3,8 @@ name: Build and test
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
-  workflow_dispatch:
+  issue_comment:
+    types: [created]
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
@@ -35,6 +36,7 @@ on:
 
 jobs:
   ubuntu:
+    if:  "github.event_name == 'pull_request' || (github.event_name == 'issue_comment'&& startsWith(github.event.comment.body, '/run-checks'))"
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
