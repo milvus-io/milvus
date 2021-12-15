@@ -21,6 +21,8 @@ type IntPrimaryKey = int64
 type UniqueID = int64
 
 const (
+	// StandaloneRole is a constant represent Standalone
+	StandaloneRole = "standalone"
 	// RootCoordRole is a constant represent RootCoord
 	RootCoordRole = "rootcoord"
 	// ProxyRole is a constant represent Proxy
