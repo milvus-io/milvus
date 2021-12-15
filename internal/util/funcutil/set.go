@@ -26,3 +26,14 @@ func SetContain(m1, m2 map[interface{}]struct{}) bool {
 
 	return true
 }
+
+// SetToSlice transform the set to a slice.
+func SetToSlice(m map[interface{}]struct{}) []interface{} {
+	ret := make([]interface{}, 0, len(m))
+
+	for k := range m {
+		ret = append(ret, k)
+	}
+
+	return ret
+}
