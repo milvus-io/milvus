@@ -47,7 +47,7 @@ type GcOption struct {
 }
 
 // garbageCollector handles garbage files in object storage
-// which could be dropped collection remnant or data node failure traces
+// which could be dropped collection remanent or data node failure traces
 type garbageCollector struct {
 	option GcOption
 	meta   *meta
