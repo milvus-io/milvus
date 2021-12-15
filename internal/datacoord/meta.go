@@ -90,7 +90,7 @@ func (m *meta) AddCollection(collection *datapb.CollectionInfo) {
 	m.collections[collection.ID] = collection
 }
 
-// GetCollection get collection info with provided collection id from local cache
+// GetCollection returns collection info with provided collection id from local cache
 func (m *meta) GetCollection(collectionID UniqueID) *datapb.CollectionInfo {
 	m.RLock()
 	defer m.RUnlock()
@@ -108,7 +108,7 @@ type chanPartSegments struct {
 	segments    []*SegmentInfo
 }
 
-// GetSegmentsChanPart get segments organized in Channel-Parition dimension with selector applied
+// GetSegmentsChanPart returns segments organized in Channel-Parition dimension with selector applied
 func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegments {
 	m.RLock()
 	defer m.RUnlock()
