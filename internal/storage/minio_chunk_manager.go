@@ -30,7 +30,7 @@ func NewMinioChunkManager(minio *miniokv.MinIOKV) *MinioChunkManager {
 	}
 }
 
-// GetPath returns the path of minio data if exist.
+// GetPath returns the path of minio data if exists.
 func (mcm *MinioChunkManager) GetPath(key string) (string, error) {
 	if !mcm.Exist(key) {
 		return "", errors.New("minio file manage cannot be found with key:" + key)
@@ -48,13 +48,13 @@ func (mcm *MinioChunkManager) Exist(key string) bool {
 	return mcm.minio.Exist(key)
 }
 
-// Read reads the minio storage data if exist.
+// Read reads the minio storage data if exists.
 func (mcm *MinioChunkManager) Read(key string) ([]byte, error) {
 	results, err := mcm.minio.Load(key)
 	return []byte(results), err
 }
 
-// ReadAt reads specific position data of minio storage if exist.
+// ReadAt reads specific position data of minio storage if exists.
 func (mcm *MinioChunkManager) ReadAt(key string, p []byte, off int64) (int, error) {
 	results, err := mcm.minio.Load(key)
 	if err != nil {
