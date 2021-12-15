@@ -43,6 +43,7 @@ func (info *indexInfo) setIndexID(id UniqueID) {
 	info.indexID = id
 }
 
+// setBuildID sets the build id of index
 func (info *indexInfo) setBuildID(id UniqueID) {
 	info.buildID = id
 }
