@@ -156,6 +156,7 @@ func (nm *NodeManager) ListNode() []UniqueID {
 	return clients
 }
 
+// indexNodeGetMetricsResponse record the metrics information of IndexNode.
 type indexNodeGetMetricsResponse struct {
 	resp *milvuspb.GetMetricsResponse
 	err  error
