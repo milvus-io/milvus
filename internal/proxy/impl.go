@@ -2296,6 +2296,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		}, nil
 	}
 
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Query")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
 	queryRequest := &milvuspb.QueryRequest{
 		DbName:         request.DbName,
 		CollectionName: request.CollectionName,
@@ -2320,41 +2324,26 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		qc:        node.queryCoord,
 	}
 
-	log.Debug("Query enqueue",
+	method := "Query"
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", queryRequest.DbName),
 		zap.String("collection", queryRequest.CollectionName),
 		zap.Any("partitions", queryRequest.PartitionNames))
 
-	err := node.sched.dqQueue.Enqueue(qt)
-	if err != nil {
-		return &milvuspb.QueryResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
-	}
-
-	log.Debug("Query",
-		zap.String("role", typeutil.ProxyRole),
-		zap.Int64("msgID", qt.Base.MsgID),
-		zap.Uint64("timestamp", qt.Base.Timestamp),
-		zap.String("db", queryRequest.DbName),
-		zap.String("collection", queryRequest.CollectionName),
-		zap.Any("partitions", queryRequest.PartitionNames))
-	defer func() {
-		log.Debug("Query Done",
+	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
-			zap.Int64("msgID", qt.Base.MsgID),
-			zap.Uint64("timestamp", qt.Base.Timestamp),
 			zap.String("db", queryRequest.DbName),
 			zap.String("collection", queryRequest.CollectionName),
 			zap.Any("partitions", queryRequest.PartitionNames))
-	}()
 
-	err = qt.WaitToFinish()
-	if err != nil {
 		return &milvuspb.QueryResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2362,6 +2351,49 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			},
 		}, nil
 	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", qt.ID()),
+		zap.Uint64("BeginTs", qt.BeginTs()),
+		zap.Uint64("EndTs", qt.EndTs()),
+		zap.String("db", queryRequest.DbName),
+		zap.String("collection", queryRequest.CollectionName),
+		zap.Any("partitions", queryRequest.PartitionNames))
+
+	if err := qt.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.Int64("MsgID", qt.ID()),
+			zap.Uint64("BeginTs", qt.BeginTs()),
+			zap.Uint64("EndTs", qt.EndTs()),
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames))
+
+		return &milvuspb.QueryResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", qt.ID()),
+		zap.Uint64("BeginTs", qt.BeginTs()),
+		zap.Uint64("EndTs", qt.EndTs()),
+		zap.String("db", queryRequest.DbName),
+		zap.String("collection", queryRequest.CollectionName),
+		zap.Any("partitions", queryRequest.PartitionNames))
 
 	return &milvuspb.QueryResults{
 		Status:     qt.result.Status,
