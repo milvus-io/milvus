@@ -90,7 +90,7 @@ type ROChannelStore interface {
 	GetNodes() []int64
 }
 
-// RWChannelStore is the read write channel store which matains the mapping between channels and node
+// RWChannelStore is the read write channel store which maintains the mapping between channels and node
 type RWChannelStore interface {
 	ROChannelStore
 	// Reload restores the buffer channels and node-channels mapping form kv
