@@ -478,7 +478,7 @@ func (ss *suffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 
 // MultiSaveAndRemoveWithPrefix save muiltple kvs and remove as well
 // if ts == 0, act like TxnKV
-// each key-value will be treat in same logic like Save
+// each key-value will be treated in same logic like Save
 func (ss *suffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	// if ts == 0, act like TxnKV
 	if ts == 0 {
