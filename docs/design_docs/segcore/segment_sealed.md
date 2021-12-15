@@ -24,7 +24,7 @@ Search is executable as long as all the columns involved in the search are loade
       3. For the vector columns involved in the query, either the original data or the index is loaded
 4. `scalar_indexings_`: store scalar index
 
-   1. Use StructuredSortedIndex in knowhere
+   1. Use StructuredSortedIndex in Knowhere
 5. `primary_key_index_`: store index for pk column
    1. Use brand new ScalarIndexBase format
    2. **Note: The functions here may overlap with scalar indexes. It is recommended to replace scalar index with ScalarIndexBase**
