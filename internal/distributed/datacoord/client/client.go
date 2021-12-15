@@ -101,13 +101,12 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// GetComponentStates calls DataCoord GetComponentStates services
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("ABC", zap.Any("ctx", ctx), zap.Any("func", c.grpcClient.ReCall))
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		log.Debug("ABC", zap.Any("client", client))
 		return client.(datapb.DataCoordClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
