@@ -728,6 +728,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 
 	if !lpt.meta.hasCollection(collectionID) {
 		lpt.meta.addCollection(collectionID, lpt.Schema)
+		lpt.meta.setLoadType(collectionID, querypb.LoadType_LoadPartition)
 		lpt.addCol = true
 	}
 	for _, id := range partitionIDs {

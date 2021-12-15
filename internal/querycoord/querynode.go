@@ -583,7 +583,7 @@ func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.Component
 
 func (qn *queryNode) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !qn.isOnline() {
-		return nil, errQueryNodeIsNotOnService(qn.id)
+		return nil, fmt.Errorf("getMetrics: queryNode %d is offline", qn.id)
 	}
 
 	return qn.client.GetMetrics(qn.ctx, in)

@@ -36,8 +36,7 @@ import (
 func getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
-	qc *QueryCoord,
-) (*milvuspb.GetMetricsResponse, error) {
+	qc *QueryCoord) (string, error) {
 
 	clusterTopology := metricsinfo.QueryClusterTopology{
 		Self: metricsinfo.QueryCoordInfos{
@@ -128,22 +127,8 @@ func getSystemInfoMetrics(
 
 	resp, err := metricsinfo.MarshalTopology(coordTopology)
 	if err != nil {
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
-		}, nil
+		return "", err
 	}
 
-	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
-	}, nil
+	return resp, nil
 }
