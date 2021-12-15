@@ -161,6 +161,7 @@ type indexNodeGetMetricsResponse struct {
 	err  error
 }
 
+// getMetrics get metrics information of all IndexNode.
 func (nm *NodeManager) getMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) []indexNodeGetMetricsResponse {
 	nm.lock.RLock()
 	defer nm.lock.RUnlock()
