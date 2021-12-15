@@ -155,10 +155,12 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		rootCoord:               node.rootCoord,
 	}
 
+	method := "CreateCollection"
 	// avoid data race
 	lenOfSchema := len(request.Schema)
 
-	log.Debug("CreateCollection received",
+	log.Debug(
+		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -166,9 +168,9 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.Int("len(schema)", lenOfSchema),
 		zap.Int32("shards_num", request.ShardsNum))
 
-	err := node.sched.ddQueue.Enqueue(cct)
-	if err != nil {
-		log.Debug("CreateCollection failed to enqueue",
+	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -183,7 +185,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		}, nil
 	}
 
-	log.Debug("CreateCollection enqueued",
+	log.Debug(
+		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cct.ID()),
@@ -195,9 +198,9 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.Int("len(schema)", lenOfSchema),
 		zap.Int32("shards_num", request.ShardsNum))
 
-	err = cct.WaitToFinish()
-	if err != nil {
-		log.Debug("CreateCollection failed to WaitToFinish",
+	if err := cct.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -215,7 +218,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		}, nil
 	}
 
-	log.Debug("CreateCollection done",
+	log.Debug(
+		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cct.ID()),
