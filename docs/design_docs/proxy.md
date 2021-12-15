@@ -155,22 +155,22 @@ allocation logic of segment ID is the responsibility of the Data Coordinator. Th
 written needs to be determined before writing to DmChannel. For a write operation, Proxy will hash each row of data
 again according to the hash value of its primary key, and then determine into which DmChannel each row of data enters. After
 collecting the number of pieces to be written by each DmChannel, it applies to the data coordinator for which SegmentIDs the
-newly written data of these dmchannels belong to. In the specific implementation, the proxy needs to preallocate some
+newly written data of these dmchannels belong to. In the specific implementation, Proxy needs to preallocate some
 quotas to the Data Coordinator to avoid frequent direct GRPC communication with the Data Coordinator.
 
 One consideration for uniformly assigning SegmentIDs by Data Coordinator is that Data Coordinator is responsible for
 coordinating the total number of each segment not to be too large, and the location is near a water level, so that the
 size of the segment is limited to a certain range.
 
-Other interactions between Proxy and Data Coordinator are mainly reflected in the proxy querying Data Coordinator for
+Other interactions between Proxy and Data Coordinator are mainly reflected in Proxy querying Data Coordinator for
 the status and statistical information of the segment of the collection. LoadCollection is an example. The
 synchronization semantics of the current LoadCollection needs to know the number of rows currently persisted, so the
 Proxy needs to ask the Data Coordinator for the total number of rows currently persisted.
 
 #### 6.4 Interaction with Query Coordinator
 
-For LoadCollection, LoadPartition, ReleaseCollection, ReleasePartition requests, the Proxy directly forwards these
-requests to Query Coordinator for execution after checking and preprocessing these requests. When the Proxy receives
+For LoadCollection, LoadPartition, ReleaseCollection, ReleasePartition requests, Proxy directly forwards these
+requests to Query Coordinator for execution after checking and preprocessing these requests. When Proxy receives
 feedback from Query Coordinator, it returns the feedback results to the clients.
 
 The semantics of the Load operation is to load Collection or Partition from persistent storage into the memory of Query
