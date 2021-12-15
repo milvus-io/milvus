@@ -34,6 +34,7 @@ func (e *Error) Result() Result {
 	return e.result
 }
 
+// Error returns the error message
 func (e *Error) Error() string {
 	return e.msg
 }
