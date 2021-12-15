@@ -14,7 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cd ..
-
 echo "Starting standalone..."
 nohup ./bin/milvus run standalone > /tmp/standalone.log 2>&1 &
