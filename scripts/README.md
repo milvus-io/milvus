@@ -69,8 +69,8 @@ $ docker-compose up -d
 
 Start milvus cluster:
 ```shell
-$ cd [milvus project path]/scripts
-$ start_cluster.sh
+$ cd [milvus project path]
+$ ./scripts/start_cluster.sh
 ```
 
 ## Run unittest

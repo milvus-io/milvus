@@ -14,8 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cd ..
-
 echo "Starting rootcoord..."
 nohup ./bin/milvus run rootcoord > /tmp/rootcoord.log 2>&1 &
 
