@@ -892,8 +892,8 @@ func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
 			SegmentID:           segment.ID,
 			CollectionID:        segment.CollectionID,
 			PartitionID:         segment.PartitionID,
-			ChannelID:           segment.InsertChannel,
-			SegmentState:        querypb.SegmentState_sealed,
+			DmChannel:           segment.InsertChannel,
+			SegmentState:        commonpb.SegmentState_Sealed,
 			CreatedByCompaction: segment.GetCreatedByCompaction(),
 			CompactionFrom:      segment.GetCompactionFrom(),
 		}

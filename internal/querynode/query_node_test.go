@@ -162,8 +162,8 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 
 func initSearchChannel(ctx context.Context, searchChan string, resultChan string, node *QueryNode) {
 	searchReq := &querypb.AddQueryChannelRequest{
-		RequestChannelID: searchChan,
-		ResultChannelID:  resultChan,
+		QueryChannel:       searchChan,
+		QueryResultChannel: resultChan,
 	}
 	_, err := node.AddQueryChannel(ctx, searchReq)
 	if err != nil {

@@ -213,7 +213,7 @@ func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.Lo
 			PartitionID:  info.PartitionID,
 			CollectionID: info.CollectionID,
 			NodeID:       qs.queryNodeID,
-			SegmentState: querypb.SegmentState_sealed,
+			SegmentState: commonpb.SegmentState_Sealed,
 			MemSize:      info.NumOfRows * int64(sizePerRecord),
 			NumRows:      info.NumOfRows,
 		}

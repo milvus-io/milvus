@@ -266,7 +266,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		return nil, fmt.Errorf("failed to unmarshal message header, err %s ", err.Error())
 	}
 	var newTask task
-	baseTask := newBaseTask(scheduler.ctx, querypb.TriggerCondition_grpcRequest)
+	baseTask := newBaseTask(scheduler.ctx, querypb.TriggerCondition_GrpcRequest)
 	switch header.Base.MsgType {
 	case commonpb.MsgType_LoadCollection:
 		loadReq := querypb.LoadCollectionRequest{}
@@ -906,7 +906,7 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 						CollectionID:   loadInfo.CollectionID,
 						PartitionID:    loadInfo.PartitionID,
 						NodeID:         dstNodeID,
-						SegmentState:   querypb.SegmentState_sealed,
+						SegmentState:   commonpb.SegmentState_Sealed,
 						CompactionFrom: loadInfo.CompactionFrom,
 					}
 					if _, ok := segmentInfosToSave[collectionID]; !ok {

@@ -158,7 +158,7 @@ func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.Colle
 
 	if _, ok := qn.collectionInfos[collectionID]; !ok {
 		partitions := make([]UniqueID, 0)
-		channels := make([]*querypb.DmChannelInfo, 0)
+		channels := make([]*querypb.DmChannelWatchInfo, 0)
 		newCollection := &querypb.CollectionInfo{
 			CollectionID: collectionID,
 			PartitionIDs: partitions,
@@ -282,7 +282,7 @@ func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) erro
 			}
 		}
 		if !findNodeID {
-			newChannelInfo := &querypb.DmChannelInfo{
+			newChannelInfo := &querypb.DmChannelWatchInfo{
 				NodeIDLoaded: qn.id,
 				ChannelIDs:   channels,
 			}
@@ -479,9 +479,9 @@ func (qn *queryNode) addQueryChannel(ctx context.Context, in *querypb.AddQueryCh
 	}
 
 	queryChannelInfo := &querypb.QueryChannelInfo{
-		CollectionID:         in.CollectionID,
-		QueryChannelID:       in.RequestChannelID,
-		QueryResultChannelID: in.ResultChannelID,
+		CollectionID:       in.CollectionID,
+		QueryChannel:       in.QueryChannel,
+		QueryResultChannel: in.QueryResultChannel,
 	}
 	qn.setQueryChannelInfo(queryChannelInfo)
 	return nil

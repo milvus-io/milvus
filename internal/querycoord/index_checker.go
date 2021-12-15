@@ -236,7 +236,7 @@ func (ic *IndexChecker) processHandoffAfterIndexDone() {
 			partitionID := segmentInfo.PartitionID
 			segmentID := segmentInfo.SegmentID
 			log.Debug("processHandoffAfterIndexDone: handoff segment start", zap.Any("segmentInfo", segmentInfo))
-			baseTask := newBaseTask(ic.ctx, querypb.TriggerCondition_handoff)
+			baseTask := newBaseTask(ic.ctx, querypb.TriggerCondition_Handoff)
 			handoffReq := &querypb.HandoffSegmentsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_HandoffSegments,

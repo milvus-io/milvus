@@ -159,7 +159,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
 	loadCollectionTask := &loadCollectionTask{
 		baseTask:              baseTask,
 		LoadCollectionRequest: req,
@@ -212,7 +212,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
 	releaseCollectionTask := &releaseCollectionTask{
 		baseTask:                 baseTask,
 		ReleaseCollectionRequest: req,
@@ -362,7 +362,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		req.PartitionIDs = partitionIDsToLoad
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
 	loadPartitionTask := &loadPartitionTask{
 		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
@@ -443,7 +443,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	}
 
 	req.PartitionIDs = toReleasedPartitions
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_grpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
 	releasePartitionTask := &releasePartitionTask{
 		baseTask:                 baseTask,
 		ReleasePartitionsRequest: req,
@@ -497,9 +497,9 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 	}
 
 	return &querypb.CreateQueryChannelResponse{
-		Status:         status,
-		RequestChannel: info.QueryChannelID,
-		ResultChannel:  info.QueryResultChannelID,
+		Status:             status,
+		QueryChannel:       info.QueryChannel,
+		QueryResultChannel: info.QueryResultChannel,
 	}, nil
 }
 
@@ -599,7 +599,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_loadBalance)
+	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_LoadBalance)
 	loadBalanceTask := &loadBalanceTask{
 		baseTask:           baseTask,
 		LoadBalanceRequest: req,

@@ -328,7 +328,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			SourceNodeIDs: offlineNodeIDs,
 		}
 
-		baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
+		baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_NodeDown)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask:           baseTask,
 			LoadBalanceRequest: loadBalanceSegment,
@@ -377,10 +377,10 @@ func (qc *QueryCoord) watchNodeLoop() {
 						SourceID: qc.session.ServerID,
 					},
 					SourceNodeIDs: []int64{serverID},
-					BalanceReason: querypb.TriggerCondition_nodeDown,
+					BalanceReason: querypb.TriggerCondition_NodeDown,
 				}
 
-				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_nodeDown)
+				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_NodeDown)
 				loadBalanceTask := &loadBalanceTask{
 					baseTask:           baseTask,
 					LoadBalanceRequest: loadBalanceSegment,
@@ -526,12 +526,12 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 							Base: &commonpb.MsgBase{
 								MsgType: commonpb.MsgType_LoadBalanceSegments,
 							},
-							BalanceReason:    querypb.TriggerCondition_loadBalance,
+							BalanceReason:    querypb.TriggerCondition_LoadBalance,
 							SourceNodeIDs:    []UniqueID{sourceNodeID},
 							DstNodeIDs:       []UniqueID{dstNodeID},
 							SealedSegmentIDs: []UniqueID{selectedSegmentInfo.SegmentID},
 						}
-						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_loadBalance)
+						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_LoadBalance)
 						balanceTask := &loadBalanceTask{
 							baseTask:           baseTask,
 							LoadBalanceRequest: req,

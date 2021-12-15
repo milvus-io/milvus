@@ -52,7 +52,7 @@ service QueryNode {
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
-//--------------------query coordinator proto------------------
+//--------------------QueryCoord grpc request and response proto------------------
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
   // Not useful for now
@@ -116,8 +116,8 @@ message CreateQueryChannelRequest {
 
 message CreateQueryChannelResponse {
   common.Status status = 1;
-  string request_channel = 2;
-  string result_channel = 3;
+  string query_channel = 2;
+  string query_result_channel = 3;
 }
 
 message GetPartitionStatesRequest {
@@ -125,22 +125,6 @@ message GetPartitionStatesRequest {
   int64 dbID = 2;
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
-}
-
-enum PartitionState {
-  NotExist = 0;
-  NotPresent = 1;
-  OnDisk = 2;
-  PartialInMemory = 3;
-  InMemory = 4;
-  PartialInGPU = 5;
-  InGPU = 6;
-}
-
-message PartitionStates {
-  int64 partitionID = 1;
-  PartitionState state = 2;
-  int64 inMemory_percentage = 3;
 }
 
 message GetPartitionStatesResponse {
@@ -154,36 +138,18 @@ message GetSegmentInfoRequest {
   int64 collectionID = 3;
 }
 
-message SegmentInfo {
-  int64 segmentID = 1;
-  int64 collectionID = 2;
-  int64 partitionID = 3;
-  int64 nodeID = 4;
-  int64 mem_size = 5;
-  int64 num_rows = 6;
-  string index_name = 7;
-  int64 indexID = 8;
-  string channelID = 9;
-  SegmentState segment_state = 10; // will deprecated
-  repeated int64 compactionFrom = 11;
-  bool createdByCompaction = 12;
-  common.SegmentState state = 13;
-  bool enable_index = 14;
-  repeated index.IndexFilePathInfo index_path_infos = 15;
-}
-
 message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
 }
 
-//-----------------query node proto----------------
+//-----------------query node grpc request and response proto----------------
 message AddQueryChannelRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
   int64 collectionID = 3;
-  string request_channelID = 4;
-  string result_channelID = 5;
+  string query_channel = 4;
+  string query_result_channel = 5;
   repeated int64 global_sealed_segmentID = 6;
   internal.MsgPosition seek_position = 7;
   repeated SegmentInfo global_sealed_segments = 8;
@@ -193,19 +159,9 @@ message RemoveQueryChannelRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
   int64 collectionID = 3;
-  string request_channelID = 4;
-  string result_channelID = 5;
+  string query_channel = 4;
+  string query_result_channel = 5;
 }
-
-//message excludedSegmentInfo {
-//  int64 segmentID = 1;
-//  internal.MsgPosition pos = 2;
-//}
-
-//message WatchDmChannelInfo {
-//  string channelID = 1;
-//  internal.MsgPosition pos = 2;
-//}
 
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
@@ -224,19 +180,6 @@ message WatchDeltaChannelsRequest {
   repeated data.VchannelInfo infos = 4;
 }
 
-enum TriggerCondition {
-  handoff = 0;
-  loadBalance = 1;
-  grpcRequest = 2;
-  nodeDown = 3;
-}
-
-//message FieldBinlogPath {
-//  int64 filedID = 1;
-//  repeated string binlog_path = 2;
-//}
-
-//used for handoff task
 message SegmentLoadInfo {
   int64 segmentID = 1;
   int64 partitionID = 2;
@@ -257,9 +200,8 @@ message LoadSegmentsRequest {
   int64 dst_nodeID = 2;
   repeated SegmentLoadInfo infos = 3;
   schema.CollectionSchema schema = 4;
-  TriggerCondition load_condition = 5; // deprecated
-  int64 source_nodeID = 6;
-  int64 collectionID = 7;
+  int64 source_nodeID = 5;
+  int64 collectionID = 6;
 }
 
 message ReleaseSegmentsRequest {
@@ -272,55 +214,7 @@ message ReleaseSegmentsRequest {
   repeated int64 segmentIDs = 6;
 }
 
-//----------------etcd-----------------
-enum SegmentState {
-  None = 0;
-  Growing = 1;
-  Frozen = 2;
-  sealing = 3;
-  sealed = 4;
-}
-
-enum LoadType {
-  LoadPartition = 0;
-  loadCollection = 1;
-}
-
-message DmChannelInfo {
-  int64 nodeID_loaded = 1;
-  repeated string channelIDs = 2;
-}
-
-message QueryChannelInfo {
-  int64 collectionID = 1;
-  string query_channelID = 2;
-  string query_result_channelID = 3;
-  repeated SegmentInfo global_sealed_segments = 4;
-  internal.MsgPosition seek_position = 5;
-}
-
-message CollectionInfo {
-  int64 collectionID = 1;
-  repeated int64 partitionIDs = 2;
-  repeated PartitionStates partition_states = 3;
-  repeated DmChannelInfo channel_infos = 4;
-  LoadType load_type = 5;
-  schema.CollectionSchema schema = 6;
-  repeated int64 released_partitionIDs = 7;
-  int64 inMemory_percentage = 8;
-}
-
-message LoadBalanceSegmentInfo {
-  int64 segmentID = 1;
-  int64 partitionID = 2;
-  int64 collectionID = 3;
-  int64 source_nodeID = 4;
-  int64 dst_nodeID = 5;
-  bool source_done = 6;
-  bool dst_done = 7;
-  bool valid_info = 8;
-}
-
+//----------------request auto triggered by QueryCoord-----------------
 message HandoffSegmentsRequest {
   common.MsgBase base = 1;
   repeated SegmentInfo segmentInfos = 2;
@@ -334,7 +228,81 @@ message LoadBalanceRequest {
   repeated int64 sealed_segmentIDs = 5;
 }
 
-//---------------- common query proto -----------------
+//-------------------- internal meta proto------------------
+enum PartitionState {
+  NotExist = 0;
+  NotPresent = 1;
+  OnDisk = 2;
+  PartialInMemory = 3;
+  InMemory = 4;
+  PartialInGPU = 5;
+  InGPU = 6;
+}
+
+enum TriggerCondition {
+  UnKnowCondition = 0;
+  Handoff = 1;
+  LoadBalance = 2;
+  GrpcRequest = 3;
+  NodeDown = 4;
+}
+
+enum LoadType {
+  UnKnowType = 0;
+  LoadPartition = 1;
+  loadCollection = 2;
+}
+
+message DmChannelWatchInfo {
+  int64 collectionID = 1;
+  repeated string channelIDs = 2; // will deprecate
+  string dmChannel = 3;
+  int64 nodeID_loaded = 4;
+}
+
+message QueryChannelInfo {
+  int64 collectionID = 1;
+  string query_channel = 2;
+  string query_result_channel = 3;
+  repeated SegmentInfo global_sealed_segments = 4;
+  internal.MsgPosition seek_position = 5;
+}
+
+message PartitionStates {
+  int64 partitionID = 1;
+  PartitionState state = 2;
+  int64 inMemory_percentage = 3;
+}
+
+message SegmentInfo {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  int64 nodeID = 4;
+  int64 mem_size = 5;
+  int64 num_rows = 6;
+  string index_name = 7;
+  int64 indexID = 8;
+  string dmChannel = 9;
+  repeated int64 compactionFrom = 10;
+  bool createdByCompaction = 11;
+  common.SegmentState segment_state = 12;
+  bool enable_index = 13;
+  repeated index.IndexFilePathInfo index_path_infos = 14;
+}
+
+message CollectionInfo {
+  int64 collectionID = 1;
+  repeated int64 partitionIDs = 2;
+  repeated PartitionStates partition_states = 3;
+  repeated DmChannelWatchInfo channel_infos = 4;
+  LoadType load_type = 5;
+  schema.CollectionSchema schema = 6;
+  repeated int64 released_partitionIDs = 7;
+  int64 inMemory_percentage = 8;
+}
+
+//---- synchronize messages proto between QueryCoord and QueryNode -----
 message SegmentChangeInfo {
   int64 online_nodeID = 1;
   repeated SegmentInfo online_segments = 2;
