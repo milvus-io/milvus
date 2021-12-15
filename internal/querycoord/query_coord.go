@@ -446,7 +446,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 	ctx, cancel := context.WithCancel(qc.loopCtx)
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("query coordinator start load balance segment loop")
+	log.Debug("QueryCoord start load balance segment loop")
 
 	timer := time.NewTicker(time.Duration(Params.BalanceIntervalSeconds) * time.Second)
 
