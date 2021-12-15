@@ -1,10 +1,8 @@
 # import docker
-
+from pymilvus import connections
 from utils import *
 
 connections.connect(host="127.0.0.1", port=19530, timeout=60)
-
-# list_containers()
 
 get_collections()
 
