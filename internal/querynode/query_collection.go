@@ -386,7 +386,7 @@ func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChange
 					ID:            segment.SegmentID,
 					CollectionID:  segment.CollectionID,
 					PartitionID:   segment.PartitionID,
-					InsertChannel: segment.ChannelID,
+					InsertChannel: segment.DmChannel,
 					NumOfRows:     segment.NumRows,
 					// TODO: add status, remove query pb segment status, use common pb segment status?
 					DmlPosition: &internalpb.MsgPosition{

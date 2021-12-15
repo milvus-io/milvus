@@ -178,7 +178,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 		baseTask: baseTask{
 			ctx:              baseCtx,
 			condition:        newTaskCondition(baseCtx),
-			triggerCondition: querypb.TriggerCondition_grpcRequest,
+			triggerCondition: querypb.TriggerCondition_GrpcRequest,
 		},
 		baseMsg: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_WatchQueryChannels,
@@ -511,7 +511,7 @@ func Test_saveInternalTaskToEtcd(t *testing.T) {
 		baseTask: baseTask{
 			ctx:              ctx,
 			condition:        newTaskCondition(ctx),
-			triggerCondition: querypb.TriggerCondition_grpcRequest,
+			triggerCondition: querypb.TriggerCondition_GrpcRequest,
 			taskID:           100,
 		},
 		baseMsg: &commonpb.MsgBase{

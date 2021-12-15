@@ -156,7 +156,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	consumeChannels := []string{r.req.RequestChannelID}
+	consumeChannels := []string{r.req.QueryChannel}
 	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 
 	if Params.skipQueryChannelRecovery {
@@ -181,7 +181,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	}
 
 	// add result channel
-	producerChannels := []string{r.req.ResultChannelID}
+	producerChannels := []string{r.req.QueryResultChannel}
 	sc.queryResultMsgStream.AsProducer(producerChannels)
 	log.Debug("QueryNode AsProducer", zap.Strings("channels", producerChannels))
 

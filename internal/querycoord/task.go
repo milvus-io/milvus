@@ -403,11 +403,10 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_LoadSegments
 			loadSegmentReq := &querypb.LoadSegmentsRequest{
-				Base:          msgBase,
-				Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
-				Schema:        lct.Schema,
-				LoadCondition: querypb.TriggerCondition_grpcRequest,
-				CollectionID:  collectionID,
+				Base:         msgBase,
+				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+				Schema:       lct.Schema,
+				CollectionID: collectionID,
 			}
 
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
@@ -527,7 +526,7 @@ func (lct *loadCollectionTask) rollBack(ctx context.Context) []task {
 			CollectionID: lct.CollectionID,
 			NodeID:       nodeID,
 		}
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
+		baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 		baseTask.setParentTask(lct)
 		releaseCollectionTask := &releaseCollectionTask{
 			baseTask:                 baseTask,
@@ -615,7 +614,7 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 		for nodeID := range nodes {
 			req := proto.Clone(rct.ReleaseCollectionRequest).(*querypb.ReleaseCollectionRequest)
 			req.NodeID = nodeID
-			baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
+			baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 			baseTask.setParentTask(rct)
 			releaseCollectionTask := &releaseCollectionTask{
 				baseTask:                 baseTask,
@@ -772,11 +771,10 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_LoadSegments
 			loadSegmentReq := &querypb.LoadSegmentsRequest{
-				Base:          msgBase,
-				Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
-				Schema:        lpt.Schema,
-				LoadCondition: querypb.TriggerCondition_grpcRequest,
-				CollectionID:  collectionID,
+				Base:         msgBase,
+				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+				Schema:       lpt.Schema,
+				CollectionID: collectionID,
 			}
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
@@ -883,7 +881,7 @@ func (lpt *loadPartitionTask) rollBack(ctx context.Context) []task {
 				CollectionID: lpt.CollectionID,
 				NodeID:       nodeID,
 			}
-			baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
+			baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 			baseTask.setParentTask(lpt)
 			releaseCollectionTask := &releaseCollectionTask{
 				baseTask:                 baseTask,
@@ -908,7 +906,7 @@ func (lpt *loadPartitionTask) rollBack(ctx context.Context) []task {
 				NodeID:       nodeID,
 			}
 
-			baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
+			baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 			baseTask.setParentTask(lpt)
 			releasePartitionTask := &releasePartitionTask{
 				baseTask:                 baseTask,
@@ -970,7 +968,7 @@ func (rpt *releasePartitionTask) execute(ctx context.Context) error {
 		for nodeID := range nodes {
 			req := proto.Clone(rpt.ReleasePartitionsRequest).(*querypb.ReleasePartitionsRequest)
 			req.NodeID = nodeID
-			baseTask := newBaseTask(ctx, querypb.TriggerCondition_grpcRequest)
+			baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 			baseTask.setParentTask(rpt)
 			releasePartitionTask := &releasePartitionTask{
 				baseTask:                 baseTask,
@@ -1104,12 +1102,11 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 		msgBase := proto.Clone(lst.Base).(*commonpb.MsgBase)
 		msgBase.MsgType = commonpb.MsgType_LoadSegments
 		req := &querypb.LoadSegmentsRequest{
-			Base:          msgBase,
-			Infos:         []*querypb.SegmentLoadInfo{info},
-			Schema:        lst.Schema,
-			LoadCondition: lst.triggerCondition,
-			SourceNodeID:  lst.SourceNodeID,
-			CollectionID:  lst.CollectionID,
+			Base:         msgBase,
+			Infos:        []*querypb.SegmentLoadInfo{info},
+			Schema:       lst.Schema,
+			SourceNodeID: lst.SourceNodeID,
+			CollectionID: lst.CollectionID,
 		}
 		loadSegmentReqs = append(loadSegmentReqs, req)
 	}
@@ -1429,8 +1426,8 @@ func (wqt *watchQueryChannelTask) preExecute(context.Context) error {
 	wqt.setResultInfo(nil)
 	log.Debug("start do watchQueryChannelTask",
 		zap.Int64("collectionID", wqt.CollectionID),
-		zap.String("queryChannel", wqt.RequestChannelID),
-		zap.String("queryResultChannel", wqt.ResultChannelID),
+		zap.String("queryChannel", wqt.QueryChannel),
+		zap.String("queryResultChannel", wqt.QueryResultChannel),
 		zap.Int64("loaded nodeID", wqt.NodeID),
 		zap.Int64("taskID", wqt.getTaskID()))
 	return nil
@@ -1450,8 +1447,8 @@ func (wqt *watchQueryChannelTask) execute(ctx context.Context) error {
 
 	log.Debug("watchQueryChannelTask Execute done",
 		zap.Int64("collectionID", wqt.CollectionID),
-		zap.String("queryChannel", wqt.RequestChannelID),
-		zap.String("queryResultChannel", wqt.ResultChannelID),
+		zap.String("queryChannel", wqt.QueryChannel),
+		zap.String("queryResultChannel", wqt.QueryResultChannel),
 		zap.Int64("taskID", wqt.getTaskID()))
 	return nil
 }
@@ -1459,8 +1456,8 @@ func (wqt *watchQueryChannelTask) execute(ctx context.Context) error {
 func (wqt *watchQueryChannelTask) postExecute(context.Context) error {
 	log.Debug("watchQueryChannelTask postExecute done",
 		zap.Int64("collectionID", wqt.CollectionID),
-		zap.String("queryChannel", wqt.RequestChannelID),
-		zap.String("queryResultChannel", wqt.ResultChannelID),
+		zap.String("queryChannel", wqt.QueryChannel),
+		zap.String("queryResultChannel", wqt.QueryResultChannel),
 		zap.Int64("taskID", wqt.getTaskID()))
 	return nil
 }
@@ -1572,10 +1569,9 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 					msgBase := proto.Clone(ht.Base).(*commonpb.MsgBase)
 					msgBase.MsgType = commonpb.MsgType_LoadSegments
 					loadSegmentReq = &querypb.LoadSegmentsRequest{
-						Base:          msgBase,
-						Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
-						Schema:        collectionInfo.Schema,
-						LoadCondition: querypb.TriggerCondition_handoff,
+						Base:   msgBase,
+						Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
+						Schema: collectionInfo.Schema,
 					}
 				}
 			}
@@ -1694,7 +1690,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		lbt.retryCount--
 	}()
 
-	if lbt.triggerCondition == querypb.TriggerCondition_nodeDown {
+	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
 		for _, nodeID := range lbt.SourceNodeIDs {
 			collectionInfos := lbt.cluster.getCollectionInfosByID(lbt.ctx, nodeID)
 			for _, info := range collectionInfos {
@@ -1754,11 +1750,10 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
 						msgBase.MsgType = commonpb.MsgType_LoadSegments
 						loadSegmentReq := &querypb.LoadSegmentsRequest{
-							Base:          msgBase,
-							Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
-							Schema:        schema,
-							LoadCondition: querypb.TriggerCondition_nodeDown,
-							SourceNodeID:  nodeID,
+							Base:         msgBase,
+							Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+							Schema:       schema,
+							SourceNodeID: nodeID,
 						}
 
 						segmentsToLoad = append(segmentsToLoad, segmentID)
@@ -1847,7 +1842,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 	}
 
 	//TODO:: use request.DstNodeIDs to balance
-	if lbt.triggerCondition == querypb.TriggerCondition_loadBalance {
+	if lbt.triggerCondition == querypb.TriggerCondition_LoadBalance {
 		if len(lbt.SourceNodeIDs) == 0 {
 			err := errors.New("loadBalanceTask: empty source Node list to balance")
 			log.Error(err.Error())
@@ -1956,10 +1951,9 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
 					msgBase.MsgType = commonpb.MsgType_LoadSegments
 					loadSegmentReq := &querypb.LoadSegmentsRequest{
-						Base:          msgBase,
-						Infos:         []*querypb.SegmentLoadInfo{segmentLoadInfo},
-						Schema:        collectionInfo.Schema,
-						LoadCondition: querypb.TriggerCondition_grpcRequest,
+						Base:   msgBase,
+						Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
+						Schema: collectionInfo.Schema,
 					}
 
 					segmentsToLoad = append(segmentsToLoad, segmentID)
@@ -2015,7 +2009,7 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 	if lbt.result.ErrorCode != commonpb.ErrorCode_Success {
 		lbt.childTasks = []task{}
 	}
-	if lbt.triggerCondition == querypb.TriggerCondition_nodeDown {
+	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
 		for _, id := range lbt.SourceNodeIDs {
 			err := lbt.cluster.removeNodeInfo(id)
 			if err != nil {
@@ -2184,8 +2178,8 @@ func assignInternalTask(ctx context.Context,
 				Base:                 msgBase,
 				NodeID:               nodeID,
 				CollectionID:         collectionID,
-				RequestChannelID:     queryChannelInfo.QueryChannelID,
-				ResultChannelID:      queryChannelInfo.QueryResultChannelID,
+				QueryChannel:         queryChannelInfo.QueryChannel,
+				QueryResultChannel:   queryChannelInfo.QueryResultChannel,
 				GlobalSealedSegments: queryChannelInfo.GlobalSealedSegments,
 				SeekPosition:         queryChannelInfo.SeekPosition,
 			}

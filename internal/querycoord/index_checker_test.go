@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
@@ -42,7 +43,7 @@ func TestReloadFromKV(t *testing.T) {
 		SegmentID:    defaultSegmentID,
 		CollectionID: defaultCollectionID,
 		PartitionID:  defaultPartitionID,
-		SegmentState: querypb.SegmentState_sealed,
+		SegmentState: commonpb.SegmentState_Sealed,
 	}
 	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 	value, err := proto.Marshal(segmentInfo)
@@ -102,7 +103,7 @@ func TestCheckIndexLoop(t *testing.T) {
 		SegmentID:    defaultSegmentID,
 		CollectionID: defaultCollectionID,
 		PartitionID:  defaultPartitionID,
-		SegmentState: querypb.SegmentState_sealed,
+		SegmentState: commonpb.SegmentState_Sealed,
 	}
 	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 	value, err := proto.Marshal(segmentInfo)
@@ -180,7 +181,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		SegmentID:    defaultSegmentID,
 		CollectionID: defaultCollectionID,
 		PartitionID:  defaultPartitionID,
-		SegmentState: querypb.SegmentState_sealed,
+		SegmentState: commonpb.SegmentState_Sealed,
 	}
 	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 	value, err := proto.Marshal(segmentInfo)

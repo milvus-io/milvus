@@ -3215,7 +3215,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 			IndexName:    info.IndexName,
 			IndexID:      info.IndexID,
 			NodeID:       info.NodeID,
-			State:        info.State,
+			State:        info.SegmentState,
 		}
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
@@ -3460,7 +3460,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		},
 		SourceNodeIDs:    []int64{req.SrcNodeID},
 		DstNodeIDs:       req.DstNodeIDs,
-		BalanceReason:    querypb.TriggerCondition_grpcRequest,
+		BalanceReason:    querypb.TriggerCondition_GrpcRequest,
 		SealedSegmentIDs: req.SealedSegmentIDs,
 	})
 	if err != nil {

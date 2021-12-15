@@ -90,10 +90,10 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 			MsgType: commonpb.MsgType_LoadCollection,
 			MsgID:   rand.Int63(),
 		},
-		NodeID:           0,
-		CollectionID:     defaultCollectionID,
-		RequestChannelID: genQueryChannel(),
-		ResultChannelID:  genQueryResultChannel(),
+		NodeID:             0,
+		CollectionID:       defaultCollectionID,
+		QueryChannel:       genQueryChannel(),
+		QueryResultChannel: genQueryResultChannel(),
 	}
 
 	status, err := node.AddQueryChannel(ctx, req)
@@ -159,9 +159,8 @@ func TestImpl_LoadSegments(t *testing.T) {
 			MsgType: commonpb.MsgType_WatchQueryChannels,
 			MsgID:   rand.Int63(),
 		},
-		DstNodeID:     0,
-		Schema:        schema,
-		LoadCondition: queryPb.TriggerCondition_grpcRequest,
+		DstNodeID: 0,
+		Schema:    schema,
 	}
 
 	status, err := node.LoadSegments(ctx, req)

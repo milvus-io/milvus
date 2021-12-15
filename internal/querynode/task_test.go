@@ -36,11 +36,11 @@ func TestTask_AddQueryChannel(t *testing.T) {
 
 	genAddQueryChanelRequest := func() *querypb.AddQueryChannelRequest {
 		return &querypb.AddQueryChannelRequest{
-			Base:             genCommonMsgBase(commonpb.MsgType_LoadCollection),
-			NodeID:           0,
-			CollectionID:     defaultCollectionID,
-			RequestChannelID: genQueryChannel(),
-			ResultChannelID:  genQueryResultChannel(),
+			Base:               genCommonMsgBase(commonpb.MsgType_LoadCollection),
+			NodeID:             0,
+			CollectionID:       defaultCollectionID,
+			QueryChannel:       genQueryChannel(),
+			QueryResultChannel: genQueryResultChannel(),
 		}
 	}
 
@@ -409,9 +409,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
 		schema := genSimpleSegCoreSchema()
 		req := &querypb.LoadSegmentsRequest{
-			Base:          genCommonMsgBase(commonpb.MsgType_LoadSegments),
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Schema: schema,
 		}
 		return req
 	}
@@ -450,9 +449,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
-			Base:          genCommonMsgBase(commonpb.MsgType_LoadSegments),
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:    defaultSegmentID,
@@ -505,7 +503,6 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 				CollectionID: defaultCollectionID + 1,
 			},
 		}
-		task.req.LoadCondition = querypb.TriggerCondition_nodeDown
 		err = task.Execute(ctx)
 		assert.Error(t, err)
 	})
@@ -534,7 +531,6 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 				NumOfRows:    totalRAM / int64(sizePerRecord),
 			},
 		}
-		task.req.LoadCondition = querypb.TriggerCondition_handoff
 		err = task.Execute(ctx)
 		assert.Error(t, err)
 	})

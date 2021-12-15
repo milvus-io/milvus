@@ -117,7 +117,7 @@ func getDqlChannelsFunc(ctx context.Context, proxyID int64, qc createQueryChanne
 		}
 
 		m := make(map[vChan]pChan)
-		m[resp.RequestChannel] = resp.RequestChannel
+		m[resp.QueryChannel] = resp.QueryChannel
 
 		return m, nil
 	}

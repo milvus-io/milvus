@@ -53,9 +53,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			DstNodeID:     0,
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			DstNodeID: 0,
+			Schema:    schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:    defaultSegmentID,
@@ -85,9 +84,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			DstNodeID:     0,
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			DstNodeID: 0,
+			Schema:    schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:    defaultSegmentID,
@@ -204,8 +202,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			DstNodeID:     0,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			DstNodeID: 0,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:    defaultSegmentID,
@@ -281,9 +278,8 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			DstNodeID:     0,
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			DstNodeID: 0,
+			Schema:    schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:    defaultSegmentID,
@@ -434,9 +430,8 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			DstNodeID:     0,
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			DstNodeID: 0,
+			Schema:    schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:    segmentID1,
@@ -456,9 +451,8 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 				MsgType: commonpb.MsgType_WatchQueryChannels,
 				MsgID:   rand.Int63(),
 			},
-			DstNodeID:     0,
-			Schema:        schema,
-			LoadCondition: querypb.TriggerCondition_grpcRequest,
+			DstNodeID: 0,
+			Schema:    schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:    segmentID2,

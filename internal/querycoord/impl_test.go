@@ -480,14 +480,14 @@ func TestLoadBalanceTask(t *testing.T) {
 			SourceID: nodeID,
 		},
 		SourceNodeIDs: []int64{nodeID},
-		BalanceReason: querypb.TriggerCondition_nodeDown,
+		BalanceReason: querypb.TriggerCondition_NodeDown,
 	}
 
 	loadBalanceTask := &loadBalanceTask{
 		baseTask: &baseTask{
 			ctx:              baseCtx,
 			condition:        newTaskCondition(baseCtx),
-			triggerCondition: querypb.TriggerCondition_nodeDown,
+			triggerCondition: querypb.TriggerCondition_NodeDown,
 		},
 		LoadBalanceRequest: loadBalanceSegment,
 		rootCoord:          queryCoord.rootCoordClient,

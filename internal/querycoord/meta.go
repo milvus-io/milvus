@@ -313,7 +313,7 @@ func (m *MetaReplica) addCollection(collectionID UniqueID, schema *schemapb.Coll
 	if !hasCollection {
 		partitions := make([]UniqueID, 0)
 		partitionStates := make([]*querypb.PartitionStates, 0)
-		channels := make([]*querypb.DmChannelInfo, 0)
+		channels := make([]*querypb.DmChannelWatchInfo, 0)
 		newCollection := &querypb.CollectionInfo{
 			CollectionID:    collectionID,
 			PartitionIDs:    partitions,
@@ -438,7 +438,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 			if err == nil {
 				offlineNodeID := offlineInfo.NodeID
 				// if the offline segment state is growing, it will not impact the global sealed segments
-				if offlineInfo.SegmentState == querypb.SegmentState_sealed {
+				if offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
 					changeInfo.OfflineNodeID = offlineNodeID
 					changeInfo.OfflineSegments = []*querypb.SegmentInfo{offlineInfo}
 				}
@@ -448,7 +448,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 			// generate offline segment change info if the loaded segment is compacted from other sealed segments
 			for _, compactionSegmentID := range info.CompactionFrom {
 				compactionSegmentInfo, err := m.getSegmentInfoByID(compactionSegmentID)
-				if err == nil && compactionSegmentInfo.SegmentState == querypb.SegmentState_sealed {
+				if err == nil && compactionSegmentInfo.SegmentState == commonpb.SegmentState_Sealed {
 					segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, &querypb.SegmentChangeInfo{
 						OfflineNodeID:   compactionSegmentInfo.NodeID,
 						OfflineSegments: []*querypb.SegmentInfo{compactionSegmentInfo},
@@ -471,14 +471,14 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 			return nil, err
 		}
 		// len(messageIDs) == 1
-		messageIDs, ok := messageIDInfos[queryChannelInfo.QueryChannelID]
+		messageIDs, ok := messageIDInfos[queryChannelInfo.QueryChannel]
 		if !ok || len(messageIDs) == 0 {
 			return col2SegmentChangeInfos, errors.New("updateGlobalSealedSegmentInfos: send sealed segment change info failed")
 		}
 
 		if queryChannelInfo.SeekPosition == nil {
 			queryChannelInfo.SeekPosition = &internalpb.MsgPosition{
-				ChannelName: queryChannelInfo.QueryChannelID,
+				ChannelName: queryChannelInfo.QueryChannel,
 			}
 		}
 
@@ -618,14 +618,14 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 		return nil, err
 	}
 	// len(messageIDs) = 1
-	messageIDs, ok := messageIDInfos[queryChannelInfo.QueryChannelID]
+	messageIDs, ok := messageIDInfos[queryChannelInfo.QueryChannel]
 	if !ok || len(messageIDs) == 0 {
 		return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, errors.New("updateGlobalSealedSegmentInfos: send sealed segment change info failed")
 	}
 
 	if queryChannelInfo.SeekPosition == nil {
 		queryChannelInfo.SeekPosition = &internalpb.MsgPosition{
-			ChannelName: queryChannelInfo.QueryChannelID,
+			ChannelName: queryChannelInfo.QueryChannel,
 		}
 	}
 	queryChannelInfo.SeekPosition.MsgID = messageIDs[0].Serialize()
@@ -907,7 +907,7 @@ func (m *MetaReplica) addDmChannel(collectionID UniqueID, nodeID int64, channels
 			}
 		}
 		if !findNodeID {
-			newChannelInfo := &querypb.DmChannelInfo{
+			newChannelInfo := &querypb.DmChannelWatchInfo{
 				NodeIDLoaded: nodeID,
 				ChannelIDs:   channels,
 			}
@@ -977,8 +977,8 @@ func createQueryChannel(collectionID UniqueID) *querypb.QueryChannelInfo {
 	}
 	info := &querypb.QueryChannelInfo{
 		CollectionID:         collectionID,
-		QueryChannelID:       allocatedQueryChannel,
-		QueryResultChannelID: allocatedQueryResultChannel,
+		QueryChannel:         allocatedQueryChannel,
+		QueryResultChannel:   allocatedQueryResultChannel,
 		GlobalSealedSegments: []*querypb.SegmentInfo{},
 		SeekPosition:         seekPosition,
 	}
@@ -1039,7 +1039,7 @@ func (m *MetaReplica) getQueryChannelInfoByID(collectionID UniqueID) (*querypb.Q
 	m.queryChannelInfos[collectionID] = info
 	info.SeekPosition = m.globalSeekPosition
 	if info.SeekPosition != nil {
-		info.SeekPosition.ChannelName = info.QueryChannelID
+		info.SeekPosition.ChannelName = info.QueryChannel
 	}
 	return proto.Clone(info).(*querypb.QueryChannelInfo), nil
 }
@@ -1061,7 +1061,7 @@ func (m *MetaReplica) getQueryStreamByID(collectionID UniqueID) (msgstream.MsgSt
 			return nil, err
 		}
 
-		queryChannel := info.QueryChannelID
+		queryChannel := info.QueryChannel
 		stream.AsProducer([]string{queryChannel})
 		m.queryStreams[collectionID] = stream
 		log.Debug("getQueryStreamByID: create query msgStream for collection", zap.Int64("collectionID", collectionID))

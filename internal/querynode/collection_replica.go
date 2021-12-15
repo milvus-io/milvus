@@ -715,8 +715,8 @@ func getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
 		NumRows:      segment.getRowCount(),
 		IndexName:    indexName,
 		IndexID:      indexID,
-		ChannelID:    segment.vChannelID,
-		State:        getSegmentStateBySegmentType(segment.segmentType),
+		DmChannel:    segment.vChannelID,
+		SegmentState: getSegmentStateBySegmentType(segment.segmentType),
 	}
 	return info
 }

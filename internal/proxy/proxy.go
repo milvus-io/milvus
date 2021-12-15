@@ -189,8 +189,8 @@ func (node *Proxy) Init() error {
 
 		// TODO SearchResultChannelNames and RetrieveResultChannelNames should not be part in the Param table
 		// we should maintain a separate map for search result
-		Params.SearchResultChannelNames = []string{resp.ResultChannel}
-		Params.RetrieveResultChannelNames = []string{resp.ResultChannel}
+		Params.SearchResultChannelNames = []string{resp.QueryResultChannel}
+		Params.RetrieveResultChannelNames = []string{resp.QueryResultChannel}
 		log.Debug("Proxy CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
 		log.Debug("Proxy CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
 	}

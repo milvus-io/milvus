@@ -254,8 +254,8 @@ func TestMetaFunc(t *testing.T) {
 
 	t.Run("Test getQueryChannel", func(t *testing.T) {
 		info, err := meta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.NotNil(t, info.QueryChannelID)
-		assert.NotNil(t, info.QueryResultChannelID)
+		assert.NotNil(t, info.QueryChannel)
+		assert.NotNil(t, info.QueryResultChannel)
 		assert.Nil(t, err)
 	})
 
