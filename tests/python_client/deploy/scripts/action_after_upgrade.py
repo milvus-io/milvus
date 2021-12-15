@@ -1,10 +1,7 @@
-# import docker
-
+from pymilvus import connections
 from utils import *
 
 connections.connect()
-
-# list_containers()
 
 get_collections()
 
