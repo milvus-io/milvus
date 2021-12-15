@@ -84,11 +84,6 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
 
-	if err := s.indexcoord.Register(); err != nil {
-		log.Error("IndexCoord", zap.Any("register session error", err))
-		return err
-	}
-
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(indexcoord.Params.Port)
 	// wait for grpc IndexCoord loop start
@@ -100,6 +95,7 @@ func (s *Server) init() error {
 		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
+
 	return nil
 }
 
@@ -109,6 +105,11 @@ func (s *Server) start() error {
 		return err
 	}
 	log.Debug("indexCoord started")
+	if err := s.indexcoord.Register(); err != nil {
+		log.Error("IndexCoord", zap.Any("register session error", err))
+		return err
+	}
+	log.Debug("IndexCoord registers service successfully")
 	return nil
 }
 

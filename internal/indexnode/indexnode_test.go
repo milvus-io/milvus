@@ -71,12 +71,13 @@ func TestIndexNode(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	err = in.Register()
-	assert.Nil(t, err)
 	err = in.Init()
 	assert.Nil(t, err)
 
 	err = in.Start()
+	assert.Nil(t, err)
+
+	err = in.Register()
 	assert.Nil(t, err)
 
 	t.Run("CreateIndex FloatVector", func(t *testing.T) {
@@ -476,12 +477,13 @@ func TestCreateIndexFailed(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	err = in.Register()
-	assert.Nil(t, err)
 	err = in.Init()
 	assert.Nil(t, err)
 
 	err = in.Start()
+	assert.Nil(t, err)
+
+	err = in.Register()
 	assert.Nil(t, err)
 
 	t.Run("CreateIndex error", func(t *testing.T) {
@@ -742,12 +744,13 @@ func TestIndexNode_Error(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	err = in.Register()
-	assert.Nil(t, err)
 	err = in.Init()
 	assert.Nil(t, err)
 
 	err = in.Start()
+	assert.Nil(t, err)
+
+	err = in.Register()
 	assert.Nil(t, err)
 
 	in.UpdateStateCode(internalpb.StateCode_Initializing)

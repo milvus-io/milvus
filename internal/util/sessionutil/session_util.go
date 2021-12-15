@@ -107,7 +107,6 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
-// Finally it will process keepAliveResponse to keep alive with etcd.
 func (s *Session) Init(serverName, address string, exclusive bool) {
 	s.ServerName = serverName
 	s.Address = address
@@ -118,6 +117,10 @@ func (s *Session) Init(serverName, address string, exclusive bool) {
 		panic(err)
 	}
 	s.ServerID = serverID
+}
+
+// Register will process keepAliveResponse to keep alive with etcd.
+func (s *Session) Register() {
 	ch, err := s.registerService()
 	if err != nil {
 		panic(err)

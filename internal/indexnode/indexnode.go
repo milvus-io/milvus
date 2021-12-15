@@ -113,13 +113,17 @@ func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 
 // Register register index node at etcd.
 func (i *IndexNode) Register() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
-	if i.session == nil {
-		return errors.New("failed to initialize session")
-	}
-	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
-	Params.NodeID = i.session.ServerID
-	Params.SetLogger(Params.NodeID)
+	i.session.Register()
+
+	//start liveness check
+	go i.session.LivenessCheck(i.loopCtx, func() {
+		log.Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
+		if err := i.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	})
 	return nil
 }
 
@@ -134,19 +138,39 @@ func (i *IndexNode) initKnowhere() {
 	C.free(unsafe.Pointer(cSimdType))
 }
 
+func (i *IndexNode) initSession() error {
+	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	if i.session == nil {
+		return errors.New("failed to initialize session")
+	}
+	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
+	Params.NodeID = i.session.ServerID
+	Params.SetLogger(Params.NodeID)
+	return nil
+}
+
 // Init initializes the IndexNode component.
 func (i *IndexNode) Init() error {
 	var initErr error = nil
 	i.initOnce.Do(func() {
 		Params.Init()
+
 		i.UpdateStateCode(internalpb.StateCode_Initializing)
-		log.Debug("IndexNode init", zap.Any("State", internalpb.StateCode_Initializing))
+		log.Debug("IndexNode init", zap.Any("State", i.stateCode.Load().(internalpb.StateCode)))
+		err := i.initSession()
+		if err != nil {
+			log.Error(err.Error())
+			initErr = err
+			return
+		}
+		log.Debug("IndexNode init session successful", zap.Int64("serverID", i.session.ServerID))
+
 		connectEtcdFn := func() error {
 			etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 			i.etcdKV = etcdKV
 			return err
 		}
-		err := retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
+		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
 			log.Error("IndexNode failed to connect to etcd", zap.Error(err))
 			initErr = err
@@ -190,16 +214,6 @@ func (i *IndexNode) Start() error {
 
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
-
-		//start liveness check
-		go i.session.LivenessCheck(i.loopCtx, func() {
-			log.Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
-			if err := i.Stop(); err != nil {
-				log.Fatal("failed to stop server", zap.Error(err))
-			}
-			// manually send signal to starter goroutine
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-		})
 
 		i.UpdateStateCode(internalpb.StateCode_Healthy)
 		log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))

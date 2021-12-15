@@ -91,6 +91,7 @@ func TestInit(t *testing.T) {
 	s.Init("inittest", "testAddr", false)
 	assert.NotEqual(t, int64(0), s.leaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
+	s.Register()
 	sessions, _, err := s.GetSessions("inittest")
 	assert.Nil(t, err)
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
@@ -128,6 +129,7 @@ func TestUpdateSessions(t *testing.T) {
 	getIDFunc := func() {
 		singleS := NewSession(ctx, metaRoot, etcdEndpoints)
 		singleS.Init("test", "testAddr", false)
+		singleS.Register()
 		muList.Lock()
 		sList = append(sList, singleS)
 		muList.Unlock()

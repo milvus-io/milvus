@@ -90,16 +90,16 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	coord.SetDataCoord(dataCoord)
 	coord.SetIndexCoord(indexCoord)
 
-	err = coord.Register()
-	if err != nil {
-		return nil, err
-	}
 	err = coord.Init()
 	if err != nil {
 		return nil, err
 	}
 	coord.cluster.(*queryNodeCluster).segSizeEstimator = segSizeEstimateForTest
 	err = coord.Start()
+	if err != nil {
+		return nil, err
+	}
+	err = coord.Register()
 	if err != nil {
 		return nil, err
 	}
@@ -131,11 +131,11 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
 
-	err = coord.Register()
+	err = coord.Init()
 	if err != nil {
 		return nil, err
 	}
-	err = coord.Init()
+	err = coord.Register()
 	if err != nil {
 		return nil, err
 	}

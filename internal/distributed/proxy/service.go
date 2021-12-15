@@ -172,12 +172,6 @@ func (s *Server) init() error {
 	log.Debug("proxy", zap.Int("proxy port", Params.Port))
 	log.Debug("proxy", zap.String("proxy address", Params.Address))
 
-	err = s.proxy.Register()
-	if err != nil {
-		log.Debug("Proxy Register etcd failed ", zap.Error(err))
-		return err
-	}
-
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -264,7 +258,16 @@ func (s *Server) init() error {
 }
 
 func (s *Server) start() error {
-	return s.proxy.Start()
+	err := s.proxy.Start()
+	if err != nil {
+		log.Error("Proxy start failed", zap.Error(err))
+	}
+	err = s.proxy.Register()
+	if err != nil {
+		log.Error("Proxy register service failed ", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // Stop stop the Proxy Server

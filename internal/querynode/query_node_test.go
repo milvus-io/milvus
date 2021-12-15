@@ -270,6 +270,9 @@ func TestQueryNode_register(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
+	err = node.initSession()
+	assert.NoError(t, err)
+
 	err = node.Register()
 	assert.NoError(t, err)
 }

@@ -153,12 +153,7 @@ func (s *Server) init() error {
 
 	log.Debug("init params done")
 
-	err := s.rootCoord.Register()
-	if err != nil {
-		return err
-	}
-
-	err = s.startGrpc(Params.Port)
+	err := s.startGrpc(Params.Port)
 	if err != nil {
 		return err
 	}
@@ -258,6 +253,11 @@ func (s *Server) startGrpcLoop(port int) {
 func (s *Server) start() error {
 	log.Debug("RootCoord Core start ...")
 	if err := s.rootCoord.Start(); err != nil {
+		log.Error(err.Error())
+		return err
+	}
+	if err := s.rootCoord.Register(); err != nil {
+		log.Error("RootCoord registers service failed", zap.Error(err))
 		return err
 	}
 	return nil

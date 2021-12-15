@@ -211,20 +211,33 @@ func (s *Server) QuitSignal() <-chan struct{} {
 
 // Register register data service at etcd
 func (s *Server) Register() error {
+	s.session.Register()
+	go s.session.LivenessCheck(s.serverLoopCtx, func() {
+		log.Error("DataCoord disconnected from etcd, process will exit", zap.Int64("ServerID", s.session.ServerID))
+		if err := s.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
+		// manually send signal to starter goroutine
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	})
+	return nil
+}
+
+func (s *Server) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
 	s.session.Init(typeutil.DataCoordRole, Params.Address, true)
 	Params.NodeID = s.session.ServerID
-	Params.SetLogger(typeutil.UniqueID(-1))
+	Params.SetLogger(Params.NodeID)
 	return nil
 }
 
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	atomic.StoreInt64(&s.isServing, ServerStateInitializing)
-	return nil
+	return s.initSession()
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:
@@ -404,14 +417,6 @@ func (s *Server) startServerLoop() {
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.garbageCollector.start()
-	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		log.Error("DataCoord disconnected from etcd, process will exit", zap.Int64("ServerID", s.session.ServerID))
-		if err := s.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
-		}
-		// manually send signal to starter goroutine
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-	})
 }
 
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream

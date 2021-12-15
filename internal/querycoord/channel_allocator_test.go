@@ -36,6 +36,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	assert.Nil(t, err)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+	clusterSession.Register()
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 	cluster := &queryNodeCluster{
@@ -77,7 +78,6 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	nodeID := node.queryNodeID
 	cluster.registerNode(baseCtx, nodeSession, nodeID, disConnect)
 	waitQueryNodeOnline(cluster, nodeID)
-
 	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, false, nil)
 	assert.Nil(t, err)
 

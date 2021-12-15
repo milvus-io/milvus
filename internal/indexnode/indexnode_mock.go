@@ -188,6 +188,7 @@ func (inm *Mock) Register() error {
 	}
 	session := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	session.Init(typeutil.IndexNodeRole, "localhost:21121", false)
+	session.Register()
 	return nil
 }
 

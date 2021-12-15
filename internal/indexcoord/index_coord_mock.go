@@ -71,6 +71,7 @@ func (icm *Mock) Register() error {
 	err := icm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
 	session := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	session.Init(typeutil.IndexCoordRole, Params.Address, true)
+	session.Register()
 	return err
 }
 

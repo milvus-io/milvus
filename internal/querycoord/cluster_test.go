@@ -397,6 +397,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 		assert.Nil(t, err)
 		clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+		clusterSession.Register()
 		cluster := &queryNodeCluster{
 			ctx:              baseCtx,
 			client:           kv,
@@ -425,6 +426,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 		assert.Nil(t, err)
 		clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+		clusterSession.Register()
 		cluster := &queryNodeCluster{
 			client:           kv,
 			nodes:            make(map[int64]Node),
@@ -472,6 +474,7 @@ func TestGrpcRequest(t *testing.T) {
 	assert.Nil(t, err)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+	clusterSession.Register()
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 	cluster := &queryNodeCluster{

@@ -106,6 +106,7 @@ func (qs *queryNodeServerMock) Register() error {
 	qs.queryNodeID = qs.session.ServerID
 	log.Debug("query nodeID", zap.Int64("nodeID", qs.queryNodeID))
 	log.Debug("query node address", zap.String("address", qs.session.Address))
+	qs.session.Register()
 
 	return nil
 }
