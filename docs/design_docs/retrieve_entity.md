@@ -98,7 +98,7 @@ In the newly created collection, insert a record with a primary key of 107, call
 
 ### Testcase 3
 
-In the newly created collection, insert the records with the primary keys of 105, 106, 107, call the Get interface to query the records with the primary keys of 101, 102, 103, 104, 105, 106, 107, the retrieved result only contains the primary keys of 105, 106, 107 records.
+In the newly created collection, insert the records with the primary keys of 105, 106, 107, call the Get interface to query the records with the primary keys of 101, 102, 103, 104, 105, 106, 107, the retrieved result only contains the records with primary keys of 105, 106, 107.
 
 ### Testcase 4
 
