@@ -49,6 +49,7 @@ func NewNodeManager() *NodeManager {
 	}
 }
 
+// setClient sets IndexNode client to node manager.
 func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) error {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
