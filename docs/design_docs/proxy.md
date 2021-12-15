@@ -29,7 +29,7 @@ Also, Proxy will do some preprocessing for every request. Proxy will do little t
 preprocessing stage and a lot more for other requests. Every object in Milvus will be assigned with an `ID`, such as
 `CollectionID`, `PartitionID`, `IndexID`, `SegmentID`, etc. Components in Milvus communicate with each other by the
 object IDs, however, users only know the object name. So as a user access layer of Milvus, Proxy should translate
-the object name into object ID. Also taking search request as example, Proxy should translate the `CollectionName` into
+the object name into object ID. Also taking search request as an example, Proxy should translate the `CollectionName` into
 `CollectionID` and then the Query Node will recognize the request. Proxy holds a cache that translate object name into
 object id and dynamically updates the cache.
 
