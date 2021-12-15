@@ -15,6 +15,7 @@ import (
 	"context"
 )
 
+// reader contains main options for rocksmq, and can only be set when newReader
 type reader struct {
 	c                       *client
 	topic                   string
