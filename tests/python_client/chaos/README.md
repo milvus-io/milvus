@@ -73,7 +73,8 @@ Run test scenario automatically:
    ```bash
    cd /milvus/tests/python_client/chaos
    # in this step, script will install milvus and run testcase
-   bash chaos_test.sh
+   bash chaos_test.sh ${pod} ${chaos_type} ${chaos_task}
+   # example: bash chaos_test.sh querynode pod_kill chaos-test
    ```
 ### Github Action
 * [Pod Kill Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/pod-kill-chaos-test.yaml)
