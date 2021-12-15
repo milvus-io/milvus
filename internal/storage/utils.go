@@ -70,7 +70,7 @@ func EstimateMemorySize(kv kv.DataKV, key string) (int64, error) {
 		return total, fmt.Errorf("key %v not in binlog format", key)
 	}
 
-	desc := &descriptorEvent{}
+	var desc *descriptorEvent
 	endPos = startPos + int(header.EventLength)
 	descContent, err := kv.LoadPartial(key, int64(startPos), int64(endPos))
 	if err != nil {
