@@ -3426,7 +3426,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "GC CPU ",
+      "title": "GC CPU time",
       "tooltip": {
         "shared": true,
         "sort": 0,
