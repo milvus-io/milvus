@@ -643,9 +643,9 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 // GetMetrics returns DataCoord metrics info
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("DataCoord.GetMetrics",
-		zap.Int64("node_id", Params.NodeID),
-		zap.String("req", req.Request))
+	log.Debug("received get metrics request",
+		zap.Int64("nodeID", Params.NodeID),
+		zap.String("request", req.Request))
 
 	if s.isClosed() {
 		log.Warn("DataCoord.GetMetrics failed",
