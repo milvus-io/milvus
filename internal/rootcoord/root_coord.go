@@ -1053,7 +1053,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		return err
 	}
 
-	var invalidateCache bool
+	invalidateCache := false
 	var ts typeutil.Timestamp
 	var collName string
 
@@ -1065,14 +1065,14 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
 			return err
 		}
-		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
-		if err != nil {
-			return err
+		if _, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0); err != nil {
+			if _, err = c.SendDdCreateCollectionReq(ctx, &ddReq, ddReq.PhysicalChannelNames); err != nil {
+				return err
+			}
+		} else {
+			log.Debug("collection has been created, skip re-send CreateCollection",
+				zap.String("collection name", collName))
 		}
-		if _, err = c.SendDdCreateCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
-			return err
-		}
-		invalidateCache = false
 	case DropCollectionDDType:
 		var ddReq = internalpb.DropCollectionRequest{}
 		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
@@ -1080,14 +1080,15 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		}
 		ts = ddReq.Base.Timestamp
 		collName = ddReq.CollectionName
-		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
-		if err != nil {
-			return err
+		if collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0); err == nil {
+			if err = c.SendDdDropCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
+				return err
+			}
+			invalidateCache = true
+		} else {
+			log.Debug("collection has been removed, skip re-send DropCollection",
+				zap.String("collection name", collName))
 		}
-		if err = c.SendDdDropCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
-			return err
-		}
-		invalidateCache = true
 	case CreatePartitionDDType:
 		var ddReq = internalpb.CreatePartitionRequest{}
 		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
@@ -1099,13 +1100,15 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		if err != nil {
 			return err
 		}
-		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err == nil {
-			return fmt.Errorf("partition %s already created", ddReq.PartitionName)
+		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err != nil {
+			if err = c.SendDdCreatePartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
+				return err
+			}
+			invalidateCache = true
+		} else {
+			log.Debug("partition has been created, skip re-send CreatePartition",
+				zap.String("collection name", collName), zap.String("partition name", ddReq.PartitionName))
 		}
-		if err = c.SendDdCreatePartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
-			return err
-		}
-		invalidateCache = true
 	case DropPartitionDDType:
 		var ddReq = internalpb.DropPartitionRequest{}
 		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
@@ -1117,13 +1120,15 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		if err != nil {
 			return err
 		}
-		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err != nil {
-			return err
+		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err == nil {
+			if err = c.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
+				return err
+			}
+			invalidateCache = true
+		} else {
+			log.Debug("partition has been removed, skip re-send DropPartition",
+				zap.String("collection name", collName), zap.String("partition name", ddReq.PartitionName))
 		}
-		if err = c.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
-			return err
-		}
-		invalidateCache = true
 	default:
 		return fmt.Errorf("invalid DdOperation %s", ddOp.Type)
 	}

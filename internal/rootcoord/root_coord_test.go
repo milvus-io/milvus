@@ -919,7 +919,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collMeta.PartitionIDs[1], ddReq.PartitionID)
 
 		err = core.reSendDdMsg(core.ctx, true)
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 	})
 
 	t.Run("has partition", func(t *testing.T) {
@@ -1254,7 +1254,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, dropPartID, ddReq.PartitionID)
 
 		err = core.reSendDdMsg(core.ctx, true)
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 	})
 
 	t.Run("remove DQL msgstream", func(t *testing.T) {
@@ -1343,7 +1343,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 
 		err = core.reSendDdMsg(core.ctx, true)
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 	})
 
 	t.Run("context_cancel", func(t *testing.T) {

@@ -220,27 +220,26 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 				Data: ids[pchan],
 			})
 		}
-		err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
-		if err != nil {
+
+		// update meta table after send dd operation
+		if err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr); err != nil {
 			t.core.chanTimeTick.removeDmlChannels(chanNames...)
 			t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
 
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
-
 		return nil
 	}
 
-	err = createCollectionFn()
-	if err != nil {
+	if err = createCollectionFn(); err != nil {
 		return err
 	}
 
-	err = t.core.CallWatchChannels(ctx, collID, vchanNames)
-	if err != nil {
+	if err = t.core.CallWatchChannels(ctx, collID, vchanNames); err != nil {
 		return err
 	}
 
@@ -313,16 +312,16 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
-		err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOpStr)
-		if err != nil {
+		if err = t.core.SendDdDropCollectionReq(ctx, &ddReq, collMeta.PhysicalChannelNames); err != nil {
 			return err
 		}
 
-		err = t.core.SendDdDropCollectionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
-		if err != nil {
+		// update meta table after send dd operation
+		if err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOpStr); err != nil {
 			return err
 		}
 
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 
@@ -343,8 +342,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	err = dropCollectionFn()
-	if err != nil {
+	if err = dropCollectionFn(); err != nil {
 		return err
 	}
 
@@ -526,23 +524,22 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
-		err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOpStr)
-		if err != nil {
+		if err = t.core.SendDdCreatePartitionReq(ctx, &ddReq, collMeta.PhysicalChannelNames); err != nil {
 			return err
 		}
 
-		err = t.core.SendDdCreatePartitionReq(ctx, &ddReq, collMeta.PhysicalChannelNames)
-		if err != nil {
+		// update meta table after send dd operation
+		if err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOpStr); err != nil {
 			return err
 		}
 
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 		return nil
 	}
 
-	err = createPartitionFn()
-	if err != nil {
+	if err = createPartitionFn(); err != nil {
 		return err
 	}
 
@@ -611,23 +608,22 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
-		_, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOpStr)
-		if err != nil {
+		if err = t.core.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
 		}
 
-		err = t.core.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames)
-		if err != nil {
+		// update meta table after send dd operation
+		if _, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOpStr); err != nil {
 			return err
 		}
 
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		t.core.SendTimeTick(ts, reason)
 		return nil
 	}
 
-	err = dropPartitionFn()
-	if err != nil {
+	if err = dropPartitionFn(); err != nil {
 		return err
 	}
 
