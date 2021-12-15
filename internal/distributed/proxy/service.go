@@ -363,6 +363,7 @@ func (s *Server) HasPartition(ctx context.Context, request *milvuspb.HasPartitio
 	return s.proxy.HasPartition(ctx, request)
 }
 
+// LoadPartitions notifies Proxy to load the partitions data
 func (s *Server) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	return s.proxy.LoadPartitions(ctx, request)
 }
