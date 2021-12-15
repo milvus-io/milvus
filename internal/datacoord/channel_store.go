@@ -130,7 +130,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 	return c
 }
 
-// Reload restores the buffer channels and node-channels mapping form kv
+// Reload restores the buffer channels and node-channels mapping from kv
 func (c *ChannelStore) Reload() error {
 	keys, values, err := c.store.LoadWithPrefix(Params.ChannelWatchSubPath)
 	if err != nil {
