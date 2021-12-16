@@ -7,12 +7,12 @@ import (
 )
 
 type singleCompactionPolicy interface {
-	// shouldSingleCompaction generates a compaction plan for single comapction, return nil if no plan can be generated.
+	// generatePlan generates a compaction plan for single comapction, return nil if no plan can be generated.
 	generatePlan(segment *SegmentInfo, timetravel *timetravel) *datapb.CompactionPlan
 }
 
 type mergeCompactionPolicy interface {
-	// shouldMergeCompaction generates a compaction plan for merge compaction, return nil if no plan can be generated.
+	// generatePlan generates a compaction plan for merge compaction, return nil if no plan can be generated.
 	generatePlan(segments []*SegmentInfo, timetravel *timetravel) []*datapb.CompactionPlan
 }
 
