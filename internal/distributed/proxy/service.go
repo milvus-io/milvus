@@ -373,6 +373,7 @@ func (s *Server) LoadPartitions(ctx context.Context, request *milvuspb.LoadParti
 	return s.proxy.LoadPartitions(ctx, request)
 }
 
+// ReleasePartitions notifies Proxy to release the partitions data
 func (s *Server) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return s.proxy.ReleasePartitions(ctx, request)
 }
