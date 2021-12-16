@@ -27,13 +27,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/common"
-
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
