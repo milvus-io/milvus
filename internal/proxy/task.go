@@ -1623,6 +1623,10 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 func (st *searchTask) Execute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-Execute")
 	defer sp.Finish()
+
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", st.ID()))
+	defer tr.Elapse("done")
+
 	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
 		SearchRequest: *st.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -1668,16 +1672,19 @@ func (st *searchTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
+	tr.Record("get used message stream")
+
 	err = stream.Produce(&msgPack)
 	if err != nil {
 		log.Debug("proxy", zap.String("send search request failed", err.Error()))
 	}
 	log.Debug("proxy sent one searchMsg",
-		zap.Any("collectionID", st.CollectionID),
-		zap.Any("msgID", tsMsg.ID()),
+		zap.Int64("collectionID", st.CollectionID),
+		zap.Int64("msgID", tsMsg.ID()),
 		zap.Int("length of search msg", len(msgPack.Msgs)),
-		zap.Any("timeoutTs", st.SearchRequest.TimeoutTimestamp),
-	)
+		zap.Uint64("timeoutTs", st.SearchRequest.TimeoutTimestamp))
+	tr.Record("send search msg to message stream")
+
 	return err
 }
 
