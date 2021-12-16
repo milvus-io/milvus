@@ -15,7 +15,7 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 
 ## Flow Chart
 
-<img src="../graphs/chaos_test_flow_chart.jpg" alt="Chaos Test Flow Chart" width="350"/>
+<img src="../graphs/chaos_test_flow_chart.jpg" alt="Chaos Test Flow Chart" width=50%/>
 
 ## Test Scenarios
 ### Milvus in cluster mode
