@@ -23,8 +23,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -32,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 // Meta is used to record the state of the index.
