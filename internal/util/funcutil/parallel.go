@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
-
 	"go.uber.org/zap"
 )
 
