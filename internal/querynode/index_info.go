@@ -55,6 +55,7 @@ func (info *indexInfo) setFieldID(id UniqueID) {
 	info.fieldID = id
 }
 
+// setIndexPaths sets the index paths
 func (info *indexInfo) setIndexPaths(paths []string) {
 	info.indexPaths = paths
 }
