@@ -381,6 +381,7 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, request *milvuspb.G
 	return s.proxy.GetPartitionStatistics(ctx, request)
 }
 
+// ShowPartitions notifies Proxy to show the partitions 
 func (s *Server) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return s.proxy.ShowPartitions(ctx, request)
 }
