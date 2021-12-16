@@ -65,6 +65,7 @@ type ConnectionInfo struct {
 	TargetType ConnectionTargetType `json:"target_type"`
 }
 
+// ConnTopology contains connection topology
 // TODO(dragondriver)
 // necessary to show all connection edge in topology graph?
 // for example, in system, Proxy connects to RootCoord and RootCoord also connects to Proxy,
