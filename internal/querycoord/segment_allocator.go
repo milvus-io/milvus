@@ -34,12 +34,12 @@ func defaultSegAllocatePolicy() SegmentAllocatePolicy {
 }
 
 // SegmentAllocatePolicy helper function definition to allocate Segment to queryNode
-type SegmentAllocatePolicy func(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
+type SegmentAllocatePolicy func(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
 
 // shuffleSegmentsToQueryNode shuffle segments to online nodes
 // returned are noded id for each segment, which satisfies:
 //     len(returnedNodeIds) == len(segmentIDs) && segmentIDs[i] is assigned to returnedNodeIds[i]
-func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
+func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
 	if len(reqs) == 0 {
 		return nil
 	}
@@ -58,18 +58,14 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 			delete(availableNodes, id)
 		}
 
-		nodeID2NumSegemnt := make(map[int64]int)
+		nodeID2NumSegment := make(map[int64]int)
 		for nodeID := range availableNodes {
 			if len(includeNodeIDs) > 0 && !nodeIncluded(nodeID, includeNodeIDs) {
 				delete(availableNodes, nodeID)
 				continue
 			}
-			numSegments, err := cluster.getNumSegments(nodeID)
-			if err != nil {
-				delete(availableNodes, nodeID)
-				continue
-			}
-			nodeID2NumSegemnt[nodeID] = numSegments
+			segmentInfos := metaCache.getSegmentInfosByNode(nodeID)
+			nodeID2NumSegment[nodeID] = len(segmentInfos)
 		}
 
 		if len(availableNodes) > 0 {
@@ -80,10 +76,10 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 
 			for _, req := range reqs {
 				sort.Slice(nodeIDSlice, func(i, j int) bool {
-					return nodeID2NumSegemnt[nodeIDSlice[i]] < nodeID2NumSegemnt[nodeIDSlice[j]]
+					return nodeID2NumSegment[nodeIDSlice[i]] < nodeID2NumSegment[nodeIDSlice[j]]
 				})
 				req.DstNodeID = nodeIDSlice[0]
-				nodeID2NumSegemnt[nodeIDSlice[0]]++
+				nodeID2NumSegment[nodeIDSlice[0]]++
 			}
 			return nil
 		}
@@ -94,7 +90,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 	}
 }
 
-func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
+func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
 	// key = offset, value = segmentSize
 	if len(reqs) == 0 {
 		return nil

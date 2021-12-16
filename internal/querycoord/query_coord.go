@@ -235,6 +235,8 @@ func (qc *QueryCoord) Start() error {
 func (qc *QueryCoord) Stop() error {
 	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
+	qc.cluster.close()
+	log.Debug("close cluster ...")
 	qc.scheduler.Close()
 	log.Debug("close scheduler ...")
 	qc.indexChecker.close()
@@ -328,7 +330,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			SourceNodeIDs: offlineNodeIDs,
 		}
 
-		baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_NodeDown)
+		baseTask := newBaseTask(qc.scheduler.ctx, querypb.TriggerCondition_NodeDown)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask:           baseTask,
 			LoadBalanceRequest: loadBalanceSegment,
@@ -356,7 +358,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
 				log.Debug("start add a QueryNode to cluster", zap.Any("nodeID", serverID))
-				err := qc.cluster.registerNode(ctx, event.Session, serverID, disConnect)
+				err := qc.cluster.registerNode(event.Session, serverID, disConnect)
 				if err != nil {
 					log.Error("QueryCoord failed to register a QueryNode", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 				}
@@ -380,7 +382,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 					BalanceReason: querypb.TriggerCondition_NodeDown,
 				}
 
-				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_NodeDown)
+				baseTask := newBaseTask(qc.scheduler.ctx, querypb.TriggerCondition_NodeDown)
 				loadBalanceTask := &loadBalanceTask{
 					baseTask:           baseTask,
 					LoadBalanceRequest: loadBalanceSegment,
@@ -531,7 +533,8 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 							DstNodeIDs:       []UniqueID{dstNodeID},
 							SealedSegmentIDs: []UniqueID{selectedSegmentInfo.SegmentID},
 						}
-						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_LoadBalance)
+
+						baseTask := newBaseTask(qc.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 						balanceTask := &loadBalanceTask{
 							baseTask:           baseTask,
 							LoadBalanceRequest: req,

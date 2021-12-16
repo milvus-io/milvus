@@ -25,7 +25,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -422,12 +421,15 @@ func TestReloadClusterFromKV(t *testing.T) {
 
 	t.Run("Test LoadOfflineNodes", func(t *testing.T) {
 		refreshParams()
+		baseCtx, cancel := context.WithCancel(context.Background())
 		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 		assert.Nil(t, err)
 		clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
+			ctx:              baseCtx,
+			cancel:           cancel,
 			client:           kv,
 			nodes:            make(map[int64]Node),
 			newNodeFn:        newQueryNodeTest,
@@ -445,25 +447,15 @@ func TestReloadClusterFromKV(t *testing.T) {
 		sessionKey := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, 100)
 		kvs[sessionKey] = string(sessionBlob)
 
-		collectionInfo := &querypb.CollectionInfo{
-			CollectionID: defaultCollectionID,
-		}
-		collectionBlobs, err := proto.Marshal(collectionInfo)
-		assert.Nil(t, err)
-		nodeKey := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, 100)
-		kvs[nodeKey] = string(collectionBlobs)
-
 		err = kv.MultiSave(kvs)
 		assert.Nil(t, err)
 
 		cluster.reloadFromKV()
-
 		assert.Equal(t, 1, len(cluster.nodes))
-		collection := cluster.getCollectionInfosByID(context.Background(), 100)
-		assert.Equal(t, defaultCollectionID, collection[0].CollectionID)
 
 		err = removeAllSession()
 		assert.Nil(t, err)
+		cluster.close()
 	})
 }
 
@@ -508,7 +500,7 @@ func TestGrpcRequest(t *testing.T) {
 	assert.Nil(t, err)
 	nodeSession := node.session
 	nodeID := node.queryNodeID
-	cluster.registerNode(baseCtx, nodeSession, nodeID, disConnect)
+	cluster.registerNode(nodeSession, nodeID, disConnect)
 	waitQueryNodeOnline(cluster, nodeID)
 
 	t.Run("Test GetComponentInfos", func(t *testing.T) {

@@ -43,7 +43,6 @@ type queryNodeClientMock struct {
 }
 
 func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
-	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
 	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
 	watchedDeltaChannels := make(map[UniqueID][]*datapb.VchannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
@@ -59,7 +58,6 @@ func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcd
 		address:              address,
 		client:               client,
 		kvClient:             kv,
-		collectionInfos:      collectionInfo,
 		watchedQueryChannels: watchedChannels,
 		watchedDeltaChannels: watchedDeltaChannels,
 	}

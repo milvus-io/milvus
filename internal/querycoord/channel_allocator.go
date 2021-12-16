@@ -31,9 +31,9 @@ func defaultChannelAllocatePolicy() ChannelAllocatePolicy {
 }
 
 // ChannelAllocatePolicy helper function definition to allocate dmChannel to queryNode
-type ChannelAllocatePolicy func(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error
+type ChannelAllocatePolicy func(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64) error
 
-func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error {
+func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64) error {
 	for {
 		availableNodes, err := cluster.onlineNodes()
 		if err != nil {
@@ -50,12 +50,8 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 
 		nodeID2NumChannels := make(map[int64]int)
 		for nodeID := range availableNodes {
-			numChannels, err := cluster.getNumDmChannels(nodeID)
-			if err != nil {
-				delete(availableNodes, nodeID)
-				continue
-			}
-			nodeID2NumChannels[nodeID] = numChannels
+			watchedChannelInfos := metaCache.getDmChannelInfosByNodeID(nodeID)
+			nodeID2NumChannels[nodeID] = len(watchedChannelInfos)
 		}
 
 		if len(availableNodes) > 0 {

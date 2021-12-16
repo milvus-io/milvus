@@ -274,7 +274,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	baseTask := newBaseTask(qc.scheduler.ctx, querypb.TriggerCondition_GrpcRequest)
 	releaseCollectionTask := &releaseCollectionTask{
 		baseTask:                 baseTask,
 		ReleaseCollectionRequest: req,
@@ -488,7 +488,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	baseTask := newBaseTask(qc.scheduler.ctx, querypb.TriggerCondition_GrpcRequest)
 	loadPartitionTask := &loadPartitionTask{
 		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
@@ -857,7 +857,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_LoadBalance)
+	baseTask := newBaseTask(qc.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 	loadBalanceTask := &loadBalanceTask{
 		baseTask:           baseTask,
 		LoadBalanceRequest: req,
