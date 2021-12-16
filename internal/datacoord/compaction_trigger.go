@@ -107,7 +107,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 	defer logutil.LogPanic()
 	defer t.wg.Done()
 
-	// If AutoCompaction diabled, global loop will not start
+	// If AutoCompaction disabled, global loop will not start
 	if !Params.EnableAutoCompaction {
 		return
 	}
