@@ -106,7 +106,7 @@ IndexNode in NodeManager, and the task amount is reduced by one.
 `assignTaskLoop` is used to assign index construction tasks. There is a timer here to traverse the MetaTable regularly
 to filter out the tasks that need to be allocated, including unallocated tasks and tasks that have been failed due to
 indexNode crash. Then sort according to the version size of each task, and assign tasks with a smaller
-version first. The purpose is to prevent certain special tasks from occupying resources all the time and always fail
+version first. The purpose is to prevent certain special tasks from occupying resources all the time and always failing
 to execute successfully. When a task is assigned, its corresponding Version is increased by one. Then send the task to
 IndexNode for execution, and update the index status in the MetaTable.
 
