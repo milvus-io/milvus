@@ -27,6 +27,7 @@ type producer struct {
 	topic string
 }
 
+// newProducer creates a rocksmq producer from options
 func newProducer(c *client, options ProducerOptions) (*producer, error) {
 	if c == nil {
 		return nil, newError(InvalidConfiguration, "client is nil")
