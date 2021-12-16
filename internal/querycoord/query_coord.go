@@ -457,7 +457,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 		case <-timer.C:
 			onlineNodes, err := qc.cluster.onlineNodes()
 			if err != nil {
-				log.Warn("loadBalanceSegmentLoop: there are no online query node to balance")
+				log.Warn("loadBalanceSegmentLoop: there are no online QueryNode to balance")
 				continue
 			}
 			// get mem info of online nodes from cluster
