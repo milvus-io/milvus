@@ -377,6 +377,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, request *milvuspb.Releas
 	return s.proxy.ReleasePartitions(ctx, request)
 }
 
+// GetPartitionStatistics notifies Proxy to get the partitions Statistics info.
 func (s *Server) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	return s.proxy.GetPartitionStatistics(ctx, request)
 }
