@@ -50,6 +50,7 @@ func (info *indexInfo) setBuildID(id UniqueID) {
 	info.buildID = id
 }
 
+// setFieldID sets the field id of index
 func (info *indexInfo) setFieldID(id UniqueID) {
 	info.fieldID = id
 }
