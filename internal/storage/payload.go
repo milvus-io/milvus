@@ -349,6 +349,7 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte) (*PayloadReader, er
 	return &PayloadReader{payloadReaderPtr: r, colType: colType}, nil
 }
 
+// GetDataFromPayload returns data,length from payload, returns err if failed
 // Params:
 //      `idx`: String index
 // Return:
