@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Use Internal docker mirror to solve  https://www.docker.com/increase-rate-limits
+
+# Exit immediately for non zero status
 set -e
 
 # Use nexus as docker mirror registry
