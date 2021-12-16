@@ -26,14 +26,8 @@ import (
 )
 
 func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *QueryNode) (*milvuspb.GetMetricsResponse, error) {
-	usedMem, err := getUsedMemory()
-	if err != nil {
-		return nil, err
-	}
-	totalMem, err := getTotalMemory()
-	if err != nil {
-		return nil, err
-	}
+	usedMem := metricsinfo.GetUsedMemoryCount()
+	totalMem := metricsinfo.GetMemoryCount()
 	nodeInfos := metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
@@ -85,18 +79,4 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
 	}, nil
-}
-
-func getUsedMemory() (uint64, error) {
-	if Params.InContainer {
-		return metricsinfo.GetContainerMemUsed()
-	}
-	return metricsinfo.GetUsedMemoryCount(), nil
-}
-
-func getTotalMemory() (uint64, error) {
-	if Params.InContainer {
-		return metricsinfo.GetContainerMemLimit()
-	}
-	return metricsinfo.GetMemoryCount(), nil
 }

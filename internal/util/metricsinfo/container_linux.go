@@ -18,8 +18,8 @@ import (
 	"github.com/containerd/cgroups"
 )
 
-// InContainer checks if the service is running inside a container.
-func InContainer() (bool, error) {
+// inContainer checks if the service is running inside a container.
+func inContainer() (bool, error) {
 	paths, err := cgroups.ParseCgroupFile("/proc/1/cgroup")
 	if err != nil {
 		return false, err
@@ -28,8 +28,8 @@ func InContainer() (bool, error) {
 	return devicePath != "", nil
 }
 
-// GetContainerMemLimit returns memory limit and error
-func GetContainerMemLimit() (uint64, error) {
+// getContainerMemLimit returns memory limit and error
+func getContainerMemLimit() (uint64, error) {
 	control, err := cgroups.Load(cgroups.V1, cgroups.RootPath)
 	if err != nil {
 		return 0, err
@@ -44,8 +44,8 @@ func GetContainerMemLimit() (uint64, error) {
 	return stats.Memory.Usage.Limit, nil
 }
 
-// GetContainerMemUsed returns memory usage and error
-func GetContainerMemUsed() (uint64, error) {
+// getContainerMemUsed returns memory usage and error
+func getContainerMemUsed() (uint64, error) {
 	control, err := cgroups.Load(cgroups.V1, cgroups.RootPath)
 	if err != nil {
 		return 0, err
