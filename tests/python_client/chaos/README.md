@@ -78,6 +78,7 @@ Run test scenario automatically:
    ```
 ### Github Action
 * [Pod Kill Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/pod-kill-chaos-test.yaml)
+* [Pod Failure Chaos Test](https://github.com/milvus-io/milvus/blob/master/.github/workflows/pod-failure-chaos-test.yaml)
 * [Network Partition Chaos Test](https://github.com/milvus-io/milvus/actions/workflows/network-partition-chaos-test.yaml)
 
 ### Nightly 
