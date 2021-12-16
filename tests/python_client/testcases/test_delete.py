@@ -461,7 +461,8 @@ class TestDeleteOperation(TestcaseBase):
 
         search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][1]],
                                             ct.default_float_vec_field_name,
-                                            ct.default_search_params, ct.default_limit, output_fields=[ct.default_int64_field_name, ct.default_float_field_name])
+                                            ct.default_search_params, ct.default_limit,
+                                            output_fields=[ct.default_int64_field_name, ct.default_float_field_name])
         assert len(search_res) == 1
 
     @pytest.mark.tags(CaseLabel.L2)
