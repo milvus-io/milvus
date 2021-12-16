@@ -121,7 +121,7 @@ type QueryCoordInfos struct {
 	SystemConfigurations QueryCoordConfiguration `json:"system_configurations"`
 }
 
-// ProxyConfiguration records the configuration of proxy.
+// ProxyConfiguration records the configuration of Proxy.
 type ProxyConfiguration struct {
 	DefaultPartitionName string `json:"default_partition_name"`
 	DefaultIndexName     string `json:"default_index_name"`
@@ -133,7 +133,7 @@ type ProxyInfos struct {
 	SystemConfigurations ProxyConfiguration `json:"system_configurations"`
 }
 
-// IndexNodeConfiguration records the configuration of index node.
+// IndexNodeConfiguration records the configuration of IndexNode.
 type IndexNodeConfiguration struct {
 	MinioBucketName string `json:"minio_bucket_name"`
 
