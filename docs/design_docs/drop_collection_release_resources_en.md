@@ -85,5 +85,5 @@ DataCoord runs a background GC goroutine, triggers every 1 day:
     - **Why 1 day: **Maybe there are newly uploaded binlogs from flush/compaction
 
 ### How to clear dropped-collection's binlogs?
-- DataCoord checks all dropped-segments, remove the binlogs recorded if they've been dropped by 1 day.
+- DataCoord checks all dropped-segments, removes the binlogs recorded if they've been dropped by 1 day.
 - DataCoord keeps the etcd segmentInfo meta.
