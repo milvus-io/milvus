@@ -620,7 +620,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		for _, channel := range vDeltaChannels {
 			err = qc.addTSafeWatcher(channel)
 			if err != nil {
-				// tSafe have been exist, not error
+				// tSafe have been existed, not error
 				log.Warn(err.Error())
 			}
 		}
