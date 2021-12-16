@@ -144,6 +144,8 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+// SingleBitLen returns the bit length of @dim
 func SingleBitLen(dim int64) int64 {
 	if dim%8 == 0 {
 		return dim
