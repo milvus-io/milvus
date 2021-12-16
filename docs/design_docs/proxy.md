@@ -192,7 +192,7 @@ about Collection, Partition, and Segment. Taking ShowCollections as an example, 
 specifies that the query is for Collections that have been loaded into memory, the ShowCollection request will be
 forwarded to QueryCoordinator, and QueryCoordinator will return a list of all the recorded Collections loaded into
 memory. Taking LoadCollection as another example, its synchronization semantics is that the number of rows loaded in
-the memory must be no less than the number of rows that have been persisted. This requires the Proxy to ask the Query
+the memory must be no less than the number of rows that have been persisted. This requires Proxy to ask the Query
 Coordinator for the sum of the number of rows currently loaded into the query nodes in the Collection.
 
 #### 6.5 Decouple Functionality and Communication
@@ -207,11 +207,11 @@ between functions or communication between Grpc. The log system can be either Pu
 communication between components is mostly undertaken by grpc, and the message flow is mostly by Pulsar.
 
 Therefore, in the original design, Milvus 2.0 decoupled the core function of the component and the communication between
-components. Taking Proxy as an example, the core function of the Proxy component is determined and has nothing to do
+components. Taking Proxy as an example, the core function of Proxy component is determined and has nothing to do
 with the deployment form. In the project's internal/proxy directory, it contains the functions of the core components of
 Proxy; and internal/distributed/proxy contains the core functions of Proxy in the deployment of cluster distributed
 which contains the re-encapsulation and communication implementation of Proxy. The following article will mainly
-introduce the functions of the Proxy core layer.
+introduce the functions of Proxy core layer.
 
 #### 6.6 Core Components of Proxy
 
