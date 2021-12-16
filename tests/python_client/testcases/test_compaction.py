@@ -775,7 +775,7 @@ class TestCompactionOperation(TestcaseBase):
                 break
             end = time()
             if end - start > cost:
-                raise BaseException(1, "Ccompact auto-merge more than 60s")
+                raise BaseException(1, "Compact auto-merge more than 60s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_less_threshold_no_merge(self):
