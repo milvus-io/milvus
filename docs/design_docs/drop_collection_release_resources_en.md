@@ -4,7 +4,7 @@
 
 **When dropping a collection**
 
-1. DataNode releases the flowgraph of this collection and drops all the data in buffer.
+1. DataNode releases the flowgraph of this collection and drops all the data in a buffer.
 2. DataCoord has no idea whether a collection is dropped or not.
     - DataCoord will make DataNode watch DmChannels of dropped collections.
     - Blob files will never be removed even if the collection is dropped.
