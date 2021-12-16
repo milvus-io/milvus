@@ -21,6 +21,7 @@ import (
 // assertion make sure implementation
 var _ Producer = (*producer)(nil)
 
+// producer contains a client instance and topic name
 type producer struct {
 	// client which the producer belong to
 	c     *client
