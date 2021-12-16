@@ -94,5 +94,5 @@ pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capt
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
 # save logs
-data=`date +%Y-%m-%d-%H-%M-%S`
-bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}-${chaos_type}-${chaos_task}-${data}
+cur_time=`date +%Y-%m-%d-%H-%M-%S`
+bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}-${chaos_type}-${chaos_task}-${cur_time}
