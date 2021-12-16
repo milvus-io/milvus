@@ -28,9 +28,9 @@ type timetravel struct {
 type trigger interface {
 	start()
 	stop()
-	// triggerCompaction trigger a compaction if any compaction condition satisfy.
+	// triggerCompaction triggers a compaction if any compaction condition satisfy.
 	triggerCompaction(timetravel *timetravel) error
-	// triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
+	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
 	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, timetravel *timetravel) error
 	// forceTriggerCompaction force to start a compaction
 	forceTriggerCompaction(collectionID int64, timetravel *timetravel) (UniqueID, error)
