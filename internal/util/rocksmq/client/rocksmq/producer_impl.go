@@ -44,6 +44,7 @@ func newProducer(c *client, options ProducerOptions) (*producer, error) {
 	}, nil
 }
 
+// Topic returns the topic name of producer
 func (p *producer) Topic() string {
 	return p.topic
 }
