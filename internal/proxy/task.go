@@ -2248,6 +2248,9 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 }
 
 func (qt *queryTask) Execute(ctx context.Context) error {
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute query %d", qt.ID()))
+	defer tr.Elapse("done")
+
 	var tsMsg msgstream.TsMsg = &msgstream.RetrieveMsg{
 		RetrieveRequest: *qt.RetrieveRequest,
 		BaseMsg: msgstream.BaseMsg{
@@ -2279,17 +2282,19 @@ func (qt *queryTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
+	tr.Record("get used message stream")
+
 	err = stream.Produce(&msgPack)
-	log.Debug("proxy sent one retrieveMsg",
-		zap.Any("collectionID", qt.CollectionID),
-		zap.Any("msgID", tsMsg.ID()),
-		zap.Int("length of search msg", len(msgPack.Msgs)),
-		zap.Any("timeoutTs", qt.RetrieveRequest.TimeoutTimestamp),
-	)
 	if err != nil {
 		log.Debug("Failed to send retrieve request.",
 			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 	}
+	log.Debug("proxy sent one retrieveMsg",
+		zap.Int64("collectionID", qt.CollectionID),
+		zap.Int64("msgID", tsMsg.ID()),
+		zap.Int("length of search msg", len(msgPack.Msgs)),
+		zap.Uint64("timeoutTs", qt.RetrieveRequest.TimeoutTimestamp))
+	tr.Record("send retrieve request to message stream")
 
 	log.Info("Query Execute done.",
 		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
