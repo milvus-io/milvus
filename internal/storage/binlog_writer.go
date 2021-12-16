@@ -320,7 +320,7 @@ func NewIndexFileBinlogWriter(
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
 	descriptorEvent.FieldID = fieldID
-	descriptorEvent.PayloadDataType = schemapb.DataType_String
+	descriptorEvent.PayloadDataType = schemapb.DataType_Int8
 	descriptorEvent.AddExtra("indexBuildID", fmt.Sprintf("%d", indexBuildID))
 	descriptorEvent.AddExtra("version", fmt.Sprintf("%d", version))
 	descriptorEvent.AddExtra("indexName", indexName)

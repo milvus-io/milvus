@@ -379,7 +379,7 @@ func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEven
 }
 
 func newIndexFileEventWriter() (*indexFileEventWriter, error) {
-	payloadWriter, err := NewPayloadWriter(schemapb.DataType_String)
+	payloadWriter, err := NewPayloadWriter(schemapb.DataType_Int8)
 	if err != nil {
 		return nil, err
 	}

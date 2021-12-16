@@ -378,42 +378,26 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 // only print slice meta and index params
 func printIndexFilePayloadValues(reader PayloadReaderInterface, key string) error {
 	if key == IndexParamsKey {
-		rows, err := reader.GetPayloadLengthFromReader()
+		content, err := reader.GetByteFromPayload()
 		if err != nil {
 			return err
 		}
-		var content []byte
-		for i := 0; i < rows; i++ {
-			val, err := reader.GetOneStringFromPayload(i)
-			if err != nil {
-				return err
-			}
-			content = append(content, []byte(val)...)
-		}
 		fmt.Print("index params: \n")
-		fmt.Println(string(content))
+		fmt.Println(content)
 
 		return nil
 	}
 
 	if key == "SLICE_META" {
-		rows, err := reader.GetPayloadLengthFromReader()
+		content, err := reader.GetByteFromPayload()
 		if err != nil {
 			return err
-		}
-		var content []byte
-		for i := 0; i < rows; i++ {
-			val, err := reader.GetOneStringFromPayload(i)
-			if err != nil {
-				return err
-			}
-			content = append(content, []byte(val)...)
 		}
 		// content is a json string serialized by milvus::json,
 		// it's better to use milvus::json to parse the content also,
 		// fortunately, the json string is readable enough.
 		fmt.Print("index slice meta: \n")
-		fmt.Println(string(content))
+		fmt.Println(content)
 
 		return nil
 	}

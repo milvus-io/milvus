@@ -402,7 +402,7 @@ func TestIndexFileBinlogCodec(t *testing.T) {
 		},
 		{
 			Key:   "large",
-			Value: []byte(funcutil.RandomString(maxLengthPerRowOfIndexFile + 1)),
+			Value: funcutil.RandomBytes(maxLengthPerRowOfIndexFile + 1),
 		},
 	}
 

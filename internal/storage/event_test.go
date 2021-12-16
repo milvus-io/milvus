@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -1086,8 +1087,8 @@ func TestIndexFileEvent(t *testing.T) {
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
-		payload := "payload"
-		err = w.AddOneStringToPayload(payload)
+		payload := funcutil.GenRandomBytes()
+		err = w.AddByteToPayload(payload)
 		assert.Nil(t, err)
 
 		err = w.Finish()
@@ -1106,9 +1107,9 @@ func TestIndexFileEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_Int8, pBuf)
 		assert.Nil(t, err)
-		value, err := pR.GetOneStringFromPayload(0)
+		value, err := pR.GetByteFromPayload()
 		assert.Nil(t, err)
 		assert.Equal(t, payload, value)
 		pR.Close()

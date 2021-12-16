@@ -1038,17 +1038,9 @@ func (codec *IndexFileBinlogCodec) Serialize(
 			return nil, err
 		}
 
-		length := (len(datas[pos].Value) + maxLengthPerRowOfIndexFile - 1) / maxLengthPerRowOfIndexFile
-		for i := 0; i < length; i++ {
-			start := i * maxLengthPerRowOfIndexFile
-			end := (i + 1) * maxLengthPerRowOfIndexFile
-			if end > len(datas[pos].Value) {
-				end = len(datas[pos].Value)
-			}
-			err = eventWriter.AddOneStringToPayload(string(datas[pos].Value[start:end]))
-			if err != nil {
-				return nil, err
-			}
+		err = eventWriter.AddByteToPayload(datas[pos].Value)
+		if err != nil {
+			return nil, err
 		}
 
 		eventWriter.SetEventTimestamp(ts, ts)
@@ -1085,17 +1077,9 @@ func (codec *IndexFileBinlogCodec) Serialize(
 	}
 
 	params, _ := json.Marshal(indexParams)
-	length := (len(params) + maxLengthPerRowOfIndexFile - 1) / maxLengthPerRowOfIndexFile
-	for i := 0; i < length; i++ {
-		start := i * maxLengthPerRowOfIndexFile
-		end := (i + 1) * maxLengthPerRowOfIndexFile
-		if end > len(params) {
-			end = len(params)
-		}
-		err = eventWriter.AddOneStringToPayload(string(params[start:end]))
-		if err != nil {
-			return nil, err
-		}
+	err = eventWriter.AddByteToPayload(params)
+	if err != nil {
+		return nil, err
 	}
 
 	eventWriter.SetEventTimestamp(ts, ts)
@@ -1195,37 +1179,23 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 				break
 			}
 			switch dataType {
-			case schemapb.DataType_String:
-				length, err := eventReader.GetPayloadLengthFromReader()
+			case schemapb.DataType_Int8:
+				content, err := eventReader.GetByteFromPayload()
 				if err != nil {
-					log.Warn("failed to get payload length",
+					log.Warn("failed to get string from payload",
 						zap.Error(err))
 					eventReader.Close()
 					binlogReader.Close()
 					return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
 				}
 
-				var content []byte
-				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetOneStringFromPayload(i)
-					if err != nil {
-						log.Warn("failed to get string from payload",
-							zap.Error(err))
-						eventReader.Close()
-						binlogReader.Close()
-						return 0, 0, 0, 0, 0, 0, nil, "", 0, nil, err
-					}
-
-					content = append(content, []byte(singleString)...)
-				}
-
 				if key == IndexParamsKey {
 					_ = json.Unmarshal(content, &indexParams)
 				} else {
-					datas = append(datas, &Blob{
-						Key:   key,
-						Value: content,
-					})
+					blob := &Blob{Key: key}
+					blob.Value = make([]byte, len(content))
+					copy(blob.Value, content)
+					datas = append(datas, blob)
 				}
 			}
 			eventReader.Close()

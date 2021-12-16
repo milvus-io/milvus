@@ -23,23 +23,33 @@ func init() {
 	r = rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+var letterRunes = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
-// RandomString returns a batch of random string
-func RandomString(n int) string {
-	b := make([]rune, n)
+// RandomBytes returns a batch of random string
+func RandomBytes(n int) []byte {
+	b := make([]byte, n)
 	for i := range b {
 		b[i] = letterRunes[r.Intn(len(letterRunes))]
 	}
-	return string(b)
+	return b
+}
+
+// RandomString returns a batch of random string
+func RandomString(n int) string {
+	return string(RandomBytes(n))
+}
+
+// GenRandomBytes generates a random bytes.
+func GenRandomBytes() []byte {
+	l := rand.Uint64()%10 + 1
+	b := make([]byte, l)
+	if _, err := rand.Read(b); err != nil {
+		return nil
+	}
+	return b
 }
 
 // GenRandomStr generates a random string.
 func GenRandomStr() string {
-	l := rand.Uint64()%10 + 1
-	b := make([]byte, l)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%X", b)
+	return fmt.Sprintf("%X", GenRandomBytes())
 }

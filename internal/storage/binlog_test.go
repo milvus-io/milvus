@@ -1029,13 +1029,13 @@ func TestIndexFileBinlog(t *testing.T) {
 	key := funcutil.GenRandomStr()
 
 	timestamp := Timestamp(time.Now().UnixNano())
-	payload := funcutil.GenRandomStr()
+	payload := funcutil.GenRandomBytes()
 
 	w := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, key)
 
 	e, err := w.NextIndexFileEventWriter()
 	assert.Nil(t, err)
-	err = e.AddOneStringToPayload(payload)
+	err = e.AddByteToPayload(payload)
 	assert.Nil(t, err)
 	e.SetEventTimestamp(timestamp, timestamp)
 
@@ -1109,7 +1109,7 @@ func TestIndexFileBinlog(t *testing.T) {
 
 	//descriptor data fix, payload type
 	colType := UnsafeReadInt32(buf, pos)
-	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_String)
+	assert.Equal(t, schemapb.DataType(colType), schemapb.DataType_Int8)
 	pos += int(unsafe.Sizeof(colType))
 
 	//descriptor data, post header lengths
