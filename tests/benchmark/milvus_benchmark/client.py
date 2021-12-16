@@ -92,7 +92,7 @@ class MilvusClient(object):
         return 'Milvus collection %s' % self._collection_name
 
     def set_collection(self, collection_name):
-        """ seting collection name """
+        """ Setting collection name """
         self._collection_name = collection_name
 
     # TODO: server not support
