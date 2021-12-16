@@ -461,7 +461,7 @@ type Core struct {
 	//setMsgStreams, send drop partition into dd channel
 	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error
 
-	// if rootcoord create segment, datacoord will put segment msg into this channel
+	// if RootCoord create segment, DataCoord will put segment msg into this channel
 	DataCoordSegmentChan <-chan *ms.MsgPack
 
 	// if segment flush completed, data node would put segment msg into this channel
