@@ -1914,8 +1914,8 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async):
         """
-        target: test search using different supported data type
-        method: search using different supported data type
+        target: test search using all supported data types
+        method: search using different supported data types
         expected: search success
         """
         # 1. initialize with data
