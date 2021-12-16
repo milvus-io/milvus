@@ -180,6 +180,14 @@ class TestChaosData:
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', cc.get_chaos_yamls())
     def test_chaos_memory_stress_etcd(self, chaos_yaml):
+        """
+        target: test inject memory stress into all etcd pods
+        method: 1.Deploy milvus and limit etcd memory resource 1Gi witl all mode
+                2.Continuously and concurrently do milvus operations
+                3.Inject memory stress chaos 51024Mi
+                4.After duration, delete chaos stress
+        expected: Verify milvus operation succ rate
+        """
         mic_checkers = {
             Op.create: CreateChecker(),
             Op.insert: InsertFlushChecker(),
@@ -207,9 +215,7 @@ class TestChaosData:
 
         # convert string duration time to a int number in seconds
         if isinstance(duration, str):
-            duration = duration.replace('h', '*3600+')
-            duration = duration.replace('m', '*60+')
-            duration = duration.replace('s', '*1')
+            duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+')+'+0'
         else:
             log.error("Duration must be string type")
 
@@ -221,3 +227,4 @@ class TestChaosData:
         # output milvus op succ rate
         for k, ch in mic_checkers.items():
             log.debug(f'Succ rate of {k.value}: {ch.succ_rate()}')
+            assert ch.succ_rate() == 1.0
