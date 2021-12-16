@@ -25,6 +25,16 @@ class TestQueryNodeScale:
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_scale_query_node(self):
+        """
+        target: test scale queryNode
+        method: 1.deploy milvus cluster with 1 queryNode
+                2.prepare work (connect, create, insert, index and load)
+                3.continuously search (daemon thread)
+                4.expand queryNode from 2 to 5
+                5.continuously insert new data (daemon thread)
+                6.shrink queryNode from 5 to 3
+        expected: Verify milvus remains healthy and search successfully during scale
+        """
         release_name = "scale-query"
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
