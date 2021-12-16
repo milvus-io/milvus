@@ -360,7 +360,7 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 			continue
 		}
 
-		// If the vector field doesn't have index. Vector data is in memory for
+		// If the vector field doesn't have indexed. Vector data is in memory for
 		// brute force search. No need to download data from remote.
 		if _, ok := s.indexInfos[fieldData.FieldId]; !ok {
 			continue
