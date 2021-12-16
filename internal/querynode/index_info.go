@@ -60,6 +60,7 @@ func (info *indexInfo) setIndexPaths(paths []string) {
 	info.indexPaths = paths
 }
 
+// setIndexParams sets the params of index, such as indexType, metricType and so on
 func (info *indexInfo) setIndexParams(params map[string]string) {
 	info.indexParams = params
 }
