@@ -197,7 +197,7 @@ func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error)
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Debug("Session Register Begin " + s.ServerName)
+	log.Debug("Session Register Begin", zap.String("ServerName", s.ServerName))
 	registerFn := func() error {
 		resp, err := s.etcdCli.Grant(s.ctx, DefaultTTL)
 		if err != nil {
