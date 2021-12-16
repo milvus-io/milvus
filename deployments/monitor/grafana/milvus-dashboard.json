@@ -3818,7 +3818,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Memory Allocated Rate",
+      "title": "Memory bytes allocated rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
