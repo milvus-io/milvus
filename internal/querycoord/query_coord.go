@@ -578,7 +578,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 			} else {
 				// no enough memory on query nodes to balance, then notify proxy to stop insert
 				//TODO:: xige-16
-				log.Error("loadBalanceSegmentLoop: query node has insufficient memory, stop inserting data")
+				log.Error("loadBalanceSegmentLoop: QueryNode has insufficient memory, stop inserting data")
 			}
 		}
 	}
