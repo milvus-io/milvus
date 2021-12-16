@@ -29,7 +29,6 @@ func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 	nodeName := node.Name()
 	nodeCtx := nodeCtx{
 		node:                   node,
-		inputChannels:          make([]chan Msg, 0),
 		downstreamInputChanIdx: make(map[string]int),
 		closeCh:                make(chan struct{}),
 	}
