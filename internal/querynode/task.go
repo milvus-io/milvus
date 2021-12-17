@@ -650,7 +650,10 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("toSubChannels", toSubChannels))
 
 	for _, info := range w.req.Infos {
-		w.node.loader.FromDmlCPLoadDelete(w.ctx, collectionID, info.SeekPosition)
+		err = readFlowGraph(w.ctx, collectionID, w.node.streaming.replica, info.SeekPosition, w.node.msFactory)
+		if err != nil {
+			return err
+		}
 	}
 
 	// start flow graphs

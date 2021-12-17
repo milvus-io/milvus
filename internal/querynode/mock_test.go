@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"path"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
@@ -405,6 +406,36 @@ func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return stream, nil
 }
 
+func genMsgStreamProducer(ctx context.Context, producerChannels []string) (msgstream.MsgStream, error) {
+	msFactory, err := genFactory()
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := msFactory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stream.Start()
+	stream.AsProducer(producerChannels)
+	return stream, nil
+}
+
+func getMsgStreamReader(ctx context.Context, consumerChannels []string, subName string) (msgstream.MsgStream, error) {
+	msFactory, err := genFactory()
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := msFactory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stream.Start()
+	stream.AsReader(consumerChannels, subName)
+	return stream, nil
+}
+
 func genLocalChunkManager() (storage.ChunkManager, error) {
 	p, err := Params.Load("storage.path")
 	if err != nil {
@@ -645,6 +676,15 @@ func genSimpleCommonBlob() ([]*commonpb.Blob, error) {
 	return genCommonBlob(defaultMsgLength, schema)
 }
 
+// joinIDPath joins ids to path format.
+func joinIDPath(ids ...UniqueID) string {
+	idStr := make([]string, 0, len(ids))
+	for _, id := range ids {
+		idStr = append(idStr, strconv.FormatInt(id, 10))
+	}
+	return path.Join(idStr...)
+}
+
 func saveBinLog(ctx context.Context,
 	collectionID UniqueID,
 	partitionID UniqueID,
@@ -672,7 +712,7 @@ func saveBinLog(ctx context.Context,
 			return nil, err
 		}
 
-		key := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		key := joinIDPath(collectionID, partitionID, segmentID, fieldID)
 		kvs[key] = string(blob.Value[:])
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -748,10 +788,16 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 		return nil, err
 	}
 
+	hashValues := make([]uint32, defaultMsgLength)
+	for i := 0; i < defaultMsgLength; i++ {
+		hashValues[i] = uint32(i)
+	}
 	return &msgstream.InsertMsg{
-		BaseMsg: genMsgStreamBaseMsg(),
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: hashValues,
+		},
 		InsertRequest: internalpb.InsertRequest{
-			Base:           genCommonMsgBase(commonpb.MsgType_Retrieve),
+			Base:           genCommonMsgBase(commonpb.MsgType_Insert),
 			CollectionName: defaultCollectionName,
 			PartitionName:  defaultPartitionName,
 			CollectionID:   defaultCollectionID,

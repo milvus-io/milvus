@@ -19,12 +19,14 @@ package querynode
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 )
@@ -175,6 +177,47 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 	}
 
 	return q
+}
+
+func readFlowGraph(ctx context.Context,
+	collectionID UniqueID,
+	streamingReplica ReplicaInterface,
+	position *internalpb.MsgPosition,
+	factory msgstream.Factory) error {
+
+	rNode, err := newReaderNode(ctx, collectionID, position, factory)
+	if err != nil {
+		return err
+	}
+	// TODO: remove loadType and partitionID
+	fNode := newFilteredDmNode(streamingReplica, loadTypeCollection, collectionID, UniqueID(0))
+	iNode := newInsertNode(streamingReplica)
+
+	res := rNode.Operate(nil)
+	res = fNode.Operate(res)
+	iNode.Operate(res)
+	return nil
+}
+
+func newReaderNode(ctx context.Context,
+	collectionID UniqueID,
+	position *internalpb.MsgPosition,
+	factory msgstream.Factory) (*flowgraph.ReaderNode, error) {
+	stream, err := factory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
+	position.ChannelName = pChannelName
+	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeID, collectionID))
+	err = stream.SeekReaders([]*internalpb.MsgPosition{position})
+	if err != nil {
+		return nil, err
+	}
+
+	maxQueueLength := Params.FlowGraphMaxQueueLength
+	maxParallelism := Params.FlowGraphMaxParallelism
+	return flowgraph.NewReaderNode(ctx, stream, pChannelName, "readerNode", maxQueueLength, maxParallelism), nil
 }
 
 func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
