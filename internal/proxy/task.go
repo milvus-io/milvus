@@ -679,7 +679,6 @@ func (it *insertTask) checkFieldAutoIDAndHashPK() error {
 
 		// TODO(dragondriver): when we can ignore the order of input fields, use append directly
 		// it.req.FieldsData = append(it.req.FieldsData, &fieldData)
-
 		it.req.FieldsData = append(it.req.FieldsData, &schemapb.FieldData{})
 		copy(it.req.FieldsData[autoIDLoc+1:], it.req.FieldsData[autoIDLoc:])
 		it.req.FieldsData[autoIDLoc] = &fieldData
