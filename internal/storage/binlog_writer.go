@@ -86,7 +86,7 @@ func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 	return writer.buffer.Bytes(), nil
 }
 
-// Close allocate buffer and release resource
+// Finish allocate buffer and release resource
 func (writer *baseBinlogWriter) Finish() error {
 	if writer.buffer != nil {
 		return nil
@@ -97,7 +97,7 @@ func (writer *baseBinlogWriter) Finish() error {
 
 	var offset int32
 	writer.buffer = new(bytes.Buffer)
-	if err := binary.Write(writer.buffer, common.Endian, int32(MagicNumber)); err != nil {
+	if err := binary.Write(writer.buffer, common.Endian, MagicNumber); err != nil {
 		return err
 	}
 	offset += int32(binary.Size(MagicNumber))
