@@ -28,7 +28,7 @@ const (
 	maxTaskNum = 1024
 )
 
-var maxParallelCompactionNum = calculeateParallel()
+var maxParallelCompactionNum = calculateParallel()
 
 type compactionExecutor struct {
 	parallelCh chan struct{}
@@ -38,7 +38,7 @@ type compactionExecutor struct {
 }
 
 // 0.5*min(8, NumCPU/2)
-func calculeateParallel() int {
+func calculateParallel() int {
 	return 2
 	//cores := runtime.NumCPU()
 	//if cores < 16 {
