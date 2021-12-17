@@ -74,7 +74,7 @@ func (m *meta) reloadFromKV() error {
 		segmentInfo := &datapb.SegmentInfo{}
 		err = proto.Unmarshal([]byte(value), segmentInfo)
 		if err != nil {
-			return fmt.Errorf("dataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
+			return fmt.Errorf("DataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
 		}
 		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
 	}
