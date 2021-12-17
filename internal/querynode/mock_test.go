@@ -63,12 +63,9 @@ const (
 	defaultNProb          = 10
 	defaultMetricType     = "JACCARD"
 
-	defaultKVRootPath         = "query-node-unittest"
-	defaultVChannel           = "query-node-unittest-channel-0"
-	defaultHistoricalVChannel = "query-node-unittest-historical-channel-0"
-	//defaultQueryChannel       = "query-node-unittest-query-channel-0"
-	//defaultQueryResultChannel = "query-node-unittest-query-result-channel-0"
-	defaultSubName = "query-node-unittest-sub-name-0"
+	defaultDMLChannel   = "query-node-unittest-DML-0"
+	defaultDeltaChannel = "query-node-unittest-delta-channel-0"
+	defaultSubName      = "query-node-unittest-sub-name-0"
 )
 
 const (
@@ -757,7 +754,7 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 			CollectionID:   defaultCollectionID,
 			PartitionID:    defaultPartitionID,
 			SegmentID:      defaultSegmentID,
-			ShardName:      defaultVChannel,
+			ShardName:      defaultDMLChannel,
 			Timestamps:     genSimpleTimestampFieldData(),
 			RowIDs:         genSimpleRowIDField(),
 			RowData:        rowData,
@@ -858,7 +855,7 @@ func genSimpleSealedSegment() (*Segment, error) {
 		defaultCollectionID,
 		defaultPartitionID,
 		defaultSegmentID,
-		defaultVChannel,
+		defaultDMLChannel,
 		defaultMsgLength)
 }
 
@@ -913,9 +910,9 @@ func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface
 		return nil, err
 	}
 	col.addVChannels([]Channel{
-		defaultHistoricalVChannel,
+		defaultDeltaChannel,
 	})
-	h.tSafeReplica.addTSafe(defaultHistoricalVChannel)
+	h.tSafeReplica.addTSafe(defaultDeltaChannel)
 	return h, nil
 }
 
@@ -940,7 +937,7 @@ func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface)
 	err = r.addSegment(defaultSegmentID,
 		defaultPartitionID,
 		defaultCollectionID,
-		defaultVChannel,
+		defaultDMLChannel,
 		segmentTypeGrowing,
 		true)
 	if err != nil {
@@ -952,9 +949,9 @@ func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface)
 		return nil, err
 	}
 	col.addVChannels([]Channel{
-		defaultVChannel,
+		defaultDMLChannel,
 	})
-	s.tSafeReplica.addTSafe(defaultVChannel)
+	s.tSafeReplica.addTSafe(defaultDMLChannel)
 	return s, nil
 }
 

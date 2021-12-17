@@ -25,8 +25,6 @@ const (
 	timestampFieldID FieldID = 1
 )
 
-const invalidTimestamp = Timestamp(0)
-
 type (
 	// UniqueID is an identifier that is guaranteed to be unique among all the collections, partitions and segments
 	UniqueID = typeutil.UniqueID
@@ -49,3 +47,11 @@ type TimeRange struct {
 	timestampMin Timestamp
 	timestampMax Timestamp
 }
+
+// loadType is load collection or load partition
+type loadType = int32
+
+const (
+	loadTypeCollection loadType = 0
+	loadTypePartition  loadType = 1
+)

@@ -17,8 +17,6 @@
 package querynode
 
 import (
-	"errors"
-
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -32,9 +30,7 @@ import (
 // filterDmNode is one of the nodes in query node flow graph
 type filterDmNode struct {
 	baseNode
-	loadType     loadType // load collection or load partition
 	collectionID UniqueID
-	partitionID  UniqueID
 	replica      ReplicaInterface
 }
 
@@ -110,36 +106,29 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 	msg.SetTraceCtx(ctx)
 	defer sp.Finish()
 
+	if msg.CollectionID != fdmNode.collectionID {
+		return nil
+	}
+
 	// check if collection and partition exist
-	collection := fdmNode.replica.hasCollection(msg.CollectionID)
-	partition := fdmNode.replica.hasPartition(msg.PartitionID)
-	if fdmNode.loadType == loadTypeCollection && !collection {
+	col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
+	if err != nil {
 		log.Debug("filter invalid delete message, collection does not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
-	if fdmNode.loadType == loadTypePartition && !partition {
-		log.Debug("filter invalid delete message, partition does not exist",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
-	}
-
-	if msg.CollectionID != fdmNode.collectionID {
-		return nil
-	}
-
-	// if the flow graph type is partition, check if the partition is target partition
-	if fdmNode.loadType == loadTypePartition && msg.PartitionID != fdmNode.partitionID {
-		log.Debug("filter invalid delete message, partition is not the target partition",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
+	if col.getLoadType() == loadTypePartition {
+		if !fdmNode.replica.hasPartition(msg.PartitionID) {
+			log.Debug("filter invalid delete message, partition does not exist",
+				zap.Any("collectionID", msg.CollectionID),
+				zap.Any("partitionID", msg.PartitionID))
+			return nil
+		}
 	}
 
 	// check if partition has been released
-	if fdmNode.loadType == loadTypeCollection {
+	if col.getLoadType() == loadTypeCollection {
 		col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
 		if err != nil {
 			log.Warn(err.Error())
@@ -170,22 +159,6 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
 	defer sp.Finish()
-	// check if collection and partition exist
-	collection := fdmNode.replica.hasCollection(msg.CollectionID)
-	partition := fdmNode.replica.hasPartition(msg.PartitionID)
-	if fdmNode.loadType == loadTypeCollection && !collection {
-		log.Debug("filter invalid insert message, collection does not exist",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
-	}
-
-	if fdmNode.loadType == loadTypePartition && !partition {
-		log.Debug("filter invalid insert message, partition does not exist",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
-	}
 
 	// check if the collection from message is target collection
 	if msg.CollectionID != fdmNode.collectionID {
@@ -195,21 +168,25 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil
 	}
 
-	// if the flow graph type is partition, check if the partition is target partition
-	if fdmNode.loadType == loadTypePartition && msg.PartitionID != fdmNode.partitionID {
-		log.Debug("filter invalid insert message, partition is not the target partition",
+	// check if collection and partition exist
+	col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
+	if err != nil {
+		log.Debug("filter invalid insert message, collection does not exist",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil
 	}
-
-	// check if partition has been released
-	if fdmNode.loadType == loadTypeCollection {
-		col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
-		if err != nil {
-			log.Warn(err.Error())
+	if col.getLoadType() == loadTypePartition {
+		if !fdmNode.replica.hasPartition(msg.PartitionID) {
+			log.Debug("filter invalid insert message, partition does not exist",
+				zap.Any("collectionID", msg.CollectionID),
+				zap.Any("partitionID", msg.PartitionID))
 			return nil
 		}
+	}
+
+	// check if partition has been released
+	if col.getLoadType() == loadTypeCollection {
 		if err = col.checkReleasedPartitions([]UniqueID{msg.PartitionID}); err != nil {
 			log.Warn(err.Error())
 			return nil
@@ -257,10 +234,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 }
 
 // newFilteredDmNode returns a new filterDmNode
-func newFilteredDmNode(replica ReplicaInterface,
-	loadType loadType,
-	collectionID UniqueID,
-	partitionID UniqueID) *filterDmNode {
+func newFilteredDmNode(replica ReplicaInterface, collectionID UniqueID) *filterDmNode {
 
 	maxQueueLength := Params.FlowGraphMaxQueueLength
 	maxParallelism := Params.FlowGraphMaxParallelism
@@ -269,17 +243,9 @@ func newFilteredDmNode(replica ReplicaInterface,
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	if loadType != loadTypeCollection && loadType != loadTypePartition {
-		err := errors.New("invalid flow graph type")
-		log.Warn(err.Error())
-		return nil
-	}
-
 	return &filterDmNode{
 		baseNode:     baseNode,
-		loadType:     loadType,
 		collectionID: collectionID,
-		partitionID:  partitionID,
 		replica:      replica,
 	}
 }

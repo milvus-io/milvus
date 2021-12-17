@@ -36,7 +36,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)
@@ -57,7 +57,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)
@@ -88,7 +88,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeGrowing,
 			true)
 		assert.NoError(t, err)
@@ -108,7 +108,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)
@@ -145,7 +145,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)
@@ -171,7 +171,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)
@@ -197,7 +197,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)
@@ -222,7 +222,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
-			defaultVChannel,
+			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
 		assert.NoError(t, err)

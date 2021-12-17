@@ -112,14 +112,14 @@ func genSimpleSealedSegmentsChangeInfoMsg() *msgstream.SealedSegmentsChangeInfoM
 
 func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 	// register
-	queryCollection.tSafeWatchers[defaultVChannel] = newTSafeWatcher()
-	queryCollection.tSafeWatchers[defaultHistoricalVChannel] = newTSafeWatcher()
+	queryCollection.tSafeWatchers[defaultDMLChannel] = newTSafeWatcher()
+	queryCollection.tSafeWatchers[defaultDeltaChannel] = newTSafeWatcher()
 
-	err := queryCollection.streaming.tSafeReplica.setTSafe(defaultVChannel, timestamp)
+	err := queryCollection.streaming.tSafeReplica.setTSafe(defaultDMLChannel, timestamp)
 	if err != nil {
 		return err
 	}
-	return queryCollection.historical.tSafeReplica.setTSafe(defaultHistoricalVChannel, timestamp)
+	return queryCollection.historical.tSafeReplica.setTSafe(defaultDeltaChannel, timestamp)
 }
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {
@@ -487,14 +487,14 @@ func TestQueryCollection_tSafeWatcher(t *testing.T) {
 	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 	assert.NoError(t, err)
 
-	err = queryCollection.addTSafeWatcher(defaultVChannel)
+	err = queryCollection.addTSafeWatcher(defaultDMLChannel)
 	assert.NoError(t, err)
 
-	err = queryCollection.removeTSafeWatcher(defaultVChannel)
+	err = queryCollection.removeTSafeWatcher(defaultDMLChannel)
 	assert.NoError(t, err)
 
 	// no tSafe watcher
-	err = queryCollection.removeTSafeWatcher(defaultVChannel)
+	err = queryCollection.removeTSafeWatcher(defaultDMLChannel)
 	assert.Error(t, err)
 }
 
@@ -572,7 +572,8 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 		assert.NoError(t, err)
 
 		timestamp := Timestamp(1000)
-		updateTSafe(queryCollection, timestamp)
+		err = updateTSafe(queryCollection, timestamp)
+		assert.NoError(t, err)
 
 		go queryCollection.doUnsolvedQueryMsg()
 
@@ -588,7 +589,8 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 		assert.NoError(t, err)
 
 		timestamp := Timestamp(1000)
-		updateTSafe(queryCollection, timestamp)
+		err = updateTSafe(queryCollection, timestamp)
+		assert.NoError(t, err)
 
 		go queryCollection.doUnsolvedQueryMsg()
 

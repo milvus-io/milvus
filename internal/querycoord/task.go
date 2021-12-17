@@ -451,7 +451,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				watchRequest := &querypb.WatchDmChannelsRequest{
 					Base:         msgBase,
 					CollectionID: collectionID,
-					PartitionID:  partitionID,
+					PartitionIDs: toLoadPartitionIDs,
 					Infos:        []*datapb.VchannelInfo{info},
 					Schema:       lct.Schema,
 				}
@@ -795,7 +795,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			watchDmRequest := &querypb.WatchDmChannelsRequest{
 				Base:         msgBase,
 				CollectionID: collectionID,
-				PartitionID:  partitionID,
+				PartitionIDs: partitionIDs,
 				Infos:        []*datapb.VchannelInfo{info},
 				Schema:       lpt.Schema,
 			}
@@ -1291,7 +1291,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 		req := &querypb.WatchDmChannelsRequest{
 			Base:         msgBase,
 			CollectionID: collectionID,
-			PartitionID:  wdt.PartitionID,
+			PartitionIDs: wdt.PartitionIDs,
 			Infos:        []*datapb.VchannelInfo{info},
 			Schema:       wdt.Schema,
 			ExcludeInfos: wdt.ExcludeInfos,
@@ -1801,7 +1801,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 									watchRequest := &querypb.WatchDmChannelsRequest{
 										Base:         msgBase,
 										CollectionID: collectionID,
-										PartitionID:  partitionID,
+										PartitionIDs: partitionIDs,
 										Infos:        []*datapb.VchannelInfo{channelInfo},
 										Schema:       schema,
 									}

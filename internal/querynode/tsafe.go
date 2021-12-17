@@ -17,7 +17,6 @@
 package querynode
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 
@@ -68,7 +67,7 @@ func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) error {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
 	if ts.watcher != nil {
-		return errors.New(fmt.Sprintln("tSafeWatcher has been existed, channel = ", ts.channel))
+		return fmt.Errorf("tSafeWatcher has been existed, channel = %s", ts.channel)
 	}
 	ts.watcher = t
 	return nil
