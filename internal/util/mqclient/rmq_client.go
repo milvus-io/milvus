@@ -46,7 +46,7 @@ func (rc *rmqClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	return &rp, nil
 }
 
-//TODO fishpenguin: implementation
+// CreateReader creates a rocksmq reader from reader options
 func (rc *rmqClient) CreateReader(options ReaderOptions) (Reader, error) {
 	opts := rocksmq.ReaderOptions{
 		Topic:                   options.Topic,
