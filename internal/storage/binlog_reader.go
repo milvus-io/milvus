@@ -26,7 +26,7 @@ type BinlogReader struct {
 	isClose   bool
 }
 
-// NextEventReader iters all events reader to read the binlog file.
+// NextEventReader iterates all events' reader to read the binlog file.
 func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.isClose {
 		return nil, errors.New("bin log reader is closed")
