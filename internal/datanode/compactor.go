@@ -204,7 +204,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		v, ok := vInter.(*storage.Value)
 		if !ok {
 			log.Warn("transfer interface to Value wrong")
-			return nil, 0, errors.New("Unexpected error")
+			return nil, 0, errors.New("unexpected error")
 		}
 
 		if _, ok := delta[v.PK]; ok {
@@ -214,7 +214,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		row, ok := v.Value.(map[UniqueID]interface{})
 		if !ok {
 			log.Warn("transfer interface to map wrong")
-			return nil, 0, errors.New("Unexpected error")
+			return nil, 0, errors.New("unexpected error")
 		}
 
 		for fID, vInter := range row {
