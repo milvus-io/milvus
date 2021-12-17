@@ -119,6 +119,7 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 	}
 }
 
+// GetCollection returns collection info with specified collection id
 func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) *datapb.CollectionInfo {
 	coll := h.s.meta.GetCollection(collectionID)
 	if coll != nil {
