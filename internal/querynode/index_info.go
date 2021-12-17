@@ -73,6 +73,7 @@ func (info *indexInfo) getIndexName() string {
 	return info.indexName
 }
 
+// getIndexID returns the index id
 func (info *indexInfo) getIndexID() UniqueID {
 	return info.indexID
 }
