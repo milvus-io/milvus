@@ -152,3 +152,17 @@ pull_request_rules:
       label:
         add:
           - ci-passed
+
+
+
+  - name: Remove ci-passed label when rerun test
+    conditions:
+      - base=master
+      - or:
+        - "status-success!=Code Checker AMD64 Ubuntu 18.04"
+        - "status-success!=Build and test AMD64 Ubuntu 18.04"
+        - "status-success!=continuous-integration/jenkins/pr-merge"        
+    actions:
+      label:
+        remove:
+          - ci-passed
