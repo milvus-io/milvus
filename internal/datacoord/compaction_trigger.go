@@ -143,7 +143,10 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 				continue
 			}
 			cancel()
-			t.triggerCompaction(tt)
+			err = t.triggerCompaction(tt)
+			if err != nil {
+				log.Warn("unable to triggerCompaction", zap.Error(err))
+			}
 		}
 	}
 }
