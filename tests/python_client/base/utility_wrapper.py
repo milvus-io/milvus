@@ -121,6 +121,38 @@ class ApiUtilityWrapper:
                                        timeout=timeout, using=using).run()
         return res, check_result
 
+    def create_alias(self, collection_name, alias, timeout=None, using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.create_alias, collection_name, alias, timeout, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       timeout=timeout, using=using).run()
+        return res, check_result
+
+    def drop_alias(self, alias, timeout=None, using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.drop_alias, alias, timeout, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       timeout=timeout, using=using).run()
+        return res, check_result
+
+    def alter_alias(self, collection_name, alias, timeout=None, using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.alter_alias, collection_name, alias, timeout, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       timeout=timeout, using=using).run()
+        return res, check_result
+
+    def list_aliases(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.list_aliases, collection_name, timeout, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       timeout=timeout, using=using).run()
+        return res, check_result
+
     def mkts_from_datetime(self, d_time=None, milliseconds=0., delta=None):
         d_time = datetime.now() if d_time is None else d_time
         res, _ = api_request([self.ut.mkts_from_datetime, d_time, milliseconds, delta])
