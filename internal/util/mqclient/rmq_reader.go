@@ -27,6 +27,7 @@ func (rr *rmqReader) Next(ctx context.Context) (Message, error) {
 	return msg, nil
 }
 
+// HasNext returns whether reader has next message
 func (rr *rmqReader) HasNext() bool {
 	return rr.r.HasNext()
 }
