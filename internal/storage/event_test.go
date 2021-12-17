@@ -27,28 +27,6 @@ import (
 )
 
 /* #nosec G103 */
-func checkEventHeader(
-	t *testing.T,
-	buf []byte,
-	tc EventTypeCode,
-	svrID int32,
-	length int32) {
-	ts := UnsafeReadInt64(buf, 0)
-	assert.Greater(t, ts, int64(0))
-	curTs := time.Now().UnixNano() / int64(time.Millisecond)
-	curTs = int64(tsoutil.ComposeTS(curTs, 0))
-	assert.GreaterOrEqual(t, curTs, ts)
-	utc := UnsafeReadInt8(buf, int(unsafe.Sizeof(ts)))
-	assert.Equal(t, EventTypeCode(utc), tc)
-	usID := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)))
-	assert.Equal(t, usID, svrID)
-	elen := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)))
-	assert.Equal(t, elen, length)
-	nPos := UnsafeReadInt32(buf, int(unsafe.Sizeof(ts)+unsafe.Sizeof(utc)+unsafe.Sizeof(usID)+unsafe.Sizeof(elen)))
-	assert.Equal(t, nPos, length)
-}
-
-/* #nosec G103 */
 func TestDescriptorEvent(t *testing.T) {
 	desc := newDescriptorEvent()
 
