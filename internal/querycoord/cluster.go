@@ -266,7 +266,7 @@ func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *q
 
 		return nil
 	}
-	return fmt.Errorf("loadSegments: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("loadSegments: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in *querypb.ReleaseSegmentsRequest) error {
