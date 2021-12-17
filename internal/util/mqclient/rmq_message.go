@@ -35,6 +35,7 @@ func (rm *rmqMessage) Payload() []byte {
 	return rm.msg.Payload
 }
 
+// ID returns the id of rocksmq message
 func (rm *rmqMessage) ID() MessageID {
 	return &rmqID{messageID: rm.msg.MsgID}
 }
