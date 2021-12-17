@@ -183,80 +183,84 @@ func (p *knowhereConfig) Init(bp *BaseParamTable) {
 type msgChannelConfig struct {
 	BaseParams *BaseParamTable
 
-	ClusterChannelPrefix string
-	MsgChannelSubName    string
-	TimeTickChannel      string
-	StatisticsChannel    string
-	DmlChannelName       string
-	DeltaChannelName     string
+	ClusterPrefix          string
+	RootCoordTimeTick      string
+	RootCoordStatistics    string
+	RootCoordDml           string
+	RootCoordDelta         string
+	Search                 string
+	SearchResult           string
+	ProxyTimeTick          string
+	QueryTimeTick          string
+	QueryNodeStats         string
+	Cmd                    string
+	DataCoordInsertChannel string
+	DataCoordStatistic     string
+	DataCoordTimeTick      string
+	DataCoordSegmentInfo   string
+
+	SkipQueryChannelRecovery string
+
+	RootCoordSubNamePrefix string
+	ProxySubNamePrefix     string
+	QueryNodeSubNamePrefix string
+	DataNodeSubNamePrefix  string
+	DataCoordSubNamePrefix string
 }
 
 func (p *msgChannelConfig) Init(bp *BaseParamTable) {
 	p.BaseParams = bp
 	// Has to init global msgchannel prefix before other channel names
-	p.initClusterMsgChannelPrefix()
-	p.initMsgChannelSubName()
-	p.initTimeTickChannel()
-	p.initStatisticsChannelName()
-	p.initDmlChannelName()
-	p.initDeltaChannelName()
+	p.initClusterPrefix()
+	p.initRootCoordTimeTick()
+	p.initRootCoordStatistics()
+	p.initRootCoordDml()
+	p.initRootCoordDelta()
+
+	p.initRootCoordSubNamePrefix()
 }
 
-func (p *msgChannelConfig) initClusterMsgChannelPrefix() {
+func (p *msgChannelConfig) initClusterPrefix() {
 	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
 	if err != nil {
 		panic(err)
 	}
-	p.ClusterChannelPrefix = config
+	p.ClusterPrefix = config
 }
 
-func (p *msgChannelConfig) initMsgChannelSubName() {
-	config, err := p.BaseParams.Load("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
+func (p *msgChannelConfig) initChanNamePrefix(cfg string) string {
+	value, err := p.BaseParams.Load(cfg)
 	if err != nil {
 		panic(err)
 	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.MsgChannelSubName = strings.Join(s, "-")
+	s := []string{p.ClusterPrefix, value}
+	return strings.Join(s, "-")
 }
 
-func (p *msgChannelConfig) initTimeTickChannel() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.TimeTickChannel = strings.Join(s, "-")
+// --- msgChannel.chanNamePrefix ---
+func (p *msgChannelConfig) initRootCoordTimeTick() {
+	p.RootCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordTimeTick")
 }
 
-func (p *msgChannelConfig) initStatisticsChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordStatistics")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.StatisticsChannel = strings.Join(s, "-")
+func (p *msgChannelConfig) initRootCoordStatistics() {
+	p.RootCoordStatistics = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordStatistics")
 }
 
-func (p *msgChannelConfig) initDmlChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DmlChannelName = strings.Join(s, "-")
+func (p *msgChannelConfig) initRootCoordDml() {
+	p.RootCoordDml = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDml")
 }
 
-func (p *msgChannelConfig) initDeltaChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDelta")
-	if err != nil {
-		config = "rootcoord-delta"
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DeltaChannelName = strings.Join(s, "-")
+func (p *msgChannelConfig) initRootCoordDelta() {
+	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDelta")
+}
+
+// --- msgChannel.subNamePrefix ---
+func (p *msgChannelConfig) initRootCoordSubNamePrefix() {
+	p.RootCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- rootcoord ---
+// --- rootcoord ---
 type rootCoordConfig struct {
 	BaseParams *BaseParamTable
 
@@ -451,7 +455,7 @@ func (p *rootCoordConfig) initTimeTickInterval() {
 //}
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- proxy ---
+// --- proxy ---
 type proxyConfig struct {
 	BaseParams *BaseParamTable
 }
@@ -461,7 +465,7 @@ func (p *proxyConfig) Init(bp *BaseParamTable) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- querycoord ---
+// --- querycoord ---
 type queryCoordConfig struct {
 	BaseParams *BaseParamTable
 }
@@ -471,7 +475,7 @@ func (p *queryCoordConfig) Init(bp *BaseParamTable) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- querynode ---
+// --- querynode ---
 type queryNodeConfig struct {
 	BaseParams *BaseParamTable
 }
@@ -481,7 +485,7 @@ func (p *queryNodeConfig) Init(bp *BaseParamTable) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- datacoord ---
+// --- datacoord ---
 type dataCoordConfig struct {
 	BaseParams *BaseParamTable
 }
@@ -491,7 +495,7 @@ func (p *dataCoordConfig) Init(bp *BaseParamTable) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- datanode ---
+// --- datanode ---
 type dataNodeConfig struct {
 	BaseParams *BaseParamTable
 }
@@ -501,7 +505,7 @@ func (p *dataNodeConfig) Init(bp *BaseParamTable) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- indexcoord ---
+// --- indexcoord ---
 type indexCoordConfig struct {
 	BaseParams *BaseParamTable
 }
@@ -511,7 +515,7 @@ func (p *indexCoordConfig) Init(bp *BaseParamTable) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- indexnode ---
+// --- indexnode ---
 type indexNodeConfig struct {
 	BaseParams *BaseParamTable
 }
@@ -521,7 +525,7 @@ func (p *indexNodeConfig) Init(bp *BaseParamTable) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// -- grpc ---
+// --- grpc ---
 type grpcConfig struct {
 	BaseParamTable
 

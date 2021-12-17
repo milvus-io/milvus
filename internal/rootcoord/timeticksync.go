@@ -73,9 +73,9 @@ func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
 
 func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
 	// initialize dml channels used for insert
-	dmlChannels := newDmlChannels(ctx, factory, Params.MsgChannelCfg.DmlChannelName, Params.RootCoordCfg.DmlChannelNum)
+	dmlChannels := newDmlChannels(ctx, factory, Params.MsgChannelCfg.RootCoordDml, Params.RootCoordCfg.DmlChannelNum)
 	// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels
-	deltaChannels := newDmlChannels(ctx, factory, Params.MsgChannelCfg.DeltaChannelName, Params.RootCoordCfg.DmlChannelNum)
+	deltaChannels := newDmlChannels(ctx, factory, Params.MsgChannelCfg.RootCoordDelta, Params.RootCoordCfg.DmlChannelNum)
 
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
@@ -85,7 +85,7 @@ func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory 
 		var err error
 		deltaChanNames := make([]string, len(chanNames))
 		for i, chanName := range chanNames {
-			deltaChanNames[i], err = ConvertChannelName(chanName, Params.MsgChannelCfg.DmlChannelName, Params.MsgChannelCfg.DeltaChannelName)
+			deltaChanNames[i], err = ConvertChannelName(chanName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
 			if err != nil {
 				log.Error("failed to convert dml channel name to delta channel name", zap.String("chanName", chanName))
 				panic("invalid dml channel name " + chanName)

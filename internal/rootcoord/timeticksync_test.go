@@ -43,8 +43,8 @@ func TestTimetickSync(t *testing.T) {
 	//}
 
 	Params.RootCoordCfg.DmlChannelNum = 2
-	Params.MsgChannelCfg.DmlChannelName = "rootcoord-dml"
-	Params.MsgChannelCfg.DeltaChannelName = "rootcoord-delta"
+	Params.MsgChannelCfg.RootCoordDml = "rootcoord-dml"
+	Params.MsgChannelCfg.RootCoordDelta = "rootcoord-delta"
 	ttSync := newTimeTickSync(ctx, session, factory, nil)
 
 	t.Run("sendToChannel", func(t *testing.T) {

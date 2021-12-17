@@ -540,13 +540,13 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.MsgChannelCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.MsgChannelCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
 	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.MsgChannelCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-	Params.MsgChannelCfg.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
-	Params.MsgChannelCfg.DeltaChannelName = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
+	Params.MsgChannelCfg.RootCoordSubNamePrefix = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	Params.MsgChannelCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
 
 	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.BaseParams.EtcdEndpoints, DialTimeout: 5 * time.Second})
 	assert.Nil(t, err)
@@ -605,7 +605,7 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.TimeTickChannel}, Params.MsgChannelCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubNamePrefix)
 	timeTickStream.Start()
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
@@ -693,7 +693,7 @@ func TestRootCoord(t *testing.T) {
 
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
-		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.MsgChannelCfg.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.MsgChannelCfg.RootCoordSubNamePrefix)
 		dmlStream.Start()
 
 		pChanMap := core.MetaTable.ListCollectionPhysicalChannels()
@@ -2212,11 +2212,11 @@ func TestRootCoord2(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.MsgChannelCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.MsgChannelCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
 	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.MsgChannelCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordSubNamePrefix = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2260,7 +2260,7 @@ func TestRootCoord2(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.TimeTickChannel}, Params.MsgChannelCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubNamePrefix)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
@@ -2298,7 +2298,7 @@ func TestRootCoord2(t *testing.T) {
 		collInfo, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		dmlStream, _ := msFactory.NewMsgStream(ctx)
-		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.MsgChannelCfg.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.MsgChannelCfg.RootCoordSubNamePrefix)
 		dmlStream.Start()
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
@@ -2480,11 +2480,11 @@ func TestCheckFlushedSegments(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.MsgChannelCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.MsgChannelCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
 	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.MsgChannelCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordSubNamePrefix = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2528,7 +2528,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.TimeTickChannel}, Params.MsgChannelCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubNamePrefix)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
@@ -2637,11 +2637,11 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.MsgChannelCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.MsgChannelCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
 	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
 	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.MsgChannelCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordSubNamePrefix = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2685,7 +2685,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.TimeTickChannel}, Params.MsgChannelCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubNamePrefix)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
