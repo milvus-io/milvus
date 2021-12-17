@@ -1725,14 +1725,14 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids_1, time_stamp_1 = \
             self.init_collection_general(prefix, True, nb, auto_id=auto_id, dim=default_dim)[0:5]
         # 2. insert for the second time
-        log.info("test_search_without_expression: inserting for the second time")
+        log.info("test_search_travel_time_without_expression: inserting for the second time")
         _, entities, _, insert_ids_2, time_stamp_2 = cf.insert_data(collection_w, nb, auto_id=auto_id,
                                                                     dim=default_dim, insert_offset=nb)[0:5]
         # 3. extract vectors inserted for the second time
         entities_list = np.array(entities[0]).tolist()
         vectors = [entities_list[i][-1] for i in range(default_nq)]
         # 4. search with insert timestamp1
-        log.info("test_search_without_expression: searching collection %s with time_stamp_1 '%d'"
+        log.info("test_search_travel_time_without_expression: searching collection %s with time_stamp_1 '%d'"
                  % (collection_w.name, time_stamp_1))
         search_res = collection_w.search(vectors, default_search_field,
                                          default_search_params, default_limit,
@@ -1741,12 +1741,12 @@ class TestCollectionSearch(TestcaseBase):
                                          check_items={"nq": default_nq,
                                                       "ids": insert_ids_1,
                                                       "limit": default_limit})[0]
-        log.info("test_search_without_expression: checking that data inserted "
+        log.info("test_search_travel_time_without_expression: checking that data inserted "
                  "after time_stamp_2 is not searched at time_stamp_1")
         for i in range(len(search_res)):
             assert insert_ids_2[i] not in search_res[i].ids
         # 5. search with insert timestamp2
-        log.info("test_search_without_expression: searching collection %s with time_stamp_2 '%d'"
+        log.info("test_search_travel_time_without_expression: searching collection %s with time_stamp_2 '%d'"
                  % (collection_w.name, time_stamp_2))
         search_res = collection_w.search(vectors, default_search_field,
                                          default_search_params, default_limit,
@@ -1755,7 +1755,7 @@ class TestCollectionSearch(TestcaseBase):
                                          check_items={"nq": default_nq,
                                                       "ids": insert_ids_1 + insert_ids_2,
                                                       "limit": default_limit})[0]
-        log.info("test_search_without_expression: checking that data inserted "
+        log.info("test_search_travel_time_without_expression: checking that data inserted "
                  "after time_stamp_2 is searched at time_stamp_2")
         for i in range(len(search_res)):
             assert insert_ids_2[i] in search_res[i].ids
