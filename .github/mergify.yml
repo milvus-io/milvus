@@ -74,10 +74,10 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for title skip ci
+  - name: Test passed for title skip e2e
     conditions:
       - base=master
-      - title~=\[skip ci\]
+      - title~=\[skip e2e\]
       - label=kind/improvement
       - files~=^(?!.*\.(go|cpp)).*$
     actions:
