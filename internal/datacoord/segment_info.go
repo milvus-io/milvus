@@ -52,8 +52,8 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	}
 }
 
-// NewSegmentsInfo create `SegmentsInfo` instance, which makes sure internal map is initialized
-// note that no mutex is wrapper so external concurrent control is needed
+// NewSegmentsInfo creates a `SegmentsInfo` instance, which makes sure internal map is initialized
+// note that no mutex is wrapped so external concurrent control is needed
 func NewSegmentsInfo() *SegmentsInfo {
 	return &SegmentsInfo{segments: make(map[UniqueID]*SegmentInfo)}
 }
