@@ -61,10 +61,12 @@ type descriptorEvent struct {
 	descriptorEventData
 }
 
+// GetMemoryUsageInBytes returns descriptor Event memory usage in bytes
 func (event *descriptorEvent) GetMemoryUsageInBytes() int32 {
 	return event.descriptorEventHeader.GetMemoryUsageInBytes() + event.descriptorEventData.GetMemoryUsageInBytes()
 }
 
+// Write writes descriptor event into buffer
 func (event *descriptorEvent) Write(buffer io.Writer) error {
 	err := event.descriptorEventData.FinishExtra()
 	if err != nil {
