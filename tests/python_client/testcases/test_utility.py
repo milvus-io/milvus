@@ -76,8 +76,8 @@ class TestUtilityParams(TestcaseBase):
                 c_name,
                 check_task=CheckTasks.err_res,
                 check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"})
-        # elif not isinstance(c_name, str):
-        #     self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items={ct.err_code: 1, ct.err_msg: "illegal"})
+        # elif not isinstance(c_name, str): self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
+        # check_items={ct.err_code: 1, ct.err_msg: "illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_collection_name_invalid(self, get_invalid_collection_name):
@@ -141,11 +141,9 @@ class TestUtilityParams(TestcaseBase):
         expected: raise exception
         """
         pass
-        # self._connect()
-        # c_name = get_invalid_collection_name
-        # ut = ApiUtilityWrapper()
-        # if isinstance(c_name, str) and c_name:
-        #     ex, _ = ut.index_building_progress(c_name, check_items={ct.err_code: 1, ct.err_msg: "Invalid collection name"})
+        # self._connect() c_name = get_invalid_collection_name ut = ApiUtilityWrapper() if isinstance(c_name,
+        # str) and c_name: ex, _ = ut.index_building_progress(c_name, check_items={ct.err_code: 1, ct.err_msg:
+        # "Invalid collection name"})
 
     # TODO: not support index name
     @pytest.mark.tags(CaseLabel.L1)
