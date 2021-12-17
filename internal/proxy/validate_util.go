@@ -346,6 +346,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+// validateMultipleVectorFields check if schema has multiple vector fields.
 func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	vecExist := false
 	var vecName string
