@@ -73,7 +73,7 @@ func (sw *StatsWriter) StatsInt64(fieldID int64, isPrimaryKey bool, msgs []int64
 	return nil
 }
 
-// StatsReade reads stats
+// StatsReader reads stats
 type StatsReader struct {
 	buffer []byte
 }
