@@ -155,13 +155,24 @@ pull_request_rules:
 
 
 
-  - name: Remove ci-passed label when rerun test
+  - name: Remove ci-passed label when rerun code checker
     conditions:
       - base=master
+      - -files~=^(?!.*\.(go|cpp)).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 18.04"
-        - "status-success!=Build and test AMD64 Ubuntu 18.04"
-        - "status-success!=continuous-integration/jenkins/pr-merge"        
+        - "status-success!=Build and test AMD64 Ubuntu 18.04"     
+    actions:
+      label:
+        remove:
+          - ci-passed
+
+  - name: Remove ci-passed label when rerun jenkins test
+    conditions:
+      - base=master
+      - -files~=^(?!.*\.(go|cpp)).*$
+      - -title~=\[skip e2e\]
+      - "status-success!=continuous-integration/jenkins/pr-merge"        
     actions:
       label:
         remove:
