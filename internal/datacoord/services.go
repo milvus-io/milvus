@@ -951,7 +951,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	}
 
 	if len(unflushed) != 0 {
-		log.Debug("[flush state] unflushed segment ids", zap.Int64s("segment ids", unflushed), zap.Int("len", len(unflushed)))
+		log.Debug("[flush state] unflushed segment ids", zap.Int64s("segmentIDs", unflushed), zap.Int("len", len(unflushed)))
 		resp.Flushed = false
 	} else {
 		log.Debug("[flush state] all segment is flushed", zap.Int64s("segment ids", req.GetSegmentIDs()))
