@@ -71,7 +71,11 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	if reflect.ValueOf(c.server).IsNil() {
 		return nil, newError(0, "Rmq server is nil")
 	}
-	if exist, con := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName); exist {
+	exist, con, err := c.server.ExistConsumerGroup(options.Topic, options.SubscriptionName)
+	if err != nil {
+		return nil, err
+	}
+	if exist {
 		log.Debug("ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.Any("SubscriptionName", options.SubscriptionName))
 		consumer, err := getExistedConsumer(c, options, con.MsgMutex)
 		if err != nil {

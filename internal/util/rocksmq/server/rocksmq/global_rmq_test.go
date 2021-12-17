@@ -26,6 +26,7 @@ import (
 
 func Test_InitRmq(t *testing.T) {
 	name := "/tmp/rmq_init"
+	defer os.RemoveAll("/tmp/rmq_init")
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
 		endpoints = "localhost:2379"
@@ -38,6 +39,8 @@ func Test_InitRmq(t *testing.T) {
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
+	defer os.RemoveAll(name + kvSuffix)
+	defer os.RemoveAll(name)
 	err = InitRmq(name, idAllocator)
 	defer Rmq.stopRetention()
 	assert.NoError(t, err)
@@ -49,7 +52,7 @@ func Test_InitRocksMQ(t *testing.T) {
 	rmqPath := "/tmp/milvus/rdb_data_global"
 	err := os.Setenv("ROCKSMQ_PATH", rmqPath)
 	assert.Nil(t, err)
-	defer os.RemoveAll(rmqPath)
+	defer os.RemoveAll("/tmp/milvus")
 	err = InitRocksMQ()
 	defer Rmq.stopRetention()
 	assert.NoError(t, err)
@@ -73,10 +76,15 @@ func Test_InitRocksMQ(t *testing.T) {
 
 func Test_InitRocksMQError(t *testing.T) {
 	once = sync.Once{}
-	dummyPath := "/tmp/milvus/dummy"
-	os.Create(dummyPath)
+	dir := "/tmp/milvus/"
+	dummyPath := dir + "dummy"
+	err := os.MkdirAll(dir, os.ModePerm)
+	assert.NoError(t, err)
+	f, err := os.Create(dummyPath)
+	defer f.Close()
+	assert.NoError(t, err)
 	os.Setenv("ROCKSMQ_PATH", dummyPath)
-	defer os.RemoveAll(dummyPath)
-	err := InitRocksMQ()
+	defer os.RemoveAll(dir)
+	err = InitRocksMQ()
 	assert.Error(t, err)
 }

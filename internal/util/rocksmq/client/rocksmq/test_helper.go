@@ -16,10 +16,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/allocator"
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
-	rocksmq "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
+	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 
 	"go.uber.org/zap"
@@ -45,23 +43,9 @@ func newMockClient() *client {
 	return client
 }
 
-func initIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
-	rocksdbKV, err := rocksdbkv.NewRocksdbKV(kvPath)
-	if err != nil {
-		panic(err)
-	}
-	idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
-	_ = idAllocator.Initialize()
-	return idAllocator
-}
-
 func newRocksMQ(rmqPath string) server.RocksMQ {
-	kvPath := rmqPath + "_kv"
-	idAllocator := initIDAllocator(kvPath)
-
 	rocksdbPath := rmqPath + "_db"
-
-	rmq, _ := rocksmq.NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, _ := rocksmq.NewRocksMQ(rocksdbPath, nil)
 	return rmq
 }
 

@@ -20,30 +20,30 @@ import (
 
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 )
 
 // RocksmqRetentionTimeInMinutes is the time of retention
-var RocksmqRetentionTimeInMinutes int64 = 10080
+var RocksmqRetentionTimeInSecs int64 = 10080 * 60
 
 // RocksmqRetentionSizeInMB is the size of retention
 var RocksmqRetentionSizeInMB int64 = 8192
 
 // Const value that used to convert unit
 const (
-	MB     = 1024 * 1024
-	MINUTE = 60
+	MB = 1024 * 1024
 )
 
 // TickerTimeInSeconds is the time of expired check, default 10 minutes
-var TickerTimeInSeconds int64 = 10 * MINUTE
+var TickerTimeInSeconds int64 = 60
 
 type retentionInfo struct {
-	// key is topic name, value is last retention type
-	topics sync.Map
-	mutex  sync.RWMutex
+	// key is topic name, value is last retention time
+	topicRetetionTime sync.Map
+	mutex             sync.RWMutex
 
 	kv *rocksdbkv.RocksdbKV
 	db *gorocksdb.DB
@@ -55,21 +55,21 @@ type retentionInfo struct {
 
 func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
 	ri := &retentionInfo{
-		topics:  sync.Map{},
-		mutex:   sync.RWMutex{},
-		kv:      kv,
-		db:      db,
-		closeCh: make(chan struct{}),
-		closeWg: sync.WaitGroup{},
+		topicRetetionTime: sync.Map{},
+		mutex:             sync.RWMutex{},
+		kv:                kv,
+		db:                db,
+		closeCh:           make(chan struct{}),
+		closeWg:           sync.WaitGroup{},
 	}
 	// Get topic from topic begin id
-	beginIDKeys, _, err := ri.kv.LoadWithPrefix(TopicBeginIDTitle)
+	topicKeys, _, err := ri.kv.LoadWithPrefix(TopicIDTitle)
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range beginIDKeys {
-		topic := key[len(TopicBeginIDTitle):]
-		ri.topics.Store(topic, time.Now().Unix())
+	for _, key := range topicKeys {
+		topic := key[len(TopicIDTitle):]
+		ri.topicRetetionTime.Store(topic, time.Now().Unix())
 		topicMu.Store(topic, new(sync.Mutex))
 	}
 	return ri, nil
@@ -79,7 +79,6 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 // Because loadRetentionInfo may need some time, so do this asynchronously. Finally start retention goroutine.
 func (ri *retentionInfo) startRetentionInfo() {
 	// var wg sync.WaitGroup
-	ri.kv.ResetPrefixLength(FixedChannelNameLen)
 	ri.closeWg.Add(1)
 	go ri.retention()
 }
@@ -98,9 +97,9 @@ func (ri *retentionInfo) retention() error {
 			return nil
 		case t := <-ticker.C:
 			timeNow := t.Unix()
-			checkTime := atomic.LoadInt64(&RocksmqRetentionTimeInMinutes) * MINUTE / 10
+			checkTime := atomic.LoadInt64(&RocksmqRetentionTimeInSecs) / 10
 			ri.mutex.RLock()
-			ri.topics.Range(func(k, v interface{}) bool {
+			ri.topicRetetionTime.Range(func(k, v interface{}) bool {
 				topic, _ := k.(string)
 				lastRetentionTs, ok := v.(int64)
 				if !ok {
@@ -112,6 +111,7 @@ func (ri *retentionInfo) retention() error {
 					if err != nil {
 						log.Warn("Retention expired clean failed", zap.Any("error", err))
 					}
+					ri.topicRetetionTime.Store(topic, timeNow)
 				}
 				return true
 			})
@@ -136,131 +136,74 @@ func (ri *retentionInfo) Stop() {
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	var deletedAckedSize int64
-	var startID UniqueID
-	var pageStartID UniqueID
+	var pageCleaned UniqueID
 	var pageEndID UniqueID
 	var err error
 
-	fixedAckedTsKey, _ := constructKey(AckedTsTitle, topic)
-
+	fixedAckedTsKey := constructKey(AckedTsTitle, topic)
+	// calculate total acked size, simply add all page info
+	totalAckedSize, err := ri.calculateTopicAckedSize(topic)
+	if err != nil {
+		return err
+	}
+	// Quick Path, No page to check
+	if totalAckedSize == 0 {
+		log.Debug("All messages are not expired, skip retention because no ack", zap.Any("topic", topic))
+		return nil
+	}
 	pageReadOpts := gorocksdb.NewDefaultReadOptions()
 	defer pageReadOpts.Destroy()
-	pageReadOpts.SetPrefixSameAsStart(true)
+	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic)
+	// ensure the iterator won't iterate to other topics
+	pageReadOpts.SetIterateUpperBound([]byte(typeutil.AddOne(pageMsgPrefix)))
+
 	pageIter := ri.kv.DB.NewIterator(pageReadOpts)
 	defer pageIter.Close()
-	pageMsgPrefix, _ := constructKey(PageMsgSizeTitle, topic)
 	pageIter.Seek([]byte(pageMsgPrefix))
-	if pageIter.Valid() {
-		pageStartID, err = strconv.ParseInt(string(pageIter.Key().Data())[FixedChannelNameLen+1:], 10, 64)
+	for ; pageIter.Valid(); pageIter.Next() {
+		pKey := pageIter.Key()
+		pageID, err := parsePageID(string(pKey.Data()))
+		if pKey != nil {
+			pKey.Free()
+		}
 		if err != nil {
 			return err
 		}
-
-		for ; pageIter.Valid(); pageIter.Next() {
-			pKey := pageIter.Key()
-			pageID, err := strconv.ParseInt(string(pKey.Data())[FixedChannelNameLen+1:], 10, 64)
-			if pKey != nil {
-				pKey.Free()
+		ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageID, 10)
+		ackedTsVal, err := ri.kv.Load(ackedTsKey)
+		if err != nil {
+			return err
+		}
+		// not acked page, TODO add TTL info there
+		if ackedTsVal == "" {
+			break
+		}
+		ackedTs, err := strconv.ParseInt(ackedTsVal, 10, 64)
+		if err != nil {
+			return err
+		}
+		if msgTimeExpiredCheck(ackedTs) {
+			pageEndID = pageID
+			pValue := pageIter.Value()
+			size, err := strconv.ParseInt(string(pValue.Data()), 10, 64)
+			if pValue != nil {
+				pValue.Free()
 			}
 			if err != nil {
 				return err
 			}
-
-			ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageID, 10)
-			ackedTsVal, err := ri.kv.Load(ackedTsKey)
-			if err != nil {
-				return err
-			}
-			if ackedTsVal == "" {
-				break
-			}
-			ackedTs, err := strconv.ParseInt(ackedTsVal, 10, 64)
-			if err != nil {
-				return err
-			}
-			if msgTimeExpiredCheck(ackedTs) {
-				pageEndID = pageID
-				pValue := pageIter.Value()
-				size, err := strconv.ParseInt(string(pValue.Data()), 10, 64)
-				if pValue != nil {
-					pValue.Free()
-				}
-				if err != nil {
-					return err
-				}
-				deletedAckedSize += size
-			} else {
-				break
-			}
+			deletedAckedSize += size
+			pageCleaned++
+		} else {
+			break
 		}
 	}
-
-	// TODO(yukun): Remove ackedTs expiredCheck one by one
-	// ackedReadOpts := gorocksdb.NewDefaultReadOptions()
-	// defer ackedReadOpts.Destroy()
-	// ackedReadOpts.SetPrefixSameAsStart(true)
-	// ackedIter := ri.kv.DB.NewIterator(ackedReadOpts)
-	// defer ackedIter.Close()
-	// if err != nil {
-	// 	return err
-	// }
-	// ackedIter.Seek([]byte(fixedAckedTsKey))
-	// if !ackedIter.Valid() {
-	// 	return nil
-	// }
-
-	// startID, err = strconv.ParseInt(string(ackedIter.Key().Data())[FixedChannelNameLen+1:], 10, 64)
-	// if err != nil {
-	// 	return err
-	// }
-	// if endID > startID {
-	// 	newPos := fixedAckedTsKey + "/" + strconv.FormatInt(endID, 10)
-	// 	ackedIter.Seek([]byte(newPos))
-	// }
-
-	// for ; ackedIter.Valid(); ackedIter.Next() {
-	// 	aKey := ackedIter.Key()
-	// 	aValue := ackedIter.Value()
-	// 	ackedTs, err := strconv.ParseInt(string(aValue.Data()), 10, 64)
-	// 	if aValue != nil {
-	// 		aValue.Free()
-	// 	}
-	// 	if err != nil {
-	// 		if aKey != nil {
-	// 			aKey.Free()
-	// 		}
-	// 		return err
-	// 	}
-	// 	if msgTimeExpiredCheck(ackedTs) {
-	// 		endID, err = strconv.ParseInt(string(aKey.Data())[FixedChannelNameLen+1:], 10, 64)
-	// 		if aKey != nil {
-	// 			aKey.Free()
-	// 		}
-	// 		if err != nil {
-	// 			return err
-	// 		}
-	// 	} else {
-	// 		if aKey != nil {
-	// 			aKey.Free()
-	// 		}
-	// 		break
-	// 	}
-	// }
-
-	if pageEndID == 0 {
-		log.Debug("All messages are not time expired")
-	}
-	log.Debug("Expired check by retention time", zap.Any("topic", topic), zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize))
-
-	ackedSizeKey := AckedSizeTitle + topic
-	totalAckedSizeVal, err := ri.kv.Load(ackedSizeKey)
-	if err != nil {
+	if err := pageIter.Err(); err != nil {
 		return err
 	}
-	totalAckedSize, err := strconv.ParseInt(totalAckedSizeVal, 10, 64)
-	if err != nil {
-		return err
-	}
+
+	log.Debug("Expired check by retention time", zap.Any("topic", topic),
+		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize), zap.Any("pageCleaned", pageCleaned))
 
 	for ; pageIter.Valid(); pageIter.Next() {
 		pValue := pageIter.Value()
@@ -278,39 +221,97 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		}
 		curDeleteSize := deletedAckedSize + size
 		if msgSizeExpiredCheck(curDeleteSize, totalAckedSize) {
-			pageEndID, err = strconv.ParseInt(pKeyStr[FixedChannelNameLen+1:], 10, 64)
+			pageEndID, err = parsePageID(pKeyStr)
 			if err != nil {
 				return err
 			}
 			deletedAckedSize += size
+			pageCleaned++
 		} else {
 			break
 		}
 	}
+	if err := pageIter.Err(); err != nil {
+		return err
+	}
+
 	if pageEndID == 0 {
-		log.Debug("All messages are not expired")
+		log.Debug("All messages are not expired, skip retention", zap.Any("topic", topic))
 		return nil
 	}
-	log.Debug("ExpiredCleanUp: ", zap.Any("topic", topic), zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize))
+	log.Debug("Expired check by message size: ", zap.Any("topic", topic),
+		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize), zap.Any("pageCleaned", pageCleaned))
+	return ri.cleanData(topic, pageEndID)
+}
 
+func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
+	fixedAckedTsKey := constructKey(AckedTsTitle, topic)
+
+	pageReadOpts := gorocksdb.NewDefaultReadOptions()
+	defer pageReadOpts.Destroy()
+	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic)
+	// ensure the iterator won't iterate to other topics
+	pageReadOpts.SetIterateUpperBound([]byte(typeutil.AddOne(pageMsgPrefix)))
+	pageIter := ri.kv.DB.NewIterator(pageReadOpts)
+	defer pageIter.Close()
+	pageIter.Seek([]byte(pageMsgPrefix))
+	var ackedSize int64
+	for ; pageIter.Valid(); pageIter.Next() {
+		key := pageIter.Key()
+		pageID, err := parsePageID(string(key.Data()))
+		if key != nil {
+			key.Free()
+		}
+		if err != nil {
+			return -1, err
+		}
+
+		// check if page is acked
+		ackedTsKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageID, 10)
+		ackedTsVal, err := ri.kv.Load(ackedTsKey)
+		if err != nil {
+			return -1, err
+		}
+		// not acked yet, break
+		// TODO, Add TTL logic here, mark it as acked if not
+		if ackedTsVal == "" {
+			break
+		}
+
+		// Get page size
+		val := pageIter.Value()
+		size, err := strconv.ParseInt(string(val.Data()), 10, 64)
+		if val != nil {
+			val.Free()
+		}
+		if err != nil {
+			return -1, err
+		}
+		ackedSize += size
+	}
+	if err := pageIter.Err(); err != nil {
+		return -1, err
+	}
+	return ackedSize, nil
+}
+
+func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
 
-	pageStartIDKey := pageMsgPrefix + "/" + strconv.FormatInt(pageStartID, 10)
+	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic)
+	fixedAckedTsKey := constructKey(AckedTsTitle, topic)
+	pageStartIDKey := pageMsgPrefix + "/"
 	pageEndIDKey := pageMsgPrefix + "/" + strconv.FormatInt(pageEndID+1, 10)
-	if pageStartID == pageEndID {
-		if pageStartID != 0 {
-			writeBatch.Delete([]byte(pageStartIDKey))
-		}
-	} else if pageStartID < pageEndID {
-		writeBatch.DeleteRange([]byte(pageStartIDKey), []byte(pageEndIDKey))
-	}
+	writeBatch.DeleteRange([]byte(pageStartIDKey), []byte(pageEndIDKey))
 
-	ackedStartIDKey := fixedAckedTsKey + "/" + strconv.Itoa(int(startID))
-	ackedEndIDKey := fixedAckedTsKey + "/" + strconv.Itoa(int(pageEndID+1))
-	if startID > pageEndID {
-		return nil
-	}
+	pageTsPrefix := constructKey(PageTsTitle, topic)
+	pageTsStartIDKey := pageTsPrefix + "/"
+	pageTsEndIDKey := pageTsPrefix + "/" + strconv.FormatInt(pageEndID+1, 10)
+	writeBatch.DeleteRange([]byte(pageTsStartIDKey), []byte(pageTsEndIDKey))
+
+	ackedStartIDKey := fixedAckedTsKey + "/"
+	ackedEndIDKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageEndID+1, 10)
 	writeBatch.DeleteRange([]byte(ackedStartIDKey), []byte(ackedEndIDKey))
 
 	ll, ok := topicMu.Load(topic)
@@ -323,26 +324,18 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 	lock.Lock()
 	defer lock.Unlock()
-	currentAckedSizeVal, err := ri.kv.Load(ackedSizeKey)
-	if err != nil {
-		return err
-	}
-	currentAckedSize, err := strconv.ParseInt(currentAckedSizeVal, 10, 64)
-	if err != nil {
-		return err
-	}
-	newAckedSize := currentAckedSize - deletedAckedSize
-	writeBatch.Put([]byte(ackedSizeKey), []byte(strconv.FormatInt(newAckedSize, 10)))
 
-	err = DeleteMessages(ri.db, topic, startID, pageEndID)
+	err := DeleteMessages(ri.db, topic, 0, pageEndID)
 	if err != nil {
 		return err
 	}
 
 	writeOpts := gorocksdb.NewDefaultWriteOptions()
 	defer writeOpts.Destroy()
-	ri.kv.DB.Write(writeOpts, writeBatch)
-
+	err = ri.kv.DB.Write(writeOpts, writeBatch)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -359,14 +352,9 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 		log.Debug("RocksMQ: combKey(" + topic + "," + strconv.FormatInt(endID, 10) + ")")
 		return err
 	}
-
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
-	if startID == endID {
-		writeBatch.Delete([]byte(startKey))
-	} else {
-		writeBatch.DeleteRange([]byte(startKey), []byte(endKey))
-	}
+	writeBatch.DeleteRange([]byte(startKey), []byte(endKey))
 	opts := gorocksdb.NewDefaultWriteOptions()
 	defer opts.Destroy()
 	err = db.Write(opts, writeBatch)
@@ -375,14 +363,19 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 	}
 
 	log.Debug("Delete message for topic: "+topic, zap.Any("startID", startID), zap.Any("endID", endID))
-
 	return nil
 }
 
 func msgTimeExpiredCheck(ackedTs int64) bool {
-	return ackedTs+atomic.LoadInt64(&RocksmqRetentionTimeInMinutes)*MINUTE < time.Now().Unix()
+	if RocksmqRetentionTimeInSecs < 0 {
+		return false
+	}
+	return ackedTs+atomic.LoadInt64(&RocksmqRetentionTimeInSecs) < time.Now().Unix()
 }
 
 func msgSizeExpiredCheck(deletedAckedSize, ackedSize int64) bool {
+	if RocksmqRetentionSizeInMB < 0 {
+		return false
+	}
 	return ackedSize-deletedAckedSize > atomic.LoadInt64(&RocksmqRetentionSizeInMB)*MB
 }

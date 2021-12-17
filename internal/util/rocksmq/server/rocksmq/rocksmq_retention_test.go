@@ -12,7 +12,6 @@
 package rocksmq
 
 import (
-	"math/rand"
 	"os"
 	"strconv"
 	"sync/atomic"
@@ -28,43 +27,30 @@ import (
 var retentionPath = "/tmp/rmq_retention/"
 
 func TestMain(m *testing.M) {
-	err := os.MkdirAll(retentionPath, os.ModePerm)
-	if err != nil {
-		log.Error("MkdirALl error for path", zap.Any("path", retentionPath))
-		return
-	}
-	atomic.StoreInt64(&TickerTimeInSeconds, 6)
 	code := m.Run()
 	os.Exit(code)
 }
 
-func genRandonName() string {
-	len := 6
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	bytes := make([]byte, len)
-	for i := 0; i < len; i++ {
-		b := r.Intn(26) + 65
-		bytes[i] = byte(b)
+// Test write data and wait for retention
+func TestRmqRetention_Basic(t *testing.T) {
+	err := os.MkdirAll(retentionPath, os.ModePerm)
+	if err != nil {
+		log.Error("MkdirAll error for path", zap.Any("path", retentionPath))
+		return
 	}
-	return string(bytes)
-}
-
-func TestRmqRetention(t *testing.T) {
+	defer os.RemoveAll(retentionPath)
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
-	defer atomic.StoreInt64(&TickerTimeInSeconds, 6)
-	kvPath := retentionPath + kvPathSuffix
-	defer os.RemoveAll(kvPath)
-	idAllocator := InitIDAllocator(kvPath)
 
 	rocksdbPath := retentionPath + dbPathSuffix
 	defer os.RemoveAll(rocksdbPath)
 	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewRocksMQ(rocksdbPath, nil)
+	defer rmq.Close()
 	assert.Nil(t, err)
 	defer rmq.stopRetention()
 
@@ -111,13 +97,147 @@ func TestRmqRetention(t *testing.T) {
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(newRes), 0)
-	//////////////////////////////////////////////////
-	// test valid value case
-	rmq.retentionInfo.topics.Store(topicName, "dummy")
+
+	// test acked size acked ts and other meta are updated as expect
+	msgSizeKey := MessageSizeTitle + topicName
+	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, msgSizeVal, "0")
+
+	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
+	keys, values, err := rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 0)
+	assert.Equal(t, len(values), 0)
+
+	pageTsSizeKey := constructKey(PageTsTitle, topicName)
+	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 0)
+	assert.Equal(t, len(values), 0)
+
+	aclTsSizeKey := constructKey(AckedTsTitle, topicName)
+	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 0)
+	assert.Equal(t, len(values), 0)
+}
+
+// Not acked message should not be purged
+func TestRmqRetention_NotConsumed(t *testing.T) {
+	err := os.MkdirAll(retentionPath, os.ModePerm)
+	if err != nil {
+		log.Error("MkdirAll error for path", zap.Any("path", retentionPath))
+		return
+	}
+	defer os.RemoveAll(retentionPath)
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 2)
+
+	rocksdbPath := retentionPath + dbPathSuffix
+	defer os.RemoveAll(rocksdbPath)
+	metaPath := retentionPath + metaPathSuffix
+	defer os.RemoveAll(metaPath)
+
+	rmq, err := NewRocksMQ(rocksdbPath, nil)
+	defer rmq.Close()
+	assert.Nil(t, err)
+	defer rmq.stopRetention()
+
+	topicName := "topic_a"
+	err = rmq.CreateTopic(topicName)
+	assert.Nil(t, err)
+	defer rmq.DestroyTopic(topicName)
+
+	msgNum := 100
+	pMsgs := make([]ProducerMessage, msgNum)
+	for i := 0; i < msgNum; i++ {
+		msg := "message_" + strconv.Itoa(i)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs[i] = pMsg
+	}
+	ids, err := rmq.Produce(topicName, pMsgs)
+	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
+
+	groupName := "test_group"
+	_ = rmq.DestroyConsumerGroup(topicName, groupName)
+	err = rmq.CreateConsumerGroup(topicName, groupName)
+
+	consumer := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName,
+	}
+	rmq.RegisterConsumer(consumer)
+
+	assert.Nil(t, err)
+	cMsgs := make([]ConsumerMessage, 0)
+	for i := 0; i < 5; i++ {
+		cMsg, err := rmq.Consume(topicName, groupName, 1)
+		assert.Nil(t, err)
+		cMsgs = append(cMsgs, cMsg[0])
+	}
+	assert.Equal(t, len(cMsgs), 5)
+	id := cMsgs[0].MsgID
+
+	aclTsSizeKey := constructKey(AckedTsTitle, topicName)
+	keys, values, err := rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 2)
+	assert.Equal(t, len(values), 2)
+
+	// wait for retention
+	checkTimeInterval := 2
 	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
+	// Seek to a previous consumed message, the message should be clean up
+	err = rmq.Seek(topicName, groupName, cMsgs[1].MsgID)
+	assert.Nil(t, err)
+	newRes, err := rmq.Consume(topicName, groupName, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(newRes), 1)
+	assert.Equal(t, newRes[0].MsgID, id+4)
+
+	// test acked size acked ts and other meta are updated as expect
+	msgSizeKey := MessageSizeTitle + topicName
+	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, msgSizeVal, "0")
+
+	// should only clean 2 pages
+	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
+	keys, values, err = rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 48)
+	assert.Equal(t, len(values), 48)
+
+	pageTsSizeKey := constructKey(PageTsTitle, topicName)
+	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	assert.NoError(t, err)
+
+	assert.Equal(t, len(keys), 48)
+	assert.Equal(t, len(values), 48)
+
+	aclTsSizeKey = constructKey(AckedTsTitle, topicName)
+	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 0)
+	assert.Equal(t, len(values), 0)
+}
+
+// Test multiple topic
+func TestRmqRetention_MultipleTopic(t *testing.T) {
+
 }
 
 func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
+	err := os.MkdirAll(retentionPath, os.ModePerm)
+	if err != nil {
+		log.Error("MkdirALl error for path", zap.Any("path", retentionPath))
+		return
+	}
+	defer os.RemoveAll(retentionPath)
 	suffix := "init"
 	kvPath := retentionPath + kvPathSuffix + suffix
 	defer os.RemoveAll(kvPath)
@@ -133,32 +253,24 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, rmq)
 
-	rmq.retentionInfo.kv.DB = nil
-	_, err = initRetentionInfo(rmq.retentionInfo.kv, rmq.retentionInfo.db)
-	assert.Error(t, err)
-}
-
-func TestRmqRetention_Complex(t *testing.T) {
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 1)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
-	kvPath := retentionPath + "kv_com"
-	defer os.RemoveAll(kvPath)
-	idAllocator := InitIDAllocator(kvPath)
-
-	rocksdbPath := retentionPath + "db_com"
-	defer os.RemoveAll(rocksdbPath)
-	metaPath := retentionPath + "meta_kv_com"
-	defer os.RemoveAll(metaPath)
-
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
-	assert.Nil(t, err)
-	defer rmq.stopRetention()
-
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
 	assert.Nil(t, err)
-	defer rmq.DestroyTopic(topicName)
+
+	rmq.Close()
+
+	rmq, err = NewRocksMQ(rocksdbPath, idAllocator)
+	assert.Nil(t, err)
+	assert.NotNil(t, rmq)
+
+	assert.Equal(t, rmq.isClosed(), false)
+	// write some data, restart and check.
+	topicName = "topic_a"
+	err = rmq.CreateTopic(topicName)
+	assert.Nil(t, err)
+	topicName = "topic_b"
+	err = rmq.CreateTopic(topicName)
+	assert.Nil(t, err)
 
 	msgNum := 100
 	pMsgs := make([]ProducerMessage, msgNum)
@@ -171,42 +283,22 @@ func TestRmqRetention_Complex(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(pMsgs), len(ids))
 
-	groupName := "test_group"
-	_ = rmq.DestroyConsumerGroup(topicName, groupName)
-	err = rmq.CreateConsumerGroup(topicName, groupName)
-
-	consumer := &Consumer{
-		Topic:     topicName,
-		GroupName: groupName,
-	}
-	rmq.RegisterConsumer(consumer)
-
-	assert.Nil(t, err)
-	cMsgs := make([]ConsumerMessage, 0)
-	for i := 0; i < msgNum; i++ {
-		cMsg, err := rmq.Consume(topicName, groupName, 1)
-		assert.Nil(t, err)
-		cMsgs = append(cMsgs, cMsg[0])
-	}
-	assert.Equal(t, len(cMsgs), msgNum)
-
-	checkTimeInterval := atomic.LoadInt64(&RocksmqRetentionTimeInMinutes) * MINUTE / 10
-	time.Sleep(time.Duration(checkTimeInterval*2) * time.Second)
-	// Seek to a previous consumed message, the message should be clean up
-	log.Debug("cMsg", zap.Any("id", cMsgs[10].MsgID))
-	err = rmq.Seek(topicName, groupName, cMsgs[10].MsgID)
-	assert.Nil(t, err)
-	newRes, err := rmq.Consume(topicName, groupName, 1)
-	assert.Nil(t, err)
-	//TODO(yukun)
-	log.Debug("Consume result", zap.Any("result len", len(newRes)))
-	// assert.NotEqual(t, newRes[0].MsgID, cMsgs[11].MsgID)
+	rmq.Close()
 }
 
 func TestRmqRetention_PageTimeExpire(t *testing.T) {
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, 0)
+	err := os.MkdirAll(retentionPath, os.ModePerm)
+	if err != nil {
+		log.Error("MkdirALl error for path", zap.Any("path", retentionPath))
+		return
+	}
+	defer os.RemoveAll(retentionPath)
+	// no retention by size
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
+	// retention by secs
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 5)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_com1"
 	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -218,7 +310,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
-	defer rmq.stopRetention()
+	defer rmq.Close()
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
@@ -226,6 +318,126 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	defer rmq.DestroyTopic(topicName)
 
 	msgNum := 100
+	pMsgs := make([]ProducerMessage, msgNum)
+	for i := 0; i < msgNum; i++ {
+		msg := "message_" + strconv.Itoa(i)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs[i] = pMsg
+	}
+	ids, err := rmq.Produce(topicName, pMsgs)
+	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
+
+	groupName := "test_group"
+	_ = rmq.DestroyConsumerGroup(topicName, groupName)
+	err = rmq.CreateConsumerGroup(topicName, groupName)
+	assert.NoError(t, err)
+
+	consumer := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName,
+	}
+	rmq.RegisterConsumer(consumer)
+
+	cMsgs := make([]ConsumerMessage, 0)
+	for i := 0; i < msgNum; i++ {
+		cMsg, err := rmq.Consume(topicName, groupName, 1)
+		assert.Nil(t, err)
+		cMsgs = append(cMsgs, cMsg[0])
+	}
+	assert.Equal(t, len(cMsgs), msgNum)
+	assert.Equal(t, cMsgs[0].MsgID, ids[0])
+	time.Sleep(time.Duration(3) * time.Second)
+
+	// insert another 100 messages which should not be cleand up
+	pMsgs2 := make([]ProducerMessage, msgNum)
+	for i := 0; i < msgNum; i++ {
+		msg := "message_" + strconv.Itoa(i+100)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs2[i] = pMsg
+	}
+	ids2, err := rmq.Produce(topicName, pMsgs2)
+	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs2), len(ids2))
+
+	assert.Nil(t, err)
+	cMsgs = make([]ConsumerMessage, 0)
+	for i := 0; i < msgNum; i++ {
+		cMsg, err := rmq.Consume(topicName, groupName, 1)
+		assert.Nil(t, err)
+		cMsgs = append(cMsgs, cMsg[0])
+	}
+	assert.Equal(t, len(cMsgs), msgNum)
+	assert.Equal(t, cMsgs[0].MsgID, ids2[0])
+
+	time.Sleep(time.Duration(3) * time.Second)
+
+	err = rmq.Seek(topicName, groupName, ids[10])
+	assert.Nil(t, err)
+	newRes, err := rmq.Consume(topicName, groupName, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(newRes), 1)
+	// point to first not consumed messages
+	assert.Equal(t, newRes[0].MsgID, ids2[0])
+
+	// test acked size acked ts and other meta are updated as expect
+	msgSizeKey := MessageSizeTitle + topicName
+	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, msgSizeVal, "0")
+
+	// 100 page left, each entity is a page
+	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
+	keys, values, err := rmq.kv.LoadWithPrefix(pageMsgSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 100)
+	assert.Equal(t, len(values), 100)
+
+	pageTsSizeKey := constructKey(PageTsTitle, topicName)
+	keys, values, err = rmq.kv.LoadWithPrefix(pageTsSizeKey)
+	assert.NoError(t, err)
+
+	assert.Equal(t, len(keys), 100)
+	assert.Equal(t, len(values), 100)
+
+	aclTsSizeKey := constructKey(AckedTsTitle, topicName)
+	keys, values, err = rmq.kv.LoadWithPrefix(aclTsSizeKey)
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 100)
+	assert.Equal(t, len(values), 100)
+}
+
+func TestRmqRetention_PageSizeExpire(t *testing.T) {
+	err := os.MkdirAll(retentionPath, os.ModePerm)
+	if err != nil {
+		log.Error("MkdirALl error for path", zap.Any("path", retentionPath))
+		return
+	}
+	defer os.RemoveAll(retentionPath)
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 1)
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, -1)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 2)
+	kvPath := retentionPath + "kv_com2"
+	os.RemoveAll(kvPath)
+	idAllocator := InitIDAllocator(kvPath)
+
+	rocksdbPath := retentionPath + "db_com2"
+	os.RemoveAll(rocksdbPath)
+	metaPath := retentionPath + "meta_kv_com2"
+	os.RemoveAll(metaPath)
+
+	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	topicName := "topic_a"
+	err = rmq.CreateTopic(topicName)
+	assert.Nil(t, err)
+	defer rmq.DestroyTopic(topicName)
+
+	// need to be larger than 1M
+	msgNum := 100000
 	pMsgs := make([]ProducerMessage, msgNum)
 	for i := 0; i < msgNum; i++ {
 		msg := "message_" + strconv.Itoa(i)
@@ -255,14 +467,12 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
 
-	checkTimeInterval := 7
-	time.Sleep(time.Duration(checkTimeInterval) * time.Second)
-	// Seek to a previous consumed message, the message should be clean up
-	log.Debug("cMsg", zap.Any("id", cMsgs[10].MsgID))
-	err = rmq.Seek(topicName, groupName, cMsgs[len(cMsgs)/2].MsgID)
+	time.Sleep(time.Duration(2) * time.Second)
+	err = rmq.Seek(topicName, groupName, ids[0])
 	assert.Nil(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
-	assert.Equal(t, len(newRes), 0)
-	// assert.NotEqual(t, newRes[0].MsgID, cMsgs[11].MsgID)
+	assert.Equal(t, len(newRes), 1)
+	// make sure clean up happens
+	assert.True(t, newRes[0].MsgID > ids[0])
 }

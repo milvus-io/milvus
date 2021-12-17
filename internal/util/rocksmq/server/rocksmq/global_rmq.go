@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
@@ -64,15 +63,6 @@ func InitRocksMQ() error {
 			}
 		}
 
-		kvname := rocksdbName + "_kv"
-		var rkv *rocksdbkv.RocksdbKV
-		rkv, finalErr = rocksdbkv.NewRocksdbKV(kvname)
-		if finalErr != nil {
-			return
-		}
-		idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rkv)
-		_ = idAllocator.Initialize()
-
 		rawRmqPageSize, err := params.Load("rocksmq.rocksmqPageSize")
 		if err == nil && rawRmqPageSize != "" {
 			rmqPageSize, err := strconv.ParseInt(rawRmqPageSize, 10, 64)
@@ -86,7 +76,7 @@ func InitRocksMQ() error {
 		if err == nil && rawRmqRetentionTimeInMinutes != "" {
 			rawRmqRetentionTimeInMinutes, err := strconv.ParseInt(rawRmqRetentionTimeInMinutes, 10, 64)
 			if err == nil {
-				atomic.StoreInt64(&RocksmqRetentionTimeInMinutes, rawRmqRetentionTimeInMinutes)
+				atomic.StoreInt64(&RocksmqRetentionTimeInSecs, rawRmqRetentionTimeInMinutes*60)
 			} else {
 				log.Warn("rocksmq.retentionTimeInMinutes is invalid, using default value 3 days")
 			}
@@ -100,9 +90,9 @@ func InitRocksMQ() error {
 				log.Warn("rocksmq.retentionSizeInMB is invalid, using default value 0")
 			}
 		}
-		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", RocksmqRetentionTimeInMinutes),
+		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
 			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
-		Rmq, finalErr = NewRocksMQ(rocksdbName, idAllocator)
+		Rmq, finalErr = NewRocksMQ(rocksdbName, nil)
 	})
 	return finalErr
 }

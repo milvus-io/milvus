@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 )
 
@@ -37,8 +38,9 @@ const (
 	LRUCacheSize = 0
 )
 
-// NewRocksdbKV returns a rockskv object
+// NewRocksdbKV returns a rockskv object, only used in test
 func NewRocksdbKV(name string) (*RocksdbKV, error) {
+	// TODO we should use multiple column family of rocks db rather than init multiple db instance
 	if name == "" {
 		return nil, errors.New("rocksdb name is nil")
 	}
@@ -48,12 +50,21 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(LRUCacheSize))
 	opts := gorocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)
+	// by default there are only 1 thread for flush compaction, which may block each other.
+	// increase to a reasonable thread numbers
+	opts.IncreaseParallelism(2)
+	// enable back ground flush
+	opts.SetMaxBackgroundFlushes(1)
 	opts.SetCreateIfMissing(true)
+	return NewRocksdbKVWithOpts(name, opts)
+}
 
+// NewRocksdbKV returns a rockskv object
+func NewRocksdbKVWithOpts(name string, opts *gorocksdb.Options) (*RocksdbKV, error) {
 	ro := gorocksdb.NewDefaultReadOptions()
-	ro.SetFillCache(false)
-
 	wo := gorocksdb.NewDefaultWriteOptions()
+
+	// only has one columnn families
 	db, err := gorocksdb.OpenDb(opts, name)
 	if err != nil {
 		return nil, err
@@ -84,7 +95,9 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 	if kv.DB == nil {
 		return "", fmt.Errorf("rocksdb instance is nil when load %s", key)
 	}
-
+	if key == "" {
+		return "", errors.New("rocksdb kv does not support load empty key")
+	}
 	value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
 	if err != nil {
 		return "", err
@@ -94,27 +107,20 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 }
 
 // LoadWithPrefix returns a batch values of keys with a prefix
-func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	if key == "" {
-		return nil, nil, errors.New("key is nil in LoadWithPrefix")
-	}
+// if prefix is "", then load every thing from the database
+func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	if kv.DB == nil {
-		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", key)
+		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)
 	}
 	kv.ReadOptions.SetPrefixSameAsStart(true)
-	kv.DB.Close()
-	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(key)))
-	var err error
-	kv.DB, err = gorocksdb.OpenDb(kv.Opts, kv.GetName())
-	if err != nil {
-		return nil, nil, err
+	if prefix != "" {
+		kv.ReadOptions.SetIterateUpperBound([]byte(typeutil.AddOne(prefix)))
 	}
-
 	iter := kv.DB.NewIterator(kv.ReadOptions)
 	defer iter.Close()
 	keys := make([]string, 0)
 	values := make([]string, 0)
-	iter.Seek([]byte(key))
+	iter.Seek([]byte(prefix))
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
@@ -127,15 +133,6 @@ func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error) {
 		return nil, nil, err
 	}
 	return keys, values, nil
-}
-
-// ResetPrefixLength will close rocksdb object and open a new rocksdb with new prefix length
-func (kv *RocksdbKV) ResetPrefixLength(len int) error {
-	kv.DB.Close()
-	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len))
-	var err error
-	kv.DB, err = gorocksdb.OpenDb(kv.Opts, kv.GetName())
-	return err
 }
 
 // MultiLoad load a batch of values by keys
@@ -160,6 +157,12 @@ func (kv *RocksdbKV) Save(key, value string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do save")
 	}
+	if key == "" {
+		return errors.New("rocksdb kv does not support empty key")
+	}
+	if value == "" {
+		return errors.New("rocksdb kv does not support empty value")
+	}
 	err := kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
 	return err
 }
@@ -179,40 +182,36 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 }
 
 // RemoveWithPrefix removes a batch of key-values with specified prefix
+// If prefix is "", then all data in the rocksdb kv will be deleted
 func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do RemoveWithPrefix")
 	}
-	kv.ReadOptions.SetPrefixSameAsStart(true)
-	kv.DB.Close()
-	kv.Opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(len(prefix)))
-	var err error
-	kv.DB, err = gorocksdb.OpenDb(kv.Opts, kv.GetName())
-	if err != nil {
-		return err
-	}
-
-	iter := kv.DB.NewIterator(kv.ReadOptions)
-	defer iter.Close()
-	iter.Seek([]byte(prefix))
-	for ; iter.Valid(); iter.Next() {
-		key := iter.Key()
-		err := kv.DB.Delete(kv.WriteOptions, key.Data())
-		key.Free()
-		if err != nil {
-			return nil
+	if len(prefix) == 0 {
+		// better to use drop column family, but as we use default column family, we just delete ["",lastKey+1)
+		readOpts := gorocksdb.NewDefaultReadOptions()
+		defer readOpts.Destroy()
+		iter := kv.DB.NewIterator(readOpts)
+		defer iter.Close()
+		// seek to the last key
+		iter.SeekToLast()
+		if iter.Valid() {
+			return kv.DeleteRange(prefix, typeutil.AddOne(string(iter.Key().Data())))
 		}
+		// nothing in the range, skip
+		return nil
 	}
-	if err := iter.Err(); err != nil {
-		return err
-	}
-	return nil
+	prefixEnd := typeutil.AddOne(prefix)
+	return kv.DeleteRange(prefix, prefixEnd)
 }
 
 // Remove is used to remove a pair of key-value
 func (kv *RocksdbKV) Remove(key string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do Remove")
+	}
+	if key == "" {
+		return errors.New("rocksdb kv does not support empty key")
 	}
 	err := kv.DB.Delete(kv.WriteOptions, []byte(key))
 	return err
@@ -254,15 +253,11 @@ func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
 	if kv.DB == nil {
 		return errors.New("Rocksdb instance is nil when do DeleteRange")
 	}
+	if startKey >= endKey {
+		return fmt.Errorf("rockskv delete range startkey must < endkey, startkey %s, endkey %s", startKey, endKey)
+	}
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
-	if len(startKey) == 0 {
-		iter := kv.DB.NewIterator(kv.ReadOptions)
-		defer iter.Close()
-		iter.SeekToFirst()
-		startKey = string(iter.Key().Data())
-	}
-
 	writeBatch.DeleteRange([]byte(startKey), []byte(endKey))
 	err := kv.DB.Write(kv.WriteOptions, writeBatch)
 	return err

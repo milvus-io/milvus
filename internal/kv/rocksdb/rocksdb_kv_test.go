@@ -108,10 +108,9 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 
 	keys, vals, err := rocksdbKV.LoadWithPrefix("abc")
 	assert.Nil(t, err)
+
 	assert.Equal(t, len(keys), 1)
 	assert.Equal(t, len(vals), 1)
-	//fmt.Println(keys)
-	//fmt.Println(vals)
 
 	err = rocksdbKV.RemoveWithPrefix("abc")
 	assert.Nil(t, err)
@@ -124,6 +123,27 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 	val, err = rocksdbKV.Load("abddqqq")
 	assert.Nil(t, err)
 	assert.Equal(t, val, "1234555")
+
+	// test remove ""
+	err = rocksdbKV.RemoveWithPrefix("")
+	assert.Nil(t, err)
+
+	// test remove from a empty cf
+	err = rocksdbKV.RemoveWithPrefix("")
+	assert.Nil(t, err)
+
+	val, err = rocksdbKV.Load("abddqqq")
+	assert.Nil(t, err)
+	assert.Equal(t, len(val), 0)
+
+	// test we can still save after drop
+	err = rocksdbKV.Save("abcd", "123")
+	assert.Nil(t, err)
+
+	val, err = rocksdbKV.Load("abcd")
+	assert.Nil(t, err)
+	assert.Equal(t, val, "123")
+
 }
 
 func TestRocksdbKV_Goroutines(t *testing.T) {
@@ -151,7 +171,7 @@ func TestRocksdbKV_Goroutines(t *testing.T) {
 	wg.Wait()
 }
 
-func TestRocksdbKV_Dummy(t *testing.T) {
+func TestRocksdbKV_DummyDB(t *testing.T) {
 	name := "/tmp/rocksdb_dummy"
 	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
 	assert.Nil(t, err)
@@ -182,5 +202,27 @@ func TestRocksdbKV_Dummy(t *testing.T) {
 
 	rocksdbkv.ReadOptions = nil
 	_, err = rocksdbkv.Load("dummy")
+	assert.Error(t, err)
+}
+
+func TestRocksdbKV_CornerCase(t *testing.T) {
+	name := "/tmp/rocksdb_corner"
+	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
+	assert.Nil(t, err)
+	defer rocksdbkv.Close()
+	defer rocksdbkv.RemoveWithPrefix("")
+	_, err = rocksdbkv.Load("")
+	assert.Error(t, err)
+	keys, values, err := rocksdbkv.LoadWithPrefix("")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 0)
+	assert.Equal(t, len(values), 0)
+	err = rocksdbkv.Save("", "")
+	assert.Error(t, err)
+	err = rocksdbkv.Save("test", "")
+	assert.Error(t, err)
+	err = rocksdbkv.Remove("")
+	assert.Error(t, err)
+	err = rocksdbkv.DeleteRange("a", "a")
 	assert.Error(t, err)
 }
