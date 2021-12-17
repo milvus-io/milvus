@@ -25,10 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
-
-	"github.com/milvus-io/milvus/internal/types"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -43,10 +39,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qn "github.com/milvus-io/milvus/internal/querynode"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GrpcServerConfig
 
 // UniqueID is an alias for type typeutil.UniqueID, used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
@@ -82,12 +83,12 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 
 // init initializes QueryNode's grpc service.
 func (s *Server) init() error {
-	Params.Init()
+	Params.InitOnce(typeutil.QueryNodeRole)
 
 	qn.Params.InitOnce()
 	qn.Params.QueryNodeIP = Params.IP
 	qn.Params.QueryNodePort = int64(Params.Port)
-	qn.Params.QueryNodeID = Params.QueryNodeID
+	//qn.Params.QueryNodeID = Params.QueryNodeID
 
 	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
@@ -256,7 +257,7 @@ func (s *Server) Run() error {
 
 // Stop stops QueryNode's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("QueryNode stop", zap.String("Address", Params.Address))
+	log.Debug("QueryNode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err

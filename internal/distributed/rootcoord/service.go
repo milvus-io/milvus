@@ -26,6 +26,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
@@ -43,10 +44,13 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"google.golang.org/grpc/keepalive"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GrpcServerConfig
 
 // Server grpc wrapper
 type Server struct {
@@ -141,10 +145,10 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
-	Params.Init()
+	Params.InitOnce(typeutil.RootCoordRole)
 
 	rootcoord.Params.InitOnce()
-	rootcoord.Params.Address = Params.Address
+	rootcoord.Params.Address = Params.GetAddress()
 	rootcoord.Params.Port = Params.Port
 	log.Debug("grpc init done ...")
 
@@ -264,7 +268,7 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	log.Debug("Rootcoord stop", zap.String("Address", Params.Address))
+	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			log.Error("Failed to close opentracing", zap.Error(err))

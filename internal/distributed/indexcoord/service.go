@@ -24,8 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/types"
-
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -37,10 +35,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GrpcServerConfig
 
 // UniqueID is an alias of int64, is used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
@@ -75,10 +77,10 @@ func (s *Server) Run() error {
 
 // init initializes IndexCoord's grpc service.
 func (s *Server) init() error {
-	Params.Init()
+	Params.InitOnce(typeutil.IndexCoordRole)
 
 	indexcoord.Params.InitOnce()
-	indexcoord.Params.Address = Params.Address
+	indexcoord.Params.Address = Params.GetAddress()
 	indexcoord.Params.Port = Params.Port
 
 	closer := trace.InitTracing("IndexCoord")
@@ -115,7 +117,7 @@ func (s *Server) start() error {
 
 // Stop stops IndexCoord's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("Indexcoord stop", zap.String("Address", Params.Address))
+	log.Debug("Indexcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err

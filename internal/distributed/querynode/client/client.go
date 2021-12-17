@@ -26,9 +26,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
+
+var Params paramtable.GrpcClientConfig
 
 // Client is the grpc client of QueryNode.
 type Client struct {
@@ -41,7 +44,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
-	Params.Init()
+	Params.InitOnce(typeutil.QueryNodeRole)
 	client := &Client{
 		addr: addr,
 		grpcClient: &grpcclient.ClientBase{

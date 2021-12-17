@@ -27,11 +27,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
+
+var Params paramtable.GrpcClientConfig
 
 // Client is the grpc client of QueryCoord.
 type Client struct {
@@ -47,7 +50,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	Params.Init()
+	Params.InitOnce(typeutil.QueryCoordRole)
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase{
 			ClientMaxRecvSize: Params.ClientMaxRecvSize,

@@ -43,7 +43,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/opentracing/opentracing-go"
 	"google.golang.org/grpc/keepalive"
 )
@@ -52,6 +54,8 @@ const (
 	// GRPCMaxMagSize is the max size of grpc message.
 	GRPCMaxMagSize = 2 << 30
 )
+
+var Params paramtable.GrpcServerConfig
 
 // Server is the Proxy Server
 type Server struct {
@@ -150,11 +154,7 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	var err error
-	Params.Init()
-	if !funcutil.CheckPortAvailable(Params.Port) {
-		Params.Port = funcutil.GetAvailablePort()
-		log.Warn("Proxy init", zap.Any("Port", Params.Port))
-	}
+	Params.InitOnce(typeutil.ProxyRole)
 
 	proxy.Params.InitOnce()
 	log.Debug("init params done ...")
@@ -163,14 +163,14 @@ func (s *Server) init() error {
 	proxy.Params.NetworkPort = Params.Port
 	proxy.Params.IP = Params.IP
 
-	proxy.Params.NetworkAddress = Params.Address
+	proxy.Params.NetworkAddress = Params.GetAddress()
 
 	closer := trace.InitTracing(fmt.Sprintf("proxy ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
 	log.Debug("proxy", zap.String("proxy host", Params.IP))
 	log.Debug("proxy", zap.Int("proxy port", Params.Port))
-	log.Debug("proxy", zap.String("proxy address", Params.Address))
+	log.Debug("proxy", zap.String("proxy address", Params.GetAddress()))
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
@@ -272,7 +272,7 @@ func (s *Server) start() error {
 
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
-	log.Debug("Proxy stop", zap.String("Address", Params.Address))
+	log.Debug("Proxy stop", zap.String("Address", Params.GetAddress()))
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {

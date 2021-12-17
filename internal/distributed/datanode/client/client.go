@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -29,7 +28,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GrpcClientConfig
 
 // Client is the grpc client for DataNode
 type Client struct {
@@ -42,7 +45,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
-	Params.Init()
+	Params.InitOnce(typeutil.DataNodeRole)
 	client := &Client{
 		addr: addr,
 		grpcClient: &grpcclient.ClientBase{

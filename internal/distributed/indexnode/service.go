@@ -25,9 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/types"
-
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
 	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
@@ -37,10 +36,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"google.golang.org/grpc"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GrpcServerConfig
 
 // Server is the grpc wrapper of IndexNode.
 type Server struct {
@@ -73,7 +76,7 @@ func (s *Server) Run() error {
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.loopWg.Done()
 
-	log.Debug("IndexNode", zap.String("network address", Params.Address), zap.Int("network port: ", grpcPort))
+	log.Debug("IndexNode", zap.String("network address", Params.GetAddress()), zap.Int("network port: ", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("IndexNode", zap.String("GrpcServer:failed to listen", err.Error()))
@@ -112,17 +115,15 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 // init initializes IndexNode's grpc service.
 func (s *Server) init() error {
 	var err error
-	Params.Init()
+	Params.InitOnce(typeutil.IndexNodeRole)
 
 	indexnode.Params.InitOnce()
 	indexnode.Params.Port = Params.Port
 	indexnode.Params.IP = Params.IP
-	indexnode.Params.Address = Params.Address
+	indexnode.Params.Address = Params.GetAddress()
 
 	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", indexnode.Params.NodeID))
 	s.closer = closer
-
-	Params.Address = Params.IP + ":" + strconv.FormatInt(int64(Params.Port), 10)
 
 	defer func() {
 		if err != nil {
@@ -168,7 +169,7 @@ func (s *Server) start() error {
 
 // Stop stops IndexNode's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("IndexNode stop", zap.String("Address", Params.Address))
+	log.Debug("IndexNode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
