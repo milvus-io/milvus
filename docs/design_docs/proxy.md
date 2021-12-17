@@ -85,7 +85,7 @@ the `ts` and inform Root Coordinator that updates the timestamp statistics.
 
 Proxy holds a cache about meta information of collections. The meta information includes `CollectionID`, `Schema`,
 `PartitionID`, etc. Components in Milvus communicate with each other using `CollectionID` and `PartitionID`, so the
-object name in request will be translated to object ID in Proxy. When the meta is not hit in cache, Proxy will update
+object name in a request will be translated to object ID in Proxy. When the meta is not hit in cache, Proxy will update
 the cache from Root Coordinator. At the same time, in order to keep the consistency of cache, when there are any changes
 of meta information in Root Coordinator, it will inform all Proxies to clear the related meta cache, and any newer
 requests will get the latest meta information.
