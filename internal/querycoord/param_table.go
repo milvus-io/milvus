@@ -31,7 +31,7 @@ import (
 // UniqueID is an alias for the Int64 type
 type UniqueID = typeutil.UniqueID
 
-// ParamTable maintains some of the environment variables that are required for the QuryCoord runtime
+// ParamTable maintains some environment variables that are required for the QuryCoord runtime
 type ParamTable struct {
 	paramtable.BaseTable
 
