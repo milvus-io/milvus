@@ -36,7 +36,7 @@ func getFilterDMNode(ctx context.Context) (*filterDmNode, error) {
 	}
 
 	streaming.addExcludedSegments(defaultCollectionID, nil)
-	return newFilteredDmNode(streaming, loadTypeCollection, defaultCollectionID, defaultPartitionID), nil
+	return newFilteredDmNode(streaming, defaultCollectionID), nil
 }
 
 func TestFlowGraphFilterDmNode_filterDmNode(t *testing.T) {
@@ -45,12 +45,6 @@ func TestFlowGraphFilterDmNode_filterDmNode(t *testing.T) {
 	fg, err := getFilterDMNode(ctx)
 	assert.NoError(t, err)
 	fg.Name()
-}
-
-func TestFlowGraphFilterDmNode_invalidLoadType(t *testing.T) {
-	const invalidLoadType = -1
-	fg := newFilteredDmNode(nil, invalidLoadType, defaultCollectionID, defaultPartitionID)
-	assert.Nil(t, fg)
 }
 
 func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
@@ -82,7 +76,11 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 		msg.PartitionID = UniqueID(1000)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
-		fg.loadType = loadTypePartition
+
+		col, err := fg.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypePartition)
+
 		res := fg.filterInvalidInsertMessage(msg)
 		assert.Nil(t, res)
 	})
@@ -93,17 +91,6 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
-		res := fg.filterInvalidInsertMessage(msg)
-		assert.Nil(t, res)
-	})
-
-	t.Run("test not target partition", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
-		assert.NoError(t, err)
-		fg, err := getFilterDMNode(ctx)
-		assert.NoError(t, err)
-		fg.loadType = loadTypePartition
-		fg.partitionID = UniqueID(1000)
 		res := fg.filterInvalidInsertMessage(msg)
 		assert.Nil(t, res)
 	})
@@ -201,7 +188,11 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 		msg.PartitionID = UniqueID(1000)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
-		fg.loadType = loadTypePartition
+
+		col, err := fg.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypePartition)
+
 		res := fg.filterInvalidDeleteMessage(msg)
 		assert.Nil(t, res)
 	})
@@ -212,17 +203,6 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
-		res := fg.filterInvalidDeleteMessage(msg)
-		assert.Nil(t, res)
-	})
-
-	t.Run("test delete not target partition", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
-		assert.NoError(t, err)
-		fg, err := getFilterDMNode(ctx)
-		assert.NoError(t, err)
-		fg.loadType = loadTypePartition
-		fg.partitionID = UniqueID(1000)
 		res := fg.filterInvalidDeleteMessage(msg)
 		assert.Nil(t, res)
 	})

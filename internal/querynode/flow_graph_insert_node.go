@@ -100,11 +100,16 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 1. hash insertMessages to insertData
 	for _, task := range iMsg.insertMessages {
-		// check if partition exists, if not, create partition
-		if hasPartition := iNode.streamingReplica.hasPartition(task.PartitionID); !hasPartition {
-			err := iNode.streamingReplica.addPartition(task.CollectionID, task.PartitionID)
+		// if loadType is loadCollection, check if partition exists, if not, create partition
+		col, err := iNode.streamingReplica.getCollectionByID(task.CollectionID)
+		if err != nil {
+			log.Error(err.Error())
+			continue
+		}
+		if col.getLoadType() == loadTypeCollection {
+			err = iNode.streamingReplica.addPartition(task.CollectionID, task.PartitionID)
 			if err != nil {
-				log.Warn(err.Error())
+				log.Error(err.Error())
 				continue
 			}
 		}

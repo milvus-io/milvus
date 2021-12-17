@@ -31,15 +31,15 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 
 	genServiceTimeNode := func() *serviceTimeNode {
 		tSafe := newTSafeReplica()
-		tSafe.addTSafe(defaultVChannel)
+		tSafe.addTSafe(defaultDMLChannel)
 
 		fac, err := genFactory()
 		assert.NoError(t, err)
 
 		node := newServiceTimeNode(ctx,
 			tSafe,
-			loadTypeCollection,
-			defaultVChannel,
+			defaultCollectionID,
+			defaultDMLChannel,
 			fac)
 		return node
 	}
@@ -58,7 +58,6 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 
 	t.Run("test operate of loadTypePartition", func(t *testing.T) {
 		node := genServiceTimeNode()
-		node.loadType = loadTypePartition
 		msg := &serviceTimeMsg{
 			timeRange: TimeRange{
 				timestampMin: 0,
@@ -83,7 +82,7 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 
 	t.Run("test no tSafe", func(t *testing.T) {
 		node := genServiceTimeNode()
-		node.tSafeReplica.removeTSafe(defaultVChannel)
+		node.tSafeReplica.removeTSafe(defaultDMLChannel)
 		msg := &serviceTimeMsg{
 			timeRange: TimeRange{
 				timestampMin: 0,

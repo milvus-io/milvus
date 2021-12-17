@@ -132,7 +132,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		},
 		NodeID:       0,
 		CollectionID: defaultCollectionID,
-		PartitionID:  defaultPartitionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
 		Schema:       schema,
 	}
 

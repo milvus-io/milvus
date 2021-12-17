@@ -51,7 +51,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 
 	firstReq := &querypb.WatchDmChannelsRequest{
 		CollectionID: defaultCollectionID,
-		PartitionID:  defaultPartitionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
 		Infos: []*datapb.VchannelInfo{
 			{
 				ChannelName: "test1",
@@ -60,7 +60,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	}
 	secondReq := &querypb.WatchDmChannelsRequest{
 		CollectionID: defaultCollectionID,
-		PartitionID:  defaultPartitionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
 		Infos: []*datapb.VchannelInfo{
 			{
 				ChannelName: "test2",

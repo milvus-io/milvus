@@ -33,7 +33,7 @@ func getFilterDeleteNode(ctx context.Context) (*filterDeleteNode, error) {
 	}
 
 	historical.addExcludedSegments(defaultCollectionID, nil)
-	return newFilteredDeleteNode(historical, defaultCollectionID, defaultPartitionID), nil
+	return newFilteredDeleteNode(historical, defaultCollectionID), nil
 }
 
 func TestFlowGraphFilterDeleteNode_filterDeleteNode(t *testing.T) {

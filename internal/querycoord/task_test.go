@@ -140,7 +140,7 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 		},
 		NodeID:       nodeID,
 		CollectionID: defaultCollectionID,
-		PartitionID:  defaultPartitionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
 		Schema:       schema,
 		Infos:        []*datapb.VchannelInfo{vChannelInfo},
 	}

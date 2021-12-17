@@ -25,36 +25,36 @@ import (
 func TestTSafeReplica(t *testing.T) {
 	t.Run("test valid", func(t *testing.T) {
 		replica := newTSafeReplica()
-		replica.addTSafe(defaultVChannel)
+		replica.addTSafe(defaultDMLChannel)
 		watcher := newTSafeWatcher()
 		assert.NotNil(t, watcher)
 
-		err := replica.registerTSafeWatcher(defaultVChannel, watcher)
+		err := replica.registerTSafeWatcher(defaultDMLChannel, watcher)
 		assert.NoError(t, err)
 
 		timestamp := Timestamp(1000)
-		err = replica.setTSafe(defaultVChannel, timestamp)
+		err = replica.setTSafe(defaultDMLChannel, timestamp)
 		assert.NoError(t, err)
 
-		resT, err := replica.getTSafe(defaultVChannel)
+		resT, err := replica.getTSafe(defaultDMLChannel)
 		assert.NoError(t, err)
 		assert.Equal(t, timestamp, resT)
 
-		replica.removeTSafe(defaultVChannel)
-		_, err = replica.getTSafe(defaultVChannel)
+		replica.removeTSafe(defaultDMLChannel)
+		_, err = replica.getTSafe(defaultDMLChannel)
 		assert.Error(t, err)
 	})
 
 	t.Run("test invalid", func(t *testing.T) {
 		replica := newTSafeReplica()
 
-		err := replica.registerTSafeWatcher(defaultVChannel, nil)
+		err := replica.registerTSafeWatcher(defaultDMLChannel, nil)
 		assert.Error(t, err)
 
-		_, err = replica.getTSafe(defaultVChannel)
+		_, err = replica.getTSafe(defaultDMLChannel)
 		assert.Error(t, err)
 
-		err = replica.setTSafe(defaultVChannel, Timestamp(1000))
+		err = replica.setTSafe(defaultDMLChannel, Timestamp(1000))
 		assert.Error(t, err)
 	})
 }
