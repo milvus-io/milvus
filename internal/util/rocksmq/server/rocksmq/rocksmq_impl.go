@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,29 +41,42 @@ type UniqueID = typeutil.UniqueID
 // RmqState Rocksmq state
 type RmqState = int64
 
-// RocksmqPageSize is the size of a message page, default 2GB
-var RocksmqPageSize int64 = 2 << 30
+// RocksmqPageSize is the size of a message page, default 256MB
+var RocksmqPageSize int64 = 256 << 20
 
 // Const variable that will be used in rocksmqs
 const (
-	DefaultMessageID        = "-1"
-	FixedChannelNameLen     = 320
-	RocksDBLRUCacheCapacity = 0
+	DefaultMessageID    = -1
+	FixedChannelNameLen = 320
+
+	// TODO make it configable
+	RocksDBLRUCacheCapacity = 1 << 30
 
 	kvSuffix = "_meta_kv"
 
-	MessageSizeTitle  = "message_size/"
-	PageMsgSizeTitle  = "page_message_size/"
-	TopicBeginIDTitle = "topic_begin_id/"
-	BeginIDTitle      = "begin_id/"
-	AckedTsTitle      = "acked_ts/"
-	AckedSizeTitle    = "acked_size/"
-	LastRetTsTitle    = "last_retention_ts/"
+	//  topic_begin_id/topicName
+	// topic begin id record a topic is valid, create when topic is created, cleaned up on destroy topic
+	TopicIDTitle = "topic_id/"
 
-	CurrentIDSuffix  = "current_id"
+	// message_size/topicName record the current page message size, once current message size > RocksMq size, reset this value and open a new page
+	// TODO should be cached
+	MessageSizeTitle = "message_size/"
+
+	// page_message_size/topicName/pageId record the endId of each page, it will be purged either in retention or the destroy of topic
+	PageMsgSizeTitle = "page_message_size/"
+
+	// page_ts/topicName/pageId, record the page last ts, used for TTL functionality
+	PageTsTitle = "page_ts/"
+
+	// acked_ts/topicName/pageId, record the latest ack ts of each page, will be purged on retention or destroy of the topic
+	AckedTsTitle = "acked_ts/"
+
+	// only in memory
+	CurrentIDSuffix = "current_id"
+
 	ReaderNamePrefix = "reader-"
 
-	RmqNotServingErrMsg = "rocksmq is not serving"
+	RmqNotServingErrMsg = "Rocksmq is not serving"
 )
 
 const (
@@ -74,6 +88,7 @@ const (
 
 /**
  * @brief fill with '_' to ensure channel name fixed length
+ * TODO this is a waste of memory, remove it
  */
 func fixChannelName(name string) (string, error) {
 	if len(name) > FixedChannelNameLen {
@@ -109,26 +124,23 @@ func constructCurrentID(topicName, groupName string) string {
 }
 
 /**
- * Construct table name and fixed channel name to be a key with length of FixedChannelNameLen,
- * used for meta infos
+ * Combine metaname together with topic
  */
-func constructKey(metaName, topic string) (string, error) {
+func constructKey(metaName, topic string) string {
 	// Check metaName/topic
-	oldLen := len(metaName + topic)
-	if oldLen > FixedChannelNameLen {
-		return "", errors.New("topic name exceeds limit")
-	}
+	return metaName + topic
+}
 
-	nameBytes := make([]byte, FixedChannelNameLen-oldLen)
-
-	for i := 0; i < len(nameBytes); i++ {
-		nameBytes[i] = byte('*')
+func parsePageID(key string) (int64, error) {
+	stringSlice := strings.Split(key, "/")
+	if len(stringSlice) != 3 {
+		return 0, fmt.Errorf("Invalid page id %s ", key)
 	}
-	return metaName + topic + string(nameBytes), nil
+	return strconv.ParseInt(stringSlice[2], 10, 64)
 }
 
 func checkRetention() bool {
-	return RocksmqRetentionTimeInMinutes != -1 && RocksmqRetentionSizeInMB != -1
+	return RocksmqRetentionTimeInSecs != -1 || RocksmqRetentionSizeInMB != -1
 }
 
 func getNowTs(idAllocator allocator.GIDAllocator) (int64, error) {
@@ -152,7 +164,7 @@ type rocksmq struct {
 	idAllocator allocator.GIDAllocator
 	storeMu     *sync.Mutex
 	consumers   sync.Map
-	ackedMu     sync.Map
+	consumersID sync.Map
 
 	retentionInfo *retentionInfo
 	readers       sync.Map
@@ -164,33 +176,64 @@ type rocksmq struct {
 // 2. Init retention info, load retention info to memory
 // 3. Start retention goroutine
 func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
+	// TODO we should use same rocksdb instance with different cfs
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetCacheIndexAndFilterBlocks(true)
+	bbto.SetPinL0FilterAndIndexBlocksInCache(true)
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
-	opts := gorocksdb.NewDefaultOptions()
-	opts.SetBlockBasedTableFactory(bbto)
-	opts.SetCreateIfMissing(true)
-	opts.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(FixedChannelNameLen + 1))
-	// opts.SetMaxOpenFiles(-1)
+	optsKV := gorocksdb.NewDefaultOptions()
+	optsKV.SetBlockBasedTableFactory(bbto)
+	optsKV.SetCreateIfMissing(true)
+	// by default there are only 1 thread for flush compaction, which may block each other.
+	// increase to a reasonable thread numbers
+	optsKV.IncreaseParallelism(runtime.NumCPU())
+	// enable back ground flush
+	optsKV.SetMaxBackgroundFlushes(1)
 
-	db, err := gorocksdb.OpenDb(opts, name)
+	// finish rocks KV
+	kvName := name + kvSuffix
+	kv, err := rocksdbkv.NewRocksdbKVWithOpts(kvName, optsKV)
 	if err != nil {
 		return nil, err
 	}
 
-	kvName := name + kvSuffix
-	kv, err := rocksdbkv.NewRocksdbKV(kvName)
+	// finish rocks mq store initialization, rocks mq store has to set the prefix extractor
+	optsStore := gorocksdb.NewDefaultOptions()
+	// share block cache with kv
+	optsStore.SetBlockBasedTableFactory(bbto)
+	optsStore.SetCreateIfMissing(true)
+	// by default there are only 1 thread for flush compaction, which may block each other.
+	// increase to a reasonable thread numbers
+	optsStore.IncreaseParallelism(runtime.NumCPU())
+	// enable back ground flush
+	optsStore.SetMaxBackgroundFlushes(1)
+	// TODO remove fix channel name len logic
+	optsStore.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(FixedChannelNameLen + 1))
+
+	db, err := gorocksdb.OpenDb(optsStore, name)
 	if err != nil {
 		return nil, err
+	}
+
+	var mqIDAllocator allocator.GIDAllocator
+	// if user didn't specify id allocator, init one with kv
+	if idAllocator == nil {
+		allocator := allocator.NewGlobalIDAllocator("rmq_id", kv)
+		err = allocator.Initialize()
+		if err != nil {
+			return nil, err
+		}
+		mqIDAllocator = allocator
+	} else {
+		mqIDAllocator = idAllocator
 	}
 
 	rmq := &rocksmq{
 		store:       db,
 		kv:          kv,
-		idAllocator: idAllocator,
+		idAllocator: mqIDAllocator,
 		storeMu:     &sync.Mutex{},
 		consumers:   sync.Map{},
-		ackedMu:     sync.Map{},
 		readers:     sync.Map{},
 	}
 
@@ -204,6 +247,24 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 		rmq.retentionInfo.startRetentionInfo()
 	}
 	atomic.StoreInt64(&rmq.state, RmqStateHealthy)
+	// TODO add this to monitor metrics
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			log.Info("Rocksmq memory usage",
+				zap.String("rockskv kv cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
+				zap.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.cur-size-all-mem-tables")),
+				zap.String("rockskv table readers", kv.DB.GetProperty("rocksdb.estimate-table-readers-mem")),
+				zap.String("rockskv pinned", kv.DB.GetProperty("rocksdb.block-cache-pinned-usage")),
+
+				zap.String("store kv cache", db.GetProperty("rocksdb.block-cache-usage")),
+				zap.String("store memtable ", db.GetProperty("rocksdb.cur-size-all-mem-tables")),
+				zap.String("store table readers", db.GetProperty("rocksdb.estimate-table-readers-mem")),
+				zap.String("store pinned", db.GetProperty("rocksdb.block-cache-pinned-usage")),
+			)
+		}
+	}()
+
 	return rmq, nil
 }
 
@@ -219,24 +280,19 @@ func (rmq *rocksmq) Close() {
 	atomic.StoreInt64(&rmq.state, RmqStateStopped)
 	rmq.stopRetention()
 	rmq.consumers.Range(func(k, v interface{}) bool {
-		var topic string
+		// TODO what happened if the server crashed? who handled the destroy consumer group? should we just handled it when rocksmq created?
+		// or we should not even make consumer info persistent?
 		for _, consumer := range v.([]*Consumer) {
-			err := rmq.DestroyConsumerGroup(consumer.Topic, consumer.GroupName)
+			err := rmq.destroyConsumerGroupInternal(consumer.Topic, consumer.GroupName)
 			if err != nil {
 				log.Warn("Failed to destroy consumer group in rocksmq!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName), zap.Any("error", err))
-			}
-			topic = consumer.Topic
-		}
-		if topic != "" {
-			err := rmq.DestroyTopic(topic)
-			if err != nil {
-				log.Warn("Rocksmq DestroyTopic failed!", zap.Any("topic", topic), zap.Any("error", err))
 			}
 		}
 		return true
 	})
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
+	rmq.kv.Close()
 	rmq.store.Close()
 }
 
@@ -246,55 +302,25 @@ func (rmq *rocksmq) stopRetention() {
 	}
 }
 
-func (rmq *rocksmq) checkKeyExist(key string) bool {
-	val, _ := rmq.kv.Load(key)
-	return val != ""
-}
-
 // CreateTopic writes initialized messages for topic in rocksdb
 func (rmq *rocksmq) CreateTopic(topicName string) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
-	beginKey := topicName + "/begin_id"
-	endKey := topicName + "/end_id"
 
-	// Check if topic exist
-	if rmq.checkKeyExist(beginKey) || rmq.checkKeyExist(endKey) {
-		log.Warn("RocksMQ: " + beginKey + " or " + endKey + " existed.")
+	// TopicBeginIDTitle is the only identifier of a topic exist or not
+	topicIDKey := TopicIDTitle + topicName
+	val, err := rmq.kv.Load(topicIDKey)
+	if err != nil {
+		return err
+	}
+	if val != "" {
 		return nil
 	}
-	// TODO change rmq kv save logic into a batch
-	err := rmq.kv.Save(beginKey, "0")
-	if err != nil {
-		return err
-	}
 
-	err = rmq.kv.Save(endKey, "0")
-	if err != nil {
-		return err
-	}
 	if _, ok := topicMu.Load(topicName); !ok {
 		topicMu.Store(topicName, new(sync.Mutex))
-	}
-	if _, ok := rmq.ackedMu.Load(topicName); !ok {
-		rmq.ackedMu.Store(topicName, new(sync.Mutex))
-	}
-
-	// Initialize retention infos
-	// Initialize acked size to 0 for topic
-	ackedSizeKey := AckedSizeTitle + topicName
-	err = rmq.kv.Save(ackedSizeKey, "0")
-	if err != nil {
-		return err
-	}
-
-	// Initialize topic begin id to defaultMessageID
-	topicBeginIDKey := TopicBeginIDTitle + topicName
-	err = rmq.kv.Save(topicBeginIDKey, DefaultMessageID)
-	if err != nil {
-		return err
 	}
 
 	// Initialize topic message size to 0
@@ -304,9 +330,16 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return err
 	}
 
+	// Initialize topic id to its create Tme, we don't really use it for now
+	nowTs := strconv.FormatInt(time.Now().Unix(), 10)
+	err = rmq.kv.Save(topicIDKey, nowTs)
+	if err != nil {
+		return err
+	}
+
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
-	rmq.retentionInfo.topics.Store(topicName, time.Now().Unix())
+	rmq.retentionInfo.topicRetetionTime.Store(topicName, time.Now().Unix())
 	log.Debug("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
@@ -324,29 +357,55 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	}
 	lock.Lock()
 	defer lock.Unlock()
-	beginKey := topicName + "/begin_id"
-	endKey := topicName + "/end_id"
-	var removedKeys []string
 
 	rmq.consumers.Delete(topicName)
 
-	ackedSizeKey := AckedSizeTitle + topicName
-	topicBeginIDKey := TopicBeginIDTitle + topicName
+	// clean the topic data it self
+	fixChanName, err := fixChannelName(topicName)
+	if err != nil {
+		return err
+	}
+	err = rmq.kv.RemoveWithPrefix(fixChanName)
+	if err != nil {
+		return err
+	}
 
-	// just for clean up old topics, for new topics this is not required
-	lastRetTsKey := LastRetTsTitle + topicName
+	// clean page size info
+	pageMsgSizeKey := constructKey(PageMsgSizeTitle, topicName)
+	err = rmq.kv.RemoveWithPrefix(pageMsgSizeKey)
+	if err != nil {
+		return err
+	}
+
+	// clean page ts info
+	pageMsgTsKey := constructKey(PageTsTitle, topicName)
+	err = rmq.kv.RemoveWithPrefix(pageMsgTsKey)
+	if err != nil {
+		return err
+	}
+
+	// cleaned acked ts info
+	ackedTsKey := constructKey(AckedTsTitle, topicName)
+	err = rmq.kv.RemoveWithPrefix(ackedTsKey)
+	if err != nil {
+		return err
+	}
+
+	// topic info
+	topicIDKey := TopicIDTitle + topicName
+	// message size of this topic
 	msgSizeKey := MessageSizeTitle + topicName
-
-	removedKeys = append(removedKeys, beginKey, endKey, ackedSizeKey, topicBeginIDKey, lastRetTsKey, msgSizeKey)
+	var removedKeys []string
+	removedKeys = append(removedKeys, topicIDKey, msgSizeKey)
 	// Batch remove, atomic operation
-	err := rmq.kv.MultiRemove(removedKeys)
+	err = rmq.kv.MultiRemove(removedKeys)
 	if err != nil {
 		return err
 	}
 
 	// clean up retention info
 	topicMu.Delete(topicName)
-	rmq.retentionInfo.topics.Delete(topicName)
+	rmq.retentionInfo.topicRetetionTime.Delete(topicName)
 
 	// clean up reader
 	if val, ok := rmq.readers.LoadAndDelete(topicName); ok {
@@ -359,18 +418,19 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 }
 
 // ExistConsumerGroup check if a consumer exists and return the existed consumer
-func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer) {
+func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer, error) {
 	key := constructCurrentID(topicName, groupName)
-	if rmq.checkKeyExist(key) {
+	_, ok := rmq.consumersID.Load(key)
+	if ok {
 		if vals, ok := rmq.consumers.Load(topicName); ok {
 			for _, v := range vals.([]*Consumer) {
 				if v.GroupName == groupName {
-					return true, v
+					return true, v, nil
 				}
 			}
 		}
 	}
-	return false, nil
+	return false, nil, nil
 }
 
 // CreateConsumerGroup creates an nonexistent consumer group for topic
@@ -380,14 +440,11 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 	}
 	start := time.Now()
 	key := constructCurrentID(topicName, groupName)
-	if rmq.checkKeyExist(key) {
-		log.Debug("RMQ CreateConsumerGroup key already exists", zap.String("key", key))
-		return nil
+	_, ok := rmq.consumersID.Load(key)
+	if ok {
+		return fmt.Errorf("RMQ CreateConsumerGroup key already exists, key = %s", key)
 	}
-	err := rmq.kv.Save(key, DefaultMessageID)
-	if err != nil {
-		return err
-	}
+	rmq.consumersID.Store(key, DefaultMessageID)
 	log.Debug("Rocksmq create consumer group successfully ", zap.String("topic", topicName),
 		zap.String("group", groupName),
 		zap.Int64("elapsed", time.Since(start).Milliseconds()))
@@ -395,15 +452,15 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 }
 
 // RegisterConsumer registers a consumer in rocksmq consumers
-func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) {
+func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 	if rmq.isClosed() {
-		return
+		return errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
 	if vals, ok := rmq.consumers.Load(consumer.Topic); ok {
 		for _, v := range vals.([]*Consumer) {
 			if v.GroupName == consumer.GroupName {
-				return
+				return nil
 			}
 		}
 		consumers := vals.([]*Consumer)
@@ -415,10 +472,19 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) {
 		rmq.consumers.Store(consumer.Topic, consumers)
 	}
 	log.Debug("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	return nil
 }
 
 // DestroyConsumerGroup removes a consumer group from rocksdb_kv
 func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
+	if rmq.isClosed() {
+		return errors.New(RmqNotServingErrMsg)
+	}
+	return rmq.destroyConsumerGroupInternal(topicName, groupName)
+}
+
+// DestroyConsumerGroup removes a consumer group from rocksdb_kv
+func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) error {
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
@@ -431,11 +497,7 @@ func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	lock.Lock()
 	defer lock.Unlock()
 	key := constructCurrentID(topicName, groupName)
-
-	err := rmq.kv.Remove(key)
-	if err != nil {
-		return err
-	}
+	rmq.consumersID.Delete(key)
 	if vals, ok := rmq.consumers.Load(topicName); ok {
 		consumers := vals.([]*Consumer)
 		for index, v := range consumers {
@@ -484,7 +546,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		return []UniqueID{}, errors.New("Obtained id length is not equal that of message")
 	}
 
-	/* Step I: Insert data to store system */
+	// Insert data to store system
 	batch := gorocksdb.NewWriteBatch()
 	defer batch.Destroy()
 	msgSizes := make(map[UniqueID]int64)
@@ -495,7 +557,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		if err != nil {
 			return []UniqueID{}, err
 		}
-
 		batch.Put([]byte(key), messages[i].Payload)
 		msgIDs[i] = msgID
 		msgSizes[msgID] = int64(len(messages[i].Payload))
@@ -506,29 +567,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	err = rmq.store.Write(opts, batch)
 	if err != nil {
 		log.Debug("RocksMQ: write batch failed")
-		return []UniqueID{}, err
-	}
-
-	/* Step II: Update meta data to kv system */
-	kvChannelBeginID := topicName + "/begin_id"
-	beginIDValue, err := rmq.kv.Load(kvChannelBeginID)
-	if err != nil {
-		log.Debug("RocksMQ: load " + kvChannelBeginID + " failed")
-		return []UniqueID{}, err
-	}
-
-	kvValues := make(map[string]string)
-
-	if beginIDValue == "0" {
-		kvValues[kvChannelBeginID] = strconv.FormatInt(idStart, 10)
-	}
-
-	kvChannelEndID := topicName + "/end_id"
-	kvValues[kvChannelEndID] = strconv.FormatInt(idEnd, 10)
-
-	err = rmq.kv.MultiSave(kvValues)
-	if err != nil {
-		log.Debug("RocksMQ: multisave failed")
 		return []UniqueID{}, err
 	}
 
@@ -554,12 +592,12 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	}
 
 	// Update message page info
-	// TODO(yukun): Should this be in a go routine
 	err = rmq.updatePageInfo(topicName, msgIDs, msgSizes)
 	if err != nil {
 		return []UniqueID{}, err
 	}
 
+	// TODO add this to monitor metrics
 	getProduceTime := time.Since(start).Milliseconds()
 	if getLockTime > 200 || getProduceTime > 200 {
 		log.Warn("rocksmq produce too slowly", zap.String("topic", topicName),
@@ -578,10 +616,10 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 	if err != nil {
 		return err
 	}
-	fixedPageSizeKey, err := constructKey(PageMsgSizeTitle, topicName)
-	if err != nil {
-		return err
-	}
+	fixedPageSizeKey := constructKey(PageMsgSizeTitle, topicName)
+	fixedPageTsKey := constructKey(PageTsTitle, topicName)
+	nowTs := strconv.FormatInt(time.Now().Unix(), 10)
+	mutateBuffer := make(map[string]string)
 	for _, id := range msgIDs {
 		msgSize := msgSizes[id]
 		if curMsgSize+msgSize > RocksmqPageSize {
@@ -590,17 +628,16 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 			pageEndID := id
 			// Update page message size for current page. key is page end ID
 			pageMsgSizeKey := fixedPageSizeKey + "/" + strconv.FormatInt(pageEndID, 10)
-			err := rmq.kv.Save(pageMsgSizeKey, strconv.FormatInt(newPageSize, 10))
-			if err != nil {
-				return err
-			}
+			mutateBuffer[pageMsgSizeKey] = strconv.FormatInt(newPageSize, 10)
+			pageTsKey := fixedPageTsKey + "/" + strconv.FormatInt(pageEndID, 10)
+			mutateBuffer[pageTsKey] = nowTs
 			curMsgSize = 0
 		} else {
 			curMsgSize += msgSize
 		}
 	}
-	// Update message size to current message size
-	err = rmq.kv.Save(msgSizeKey, strconv.FormatInt(curMsgSize, 10))
+	mutateBuffer[msgSizeKey] = strconv.FormatInt(curMsgSize, 10)
+	err = rmq.kv.MultiSave(mutateBuffer)
 	return err
 }
 
@@ -626,12 +663,8 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	getLockTime := time.Since(start).Milliseconds()
 
 	metaKey := constructCurrentID(topicName, groupName)
-	currentID, err := rmq.kv.Load(metaKey)
-	if err != nil {
-		log.Debug("RocksMQ: load " + metaKey + " failed")
-		return nil, err
-	}
-	if currentID == "" {
+	currentID, ok := rmq.consumersID.Load(metaKey)
+	if !ok {
 		return nil, fmt.Errorf("currentID of topicName=%s, groupName=%s not exist", topicName, groupName)
 	}
 
@@ -653,7 +686,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	if currentID == DefaultMessageID {
 		dataKey = fixChanName + "/"
 	} else {
-		dataKey = fixChanName + "/" + currentID
+		dataKey = fixChanName + "/" + strconv.FormatInt(currentID.(int64), 10)
 	}
 	iter.Seek([]byte(dataKey))
 
@@ -666,7 +699,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		offset++
 		msgID, err := strconv.ParseInt(strKey[FixedChannelNameLen+1:], 10, 64)
 		if err != nil {
-			log.Debug("RocksMQ: parse int " + strKey[FixedChannelNameLen+1:] + " failed")
+			log.Warn("RocksMQ: parse int " + strKey[FixedChannelNameLen+1:] + " failed")
 			val.Free()
 			return nil, err
 		}
@@ -684,6 +717,10 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		consumerMessage = append(consumerMessage, msg)
 		val.Free()
 	}
+	// if iterate fail
+	if err := iter.Err(); err != nil {
+		return nil, err
+	}
 
 	// When already consume to last mes, an empty slice will be returned
 	if len(consumerMessage) == 0 {
@@ -696,12 +733,10 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		consumedIDs = append(consumedIDs, msg.MsgID)
 	}
 	newID := consumedIDs[len(consumedIDs)-1]
-	err = rmq.moveConsumePos(topicName, groupName, newID+1)
-	if err != nil {
-		return nil, err
-	}
+	rmq.moveConsumePos(topicName, groupName, newID+1)
 
-	go rmq.updateAckedInfo(topicName, groupName, consumedIDs)
+	rmq.updateAckedInfo(topicName, groupName, consumedIDs)
+	// TODO add this to monitor metrics
 	getConsumeTime := time.Since(start).Milliseconds()
 	if getLockTime > 200 || getConsumeTime > 200 {
 		log.Warn("rocksmq consume too slowly", zap.String("topic", topicName),
@@ -715,10 +750,12 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
 	key := constructCurrentID(topicName, groupName)
-	if !rmq.checkKeyExist(key) {
+	_, ok := rmq.consumersID.Load(key)
+	if !ok {
 		log.Warn("RocksMQ: channel " + key + " not exists")
-		return fmt.Errorf("consumerGroup %s, channel %s not exists", groupName, topicName)
+		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
+
 	storeKey, err := combKey(topicName, msgID)
 	if err != nil {
 		log.Warn("RocksMQ: combKey(" + topicName + "," + strconv.FormatInt(msgID, 10) + ") failed")
@@ -727,28 +764,26 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	opts := gorocksdb.NewDefaultReadOptions()
 	defer opts.Destroy()
 	val, err := rmq.store.Get(opts, []byte(storeKey))
-	defer val.Free()
 	if err != nil {
 		log.Warn("RocksMQ: get " + storeKey + " failed")
 		return err
 	}
+	defer val.Free()
 	if !val.Exists() {
+		log.Warn("RocksMQ: trying to seek to no exist position, reset current id",
+			zap.String("topic", topicName), zap.String("group", groupName), zap.Int64("msgId", msgID))
+		rmq.moveConsumePos(topicName, groupName, DefaultMessageID)
 		//skip seek if key is not found, this is the behavior as pulsar
 		return nil
 	}
-
-	/* Step II: Save current_id in kv */
-	return rmq.moveConsumePos(topicName, groupName, msgID)
+	/* Step II: update current_id */
+	rmq.moveConsumePos(topicName, groupName, msgID)
+	return nil
 }
 
-func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID UniqueID) error {
+func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID UniqueID) {
 	key := constructCurrentID(topicName, groupName)
-	err := rmq.kv.Save(key, strconv.FormatInt(msgID, 10))
-	if err != nil {
-		log.Warn("RocksMQ: save " + key + " failed")
-		return err
-	}
-	return nil
+	rmq.consumersID.Store(key, msgID)
 }
 
 // Seek updates the current id to the given msgID
@@ -779,8 +814,9 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
 	key := constructCurrentID(topicName, groupName)
-	if !rmq.checkKeyExist(key) {
-		log.Debug("RocksMQ: channel " + key + " not exists")
+	_, ok := rmq.consumersID.Load(key)
+	if !ok {
+		log.Warn("RocksMQ: channel " + key + " not exists")
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
@@ -794,6 +830,10 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	// 0 is the ASC value of "/" + 1
 	iter.SeekForPrev([]byte(fixChanName + "0"))
 
+	// if iterate fail
+	if err := iter.Err(); err != nil {
+		return err
+	}
 	// should find the last key we written into, start with fixChanName/
 	// if not find, start from 0
 	if !iter.Valid() {
@@ -813,7 +853,8 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 		return err
 	}
 	// current msgID should not be included
-	return rmq.moveConsumePos(topicName, groupName, msgID+1)
+	rmq.moveConsumePos(topicName, groupName, msgID+1)
+	return nil
 }
 
 // Notify sends a mutex in MsgMutex channel to tell consumers to consume
@@ -837,48 +878,25 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 	if len(ids) == 0 {
 		return nil
 	}
-	ll, ok := topicMu.Load(topicName)
-	if !ok {
-		return fmt.Errorf("topic name = %s not exist", topicName)
-	}
-	lock, ok := ll.(*sync.Mutex)
-	if !ok {
-		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
-	}
-	lock.Lock()
-	defer lock.Unlock()
-
 	firstID := ids[0]
 	lastID := ids[len(ids)-1]
 
-	fixedBeginIDKey, err := constructKey(BeginIDTitle, topicName)
-	if err != nil {
-		return err
-	}
-
-	// 1. Update begin_id for the consumer_group
-	beginIDKey := fixedBeginIDKey + "/" + groupName
-	err = rmq.kv.Save(beginIDKey, strconv.FormatInt(lastID, 10))
-	if err != nil {
-		return err
-	}
-
-	// 2. Try to get the page id between first ID and last ID of ids
-	pageMsgPrefix, err := constructKey(PageMsgSizeTitle, topicName)
-	if err != nil {
-		return err
-	}
+	// 1. Try to get the page id between first ID and last ID of ids
+	pageMsgPrefix := constructKey(PageMsgSizeTitle, topicName)
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
-	readOpts.SetPrefixSameAsStart(true)
+	pageMsgFirstKey := pageMsgPrefix + "/" + strconv.FormatInt(firstID, 10)
+	// set last key by lastID
+	pageMsgLastKey := pageMsgPrefix + "/" + strconv.FormatInt(lastID+1, 10)
+
+	readOpts.SetIterateUpperBound([]byte(pageMsgLastKey))
 	iter := rmq.kv.(*rocksdbkv.RocksdbKV).DB.NewIterator(readOpts)
 	defer iter.Close()
-
 	var pageIDs []UniqueID
-	pageMsgKey := pageMsgPrefix + "/" + strconv.FormatInt(firstID, 10)
-	for iter.Seek([]byte(pageMsgKey)); iter.Valid(); iter.Next() {
+
+	for iter.Seek([]byte(pageMsgFirstKey)); iter.Valid(); iter.Next() {
 		key := iter.Key()
-		pageID, err := strconv.ParseInt(string(key.Data())[FixedChannelNameLen+1:], 10, 64)
+		pageID, err := parsePageID(string(key.Data()))
 		if key != nil {
 			key.Free()
 		}
@@ -891,80 +909,47 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 			break
 		}
 	}
+	if err := iter.Err(); err != nil {
+		return err
+	}
 	if len(pageIDs) == 0 {
 		return nil
 	}
+	fixedAckedTsKey := constructKey(AckedTsTitle, topicName)
 
-	fixedAckedTsKey, err := constructKey(AckedTsTitle, topicName)
-	if err != nil {
-		return err
-	}
-
-	// 3. Update acked ts and acked size for pageIDs
+	// 2. Update acked ts and acked size for pageIDs
 	if vals, ok := rmq.consumers.Load(topicName); ok {
-		var minBeginID int64 = math.MaxInt64
 		consumers, ok := vals.([]*Consumer)
 		if !ok || len(consumers) == 0 {
 			return nil
 		}
-		for _, v := range consumers {
-			curBeginIDKey := path.Join(fixedBeginIDKey, v.GroupName)
-			curBeginIDVal, err := rmq.kv.Load(curBeginIDKey)
-			if err != nil {
-				return err
+		// update consumer id
+		for _, consumer := range consumers {
+			if consumer.GroupName == groupName {
+				consumer.beginID = lastID
+				break
 			}
-			curBeginID, err := strconv.ParseInt(curBeginIDVal, 10, 64)
-			if err != nil {
-				return err
-			}
-			if curBeginID < minBeginID {
-				minBeginID = curBeginID
+		}
+
+		// find min id of all consumer
+		var minBeginID int64 = math.MaxInt64
+		for _, consumer := range consumers {
+			if consumer.beginID < minBeginID {
+				minBeginID = consumer.beginID
 			}
 		}
 
 		nowTs := strconv.FormatInt(time.Now().Unix(), 10)
 		ackedTsKvs := make(map[string]string)
-		totalAckMsgSize := int64(0)
-
-		fixedPageSizeKey, err := constructKey(PageMsgSizeTitle, topicName)
-		if err != nil {
-			return err
-		}
+		// update ackedTs, if page is all acked, then ackedTs is set
 		for _, pID := range pageIDs {
 			if pID <= minBeginID {
 				// Update acked info for message pID
 				pageAckedTsKey := path.Join(fixedAckedTsKey, strconv.FormatInt(pID, 10))
 				ackedTsKvs[pageAckedTsKey] = nowTs
-
-				// get current page message size
-				pageMsgSizeKey := path.Join(fixedPageSizeKey, strconv.FormatInt(pID, 10))
-				pageMsgSizeVal, err := rmq.kv.Load(pageMsgSizeKey)
-				if err != nil {
-					return err
-				}
-				pageMsgSize, err := strconv.ParseInt(pageMsgSizeVal, 10, 64)
-				if err != nil {
-					return err
-				}
-				totalAckMsgSize += pageMsgSize
 			}
 		}
-		err = rmq.kv.MultiSave(ackedTsKvs)
-		if err != nil {
-			return err
-		}
-
-		ackedSizeKey := AckedSizeTitle + topicName
-		ackedSizeVal, err := rmq.kv.Load(ackedSizeKey)
-		if err != nil {
-			return err
-		}
-		ackedSize, err := strconv.ParseInt(ackedSizeVal, 10, 64)
-		if err != nil {
-			return err
-		}
-		ackedSize += totalAckMsgSize
-		err = rmq.kv.Save(ackedSizeKey, strconv.FormatInt(ackedSize, 10))
+		err := rmq.kv.MultiSave(ackedTsKvs)
 		if err != nil {
 			return err
 		}
@@ -983,9 +968,21 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	readOpts.SetPrefixSameAsStart(true)
 	iter := rmq.store.NewIterator(readOpts)
+	fixChanName, err := fixChannelName(topicName)
+	if err != nil {
+		log.Debug("RocksMQ: fixChannelName " + topicName + " failed")
+		return "", err
+	}
+	dataKey := path.Join(fixChanName, strconv.FormatInt(startMsgID, 10))
+	iter.Seek([]byte(dataKey))
+	// if iterate fail
+	if err := iter.Err(); err != nil {
+		return "", err
+	}
+
 	nowTs, err := getNowTs(rmq.idAllocator)
 	if err != nil {
-		return "", errors.New("can't get current ts from rocksmq idAllocator")
+		return "", errors.New("Can't get current ts from rocksmq idAllocator")
 	}
 	readerName := subscriptionRolePrefix + ReaderNamePrefix + strconv.FormatInt(nowTs, 10)
 
@@ -999,7 +996,6 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 		messageIDInclusive: messageIDInclusive,
 		readerMutex:        make(chan struct{}, 1),
 	}
-	reader.Seek(startMsgID)
 	if vals, ok := rmq.readers.Load(topicName); ok {
 		readers := vals.([]*rocksmqReader)
 		readers = append(readers, reader)
@@ -1024,17 +1020,17 @@ func (rmq *rocksmq) getReader(topicName, readerName string) *rocksmqReader {
 }
 
 // ReaderSeek seek a reader to the pointed position
-func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID UniqueID) {
+func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID UniqueID) error {
 	if rmq.isClosed() {
-		return
+		return errors.New(RmqNotServingErrMsg)
 	}
 	reader := rmq.getReader(topicName, readerName)
 	if reader == nil {
 		log.Warn("reader not exist", zap.String("topic", topicName), zap.String("readerName", readerName))
-		return
+		return fmt.Errorf("reader not exist, topic %s, reader %s", topicName, readerName)
 	}
-
 	reader.Seek(msgID)
+	return nil
 }
 
 // Next get the next message of reader

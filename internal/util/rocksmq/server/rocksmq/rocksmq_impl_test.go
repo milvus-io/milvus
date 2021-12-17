@@ -78,9 +78,8 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	idAllocator := InitIDAllocator(kvPath)
 
 	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := rmqPath + metaPathSuffix + suffix
-	defer os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.NoError(t, err)
@@ -88,9 +87,14 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 
 	topicName := "topic_register"
 	groupName := "group_register"
-	_ = rmq.DestroyConsumerGroup(topicName, groupName)
+
+	err = rmq.CreateTopic(topicName)
+	assert.NoError(t, err)
+	defer rmq.DestroyTopic(topicName)
+
 	err = rmq.CreateConsumerGroup(topicName, groupName)
 	assert.Nil(t, err)
+	defer rmq.DestroyConsumerGroup(topicName, groupName)
 
 	consumer := &Consumer{
 		Topic:     topicName,
@@ -98,10 +102,10 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 		MsgMutex:  make(chan struct{}),
 	}
 	rmq.RegisterConsumer(consumer)
-	exist, _ := rmq.ExistConsumerGroup(topicName, groupName)
+	exist, _, _ := rmq.ExistConsumerGroup(topicName, groupName)
 	assert.Equal(t, exist, true)
 	dummyGrpName := "group_dummy"
-	exist, _ = rmq.ExistConsumerGroup(topicName, dummyGrpName)
+	exist, _, _ = rmq.ExistConsumerGroup(topicName, dummyGrpName)
 	assert.Equal(t, exist, false)
 
 	msgA := "a_message"
@@ -111,7 +115,7 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 
 	_ = idAllocator.UpdateID()
 	_, err = rmq.Produce(topicName, pMsgs)
-	assert.Error(t, err)
+	assert.Nil(t, err)
 
 	rmq.Notify(topicName, groupName)
 
@@ -129,25 +133,18 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 		MsgMutex:  make(chan struct{}),
 	}
 	rmq.RegisterConsumer(consumer2)
-
-	topicMu.Delete(topicName)
-	topicMu.Store(topicName, topicName)
-	assert.Error(t, rmq.DestroyConsumerGroup(topicName, groupName))
-	err = rmq.DestroyConsumerGroup(topicName, groupName)
-	assert.Error(t, err)
 }
 
-func TestRocksmq(t *testing.T) {
+func TestRocksmq_Basic(t *testing.T) {
 	suffix := "_rmq"
+
 	kvPath := rmqPath + kvPathSuffix + suffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
 	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := rmqPath + metaPathSuffix + suffix
-	defer os.RemoveAll(metaPath)
-
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -181,7 +178,7 @@ func TestRocksmq(t *testing.T) {
 	assert.Nil(t, err)
 	// double create consumer group
 	err = rmq.CreateConsumerGroup(channelName, groupName)
-	assert.Nil(t, err)
+	assert.Error(t, err)
 	cMsgs, err := rmq.Consume(channelName, groupName, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 1)
@@ -201,9 +198,8 @@ func TestRocksmq_Dummy(t *testing.T) {
 	idAllocator := InitIDAllocator(kvPath)
 
 	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := rmqPath + metaPathSuffix + suffix
-	defer os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
@@ -216,8 +212,9 @@ func TestRocksmq_Dummy(t *testing.T) {
 	err = rmq.CreateTopic(channelName)
 	assert.Nil(t, err)
 	defer rmq.DestroyTopic(channelName)
+	// create topic twice should be ignored
 	err = rmq.CreateTopic(channelName)
-	assert.NoError(t, err)
+	assert.Nil(t, err)
 
 	channelName1 := "channel_dummy"
 	topicMu.Store(channelName1, new(sync.Mutex))
@@ -258,7 +255,6 @@ func TestRocksmq_Dummy(t *testing.T) {
 
 	_, err = rmq.Consume(channelName, groupName1, 1)
 	assert.Error(t, err)
-
 }
 
 func TestRocksmq_Seek(t *testing.T) {
@@ -268,9 +264,8 @@ func TestRocksmq_Seek(t *testing.T) {
 	idAllocator := InitIDAllocator(kvPath)
 
 	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
-	metaPath := rmqPath + metaPathSuffix + suffix
-	defer os.RemoveAll(metaPath)
 
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
@@ -824,7 +819,6 @@ func TestReader_CornerCase(t *testing.T) {
 		extraMsgs[0] = ProducerMessage{Payload: []byte(msg)}
 		extraIds, _ = rmq.Produce(channelName, extraMsgs)
 		// assert.NoError(t, er)
-		fmt.Println(extraIds[0])
 		assert.Equal(t, 1, len(extraIds))
 	}()
 
