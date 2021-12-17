@@ -470,7 +470,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 			for nodeID := range onlineNodes {
 				nodeInfo, err := qc.cluster.getNodeInfoByID(nodeID)
 				if err != nil {
-					log.Warn("loadBalanceSegmentLoop: get node info from query node failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					log.Warn("loadBalanceSegmentLoop: get node info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 					delete(onlineNodes, nodeID)
 					continue
 				}
