@@ -44,7 +44,7 @@ DataCoord tells DataNode stateful vchannel info through RPC `WatchDmChannels` so
 the same messages over and over again. So flowgraph needs the ability to consume messages in the middle of a vchannel.
 
 DataNode tells DataCoord vchannel states after each flush through RPC `SaveBinlogPaths`, so that DataCoord
-keeps the vchannel states update.
+keeps the vchannel states updated.
 
 
 ## Some interface/proto designs below are outdated, will be updated soon
