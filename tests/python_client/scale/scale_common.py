@@ -1,3 +1,5 @@
+import os
+
 from pymilvus import connections, Index
 
 from utils.util_log import test_log as log
@@ -7,6 +9,7 @@ from common import common_type as ct
 
 
 def e2e_milvus(host, c_name):
+    log.debug(f'pid: {os.getpid()}')
     # connect
     connections.add_connection(default={"host": host, "port": 19530})
     connections.connect(alias='default')
@@ -16,8 +19,8 @@ def e2e_milvus(host, c_name):
     collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema())
 
     # insert
-    data = cf.gen_default_list_data()
-    mutation_res, _ = collection_w.insert(data)
+    df = cf.gen_default_dataframe_data()
+    mutation_res, _ = collection_w.insert(df)
     assert mutation_res.insert_count == ct.default_nb
     log.debug(collection_w.num_entities)
 
@@ -29,10 +32,10 @@ def e2e_milvus(host, c_name):
 
     # search
     collection_w.load()
-    search_res, _ = collection_w.search(data[-1][:ct.default_nq], ct.default_float_vec_field_name,
+    search_res, _ = collection_w.search(cf.gen_vectors(1, dim=ct.default_dim), ct.default_float_vec_field_name,
                                         ct.default_search_params, ct.default_limit)
     assert len(search_res[0]) == ct.default_limit
-    log.debug(search_res[0][0].id)
+    log.debug(search_res[0].ids)
 
     # query
     ids = search_res[0].ids[0]
