@@ -56,7 +56,7 @@ type IDAllocator struct {
 }
 
 // NewIDAllocator creates an ID Allocator allocate Unique and monotonically increasing IDs from RootCoord.
-func NewIDAllocator(ctx context.Context, idAlloctor idAllocatorInterface, peerID UniqueID) (*IDAllocator, error) {
+func NewIDAllocator(ctx context.Context, idAllocator idAllocatorInterface, peerID UniqueID) (*IDAllocator, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &IDAllocator{
 		Allocator: Allocator{
@@ -65,7 +65,7 @@ func NewIDAllocator(ctx context.Context, idAlloctor idAllocatorInterface, peerID
 			Role:       "IDAllocator",
 		},
 		countPerRPC: idCountPerRPC,
-		idAllocator: idAlloctor,
+		idAllocator: idAllocator,
 		PeerID:      peerID,
 	}
 	a.TChan = &EmptyTicker{}
