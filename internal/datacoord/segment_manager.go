@@ -42,7 +42,7 @@ var (
 	}
 )
 
-// getAllocation unified way to retrieve allocation struct
+// getAllocation unifies way to retrieve allocation struct
 func getAllocation(numOfRows int64) *Allocation {
 	v := allocPool.Get()
 	a, ok := v.(*Allocation)
@@ -60,7 +60,7 @@ func getAllocation(numOfRows int64) *Allocation {
 	return a
 }
 
-// putAllocation put allocation for recycling
+// putAllocation puts an allocation for recycling
 func putAllocation(a *Allocation) {
 	allocPool.Put(a)
 }
@@ -69,7 +69,7 @@ func putAllocation(a *Allocation) {
 // TODO needs to be configurable
 const segmentMaxLifetime = 24 * time.Hour
 
-// Manager manage segment related operations.
+// Manager manages segment related operations.
 type Manager interface {
 	// AllocSegment allocates rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
