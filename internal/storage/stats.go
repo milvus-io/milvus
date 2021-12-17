@@ -24,9 +24,7 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
-type Stats interface {
-}
-
+// Int64Stats contains statistics data for int64 column
 type Int64Stats struct {
 	FieldID int64              `json:"fieldID"`
 	Max     int64              `json:"max"`
