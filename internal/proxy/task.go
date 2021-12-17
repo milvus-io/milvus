@@ -4857,6 +4857,7 @@ func (c *CreateAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// DropAliasTask is the task to drop alias
 type DropAliasTask struct {
 	Condition
 	*milvuspb.DropAliasRequest
