@@ -143,19 +143,19 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 			pk := dData.Pks[i]
 			ts := dData.Tss[i]
 
-			if timetravelTs != Timestamp(0) && Timestamp(dData.Tss[i]) <= timetravelTs {
+			if timetravelTs != Timestamp(0) && dData.Tss[i] <= timetravelTs {
 				pk2ts[pk] = ts
 				continue
 			}
 
 			dbuff.delData.Append(pk, ts)
 
-			if Timestamp(ts) < dbuff.tsFrom {
-				dbuff.tsFrom = Timestamp(ts)
+			if ts < dbuff.tsFrom {
+				dbuff.tsFrom = ts
 			}
 
-			if Timestamp(ts) > dbuff.tsTo {
-				dbuff.tsTo = Timestamp(ts)
+			if ts > dbuff.tsTo {
+				dbuff.tsTo = ts
 			}
 		}
 	}
