@@ -113,7 +113,7 @@ type allocHelper struct {
 	afterCreateSegment func(segment *datapb.SegmentInfo) error
 }
 
-// allocOption allction option applies to `SegmentManager`
+// allocOption allocation option applies to `SegmentManager`
 type allocOption interface {
 	apply(manager *SegmentManager)
 }
@@ -173,7 +173,7 @@ func defaultCalUpperLimitPolicy() calUpperLimitPolicy {
 	return calBySchemaPolicy
 }
 
-func defaultAlocatePolicy() AllocatePolicy {
+func defaultAllocatePolicy() AllocatePolicy {
 	return AllocatePolicyV1
 }
 
@@ -196,7 +196,7 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 		helper:              defaultAllocHelper(),
 		segments:            make([]UniqueID, 0),
 		estimatePolicy:      defaultCalUpperLimitPolicy(),
-		allocPolicy:         defaultAlocatePolicy(),
+		allocPolicy:         defaultAllocatePolicy(),
 		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
 		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
 		flushPolicy:         defaultFlushPolicy(),

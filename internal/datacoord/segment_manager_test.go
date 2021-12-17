@@ -56,7 +56,7 @@ func TestManagerOptions(t *testing.T) {
 	})
 
 	t.Run("test withAllocPolicy", func(t *testing.T) {
-		opt := withAllocPolicy(defaultAlocatePolicy())
+		opt := withAllocPolicy(defaultAllocatePolicy())
 		assert.NotNil(t, opt)
 		// manual set nil
 		segmentManager.allocPolicy = nil
