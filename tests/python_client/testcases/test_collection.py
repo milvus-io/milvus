@@ -1662,7 +1662,7 @@ class TestGetCollectionStats:
         params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         if request.param["index_type"] in binary_support():
             request.param["metric_type"] = "JACCARD"
             return request.param
@@ -1782,12 +1782,12 @@ class TestGetCollectionStats:
         connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         assert stats["row_count"] == default_nb - delete_length
         compact_before = stats["partitions"][0]["segments"][0]["data_size"]
         connect.compact(collection)
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         compact_after = stats["partitions"][0]["segments"][0]["data_size"]
         assert compact_before == compact_after
 
@@ -1804,11 +1804,11 @@ class TestGetCollectionStats:
         connect.delete_entity_by_id(collection, delete_ids)
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         compact_before = stats["partitions"][0]["row_count"]
         connect.compact(collection)
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         compact_after = stats["partitions"][0]["row_count"]
         # pdb.set_trace()
         assert compact_before == compact_after
@@ -2183,7 +2183,7 @@ class TestCreateCollectionInvalid(object):
         fields.pop("segment_row_limit")
         connect.create_collection(collection_name, fields)
         res = connect.get_collection_info(collection_name)
-        logging.getLogger().info(res)
+        log.info(res)
         assert res["segment_row_limit"] == default_server_segment_row_limit
 
     # TODO: assert exception
@@ -2232,7 +2232,7 @@ class TestDescribeCollection:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         # if str(connect._cmd("mode")) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in CPU mode")
@@ -3166,7 +3166,7 @@ class TestLoadPartition:
         params=gen_binary_index()
     )
     def get_binary_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         if request.param["index_type"] in binary_support():
             return request.param
         else:
@@ -3184,7 +3184,7 @@ class TestLoadPartition:
         assert len(result.primary_keys) == default_nb
         connect.flush([binary_collection])
         for metric_type in binary_metrics():
-            logging.getLogger().info(metric_type)
+            log.info(metric_type)
             get_binary_index["metric_type"] = metric_type
             if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in structure_metrics():
                 with pytest.raises(Exception) as e:

@@ -1,11 +1,11 @@
 import threading
-import logging
 import time
 from multiprocessing import Pool, Process
 import pytest
 from utils import utils as ut
 from common.constants import default_entities, default_fields
 from common.common_type import CaseLabel
+from utils.util_log import test_log as log
 
 TIMEOUT = 120
 default_nb = ut.default_nb
@@ -264,7 +264,7 @@ class TestHasBase:
         """
         connect.create_partition(collection, default_tag)
         res = connect.has_partition(collection, default_tag)
-        logging.getLogger().info(res)
+        log.info(res)
         assert res
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -288,7 +288,7 @@ class TestHasBase:
         expected: status ok, result empty
         """
         res = connect.has_partition(collection, default_tag)
-        logging.getLogger().info(res)
+        log.info(res)
         assert not res
 
     @pytest.mark.tags(CaseLabel.L2)

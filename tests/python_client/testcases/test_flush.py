@@ -2,6 +2,7 @@ import pytest
 from utils.utils import *
 from common.constants import default_entities
 from common.common_type import CaseLabel
+from utils.util_log import test_log as log
 
 DELETE_TIMEOUT = 60
 default_single_query = {
@@ -170,7 +171,7 @@ class TestFlushBase:
         assert res["row_count"] == len(result.primary_keys)
         connect.load_collection(collection)
         res = connect.search(collection, **default_single_query)
-        logging.getLogger().debug(res)
+        log.debug(res)
         assert len(res) == 1
         assert len(res[0].ids) == 10
         assert len(res[0].distances) == 10
@@ -237,7 +238,7 @@ class TestFlushBase:
         assert len(res) == 1
         assert len(res[0].ids) == 10
         assert len(res[0].distances) == 10
-        logging.getLogger().debug(res)
+        log.debug(res)
         # assert res
 
     # TODO: unable to set config
@@ -307,7 +308,7 @@ class TestFlushAsync:
     """
 
     def check_status(self):
-        logging.getLogger().info("In callback check status")
+        log.info("In callback check status")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_flush_empty_collection(self, connect, collection):
@@ -344,7 +345,7 @@ class TestFlushAsync:
             assert len(result.primary_keys) == default_nb
         future = connect.flush([collection], _async=True)
         assert future.result() is None
-        logging.getLogger().info("DROP")
+        log.info("DROP")
         res = connect.drop_collection(collection)
         assert res is None
 
@@ -356,9 +357,9 @@ class TestFlushAsync:
         expected: status ok
         """
         connect.insert(collection, default_entities)
-        logging.getLogger().info("before")
+        log.info("before")
         future = connect.flush([collection], _async=True, _callback=self.check_status)
-        logging.getLogger().info("after")
+        log.info("after")
         future.done()
         status = future.result()
         assert status is None

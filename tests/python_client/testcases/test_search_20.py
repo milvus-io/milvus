@@ -2242,7 +2242,7 @@ class TestSearchBase:
         params=gen_binary_index()
     )
     def get_jaccard_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         if request.param["index_type"] in binary_support():
             return request.param
         # else:
@@ -2253,7 +2253,7 @@ class TestSearchBase:
         params=gen_binary_index()
     )
     def get_hamming_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         if request.param["index_type"] in binary_support():
             return request.param
         # else:
@@ -2264,7 +2264,7 @@ class TestSearchBase:
         params=gen_binary_index()
     )
     def get_structure_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         if request.param["index_type"] == "FLAT":
             return request.param
         # else:
