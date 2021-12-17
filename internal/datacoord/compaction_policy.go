@@ -7,25 +7,25 @@ import (
 )
 
 type singleCompactionPolicy interface {
-	// generatePlan generates a compaction plan for single comapction, return nil if no plan can be generated.
-	generatePlan(segment *SegmentInfo, timetravel *timetravel) *datapb.CompactionPlan
+	// generatePlan generates a compaction plan for single compaction, return nil if no plan can be generated.
+	generatePlan(segment *SegmentInfo, timeTravel *timetravel) *datapb.CompactionPlan
 }
 
 type mergeCompactionPolicy interface {
 	// generatePlan generates a compaction plan for merge compaction, return nil if no plan can be generated.
-	generatePlan(segments []*SegmentInfo, timetravel *timetravel) []*datapb.CompactionPlan
+	generatePlan(segments []*SegmentInfo, timeTravel *timetravel) []*datapb.CompactionPlan
 }
 
-type singleCompactionFunc func(segment *SegmentInfo, timetravel *timetravel) *datapb.CompactionPlan
+type singleCompactionFunc func(segment *SegmentInfo, timeTravel *timetravel) *datapb.CompactionPlan
 
-func (f singleCompactionFunc) generatePlan(segment *SegmentInfo, timetravel *timetravel) *datapb.CompactionPlan {
-	return f(segment, timetravel)
+func (f singleCompactionFunc) generatePlan(segment *SegmentInfo, timeTravel *timetravel) *datapb.CompactionPlan {
+	return f(segment, timeTravel)
 }
 
-func chooseAllBinlogs(segment *SegmentInfo, timetravel *timetravel) *datapb.CompactionPlan {
+func chooseAllBinlogs(segment *SegmentInfo, timeTravel *timetravel) *datapb.CompactionPlan {
 	var deltaLogs []*datapb.DeltaLogInfo
 	for _, l := range segment.GetDeltalogs() {
-		if l.TimestampTo < timetravel.time {
+		if l.TimestampTo < timeTravel.time {
 			deltaLogs = append(deltaLogs, l)
 		}
 	}
@@ -44,18 +44,18 @@ func chooseAllBinlogs(segment *SegmentInfo, timetravel *timetravel) *datapb.Comp
 			},
 		},
 		Type:       datapb.CompactionType_InnerCompaction,
-		Timetravel: timetravel.time,
+		Timetravel: timeTravel.time,
 		Channel:    segment.GetInsertChannel(),
 	}
 }
 
-type mergeCompactionFunc func(segments []*SegmentInfo, timetravel *timetravel) []*datapb.CompactionPlan
+type mergeCompactionFunc func(segments []*SegmentInfo, timeTravel *timetravel) []*datapb.CompactionPlan
 
-func (f mergeCompactionFunc) generatePlan(segments []*SegmentInfo, timetravel *timetravel) []*datapb.CompactionPlan {
-	return f(segments, timetravel)
+func (f mergeCompactionFunc) generatePlan(segments []*SegmentInfo, timeTravel *timetravel) []*datapb.CompactionPlan {
+	return f(segments, timeTravel)
 }
 
-func greedyMergeCompaction(segments []*SegmentInfo, timetravel *timetravel) []*datapb.CompactionPlan {
+func greedyMergeCompaction(segments []*SegmentInfo, timeTravel *timetravel) []*datapb.CompactionPlan {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -64,16 +64,16 @@ func greedyMergeCompaction(segments []*SegmentInfo, timetravel *timetravel) []*d
 		return segments[i].NumOfRows < segments[j].NumOfRows
 	})
 
-	return greedyGeneratePlans(segments, timetravel)
+	return greedyGeneratePlans(segments, timeTravel)
 }
 
-func greedyGeneratePlans(sortedSegments []*SegmentInfo, timetravel *timetravel) []*datapb.CompactionPlan {
+func greedyGeneratePlans(sortedSegments []*SegmentInfo, timeTravel *timetravel) []*datapb.CompactionPlan {
 	maxRowNumPerSegment := sortedSegments[0].MaxRowNum
 
 	plans := make([]*datapb.CompactionPlan, 0)
 	free := maxRowNumPerSegment
 	plan := &datapb.CompactionPlan{
-		Timetravel: timetravel.time,
+		Timetravel: timeTravel.time,
 		Type:       datapb.CompactionType_MergeCompaction,
 		Channel:    sortedSegments[0].GetInsertChannel(),
 	}
@@ -94,7 +94,7 @@ func greedyGeneratePlans(sortedSegments []*SegmentInfo, timetravel *timetravel) 
 			}
 			plans = append(plans, plan)
 			plan = &datapb.CompactionPlan{
-				Timetravel: timetravel.time,
+				Timetravel: timeTravel.time,
 				Type:       datapb.CompactionType_MergeCompaction,
 				Channel:    sortedSegments[0].GetInsertChannel(),
 			}
