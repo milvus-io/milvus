@@ -135,6 +135,6 @@ _Notes:_
 
 1. In `Proxy`, all `DDL` requests will be wrapped into `task`, and push the `task` into `DdTaskQueue`. 
    A background service will read a new `task` from `DdTaskQueue` only when the previous one is finished. 
-   So all the `DDL` requests are executed serially on `Proxy`
+   So all the `DDL` requests are executed serially on `Proxy`.
 
 2. In `RootCoord`, all `DDL` requests will be wrapped into `reqTask`, but there is no task queue, so the `DDL` requests will be executed in parallel on `RootCoord`.
