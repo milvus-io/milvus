@@ -24,6 +24,7 @@ type rmqID struct {
 // Check if rmqID implements MessageID interface
 var _ MessageID = &rmqID{}
 
+// Serialize convert rmq message id to []byte
 func (rid *rmqID) Serialize() []byte {
 	return SerializeRmqID(rid.messageID)
 }
