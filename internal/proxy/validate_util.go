@@ -35,6 +35,7 @@ func isAlpha(c uint8) bool {
 	return true
 }
 
+// isNumber check if c is a number.
 func isNumber(c uint8) bool {
 	if c < '0' || c > '9' {
 		return false
