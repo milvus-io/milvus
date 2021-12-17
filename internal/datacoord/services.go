@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/logutil"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
 
@@ -35,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"go.uber.org/zap"
 )
+
+const moduleName = "DataCoord"
 
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
@@ -224,6 +227,8 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 // GetCollectionStatistics returns statistics for collection
 // for now only row count is returned
 func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to get collection statistics")
 	resp := &datapb.GetCollectionStatisticsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -236,6 +241,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	nums := s.meta.GetNumRowsOfCollection(req.CollectionID)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+	logutil.Logger(ctx).Debug("success to get collection statistics", zap.Any("response", resp))
 	return resp, nil
 }
 
