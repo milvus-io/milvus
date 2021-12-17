@@ -17,79 +17,49 @@
 package querynode
 
 import (
-	"context"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func TestTSafe_GetAndSet(t *testing.T) {
-	tSafe := newTSafe(context.Background(), "TestTSafe-channel")
-	tSafe.start()
+func TestTSafe_TSafeWatcher(t *testing.T) {
 	watcher := newTSafeWatcher()
 	defer watcher.close()
-	err := tSafe.registerTSafeWatcher(watcher)
-	assert.NoError(t, err)
+	assert.NotNil(t, watcher)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		// wait work
-		<-watcher.watcherChan()
-		timestamp := tSafe.get()
-		assert.Equal(t, timestamp, Timestamp(1000))
+		watcher.notify()
 		wg.Done()
 	}()
-	tSafe.set(UniqueID(1), Timestamp(1000))
 	wg.Wait()
-}
 
-func TestTSafe_Remove(t *testing.T) {
-	tSafe := newTSafe(context.Background(), "TestTSafe-remove")
-	tSafe.start()
-	watcher := newTSafeWatcher()
-	defer watcher.close()
-	err := tSafe.registerTSafeWatcher(watcher)
-	assert.NoError(t, err)
-
-	tSafe.set(UniqueID(1), Timestamp(1000))
-	tSafe.set(UniqueID(2), Timestamp(1001))
-
+	// wait notify, expect non-block here
 	<-watcher.watcherChan()
-	timestamp := tSafe.get()
-	assert.Equal(t, timestamp, Timestamp(1000))
-
-	tSafe.removeRecord(UniqueID(1))
-	timestamp = tSafe.get()
-	assert.Equal(t, timestamp, Timestamp(1001))
 }
 
-func TestTSafe_Close(t *testing.T) {
-	tSafe := newTSafe(context.Background(), "TestTSafe-close")
-	tSafe.start()
+func TestTSafe_TSafe(t *testing.T) {
+	safe := newTSafe("TestTSafe-channel")
+	assert.NotNil(t, safe)
+
+	timestamp := safe.get()
+	assert.Equal(t, typeutil.ZeroTimestamp, timestamp)
+
 	watcher := newTSafeWatcher()
 	defer watcher.close()
-	err := tSafe.registerTSafeWatcher(watcher)
+	assert.NotNil(t, watcher)
+
+	err := safe.registerTSafeWatcher(watcher)
+	assert.NotNil(t, safe.watcher)
 	assert.NoError(t, err)
 
-	// test set won't panic while close
-	go func() {
-		for i := 0; i <= 100; i++ {
-			tSafe.set(UniqueID(i), Timestamp(1000))
-		}
-	}()
+	targetTimestamp := Timestamp(1000)
+	safe.set(targetTimestamp)
 
-	tSafe.close()
-
-	// wait until channel close
-	for range watcher.watcherChan() {
-
-	}
-
-	tSafe.set(UniqueID(101), Timestamp(1000))
-	tSafe.removeRecord(UniqueID(1))
-	// register TSafe will fail
-	err = tSafe.registerTSafeWatcher(watcher)
-	assert.Error(t, err)
+	timestamp = safe.get()
+	assert.Equal(t, targetTimestamp, timestamp)
 }

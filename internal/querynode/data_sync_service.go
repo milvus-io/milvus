@@ -91,7 +91,6 @@ func (dsService *dataSyncService) addCollectionDeltaFlowGraph(collectionID Uniqu
 		// collection flow graph doesn't need partition id
 		partitionID := UniqueID(0)
 		newFlowGraph := newQueryNodeDeltaFlowGraph(dsService.ctx,
-			loadTypeCollection,
 			collectionID,
 			partitionID,
 			dsService.historicalReplica,
@@ -272,20 +271,6 @@ func (dsService *dataSyncService) startPartitionFlowGraph(partitionID UniqueID, 
 func (dsService *dataSyncService) removePartitionFlowGraph(partitionID UniqueID) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
-
-	if _, ok := dsService.partitionFlowGraphs[partitionID]; ok {
-		for channel, nodeFG := range dsService.partitionFlowGraphs[partitionID] {
-			// close flow graph
-			nodeFG.close()
-			// remove tSafe record
-			// no tSafe in tSafeReplica, don't return error
-			err := dsService.tSafeReplica.removeRecord(channel, partitionID)
-			if err != nil {
-				log.Warn(err.Error())
-			}
-		}
-		dsService.partitionFlowGraphs[partitionID] = nil
-	}
 	delete(dsService.partitionFlowGraphs, partitionID)
 }
 

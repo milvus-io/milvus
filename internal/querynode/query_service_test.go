@@ -226,7 +226,7 @@ func TestQueryService_addQueryCollection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tSafe := newTSafeReplica(ctx)
+	tSafe := newTSafeReplica()
 	his, err := genSimpleHistorical(ctx, tSafe)
 	assert.NoError(t, err)
 

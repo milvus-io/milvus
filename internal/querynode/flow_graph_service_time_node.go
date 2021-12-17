@@ -29,8 +29,6 @@ import (
 type serviceTimeNode struct {
 	baseNode
 	loadType          loadType
-	collectionID      UniqueID
-	partitionID       UniqueID
 	vChannel          Channel
 	tSafeReplica      TSafeReplicaInterface
 	timeTickMsgStream msgstream.MsgStream
@@ -64,15 +62,9 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// update service time
-	var id UniqueID
-	if stNode.loadType == loadTypePartition {
-		id = stNode.partitionID
-	} else {
-		id = stNode.collectionID
-	}
-	err := stNode.tSafeReplica.setTSafe(stNode.vChannel, id, serviceTimeMsg.timeRange.timestampMax)
+	err := stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	if err != nil {
-		log.Warn(err.Error())
+		log.Error(err.Error())
 	}
 	//p, _ := tsoutil.ParseTS(serviceTimeMsg.timeRange.timestampMax)
 	//log.Debug("update tSafe:",
@@ -114,8 +106,6 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
 	loadType loadType,
-	collectionID UniqueID,
-	partitionID UniqueID,
 	channel Channel,
 	factory msgstream.Factory) *serviceTimeNode {
 
@@ -139,8 +129,6 @@ func newServiceTimeNode(ctx context.Context,
 	return &serviceTimeNode{
 		baseNode:          baseNode,
 		loadType:          loadType,
-		collectionID:      collectionID,
-		partitionID:       partitionID,
 		vChannel:          channel,
 		tSafeReplica:      tSafeReplica,
 		timeTickMsgStream: timeTimeMsgStream,
