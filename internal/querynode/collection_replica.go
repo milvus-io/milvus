@@ -129,7 +129,7 @@ type ReplicaInterface interface {
 	printReplica()
 }
 
-// collectionReplica is the data replication of memory data in query node.
+// collectionReplica is the data replication of memory data in QueryNode.
 // It implements `ReplicaInterface` interface.
 type collectionReplica struct {
 	mu          sync.RWMutex // guards all
