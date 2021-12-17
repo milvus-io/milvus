@@ -70,6 +70,7 @@ func (info *indexInfo) setReadyLoad(load bool) {
 	info.readyLoad = load
 }
 
+// getIndexName returns the name of index
 func (info *indexInfo) getIndexName() string {
 	return info.indexName
 }
