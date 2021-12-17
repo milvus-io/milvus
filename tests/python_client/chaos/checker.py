@@ -33,6 +33,7 @@ class Checker:
        a. check whether milvus is servicing
        b. count operations and success rate
     """
+
     def __init__(self):
         self._succ = 0
         self._fail = 0
@@ -45,7 +46,7 @@ class Checker:
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH),
                            timeout=timeout,
                            enable_traceback=enable_traceback)
-        self.initial_entities = self.c_wrap.num_entities    # do as a flush
+        self.initial_entities = self.c_wrap.num_entities  # do as a flush
 
     def total(self):
         return self._succ + self._fail
@@ -61,6 +62,7 @@ class Checker:
 
 class SearchChecker(Checker):
     """check search operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
         self.c_wrap.load(enable_traceback=enable_traceback)  # do load before search
@@ -86,8 +88,10 @@ class SearchChecker(Checker):
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
 
+
 class InsertFlushChecker(Checker):
     """check Insert and flush operations in a dependent thread"""
+
     def __init__(self, flush=False):
         super().__init__()
         self._flush = flush
@@ -123,8 +127,10 @@ class InsertFlushChecker(Checker):
                 else:
                     self._fail += 1
 
+
 class CreateChecker(Checker):
     """check create operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
 
@@ -148,13 +154,15 @@ class CreateChecker(Checker):
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
 
+
 class IndexChecker(Checker):
     """check Insert operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=5 * constants.ENTITIES_FOR_SEARCH),
                            timeout=timeout, enable_traceback=enable_traceback)
-        log.debug(f"Index ready entities: {self.c_wrap.num_entities }")  # do as a flush before indexing
+        log.debug(f"Index ready entities: {self.c_wrap.num_entities}")  # do as a flush before indexing
 
     def keep_running(self):
         while True:
@@ -174,8 +182,10 @@ class IndexChecker(Checker):
             else:
                 self._fail += 1
 
+
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
+
     def __init__(self):
         super().__init__()
         self.c_wrap.load(enable_traceback=enable_traceback)  # load before query
@@ -198,6 +208,7 @@ class QueryChecker(Checker):
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
+
 
 def assert_statistic(checkers, expectations={}):
     for k in checkers.keys():
