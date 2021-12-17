@@ -933,7 +933,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	resp := &milvuspb.GetFlushStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
 	if s.isClosed() {
 		log.Warn("failed to get flush state because of closed server",
-			zap.Int64s("segment ids", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
+			zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
 		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
 		return resp, nil
 	}
