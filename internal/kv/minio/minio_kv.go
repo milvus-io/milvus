@@ -58,7 +58,7 @@ func NewMinIOKV(ctx context.Context, option *Option) (*MinIOKV, error) {
 		Creds:  credentials.NewStaticV4(option.AccessKeyID, option.SecretAccessKeyID, ""),
 		Secure: option.UseSSL,
 	})
-	// options nil or invalid formatted endpoint, don't need retry
+	// options nil or invalid formatted endpoint, don't need to retry
 	if err != nil {
 		return nil, err
 	}
