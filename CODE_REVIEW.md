@@ -4,7 +4,9 @@ All PRs are checked in automatically by the sre-robot, with the following condit
 
 1. DCO check passed
 2. All test passed and code coverage check passed, with a `ci-passed` label
-3. Reviewe passed, with a `lgtm` label
+   - Notes: If there is a `[skip e2e]` tag in the commit message, it skips running e2e tests automatically,
+     but it still runs UT tests and code checkers.
+3. Reviewer passed, with a `lgtm` label
 4. Approver passed, with a `approved` label
 
 Generally speaking, reviewer is volunteered and can be anyone in the community who is familiar with the packages the PR modifies.
@@ -42,6 +44,9 @@ all Approvers are listed under OWNERS_ALIASES file.
 - Are there enough comments to understand the intent of the code?
 
 - Are hacks, workarounds and temporary fixes commented?
+
+- If `[skip e2e]` is tagged, is it safe enough to skip running e2e tests?
+  - Notes: it skips running e2e tests, if there is a `[skip e2e]` in the commit message.
 
 ## Things to keep in mind when you are writing a review comment
 
