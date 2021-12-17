@@ -119,8 +119,8 @@ func (qc *QueryCoord) initSession() error {
 
 // Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
-	log.Debug("query coord session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints), zap.String("address", Params.Address))
-	log.Debug("query coordinator start init")
+	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.MetaRootPath),
+		zap.Strings("etcdEndPoints", Params.EtcdEndpoints), zap.String("address", Params.Address))
 	//connect etcd
 	connectEtcdFn := func() error {
 		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
@@ -134,11 +134,11 @@ func (qc *QueryCoord) Init() error {
 	qc.initOnce.Do(func() {
 		err := qc.initSession()
 		if err != nil {
-			log.Error("QueryCoord init session failed", zap.Error(err))
+			log.Error("queryCoord init session failed", zap.Error(err))
 			initError = err
 			return
 		}
-		log.Debug("QueryCoord try to connect etcd")
+		log.Debug("queryCoord try to connect etcd")
 		initError = retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if initError != nil {
 			log.Debug("query coordinator try to connect etcd failed", zap.Error(initError))
@@ -150,6 +150,7 @@ func (qc *QueryCoord) Init() error {
 		var idAllocatorKV *etcdkv.EtcdKV
 		idAllocatorKV, initError = tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID")
 		if initError != nil {
+			log.Debug("query coordinator idAllocatorKV initialize failed", zap.Error(initError))
 			return
 		}
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
