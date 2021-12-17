@@ -195,7 +195,7 @@ func getSystemInfoMetrics(
 			}
 		}
 
-		// add query nodes to system topology graph
+		// add QueryNodes to system topology graph
 		for _, queryNode := range queryCoordTopology.Cluster.ConnectedNodes {
 			node := queryNode
 			identifier := int(node.ID)
@@ -213,7 +213,7 @@ func getSystemInfoMetrics(
 			})
 		}
 
-		// add query coord to system topology graph
+		// add QueryCoord to system topology graph
 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryCoordTopologyNode)
 	}
 
@@ -224,7 +224,7 @@ func getSystemInfoMetrics(
 			TargetType:          typeutil.DataCoordRole,
 		})
 
-		// data coord in system topology graph
+		// DataCoord in system topology graph
 		dataCoordTopologyNode := metricsinfo.SystemTopologyNode{
 			Identifier: identifierMap[dataCoordRoleName],
 			Connected:  make([]metricsinfo.ConnectionEdge, 0),
