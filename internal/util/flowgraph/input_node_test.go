@@ -17,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
-
 	"github.com/stretchr/testify/assert"
 )
 
