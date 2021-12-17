@@ -38,7 +38,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 
 ### Contributing code
 
-**If you encountered a bug, you can**
+**If you encounter a bug, you can**
 
 - (**Recommended**) File an issue about the bug.
 - Provide clear and concrete ways/scripts to reproduce the bug.
@@ -52,7 +52,7 @@ As for everything else in the project, the contributions to Milvus are governed 
   - (**Recommended**) Ask questions, reproduce the issue, or provide solutions.
   - Pull a request to fix the issue.
 
-**If you require new feature or major enhancement, you can**
+**If you require a new feature or major enhancement, you can**
 
 - (**Recommended**) File an issue about the feature/enhancement with reasons.
 - Provide an MEP for the feature/enhancement.
@@ -63,7 +63,7 @@ As for everything else in the project, the contributions to Milvus are governed 
 - Participate in [PR review](CODE_REVIEW.md) process.
 - Instruct newcomers in the community to complete the PR process.
 
-If you want to become a contributor of Milvus, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow) below.
+If you want to become a contributor of Milvus, submit your pull requests! For those just getting started, see [GitHub workflow](#github-workflow) below.
 
 All submissions will be reviewed as quickly as possible.
 There will be a reviewer to review the codes, and an approver to review everything aside the codes, see [code review](CODE_REVIEW.md) for details.
