@@ -32,7 +32,7 @@ func TestTimetickSync(t *testing.T) {
 
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err := factory.SetParams(m)
@@ -42,9 +42,9 @@ func TestTimetickSync(t *testing.T) {
 	//	int64(1): {"rootcoord-dml_0"},
 	//}
 
-	Params.DmlChannelNum = 2
-	Params.DmlChannelName = "rootcoord-dml"
-	Params.DeltaChannelName = "rootcoord-delta"
+	Params.RootCoordCfg.DmlChannelNum = 2
+	Params.MsgChannelCfg.DmlChannelName = "rootcoord-dml"
+	Params.MsgChannelCfg.DeltaChannelName = "rootcoord-delta"
 	ttSync := newTimeTickSync(ctx, session, factory, nil)
 
 	t.Run("sendToChannel", func(t *testing.T) {

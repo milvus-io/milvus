@@ -112,7 +112,7 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	go func() {
 		rootcoord.Params.Init()
 		if !localMsg {
-			logutil.SetupLogger(&rootcoord.Params.Log)
+			logutil.SetupLogger(&rootcoord.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 

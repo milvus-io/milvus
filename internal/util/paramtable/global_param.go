@@ -15,13 +15,14 @@ import (
 	"math"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
-
-	"go.uber.org/zap"
+	"time"
 
 	"github.com/go-basic/ipv4"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -37,6 +38,487 @@ const (
 	// DefaultClientMaxRecvSize defines the maximum size of data per grpc request can receive by client side.
 	DefaultClientMaxRecvSize = 100 * 1024 * 1024
 )
+
+// GlobalParamTable is a derived struct of BaseParamTable.
+// It is used to quickly and easily access global system configuration.
+type GlobalParamTable struct {
+	BaseParams BaseParamTable
+
+	EtcdCfg       etcdConfig
+	MinioCfg      minioConfig
+	PulsarCfg     pulsarConfig
+	RocksdbCfg    rocksdbConfig
+	CommonCfg     commonConfig
+	KnowhereCfg   knowhereConfig
+	MsgChannelCfg msgChannelConfig
+
+	RootCoordCfg  rootCoordConfig
+	ProxyCfg      proxyConfig
+	QueryCoordCfg queryCoordConfig
+	QueryNodeCfg  queryNodeConfig
+	DataCoordCfg  dataCoordConfig
+	DataNodeCfg   dataNodeConfig
+	IndexCoordCfg indexCoordConfig
+	IndexNodeCfg  indexNodeConfig
+}
+
+// InitOnce initialize once
+func (p *GlobalParamTable) InitOnce() {
+	once.Do(func() {
+		p.Init()
+	})
+}
+
+func (p *GlobalParamTable) Init() {
+	p.BaseParams.Init()
+	p.BaseParams.RoleName = "rootcoord"
+
+	p.EtcdCfg.Init(&p.BaseParams)
+	p.MinioCfg.Init(&p.BaseParams)
+	p.PulsarCfg.Init(&p.BaseParams)
+	p.RocksdbCfg.Init(&p.BaseParams)
+	p.CommonCfg.Init(&p.BaseParams)
+	p.KnowhereCfg.Init(&p.BaseParams)
+	p.MsgChannelCfg.Init(&p.BaseParams)
+
+	p.RootCoordCfg.Init(&p.BaseParams)
+	p.ProxyCfg.Init(&p.BaseParams)
+	p.QueryCoordCfg.Init(&p.BaseParams)
+	p.QueryNodeCfg.Init(&p.BaseParams)
+	p.DataCoordCfg.Init(&p.BaseParams)
+	p.DataNodeCfg.Init(&p.BaseParams)
+	p.IndexCoordCfg.Init(&p.BaseParams)
+	p.IndexNodeCfg.Init(&p.BaseParams)
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- etcd ---
+type etcdConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *etcdConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- minio ---
+type minioConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *minioConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- pulsar ---
+type pulsarConfig struct {
+	BaseParams *BaseParamTable
+
+	Address string
+}
+
+func (p *pulsarConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initPulsarAddress()
+}
+
+func (p *pulsarConfig) initPulsarAddress() {
+	addr, err := p.BaseParams.Load("_PulsarAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.Address = addr
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- rocksdb ---
+type rocksdbConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *rocksdbConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- common ---
+type commonConfig struct {
+	BaseParams *BaseParamTable
+
+	DefaultPartitionName string
+	DefaultIndexName     string
+}
+
+func (p *commonConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+	p.initDefaultPartitionName()
+	p.initDefaultIndexName()
+}
+
+func (p *commonConfig) initDefaultPartitionName() {
+	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
+	p.DefaultPartitionName = name
+}
+
+func (p *commonConfig) initDefaultIndexName() {
+	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
+	p.DefaultIndexName = name
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- knowhere ---
+type knowhereConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *knowhereConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- msgChannel ---
+type msgChannelConfig struct {
+	BaseParams *BaseParamTable
+
+	ClusterChannelPrefix string
+	MsgChannelSubName    string
+	TimeTickChannel      string
+	StatisticsChannel    string
+	DmlChannelName       string
+	DeltaChannelName     string
+}
+
+func (p *msgChannelConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+	// Has to init global msgchannel prefix before other channel names
+	p.initClusterMsgChannelPrefix()
+	p.initMsgChannelSubName()
+	p.initTimeTickChannel()
+	p.initStatisticsChannelName()
+	p.initDmlChannelName()
+	p.initDeltaChannelName()
+}
+
+func (p *msgChannelConfig) initClusterMsgChannelPrefix() {
+	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
+	if err != nil {
+		panic(err)
+	}
+	p.ClusterChannelPrefix = config
+}
+
+func (p *msgChannelConfig) initMsgChannelSubName() {
+	config, err := p.BaseParams.Load("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.MsgChannelSubName = strings.Join(s, "-")
+}
+
+func (p *msgChannelConfig) initTimeTickChannel() {
+	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordTimeTick")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.TimeTickChannel = strings.Join(s, "-")
+}
+
+func (p *msgChannelConfig) initStatisticsChannelName() {
+	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordStatistics")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.StatisticsChannel = strings.Join(s, "-")
+}
+
+func (p *msgChannelConfig) initDmlChannelName() {
+	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DmlChannelName = strings.Join(s, "-")
+}
+
+func (p *msgChannelConfig) initDeltaChannelName() {
+	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDelta")
+	if err != nil {
+		config = "rootcoord-delta"
+	}
+	s := []string{p.ClusterChannelPrefix, config}
+	p.DeltaChannelName = strings.Join(s, "-")
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- rootcoord ---
+type rootCoordConfig struct {
+	BaseParams *BaseParamTable
+
+	Port    int
+	Address string
+	//PulsarAddress string
+	//EtcdEndpoints []string
+	//MetaRootPath  string
+	//KvRootPath    string
+
+	//ClusterChannelPrefix string
+	//MsgChannelSubName    string
+	//TimeTickChannel      string
+	//StatisticsChannel    string
+	//DmlChannelName       string
+	//DeltaChannelName     string
+
+	DmlChannelNum   int64
+	MaxPartitionNum int64
+	//DefaultPartitionName        string
+	//DefaultIndexName            string
+	MinSegmentSizeToEnableIndex int64
+
+	Timeout          int
+	TimeTickInterval int
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
+}
+
+// InitOnce initialize once
+//func (p *rootCoordConfig) InitOnce() {
+//	once.Do(func() {
+//		p.Init()
+//	})
+//}
+
+// Init initialize param table
+func (p *rootCoordConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	//p.initPulsarAddress()
+	//p.initEtcdEndpoints()
+	//p.initMetaRootPath()
+	//p.initKvRootPath()
+
+	// Has to init global msgchannel prefix before other channel names
+	//p.initClusterMsgChannelPrefix()
+	//p.initMsgChannelSubName()
+	//p.initTimeTickChannel()
+	//p.initStatisticsChannelName()
+	//p.initDmlChannelName()
+	//p.initDeltaChannelName()
+
+	p.initDmlChannelNum()
+	p.initMaxPartitionNum()
+	p.initMinSegmentSizeToEnableIndex()
+	//p.initDefaultPartitionName()
+	//p.initDefaultIndexName()
+
+	p.initTimeout()
+	p.initTimeTickInterval()
+
+	//p.initRoleName()
+}
+
+//func (p *rootCoordConfig) initPulsarAddress() {
+//	addr, err := p.BaseParams.Load("_PulsarAddress")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.PulsarAddress = addr
+//}
+
+//func (p *rootCoordConfig) initEtcdEndpoints() {
+//	endpoints, err := p.BaseParams.Load("_EtcdEndpoints")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.EtcdEndpoints = strings.Split(endpoints, ",")
+//}
+
+//func (p *rootCoordConfig) initMetaRootPath() {
+//	rootPath, err := p.BaseParams.Load("etcd.rootPath")
+//	if err != nil {
+//		panic(err)
+//	}
+//	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.MetaRootPath = rootPath + "/" + subPath
+//}
+
+//func (p *rootCoordConfig) initKvRootPath() {
+//	rootPath, err := p.BaseParams.Load("etcd.rootPath")
+//	if err != nil {
+//		panic(err)
+//	}
+//	subPath, err := p.BaseParams.Load("etcd.kvSubPath")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.KvRootPath = rootPath + "/" + subPath
+//}
+
+//func (p *rootCoordConfig) initClusterMsgChannelPrefix() {
+//	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.ClusterChannelPrefix = config
+//}
+//
+//func (p *rootCoordConfig) initMsgChannelSubName() {
+//	config, err := p.BaseParams.Load("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
+//	if err != nil {
+//		panic(err)
+//	}
+//	s := []string{p.ClusterChannelPrefix, config}
+//	p.MsgChannelSubName = strings.Join(s, "-")
+//}
+//
+//func (p *rootCoordConfig) initTimeTickChannel() {
+//	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordTimeTick")
+//	if err != nil {
+//		panic(err)
+//	}
+//	s := []string{p.ClusterChannelPrefix, config}
+//	p.TimeTickChannel = strings.Join(s, "-")
+//}
+//
+//func (p *rootCoordConfig) initStatisticsChannelName() {
+//	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordStatistics")
+//	if err != nil {
+//		panic(err)
+//	}
+//	s := []string{p.ClusterChannelPrefix, config}
+//	p.StatisticsChannel = strings.Join(s, "-")
+//}
+//
+//func (p *rootCoordConfig) initDmlChannelName() {
+//	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
+//	if err != nil {
+//		panic(err)
+//	}
+//	s := []string{p.ClusterChannelPrefix, config}
+//	p.DmlChannelName = strings.Join(s, "-")
+//}
+//
+//func (p *rootCoordConfig) initDeltaChannelName() {
+//	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDelta")
+//	if err != nil {
+//		config = "rootcoord-delta"
+//	}
+//	s := []string{p.ClusterChannelPrefix, config}
+//	p.DeltaChannelName = strings.Join(s, "-")
+//}
+
+func (p *rootCoordConfig) initDmlChannelNum() {
+	p.DmlChannelNum = p.BaseParams.ParseInt64WithDefault("rootCoord.dmlChannelNum", 256)
+}
+
+func (p *rootCoordConfig) initMaxPartitionNum() {
+	p.MaxPartitionNum = p.BaseParams.ParseInt64WithDefault("rootCoord.maxPartitionNum", 4096)
+}
+
+func (p *rootCoordConfig) initMinSegmentSizeToEnableIndex() {
+	p.MinSegmentSizeToEnableIndex = p.BaseParams.ParseInt64WithDefault("rootCoord.minSegmentSizeToEnableIndex", 1024)
+}
+
+//func (p *rootCoordConfig) initDefaultPartitionName() {
+//	name := p.LoadWithDefault("common.defaultPartitionName", "_default")
+//	p.DefaultPartitionName = name
+//}
+//
+//func (p *rootCoordConfig) initDefaultIndexName() {
+//	name := p.LoadWithDefault("common.defaultIndexName", "_default_idx")
+//	p.DefaultIndexName = name
+//}
+
+func (p *rootCoordConfig) initTimeout() {
+	p.Timeout = p.BaseParams.ParseIntWithDefault("rootCoord.timeout", 3600)
+}
+
+func (p *rootCoordConfig) initTimeTickInterval() {
+	p.TimeTickInterval = p.BaseParams.ParseIntWithDefault("rootCoord.timeTickInterval", 200)
+}
+
+//func (p *rootCoordConfig) initRoleName() {
+//	p.RoleName = "rootcoord"
+//}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- proxy ---
+type proxyConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *proxyConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- querycoord ---
+type queryCoordConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *queryCoordConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- querynode ---
+type queryNodeConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *queryNodeConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- datacoord ---
+type dataCoordConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *dataCoordConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- datanode ---
+type dataNodeConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *dataNodeConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- indexcoord ---
+type indexCoordConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *indexCoordConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// -- indexnode ---
+type indexNodeConfig struct {
+	BaseParams *BaseParamTable
+}
+
+func (p *indexNodeConfig) Init(bp *BaseParamTable) {
+	p.BaseParams = bp
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // -- grpc ---

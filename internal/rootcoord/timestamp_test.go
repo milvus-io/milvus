@@ -83,11 +83,11 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
+	Params.MsgChannelCfg.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
+	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
+	Params.MsgChannelCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
 	err = core.SetDataCoord(ctx, &tbd{})
 	assert.Nil(b, err)
@@ -117,7 +117,7 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(b, err)

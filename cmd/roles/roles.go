@@ -94,7 +94,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 		rootcoord.Params.InitOnce()
 
 		f := setLoggerFunc()
-		rootcoord.Params.SetLogConfig(f)
+		rootcoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
