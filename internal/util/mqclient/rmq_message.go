@@ -23,6 +23,7 @@ type rmqMessage struct {
 	msg rocksmq.Message
 }
 
+// Topic returns the topic name of rocksmq message
 func (rm *rmqMessage) Topic() string {
 	return rm.msg.Topic
 }
