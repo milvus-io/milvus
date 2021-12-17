@@ -1,4 +1,3 @@
-# import docker
 import copy
 import time
 from pymilvus import (
@@ -15,6 +14,15 @@ default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist"
                         {"nlist": 128}]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
+
+
+def filter_collections_by_prefix(prefix):
+    col_list = list_collections()
+    res = []
+    for col in col_list:
+        if col.startswith(prefix):
+            res.append(col)
+    return res
 
 
 def gen_search_param(index_type, metric_type="L2"):
@@ -44,17 +52,19 @@ def gen_search_param(index_type, metric_type="L2"):
         raise Exception("Invalid index_type.")
     return search_params
 
-def get_collections():
+
+def get_collections(prefix):
     print(f"\nList collections...")
-    col_list = list_collections()
+    col_list = filter_collections_by_prefix(prefix)
     print(f"collections_nums: {len(col_list)}")
     # list entities if collections
     for name in col_list:
         c = Collection(name=name)
         print(f"{name}: {c.num_entities}")
+    return col_list
 
 
-def create_collections_and_insert_data():
+def create_collections_and_insert_data(prefix):
     import random
     dim = 128
     default_fields = [
@@ -63,14 +73,13 @@ def create_collections_and_insert_data():
         FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
-    print(f"\nList collections...")
-    print(list_collections())
-    for col_name in all_index_types:
+    for index_name in all_index_types:
         print(f"\nCreate collection...")
+        col_name = prefix + index_name
         collection = Collection(name=col_name, schema=default_schema) 
         print(f"collection name: {col_name}")
-        count = 50000
-        nb = 5000
+        count = 3000
+        nb = 500
         print(f"begin insert, count: {count} nb: {nb}")
         times = int(count / nb)
         total_time = 0.0
@@ -95,42 +104,42 @@ def create_collections_and_insert_data():
         end_time = time.time()
         print("Get collection entities time = %.4fs" % (end_time - start_time))
     print(f"\nList collections...")
-    print(list_collections())
+    print(get_collections(prefix))
 
 
-def create_index():
+def create_index(prefix):
     # create index
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
-    col_list = list_collections()
+    col_list = get_collections(prefix)
     print(f"\nCreate index...")
-    for name in col_list:
-        c = Collection(name=name)
-
-        print(name)
+    for col_name in col_list:
+        c = Collection(name=col_name)
+        index_name = col_name.replace(prefix, "")
+        print(index_name)
         print(c)
         index = copy.deepcopy(default_index)
-        index["index_type"] = name
-        index["params"] = index_params_map[name]
-        if name in ["BIN_FLAT", "BIN_IVF_FLAT"]:
+        index["index_type"] = index_name
+        index["params"] = index_params_map[index_name]
+        if index_name in ["BIN_FLAT", "BIN_IVF_FLAT"]:
             index["metric_type"] = "HAMMING"
         t0 = time.time()
         c.create_index(field_name="float_vector", index_params=index)
         print(f"create index time: {time.time() - t0:.4f}")
 
 
-def load_and_search():
+def load_and_search(prefix):
     print("search data starts")
-    col_list = list_collections()
-    for name in col_list:
-        c = Collection(name=name)
-        print(f"collection name: {name}")
+    col_list = get_collections(prefix)
+    for col_name in col_list:
+        c = Collection(name=col_name)
+        print(f"collection name: {col_name}")
         t0 = time.time()
         c.load()
         print(f"load time: {time.time() - t0:.4f}")
         topK = 5
         vectors = [[0.0 for _ in range(128)] for _ in range(3000)]
-        index_type = name
-        search_params = gen_search_param(index_type)[0]
+        index_name = col_name.replace(prefix, "")
+        search_params = gen_search_param(index_name)[0]
         print(search_params)
         # search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
         start_time = time.time()
@@ -157,7 +166,7 @@ def load_and_search():
         for r in sorted_res:
             print(r)
         t1 = time.time()
-        print("query latency: %.4fs" % (t1 -t0))
+        print("query latency: %.4fs" % (t1 - t0))
         # c.release()
         print("###########")
     print("search data ends")

@@ -141,7 +141,7 @@ fi
 if [ "$Task" == "upgrade" ];
 then
     printf "start to deploy previous rc tag milvus\n"
-    replace_image_tag $latest_rc_tag
+    replace_image_tag "master-20211216-7e56f08"
 
 fi
 cat docker-compose.yml|grep milvusdb
@@ -156,7 +156,7 @@ popd
 printf "test for first deployment\n"
 if [ "$Task" == "reinstall" ];
 then
-    python scripts/action_reinstall.py || error_exit
+    python scripts/action_before_reinstall.py || error_exit
 fi
 if [ "$Task" == "upgrade" ];
 then
@@ -195,7 +195,7 @@ popd
 printf "test for second deployment\n"
 if [ "$Task" == "reinstall" ];
 then
-    python scripts/action_reinstall.py || error_exit
+    python scripts/action_after_reinstall.py || error_exit
 fi
 if [ "$Task" == "upgrade" ];
 then

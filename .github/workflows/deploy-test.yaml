@@ -117,7 +117,7 @@ jobs:
           if [ ${{ matrix.task }} == "reinstall" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml; fi
 
           # if the task is upgrade, install milvus with latest rc image in repo milvusdb/milvus
-          if [ ${{ matrix.task }} == "upgrade" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest -f cluster-values.yaml; fi
+          if [ ${{ matrix.task }} == "upgrade" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus-dev --set image.all.tag=master-20211216-7e56f08 -f cluster-values.yaml; fi
           kubectl get pods
           sleep 20s
           kubectl get pods
@@ -127,7 +127,7 @@ jobs:
           nc -vz 127.0.0.1 19530
 
           # first test
-          if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_reinstall.py; fi
+          if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_before_reinstall.py; fi
           if [ ${{ matrix.task }} == "upgrade" ]; then python scripts/action_before_upgrade.py; fi
 
 
@@ -152,7 +152,7 @@ jobs:
           nc -vz 127.0.0.1 19530
           
           # second test
-          if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_reinstall.py; fi
+          if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_after_reinstall.py; fi
           if [ ${{ matrix.task }} == "upgrade" ]; then python scripts/action_after_upgrade.py; fi
         
       - name: Export logs
