@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-// metaService initialize replica collections in data node from root coord.
+// metaService initialize replica collections in DataNode from RootCoord.
 // Initializing replica collections happens on data node starting. It depends on
 // a healthy root coord and a valid root coord grpc client.
 type metaService struct {
