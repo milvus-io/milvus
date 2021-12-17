@@ -31,6 +31,7 @@ func (rm *rmqMessage) Properties() map[string]string {
 	return nil
 }
 
+// Payload returns the payload of rocksmq message
 func (rm *rmqMessage) Payload() []byte {
 	return rm.msg.Payload
 }
