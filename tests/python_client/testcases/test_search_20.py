@@ -2128,9 +2128,9 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.parametrize("round_decimal", [0, 1, 2, 3, 4, 5, 6])
     def test_search_round_decimal(self, round_decimal):
         """
-        target: test search with invalid round decimal
-        method: search with invalid round decimal
-        expected: raise exception and report the error
+        target: test search with valid round decimal
+        method: search with valid round decimal
+        expected: search successfully
         """
         import math
         tmp_nb = 500
