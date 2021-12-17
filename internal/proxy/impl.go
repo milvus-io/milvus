@@ -24,6 +24,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/logutil"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
@@ -45,6 +46,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+const moduleName = "Proxy"
 
 // UpdateStateCode updates the state code of Proxy.
 func (node *Proxy) UpdateStateCode(code internalpb.StateCode) {
@@ -94,7 +97,8 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRe
 
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	log.Debug("InvalidateCollectionMetaCache",
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
@@ -103,7 +107,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if globalMetaCache != nil {
 		globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
 	}
-	log.Debug("InvalidateCollectionMetaCache Done",
+	logutil.Logger(ctx).Debug("complete to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
@@ -116,7 +120,8 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 // ReleaseDQLMessageStream release the query message stream of specific collection.
 func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	log.Debug("ReleaseDQLMessageStream",
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to release DQL message strem",
 		zap.Any("role", typeutil.ProxyRole),
 		zap.Any("db", request.DbID),
 		zap.Any("collection", request.CollectionID))
@@ -127,7 +132,7 @@ func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb
 
 	_ = node.chMgr.removeDQLStream(request.CollectionID)
 
-	log.Debug("ReleaseDQLMessageStream Done",
+	logutil.Logger(ctx).Debug("complete to release DQL message stream",
 		zap.Any("role", typeutil.ProxyRole),
 		zap.Any("db", request.DbID),
 		zap.Any("collection", request.CollectionID))

@@ -351,7 +351,8 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var pn *components.Proxy
 	if mr.EnableProxy {
-		pn = mr.runProxy(ctx, localMsg, alias)
+		pctx := logutil.WithModule(ctx, "Proxy")
+		pn = mr.runProxy(pctx, localMsg, alias)
 		if pn != nil {
 			defer pn.Stop()
 		}

@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -103,7 +104,7 @@ func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 		msFactory: factory,
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("Proxy", zap.Any("State", node.stateCode.Load()))
+	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 
 }
