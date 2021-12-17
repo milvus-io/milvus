@@ -434,10 +434,11 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		ret.Status.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Any("IndexBuildID", t.indexBuildID))
+	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Int64("IndexBuildID", t.indexBuildID))
 
 	err = t.WaitToFinish()
 	if err != nil {
+		log.Error("IndexCoord scheduler index task failed", zap.Int64("IndexBuildID", t.indexBuildID))
 		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
 		return ret, nil
