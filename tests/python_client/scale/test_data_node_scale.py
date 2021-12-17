@@ -23,9 +23,16 @@ class TestDataNodeScale:
     @pytest.mark.tags(CaseLabel.L3)
     def test_scale_data_node(self):
         """
-        target:
-        method:
-        expected:
+        target: test scale dataNode
+        method: 1.deploy milvus cluster with 2 dataNode
+                2.create collection with shards_num=5
+                3.continuously insert new data (daemon thread)
+                4.expand dataNode from 2 to 5
+                5.create new collection with shards_num=2
+                6.continuously insert new collection new data (daemon thread)
+                7.shrink dataNode from 5 to 3
+        expected: Verify milvus remains healthy, Insert and flush successfully during scale
+                  Average dataNode memory usage
         """
         release_name = "scale-data"
         image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
