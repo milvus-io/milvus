@@ -130,36 +130,33 @@ func (s *Session) Register() {
 }
 
 func (s *Session) getServerID() (int64, error) {
-	return s.getServerIDWithKey(DefaultIDKey, DefaultRetryTimes)
+	return s.getServerIDWithKey(DefaultIDKey)
 }
 
 func (s *Session) checkIDExist() {
-	log.Debug("Session checkIDExist Begin")
 	s.etcdCli.Txn(s.ctx).If(
 		clientv3.Compare(
 			clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
 			"=",
 			0)).
 		Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), "1")).Commit()
-	log.Debug("Session checkIDExist End")
 }
 
-func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error) {
+func (s *Session) getServerIDWithKey(key string) (int64, error) {
 	for {
-		log.Debug("Session try to get serverID")
 		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
 		if err != nil {
-			log.Debug("Session get etcd key error", zap.String("key", key), zap.Error(err))
+			log.Warn("Session get etcd key error", zap.String("key", key), zap.Error(err))
 			return -1, err
 		}
 		if getResp.Count <= 0 {
-			log.Debug("Session there is no value", zap.String("key", key))
+			log.Warn("Session there is no value", zap.String("key", key))
 			continue
 		}
 		value := string(getResp.Kvs[0].Value)
 		valueInt, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			log.Debug("Session ParseInt error", zap.String("value", value), zap.Error(err))
+			log.Warn("Session ParseInt error", zap.String("value", value), zap.Error(err))
 			continue
 		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
@@ -169,15 +166,15 @@ func (s *Session) getServerIDWithKey(key string, retryTimes uint) (int64, error)
 				value)).
 			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), strconv.FormatInt(valueInt+1, 10))).Commit()
 		if err != nil {
-			log.Debug("Session Txn failed", zap.String("key", key), zap.Error(err))
+			log.Warn("Session Txn failed", zap.String("key", key), zap.Error(err))
 			return -1, err
 		}
 
 		if !txnResp.Succeeded {
-			log.Debug("Session Txn unsuccessful", zap.String("key", key))
+			log.Warn("Session Txn unsuccessful", zap.String("key", key))
 			continue
 		}
-		log.Debug("Session get serverID success")
+		log.Debug("Session get serverID success", zap.String("key", key), zap.Int64("ServerId", valueInt))
 		return valueInt, nil
 	}
 }
@@ -238,7 +235,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			fmt.Printf("keep alive error %s\n", err)
 			return err
 		}
-		log.Debug("Session Register End", zap.Int64("ServerID", s.ServerID))
+		log.Debug("Session register successfully", zap.Int64("ServerID", s.ServerID))
 		return nil
 	}
 	err := retry.Do(s.ctx, registerFn, retry.Attempts(DefaultRetryTimes), retry.Sleep(500*time.Millisecond))

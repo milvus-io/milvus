@@ -386,14 +386,9 @@ func (qn *queryNode) removeQueryChannelInfo(collectionID UniqueID) {
 func (qn *queryNode) clearNodeInfo() error {
 	qn.RLock()
 	defer qn.RUnlock()
-	for collectionID := range qn.collectionInfos {
-		err := removeNodeCollectionInfo(collectionID, qn.id, qn.kvClient)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	// delete query node meta and all the collection info
+	key := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, qn.id)
+	return qn.kvClient.RemoveWithPrefix(key)
 }
 
 func (qn *queryNode) setState(state nodeState) {

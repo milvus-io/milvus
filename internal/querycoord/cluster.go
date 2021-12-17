@@ -219,7 +219,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 			}
 			err = c.nodes[nodeID].setCollectionInfo(collectionInfo)
 			if err != nil {
-				log.Debug("reloadFromKV: failed to add queryNode meta to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+				log.Warn("reloadFromKV: failed to add queryNode meta to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 				return err
 			}
 			log.Debug("reloadFromKV: reload collection info from etcd", zap.Any("info", collectionInfo))
@@ -647,7 +647,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 			go node.start()
 		}
 		c.nodes[id] = node
-		log.Debug("registerNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address))
+		log.Debug("registerNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
 	return fmt.Errorf("registerNode: node %d alredy exists in cluster", id)

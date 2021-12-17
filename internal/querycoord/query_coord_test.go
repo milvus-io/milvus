@@ -30,10 +30,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"go.uber.org/zap"
 )
 
 func setup() {
@@ -176,10 +178,18 @@ func TestWatchNodeLoop(t *testing.T) {
 		assert.Nil(t, err)
 
 		for {
-			_, err = queryCoord.cluster.offlineNodes()
+			offlineNodes, err := queryCoord.cluster.offlineNodes()
 			if err == nil {
+				log.Warn("find offline Nodes", zap.Any("node map", offlineNodes))
 				break
 			}
+			// if session id not exist, means querycoord already handled it and remove
+			_, err = kv.Load(nodeKey)
+			if err != nil {
+				log.Warn("already handled by querycoord", zap.Error(err))
+				break
+			}
+			time.Sleep(time.Duration(1) * time.Second)
 		}
 
 		queryCoord.Stop()
