@@ -27,6 +27,7 @@ func (rm *rmqMessage) Topic() string {
 	return rm.msg.Topic
 }
 
+// Properties returns the properties of rocksmq message
 func (rm *rmqMessage) Properties() map[string]string {
 	return nil
 }
