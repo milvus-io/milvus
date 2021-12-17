@@ -43,6 +43,7 @@ type indexInfo struct {
 	enableIndex bool
 }
 
+// IndexChecker checks index
 type IndexChecker struct {
 	ctx    context.Context
 	cancel context.CancelFunc
