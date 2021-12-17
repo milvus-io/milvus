@@ -1,5 +1,4 @@
 import copy
-import logging
 import threading
 
 import pytest
@@ -8,6 +7,7 @@ from utils import utils as ut
 from common.constants import default_entity, default_entities, default_binary_entity, default_binary_entities, \
     default_fields
 from common.common_type import CaseLabel
+from utils.util_log import test_log as log
 
 ADD_TIMEOUT = 60
 uid = "test_insert"
@@ -38,7 +38,7 @@ class TestInsertBase:
     def get_simple_index(self, request, connect):
         if request.param["index_type"] in ut.index_cpu_not_support():
             pytest.skip("CPU not support index_type: ivf_sq8h")
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         return request.param
 
     @pytest.fixture(
@@ -253,7 +253,7 @@ class TestInsertBase:
         connect.create_collection(collection_name, fields)
         ids = [i for i in range(nb)]
         entities = ut.gen_entities_by_fields(fields["fields"], nb, ut.default_dim, ids)
-        logging.getLogger().info(entities)
+        log.info(entities)
         result = connect.insert(collection_name, entities)
         assert result.primary_keys == ids
         connect.flush([collection_name])
@@ -313,7 +313,7 @@ class TestInsertBase:
         expected: raise exception
         """
         ids = [i for i in range(1, default_nb)]
-        logging.getLogger().info(len(ids))
+        log.info(len(ids))
         entities = copy.deepcopy(default_entities)
         entities[0]["values"] = ids
         with pytest.raises(Exception) as e:
@@ -328,7 +328,7 @@ class TestInsertBase:
         expected: raise exception
         """
         ids = [i for i in range(1, default_nb)]
-        logging.getLogger().info(len(ids))
+        log.info(len(ids))
         entity = copy.deepcopy(default_entity)
         entity[0]["values"] = ids
         with pytest.raises(Exception) as e:
@@ -365,7 +365,7 @@ class TestInsertBase:
         entities[0]["values"] = ids
         result = connect.insert(id_collection, entities, partition_name=default_tag)
         assert result.primary_keys == ids
-        logging.getLogger().info(connect.describe_collection(id_collection))
+        log.info(connect.describe_collection(id_collection))
 
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L1)
@@ -551,7 +551,7 @@ class TestInsertBase:
         milvus = ut.get_milvus(host=args["ip"], port=args["port"], handler=args["handler"], try_connect=False)
 
         def insert(thread_i):
-            logging.getLogger().info("In thread-%d" % thread_i)
+            log.info("In thread-%d" % thread_i)
             result = milvus.insert(collection, default_entities)
             milvus.flush([collection])
 
@@ -676,7 +676,7 @@ class TestInsertBinary:
                                                 ut.default_top_k, 1, metric_type="JACCARD")
         connect.load_collection(binary_collection)
         res = connect.search(binary_collection, **query)
-        logging.getLogger().debug(res)
+        log.debug(res)
         assert len(res[0]) == ut.default_top_k
 
 
@@ -697,11 +697,11 @@ class TestInsertAsync:
         yield request.param
 
     def check_status(self, result):
-        logging.getLogger().info("In callback check status")
+        log.info("In callback check status")
         assert not result
 
     def check_result(self, result):
-        logging.getLogger().info("In callback check results")
+        log.info("In callback check results")
         assert result
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -755,7 +755,7 @@ class TestInsertAsync:
         assert len(result.primary_keys) == nb
         connect.flush([collection])
         stats = connect.get_collection_stats(collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         assert stats[row_count] == nb
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -810,7 +810,7 @@ class TestInsertMultiCollections:
         params=ut.gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         # if str(connect._cmd("mode")) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in CPU mode")

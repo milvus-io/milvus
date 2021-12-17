@@ -382,7 +382,7 @@ class TestIndexBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         # if str(connect._cmd("mode")) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in CPU mode")
@@ -513,7 +513,7 @@ class TestIndexBase:
         result = connect.insert(collection, default_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
-        logging.getLogger().info(connect.describe_index(collection, ""))
+        log.info(connect.describe_index(collection, ""))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
@@ -714,7 +714,7 @@ class TestIndexBase:
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         connect.load_collection(collection)
-        logging.getLogger().info(connect.describe_index(collection, ""))
+        log.info(connect.describe_index(collection, ""))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
@@ -1066,7 +1066,7 @@ class TestIndexBinary:
         search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
         params, _ = gen_search_vectors_params(binary_field_name, default_binary_entities, default_top_k, nq,
                                               search_params=search_param, metric_type="JACCARD")
-        logging.getLogger().info(params)
+        log.info(params)
         res = connect.search(binary_collection, **params)
         assert len(res) == nq
 
@@ -1122,7 +1122,7 @@ class TestIndexBinary:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         assert stats["row_count"] == default_nb
         assert len(stats["partitions"]) == 2
         for partition in stats["partitions"]:
@@ -1148,7 +1148,7 @@ class TestIndexBinary:
         """
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         connect.drop_index(binary_collection, binary_field_name)
         binary_index = connect.describe_index(binary_collection, "")
         assert not binary_index
@@ -1218,7 +1218,7 @@ class TestIndexInvalid(object):
         method: create index with invalid index params
         expected: raise exception
         """
-        logging.getLogger().info(get_index)
+        log.info(get_index)
         with pytest.raises(Exception) as e:
             connect.create_index(collection, field_name, get_index)
 
@@ -1246,8 +1246,8 @@ class TestIndexAsync:
         return copy.deepcopy(request.param)
 
     def check_result(self, res):
-        logging.getLogger().info("In callback check search result")
-        logging.getLogger().info(res)
+        log.info("In callback check search result")
+        log.info(res)
 
     """
     ******************************************************************
@@ -1263,12 +1263,12 @@ class TestIndexAsync:
         expected: return search success
         """
         result = connect.insert(collection, default_entities)
-        logging.getLogger().info("start index")
+        log.info("start index")
         future = connect.create_index(collection, field_name, get_simple_index, _async=True)
-        logging.getLogger().info("before result")
+        log.info("before result")
         res = future.result()
         # TODO:
-        logging.getLogger().info(res)
+        log.info(res)
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.timeout(BUILD_TIMEOUT)
@@ -1300,10 +1300,10 @@ class TestIndexAsync:
         expected: return search success
         """
         result = connect.insert(collection, default_entities)
-        logging.getLogger().info("start index")
+        log.info("start index")
         future = connect.create_index(collection, field_name, get_simple_index, _async=True,
                                       _callback=self.check_result)
-        logging.getLogger().info("before result")
+        log.info("before result")
         res = future.result()
         # TODO:
-        logging.getLogger().info(res)
+        log.info(res)
