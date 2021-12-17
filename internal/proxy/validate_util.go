@@ -231,6 +231,7 @@ func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, e
 	return resMap, nil
 }
 
+// isVector check if dataType belongs to vector type.
 func isVector(dataType schemapb.DataType) (bool, error) {
 	switch dataType {
 	case schemapb.DataType_Bool, schemapb.DataType_Int8,
