@@ -12,6 +12,7 @@
 package rocksmq
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -44,6 +45,7 @@ func TestClient_CreateProducer(t *testing.T) {
 
 	/////////////////////////////////////////////////
 	rmqPath := "/tmp/milvus/test_client1"
+	os.MkdirAll(rmqPath, os.ModePerm)
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client1, err := NewClient(ClientOptions{

@@ -55,13 +55,6 @@ func newGroupName() string {
 	return fmt.Sprintf("my-group-%v", time.Now().Nanosecond())
 }
 
-func Test_FixChannelName(t *testing.T) {
-	name := "abcd"
-	fixName, err := fixChannelName(name)
-	assert.Nil(t, err)
-	assert.Equal(t, len(fixName), FixedChannelNameLen)
-}
-
 func etcdEndpoints() []string {
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
@@ -273,6 +266,7 @@ func TestRocksmq_Seek(t *testing.T) {
 
 	_, err = NewRocksMQ("", idAllocator)
 	assert.Error(t, err)
+	defer os.RemoveAll("_meta_kv")
 
 	channelName := "channel_seek"
 	err = rmq.CreateTopic(channelName)

@@ -46,8 +46,7 @@ var RocksmqPageSize int64 = 256 << 20
 
 // Const variable that will be used in rocksmqs
 const (
-	DefaultMessageID    = -1
-	FixedChannelNameLen = 320
+	DefaultMessageID = -1
 
 	// TODO make it configable
 	RocksDBLRUCacheCapacity = 1 << 30
@@ -85,36 +84,6 @@ const (
 	// RmqStateHealthy state stands for healthy `Rocksmq` instance
 	RmqStateHealthy RmqState = 1
 )
-
-/**
- * @brief fill with '_' to ensure channel name fixed length
- * TODO this is a waste of memory, remove it
- */
-func fixChannelName(name string) (string, error) {
-	if len(name) > FixedChannelNameLen {
-		return "", errors.New("Channel name exceeds limit")
-	}
-
-	nameBytes := make([]byte, FixedChannelNameLen-len(name))
-
-	for i := 0; i < len(nameBytes); i++ {
-		nameBytes[i] = byte('*')
-	}
-
-	return name + string(nameBytes), nil
-}
-
-/**
- * Combine key with fixed channel name and unique id
- */
-func combKey(channelName string, id UniqueID) (string, error) {
-	fixName, err := fixChannelName(channelName)
-	if err != nil {
-		return "", err
-	}
-
-	return fixName + "/" + strconv.FormatInt(id, 10), nil
-}
 
 /**
  * Construct current id
@@ -207,8 +176,6 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	optsStore.IncreaseParallelism(runtime.NumCPU())
 	// enable back ground flush
 	optsStore.SetMaxBackgroundFlushes(1)
-	// TODO remove fix channel name len logic
-	optsStore.SetPrefixExtractor(gorocksdb.NewFixedPrefixTransform(FixedChannelNameLen + 1))
 
 	db, err := gorocksdb.OpenDb(optsStore, name)
 	if err != nil {
@@ -323,19 +290,20 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		topicMu.Store(topicName, new(sync.Mutex))
 	}
 
+	kvs := make(map[string]string)
 	// Initialize topic message size to 0
 	msgSizeKey := MessageSizeTitle + topicName
-	err = rmq.kv.Save(msgSizeKey, "0")
-	if err != nil {
-		return err
-	}
+	kvs[msgSizeKey] = "0"
 
 	// Initialize topic id to its create Tme, we don't really use it for now
 	nowTs := strconv.FormatInt(time.Now().Unix(), 10)
+	kvs[topicIDKey] = nowTs
 	err = rmq.kv.Save(topicIDKey, nowTs)
 	if err != nil {
 		return err
 	}
+
+	rmq.kv.MultiSave(kvs)
 
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
@@ -361,11 +329,8 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	rmq.consumers.Delete(topicName)
 
 	// clean the topic data it self
-	fixChanName, err := fixChannelName(topicName)
-	if err != nil {
-		return err
-	}
-	err = rmq.kv.RemoveWithPrefix(fixChanName)
+	fixTopicName := topicName + "/"
+	err := rmq.kv.RemoveWithPrefix(fixTopicName)
 	if err != nil {
 		return err
 	}
@@ -553,10 +518,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	msgIDs := make([]UniqueID, msgLen)
 	for i := 0; i < msgLen && idStart+UniqueID(i) < idEnd; i++ {
 		msgID := idStart + UniqueID(i)
-		key, err := combKey(topicName, msgID)
-		if err != nil {
-			return []UniqueID{}, err
-		}
+		key := path.Join(topicName, strconv.FormatInt(msgID, 10))
 		batch.Put([]byte(key), messages[i].Payload)
 		msgIDs[i] = msgID
 		msgSizes[msgID] = int64(len(messages[i].Payload))
@@ -671,25 +633,19 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
 	readOpts.SetPrefixSameAsStart(true)
+	readOpts.SetIterateUpperBound([]byte(typeutil.AddOne(topicName + "/")))
 	iter := rmq.store.NewIterator(readOpts)
 	defer iter.Close()
 
-	consumerMessage := make([]ConsumerMessage, 0, n)
-
-	fixChanName, err := fixChannelName(topicName)
-	if err != nil {
-		log.Debug("RocksMQ: fixChannelName " + topicName + " failed")
-		return nil, err
-	}
-
 	var dataKey string
 	if currentID == DefaultMessageID {
-		dataKey = fixChanName + "/"
+		dataKey = topicName + "/"
 	} else {
-		dataKey = fixChanName + "/" + strconv.FormatInt(currentID.(int64), 10)
+		dataKey = path.Join(topicName, strconv.FormatInt(currentID.(int64), 10))
 	}
 	iter.Seek([]byte(dataKey))
 
+	consumerMessage := make([]ConsumerMessage, 0, n)
 	offset := 0
 	for ; iter.Valid() && offset < n; iter.Next() {
 		key := iter.Key()
@@ -697,9 +653,9 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		strKey := string(key.Data())
 		key.Free()
 		offset++
-		msgID, err := strconv.ParseInt(strKey[FixedChannelNameLen+1:], 10, 64)
+		msgID, err := strconv.ParseInt(strKey[len(topicName)+1:], 10, 64)
 		if err != nil {
-			log.Warn("RocksMQ: parse int " + strKey[FixedChannelNameLen+1:] + " failed")
+			log.Warn("RocksMQ: parse int " + strKey[len(topicName)+1:] + " failed")
 			val.Free()
 			return nil, err
 		}
@@ -756,11 +712,7 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
-	storeKey, err := combKey(topicName, msgID)
-	if err != nil {
-		log.Warn("RocksMQ: combKey(" + topicName + "," + strconv.FormatInt(msgID, 10) + ") failed")
-		return err
-	}
+	storeKey := path.Join(topicName, strconv.FormatInt(msgID, 10))
 	opts := gorocksdb.NewDefaultReadOptions()
 	defer opts.Destroy()
 	val, err := rmq.store.Get(opts, []byte(storeKey))
@@ -825,30 +777,30 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	iter := rmq.store.NewIterator(readOpts)
 	defer iter.Close()
 
-	fixChanName, _ := fixChannelName(topicName)
-
 	// 0 is the ASC value of "/" + 1
-	iter.SeekForPrev([]byte(fixChanName + "0"))
+	iter.SeekForPrev([]byte(topicName + "0"))
 
 	// if iterate fail
 	if err := iter.Err(); err != nil {
 		return err
 	}
-	// should find the last key we written into, start with fixChanName/
+	// should find the last key we written into, start with fixTopicName/
 	// if not find, start from 0
 	if !iter.Valid() {
 		return nil
 	}
 
+	fixTopicName := topicName + "/"
+
 	iKey := iter.Key()
 	seekMsgID := string(iKey.Data())
 	iKey.Free()
 	// if find message is not belong to current channel, start from 0
-	if !strings.Contains(seekMsgID, fixChanName+"/") {
+	if !strings.Contains(seekMsgID, fixTopicName) {
 		return nil
 	}
 
-	msgID, err := strconv.ParseInt(seekMsgID[FixedChannelNameLen+1:], 10, 64)
+	msgID, err := strconv.ParseInt(seekMsgID[len(topicName)+1:], 10, 64)
 	if err != nil {
 		return err
 	}
@@ -968,12 +920,7 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	readOpts.SetPrefixSameAsStart(true)
 	iter := rmq.store.NewIterator(readOpts)
-	fixChanName, err := fixChannelName(topicName)
-	if err != nil {
-		log.Debug("RocksMQ: fixChannelName " + topicName + " failed")
-		return "", err
-	}
-	dataKey := path.Join(fixChanName, strconv.FormatInt(startMsgID, 10))
+	dataKey := path.Join(topicName, strconv.FormatInt(startMsgID, 10))
 	iter.Seek([]byte(dataKey))
 	// if iterate fail
 	if err := iter.Err(); err != nil {
