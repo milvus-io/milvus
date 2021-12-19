@@ -209,8 +209,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	segmentID UniqueID,
 	flushed bool,
 	dropped bool,
-	binlogs, statslogs []*datapb.FieldBinlog,
-	deltalogs []*datapb.DeltaLogInfo,
+	binlogs, statslogs, deltalogs []*datapb.FieldBinlog,
 	checkpoints []*datapb.CheckPoint,
 	startPositions []*datapb.SegmentStartPosition,
 ) error {
@@ -270,7 +269,16 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	}
 	clonedSegment.Statslogs = currStatsLogs
 	// deltalogs
-	clonedSegment.Deltalogs = append(clonedSegment.Deltalogs, deltalogs...)
+	currDeltaLogs := clonedSegment.GetDeltalogs()
+	for _, tDeltaLogs := range deltalogs {
+		fieldDeltaLogs := getFieldBinlogs(tDeltaLogs.GetFieldID(), currDeltaLogs)
+		if fieldDeltaLogs == nil {
+			currDeltaLogs = append(currDeltaLogs, tDeltaLogs)
+		} else {
+			fieldDeltaLogs.Binlogs = append(fieldDeltaLogs.Binlogs, tDeltaLogs.Binlogs...)
+		}
+	}
+	clonedSegment.Deltalogs = currDeltaLogs
 
 	modSegments[segmentID] = clonedSegment
 
@@ -508,11 +516,11 @@ func (m *meta) ChannelHasRemoveFlag(channel string) bool {
 }
 
 // ListSegmentFiles lists all segments' logs
-func (m *meta) ListSegmentFiles() []string {
+func (m *meta) ListSegmentFiles() []*datapb.Binlog {
 	m.RLock()
 	defer m.RUnlock()
 
-	var logs []string
+	var logs []*datapb.Binlog
 
 	for _, segment := range m.segments.GetSegments() {
 		if !isSegmentHealthy(segment) {
@@ -527,7 +535,7 @@ func (m *meta) ListSegmentFiles() []string {
 		}
 
 		for _, deltaLog := range segment.GetDeltalogs() {
-			logs = append(logs, deltaLog.GetDeltaLogPath())
+			logs = append(logs, deltaLog.Binlogs...)
 		}
 	}
 	return logs
@@ -716,12 +724,12 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 	}
 
 	// find new added delta logs when executing compaction
-	var originDeltalogs []*datapb.DeltaLogInfo
+	var originDeltalogs []*datapb.FieldBinlog
 	for _, s := range segments {
 		originDeltalogs = append(originDeltalogs, s.GetDeltalogs()...)
 	}
 
-	var deletedDeltalogs []*datapb.DeltaLogInfo
+	var deletedDeltalogs []*datapb.FieldBinlog
 	for _, l := range compactionLogs {
 		deletedDeltalogs = append(deletedDeltalogs, l.GetDeltalogs()...)
 	}
@@ -802,14 +810,14 @@ func (m *meta) CompleteInnerCompaction(segmentBinlogs *datapb.CompactionSegmentB
 }
 
 func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
-	fieldBinlogs := make(map[int64]map[string]struct{})
+	fieldBinlogs := make(map[int64]map[string]*datapb.Binlog)
 	for _, f := range origin {
 		fid := f.GetFieldID()
 		if _, ok := fieldBinlogs[fid]; !ok {
-			fieldBinlogs[fid] = make(map[string]struct{})
+			fieldBinlogs[fid] = make(map[string]*datapb.Binlog)
 		}
 		for _, p := range f.GetBinlogs() {
-			fieldBinlogs[fid][p] = struct{}{}
+			fieldBinlogs[fid][p.GetLogPath()] = p
 		}
 	}
 
@@ -819,17 +827,17 @@ func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.Fie
 			continue
 		}
 		for _, p := range f.GetBinlogs() {
-			delete(fieldBinlogs[fid], p)
+			delete(fieldBinlogs[fid], p.GetLogPath())
 		}
 	}
 
 	for _, f := range adds {
 		fid := f.GetFieldID()
 		if _, ok := fieldBinlogs[fid]; !ok {
-			fieldBinlogs[fid] = make(map[string]struct{})
+			fieldBinlogs[fid] = make(map[string]*datapb.Binlog)
 		}
 		for _, p := range f.GetBinlogs() {
-			fieldBinlogs[fid][p] = struct{}{}
+			fieldBinlogs[fid][p.GetLogPath()] = p
 		}
 	}
 
@@ -839,9 +847,9 @@ func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.Fie
 			continue
 		}
 
-		binlogs := make([]string, 0, len(logs))
-		for path := range logs {
-			binlogs = append(binlogs, path)
+		binlogs := make([]*datapb.Binlog, 0, len(logs))
+		for _, log := range logs {
+			binlogs = append(binlogs, log)
 		}
 
 		field := &datapb.FieldBinlog{FieldID: fid, Binlogs: binlogs}
@@ -850,21 +858,32 @@ func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.Fie
 	return res
 }
 
-func (m *meta) updateDeltalogs(origin []*datapb.DeltaLogInfo, removes []*datapb.DeltaLogInfo, adds []*datapb.DeltaLogInfo) []*datapb.DeltaLogInfo {
-	deltalogs := make(map[string]*datapb.DeltaLogInfo)
-	for _, d := range origin {
-		deltalogs[d.GetDeltaLogPath()] = d
+func (m *meta) updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
+	res := make([]*datapb.FieldBinlog, 0, len(origin))
+	for _, fbl := range origin {
+		logs := make(map[string]*datapb.Binlog)
+		for _, d := range fbl.GetBinlogs() {
+			logs[d.GetLogPath()] = d
+		}
+		for _, remove := range removes {
+			if remove.GetFieldID() == fbl.GetFieldID() {
+				for _, r := range remove.GetBinlogs() {
+					delete(logs, r.GetLogPath())
+				}
+			}
+		}
+		binlogs := make([]*datapb.Binlog, 0, len(logs))
+		for _, l := range logs {
+			binlogs = append(binlogs, l)
+		}
+		if len(binlogs) > 0 {
+			res = append(res, &datapb.FieldBinlog{
+				FieldID: fbl.GetFieldID(),
+				Binlogs: binlogs,
+			})
+		}
 	}
 
-	for _, r := range removes {
-		delete(deltalogs, r.GetDeltaLogPath())
-	}
-
-	res := make([]*datapb.DeltaLogInfo, 0, len(deltalogs))
-	for _, log := range deltalogs {
-		res = append(res, log)
-	}
-	res = append(res, adds...)
 	return res
 }
 

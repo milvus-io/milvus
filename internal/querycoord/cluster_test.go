@@ -269,7 +269,7 @@ func saveBinLog(ctx context.Context,
 		kvs[key] = string(blob.Value[:])
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
-			Binlogs: []string{key},
+			Binlogs: []*datapb.Binlog{{LogPath: key}},
 		})
 	}
 	log.Debug("[query coord unittest] save binlog file to MinIO/S3")
@@ -665,7 +665,7 @@ func TestEstimateSegmentSize(t *testing.T) {
 	binlog := []*datapb.FieldBinlog{
 		{
 			FieldID: simpleConstField.id,
-			Binlogs: []string{"^&^%*&%&&(*^*&"},
+			Binlogs: []*datapb.Binlog{{LogPath: "^&^%*&%&&(*^*&"}},
 		},
 	}
 

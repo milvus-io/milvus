@@ -688,7 +688,7 @@ func Test_AssignInternalTask(t *testing.T) {
 	binlogs := make([]*datapb.FieldBinlog, 0)
 	binlogs = append(binlogs, &datapb.FieldBinlog{
 		FieldID: 0,
-		Binlogs: []string{funcutil.RandomString(1000)},
+		Binlogs: []*datapb.Binlog{{LogPath: funcutil.RandomString(1000)}},
 	})
 	for id := 0; id < 3000; id++ {
 		segmentInfo := &querypb.SegmentLoadInfo{

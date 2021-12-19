@@ -104,7 +104,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 type cpaths struct {
 	inPaths    []*datapb.FieldBinlog
 	statsPaths []*datapb.FieldBinlog
-	deltaInfo  *datapb.DeltaLogInfo
+	deltaInfo  []*datapb.FieldBinlog
 }
 
 func (b *binlogIO) upload(
@@ -114,11 +114,7 @@ func (b *binlogIO) upload(
 	dData *DeleteData,
 	meta *etcdpb.CollectionMeta) (*cpaths, error) {
 
-	var p = &cpaths{
-		inPaths:    make([]*datapb.FieldBinlog, 0),
-		statsPaths: make([]*datapb.FieldBinlog, 0),
-		deltaInfo:  &datapb.DeltaLogInfo{},
-	}
+	p := &cpaths{}
 
 	kvs := make(map[string]string)
 
@@ -156,8 +152,16 @@ func (b *binlogIO) upload(
 		}
 
 		kvs[k] = bytes.NewBuffer(v).String()
-		p.deltaInfo.RecordEntries = uint64(len(v))
-		p.deltaInfo.DeltaLogPath = k
+		p.deltaInfo = append(p.deltaInfo, &datapb.FieldBinlog{
+			//Field id shall be primary key id
+			Binlogs: []*datapb.Binlog{
+				{
+					EntriesNum: dData.RowCount,
+					LogPath:    k,
+					LogSize:    int64(len(v)),
+				},
+			},
+		})
 	}
 
 	var err = errStart
@@ -234,7 +238,11 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		kvs[key] = bytes.NewBuffer(blob.GetValue()).String()
 		inpaths = append(inpaths, &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []string{key},
+			Binlogs: []*datapb.Binlog{
+				{
+					LogPath: key,
+				},
+			},
 		})
 	}
 
@@ -248,7 +256,11 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		kvs[key] = bytes.NewBuffer(blob.GetValue()).String()
 		statspaths = append(statspaths, &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []string{key},
+			Binlogs: []*datapb.Binlog{
+				{
+					LogPath: key,
+				},
+			},
 		})
 	}
 

@@ -127,8 +127,10 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 			delData: &DeleteData{
 				Pks: make([]UniqueID, 0),
 				Tss: make([]Timestamp, 0)},
-			tsFrom: math.MaxUint64,
-			tsTo:   0,
+			Binlog: datapb.Binlog{
+				TimestampFrom: math.MaxUint64,
+				TimestampTo:   0,
+			},
 		}
 	)
 
@@ -150,12 +152,12 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 
 			dbuff.delData.Append(pk, ts)
 
-			if ts < dbuff.tsFrom {
-				dbuff.tsFrom = ts
+			if Timestamp(ts) < dbuff.TimestampFrom {
+				dbuff.TimestampFrom = Timestamp(ts)
 			}
 
-			if ts > dbuff.tsTo {
-				dbuff.tsTo = ts
+			if Timestamp(ts) > dbuff.TimestampTo {
+				dbuff.TimestampTo = Timestamp(ts)
 			}
 		}
 	}
@@ -343,7 +345,7 @@ func (t *compactionTask) compact() error {
 		for idx := 0; idx < fieldNum; idx++ {
 			ps := make([]string, 0, fieldNum)
 			for _, f := range s.GetFieldBinlogs() {
-				ps = append(ps, f.GetBinlogs()[idx])
+				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
 			}
 
 			g.Go(func() error {
@@ -369,20 +371,22 @@ func (t *compactionTask) compact() error {
 
 		segID := s.GetSegmentID()
 		for _, d := range s.GetDeltalogs() {
-			path := d.GetDeltaLogPath()
-			g.Go(func() error {
-				bs, err := t.download(gCtx, []string{path})
-				if err != nil {
-					log.Warn("download deltalogs wrong")
-					return err
-				}
+			for _, l := range d.GetBinlogs() {
+				path := l.GetLogPath()
+				g.Go(func() error {
+					bs, err := t.download(gCtx, []string{path})
+					if err != nil {
+						log.Warn("download deltalogs wrong")
+						return err
+					}
 
-				dmu.Lock()
-				dblobs[segID] = append(dblobs[segID], bs...)
-				dmu.Unlock()
+					dmu.Lock()
+					dblobs[segID] = append(dblobs[segID], bs...)
+					dmu.Unlock()
 
-				return nil
-			})
+					return nil
+				})
+			}
 		}
 	}
 
@@ -410,13 +414,13 @@ func (t *compactionTask) compact() error {
 		return err
 	}
 
-	var deltaLogs []*datapb.DeltaLogInfo
-	if len(cpaths.deltaInfo.GetDeltaLogPath()) > 0 {
-		cpaths.deltaInfo.DeltaLogSize = deltaBuf.size
-		cpaths.deltaInfo.TimestampFrom = deltaBuf.tsFrom
-		cpaths.deltaInfo.TimestampTo = deltaBuf.tsTo
-
-		deltaLogs = append(deltaLogs, cpaths.deltaInfo)
+	for _, fbl := range cpaths.deltaInfo {
+		for _, deltaLogInfo := range fbl.GetBinlogs() {
+			deltaLogInfo.LogSize = deltaBuf.GetLogSize()
+			deltaLogInfo.TimestampFrom = deltaBuf.GetTimestampFrom()
+			deltaLogInfo.TimestampTo = deltaBuf.GetTimestampTo()
+			deltaLogInfo.EntriesNum = deltaBuf.GetEntriesNum()
+		}
 	}
 
 	pack := &datapb.CompactionResult{
@@ -424,8 +428,8 @@ func (t *compactionTask) compact() error {
 		SegmentID:           targetSegID,
 		InsertLogs:          cpaths.inPaths,
 		Field2StatslogPaths: cpaths.statsPaths,
+		Deltalogs:           cpaths.deltaInfo,
 		NumOfRows:           numRows,
-		Deltalogs:           deltaLogs,
 	}
 
 	status, err := t.dc.CompleteCompaction(ctxTimeout, pack)
@@ -460,9 +464,9 @@ func (t *compactionTask) compact() error {
 
 	ti.injectDone(true)
 	log.Info("compaction done", zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Any("num of binlog paths", len(cpaths.inPaths)),
-		zap.Any("num of stats paths", len(cpaths.statsPaths)),
-		zap.Any("deltalog paths", cpaths.deltaInfo.GetDeltaLogPath()),
+		zap.Int("num of binlog paths", len(cpaths.inPaths)),
+		zap.Int("num of stats paths", len(cpaths.statsPaths)),
+		zap.Int("num of delta paths", len(cpaths.deltaInfo)),
 	)
 	return nil
 }

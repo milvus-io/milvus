@@ -97,15 +97,6 @@ type segmentCheckPoint struct {
 	pos     internalpb.MsgPosition
 }
 
-type segmentFlushUnit struct {
-	collID         UniqueID
-	segID          UniqueID
-	field2Path     map[UniqueID]string
-	checkPoint     map[UniqueID]segmentCheckPoint
-	startPositions []*datapb.SegmentStartPosition
-	flushed        bool
-}
-
 // BufferData buffers insert data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type BufferData struct {

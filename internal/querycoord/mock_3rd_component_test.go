@@ -351,7 +351,7 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 				for fieldID, path := range fieldID2Paths {
 					fieldBinlog := &datapb.FieldBinlog{
 						FieldID: fieldID,
-						Binlogs: []string{path},
+						Binlogs: []*datapb.Binlog{{LogPath: path}},
 					}
 					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 				}

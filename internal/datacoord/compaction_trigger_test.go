@@ -95,10 +95,14 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"log1"}},
+										getFieldBinlogPaths(1, "log1"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog1"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog1"},
+											},
+										},
 									},
 								},
 							},
@@ -113,10 +117,14 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"log2"}},
+										getFieldBinlogPaths(1, "log2"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog2"},
+											},
+										},
 									},
 								},
 							},
@@ -142,21 +150,29 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 						{
 							SegmentID: 1,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"log1"}},
+								getFieldBinlogPaths(1, "log1"),
 							},
 							Field2StatslogPaths: nil,
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5, DeltaLogPath: "deltalog1"},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5, LogPath: "deltalog1"},
+									},
+								},
 							},
 						},
 						{
 							SegmentID: 2,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"log2"}},
+								getFieldBinlogPaths(1, "log2"),
 							},
 							Field2StatslogPaths: nil,
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5, LogPath: "deltalog2"},
+									},
+								},
 							},
 						},
 					},
@@ -183,10 +199,14 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"log1"}},
+										getFieldBinlogPaths(1, "log1"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5},
+											},
+										},
 									},
 								},
 							},
@@ -212,11 +232,15 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 						{
 							SegmentID: 1,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"log1"}},
+								getFieldBinlogPaths(1, "log1"),
 							},
 							Field2StatslogPaths: nil,
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5},
+									},
+								},
 							},
 						},
 					},
@@ -294,10 +318,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog1"}},
+										getFieldBinlogPaths(1, "binlog1"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog1"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog1"},
+											},
+										},
 									},
 								},
 							},
@@ -312,10 +340,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog2"}},
+										getFieldBinlogPaths(1, "binlog2"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog2"},
+											},
+										},
 									},
 								},
 							},
@@ -330,10 +362,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog3"}},
+										getFieldBinlogPaths(1, "binlog3"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog3"},
+											},
+										},
 									},
 								},
 							},
@@ -359,10 +395,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 						{
 							SegmentID: 1,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"binlog1"}},
+								getFieldBinlogPaths(1, "binlog1"),
 							},
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5, DeltaLogPath: "deltalog1"},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5, LogPath: "deltalog1"},
+									},
+								},
 							},
 						},
 					},
@@ -378,19 +418,27 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 						{
 							SegmentID: 2,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"binlog2"}},
+								getFieldBinlogPaths(1, "binlog2"),
 							},
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5, LogPath: "deltalog2"},
+									},
+								},
 							},
 						},
 						{
 							SegmentID: 3,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"binlog3"}},
+								getFieldBinlogPaths(1, "binlog3"),
 							},
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5, LogPath: "deltalog3"},
+									},
+								},
 							},
 						},
 					},
@@ -419,10 +467,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog1"}},
+										getFieldBinlogPaths(1, "binlog1"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog1"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog1"},
+											},
+										},
 									},
 								},
 							},
@@ -437,10 +489,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog2"}},
+										getFieldBinlogPaths(1, "binlog2"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog2"},
+											},
+										},
 									},
 								},
 							},
@@ -455,10 +511,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushed,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog3"}},
+										getFieldBinlogPaths(1, "binlog3"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog1"},
+											},
+										},
 									},
 								},
 							},
@@ -496,10 +556,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushing,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog2"}},
+										getFieldBinlogPaths(1, "binlog2"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog2"},
+											},
+										},
 									},
 								},
 							},
@@ -514,10 +578,14 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushing,
 									Binlogs: []*datapb.FieldBinlog{
-										{FieldID: 1, Binlogs: []string{"binlog3"}},
+										getFieldBinlogPaths(1, "binlog3"),
 									},
-									Deltalogs: []*datapb.DeltaLogInfo{
-										{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+									Deltalogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "deltalog3"},
+											},
+										},
 									},
 								},
 							},
@@ -543,19 +611,27 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 						{
 							SegmentID: 2,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"binlog2"}},
+								getFieldBinlogPaths(1, "binlog2"),
 							},
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5, DeltaLogPath: "deltalog2"},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5, LogPath: "deltalog2"},
+									},
+								},
 							},
 						},
 						{
 							SegmentID: 3,
 							FieldBinlogs: []*datapb.FieldBinlog{
-								{FieldID: 1, Binlogs: []string{"binlog3"}},
+								getFieldBinlogPaths(1, "binlog3"),
 							},
-							Deltalogs: []*datapb.DeltaLogInfo{
-								{RecordEntries: 5, DeltaLogPath: "deltalog3"},
+							Deltalogs: []*datapb.FieldBinlog{
+								{
+									Binlogs: []*datapb.Binlog{
+										{EntriesNum: 5, LogPath: "deltalog3"},
+									},
+								},
 							},
 						},
 					},
@@ -655,9 +731,11 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 									},
 									Binlogs:   []*datapb.FieldBinlog{},
 									Statslogs: []*datapb.FieldBinlog{},
-									Deltalogs: []*datapb.DeltaLogInfo{
+									Deltalogs: []*datapb.FieldBinlog{
 										{
-											RecordEntries: 2001,
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 2001},
+											},
 										},
 									},
 									CreatedByCompaction: false,
@@ -694,9 +772,11 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 					SegmentID:           101,
 					FieldBinlogs:        []*datapb.FieldBinlog{},
 					Field2StatslogPaths: []*datapb.FieldBinlog{},
-					Deltalogs: []*datapb.DeltaLogInfo{
+					Deltalogs: []*datapb.FieldBinlog{
 						{
-							RecordEntries: 2001,
+							Binlogs: []*datapb.Binlog{
+								{EntriesNum: 2001},
+							},
 						},
 					},
 				},
@@ -732,16 +812,12 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 									},
 									Binlogs:   []*datapb.FieldBinlog{},
 									Statslogs: []*datapb.FieldBinlog{},
-									Deltalogs: []*datapb.DeltaLogInfo{
+									Deltalogs: []*datapb.FieldBinlog{
 										{
-											RecordEntries: 1000,
-											TimestampFrom: 10,
-											TimestampTo:   20,
-										},
-										{
-											RecordEntries: 1001,
-											TimestampFrom: 30,
-											TimestampTo:   45,
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 1000, TimestampFrom: 10, TimestampTo: 20},
+												{EntriesNum: 1001, TimestampFrom: 30, TimestampTo: 45},
+											},
 										},
 									},
 									CreatedByCompaction: false,
@@ -778,9 +854,11 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 					SegmentID:           101,
 					FieldBinlogs:        []*datapb.FieldBinlog{},
 					Field2StatslogPaths: []*datapb.FieldBinlog{},
-					Deltalogs: []*datapb.DeltaLogInfo{
+					Deltalogs: []*datapb.FieldBinlog{
 						{
-							RecordEntries: 2001,
+							Binlogs: []*datapb.Binlog{
+								{EntriesNum: 2001},
+							},
 						},
 					},
 				},
@@ -816,16 +894,19 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 									},
 									Binlogs:   []*datapb.FieldBinlog{},
 									Statslogs: []*datapb.FieldBinlog{},
-									Deltalogs: []*datapb.DeltaLogInfo{
+									Deltalogs: []*datapb.FieldBinlog{
 										{
-											RecordEntries: 1000,
-											TimestampFrom: 10,
-											TimestampTo:   20,
-											DeltaLogSize:  10*1024*1024 + 1,
+											Binlogs: []*datapb.Binlog{
+												{
+													EntriesNum:    1000,
+													TimestampFrom: 10,
+													TimestampTo:   20,
+													LogSize:       10*1024*1024 + 1,
+												},
+											},
 										},
 									},
 									CreatedByCompaction: false,
-									CompactionFrom:      []int64{},
 								},
 								isCompacting: false,
 							},
@@ -858,12 +939,16 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 					SegmentID:           101,
 					FieldBinlogs:        []*datapb.FieldBinlog{},
 					Field2StatslogPaths: []*datapb.FieldBinlog{},
-					Deltalogs: []*datapb.DeltaLogInfo{
+					Deltalogs: []*datapb.FieldBinlog{
 						{
-							RecordEntries: 1000,
-							TimestampFrom: 10,
-							TimestampTo:   20,
-							DeltaLogSize:  10*1024*1024 + 1,
+							Binlogs: []*datapb.Binlog{
+								{
+									EntriesNum:    1000,
+									TimestampFrom: 10,
+									TimestampTo:   20,
+									LogSize:       10*1024*1024 + 1,
+								},
+							},
 						},
 					},
 				},
@@ -899,16 +984,12 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 									},
 									Binlogs:   []*datapb.FieldBinlog{},
 									Statslogs: []*datapb.FieldBinlog{},
-									Deltalogs: []*datapb.DeltaLogInfo{
+									Deltalogs: []*datapb.FieldBinlog{
 										{
-											RecordEntries: 1000,
-											TimestampFrom: 10,
-											TimestampTo:   20,
-										},
-										{
-											RecordEntries: 1001,
-											TimestampFrom: 30,
-											TimestampTo:   45,
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 1000, TimestampFrom: 10, TimestampTo: 20},
+												{EntriesNum: 1001, TimestampFrom: 30, TimestampTo: 45},
+											},
 										},
 									},
 									CreatedByCompaction: false,
@@ -945,9 +1026,11 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 					SegmentID:           101,
 					FieldBinlogs:        []*datapb.FieldBinlog{},
 					Field2StatslogPaths: []*datapb.FieldBinlog{},
-					Deltalogs: []*datapb.DeltaLogInfo{
+					Deltalogs: []*datapb.FieldBinlog{
 						{
-							RecordEntries: 2001,
+							Binlogs: []*datapb.Binlog{
+								{EntriesNum: 2001},
+							},
 						},
 					},
 				},

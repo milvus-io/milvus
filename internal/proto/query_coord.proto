@@ -189,7 +189,7 @@ message SegmentLoadInfo {
   repeated data.FieldBinlog binlog_paths = 6;
   int64 num_of_rows = 7;
   repeated data.FieldBinlog statslogs = 8;
-  repeated data.DeltaLogInfo deltalogs = 9;
+  repeated data.FieldBinlog deltalogs = 9;
   repeated int64 compactionFrom = 10; // segmentIDs compacted from
   bool enable_index = 11;
   repeated index.IndexFilePathInfo index_path_infos = 12;

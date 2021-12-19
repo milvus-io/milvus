@@ -369,7 +369,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	defer sp.Finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ret := make([]UniqueID, 0)
+	var ret []UniqueID
 	for _, id := range s.segments {
 		info := s.meta.GetSegment(id)
 		if info == nil {

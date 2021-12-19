@@ -25,6 +25,7 @@ import (
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
@@ -81,7 +82,7 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 			wg.Done()
 		}(ids[i])
 		go func(id []byte) {
-			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, false, &internalpb.MsgPosition{
+			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &internalpb.MsgPosition{
 				MsgID: id,
 			})
 			wg.Done()
@@ -119,7 +120,7 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 		q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]string{}, map[UniqueID]string{}, false, false, &internalpb.MsgPosition{
+		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &internalpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -532,9 +533,9 @@ func TestFlushNotifyFunc(t *testing.T) {
 	t.Run("normal run", func(t *testing.T) {
 		assert.NotPanics(t, func() {
 			notifyFunc(&segmentFlushPack{
-				insertLogs: map[UniqueID]string{1: "/dev/test/id"},
-				statsLogs:  map[UniqueID]string{1: "/dev/test/id-stats"},
-				deltaLogs:  []*DelDataBuf{{filePath: "/dev/test/del"}},
+				insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id"}},
+				statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats"}},
+				deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del"}},
 				flushed:    true,
 			})
 		})
@@ -589,9 +590,9 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 			dropFunc([]*segmentFlushPack{
 				{
 					segmentID:  1,
-					insertLogs: map[UniqueID]string{1: "/dev/test/id"},
-					statsLogs:  map[UniqueID]string{1: "/dev/test/id-stats"},
-					deltaLogs:  []*DelDataBuf{{filePath: "/dev/test/del"}},
+					insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id"}},
+					statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats"}},
+					deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del"}},
 					pos: &internalpb.MsgPosition{
 						ChannelName: "vchan_01",
 						MsgID:       []byte{1, 2, 3},
@@ -600,9 +601,9 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 				},
 				{
 					segmentID:  1,
-					insertLogs: map[UniqueID]string{1: "/dev/test/id_2"},
-					statsLogs:  map[UniqueID]string{1: "/dev/test/id-stats-2"},
-					deltaLogs:  []*DelDataBuf{{filePath: "/dev/test/del-2"}},
+					insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/idi_2"}},
+					statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats-2"}},
+					deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del-2"}},
 					pos: &internalpb.MsgPosition{
 						ChannelName: "vchan_01",
 						MsgID:       []byte{1, 2, 3},

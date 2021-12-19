@@ -23,10 +23,19 @@ func (f singleCompactionFunc) generatePlan(segment *SegmentInfo, timeTravel *tim
 }
 
 func chooseAllBinlogs(segment *SegmentInfo, timeTravel *timetravel) *datapb.CompactionPlan {
-	var deltaLogs []*datapb.DeltaLogInfo
-	for _, l := range segment.GetDeltalogs() {
-		if l.TimestampTo < timeTravel.time {
-			deltaLogs = append(deltaLogs, l)
+	var deltaLogs []*datapb.FieldBinlog
+	for _, fieldBinlog := range segment.GetDeltalogs() {
+		fbl := &datapb.FieldBinlog{
+			FieldID: fieldBinlog.GetFieldID(),
+			Binlogs: make([]*datapb.Binlog, 0, len(fieldBinlog.GetBinlogs())),
+		}
+		for _, binlog := range fieldBinlog.GetBinlogs() {
+			if binlog.TimestampTo < timeTravel.time {
+				fbl.Binlogs = append(fbl.Binlogs, binlog)
+			}
+		}
+		if len(fbl.Binlogs) > 0 {
+			deltaLogs = append(deltaLogs, fbl)
 		}
 	}
 

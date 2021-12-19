@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.uber.org/zap"
@@ -57,9 +58,9 @@ type flushTaskRunner struct {
 	injectSignal <-chan *taskInjection
 
 	segmentID  UniqueID
-	insertLogs map[UniqueID]string
-	statsLogs  map[UniqueID]string
-	deltaLogs  []*DelDataBuf
+	insertLogs map[UniqueID]*datapb.Binlog
+	statsLogs  map[UniqueID]*datapb.Binlog
+	deltaLogs  []*datapb.Binlog //[]*DelDataBuf
 	pos        *internalpb.MsgPosition
 	flushed    bool
 	dropped    bool
@@ -121,7 +122,7 @@ func (t *flushTaskRunner) init(f notifyMetaFunc, postFunc taskPostFunc, signal <
 
 // runFlushInsert executei flush insert task with once and retry
 func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
-	binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition, opts ...retry.Option) {
+	binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition, opts ...retry.Option) {
 	t.insertOnce.Do(func() {
 		t.insertLogs = binlogs
 		t.statsLogs = statslogs
@@ -144,9 +145,16 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
 func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBuf, opts ...retry.Option) {
 	t.deleteOnce.Do(func() {
 		if deltaLogs == nil {
-			t.deltaLogs = []*DelDataBuf{}
+			t.deltaLogs = nil //[]*DelDataBuf{}
 		} else {
-			t.deltaLogs = []*DelDataBuf{deltaLogs}
+			t.deltaLogs = []*datapb.Binlog{
+				{
+					LogSize:       deltaLogs.GetLogSize(),
+					LogPath:       deltaLogs.GetLogPath(),
+					TimestampFrom: deltaLogs.GetTimestampFrom(),
+					TimestampTo:   deltaLogs.GetTimestampTo(),
+				},
+			}
 		}
 		go func() {
 			err := retry.Do(context.Background(), func() error {

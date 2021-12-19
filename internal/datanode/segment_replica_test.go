@@ -91,7 +91,7 @@ func (kv *mockMinioKVStatsError) MultiLoad(keys []string) ([]string, error) {
 func getSimpleFieldBinlog() *datapb.FieldBinlog {
 	return &datapb.FieldBinlog{
 		FieldID: 106,
-		Binlogs: []string{"test"},
+		Binlogs: []*datapb.Binlog{{LogPath: "test"}},
 	}
 }
 

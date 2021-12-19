@@ -673,7 +673,7 @@ func saveBinLog(ctx context.Context,
 		kvs[key] = string(blob.Value[:])
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
-			Binlogs: []string{key},
+			Binlogs: []*datapb.Binlog{{LogPath: key}},
 		})
 	}
 	log.Debug("[query node unittest] save binlog file to MinIO/S3")

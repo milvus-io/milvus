@@ -213,7 +213,12 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 	paths := make([]*internalpb.StringList, 0, len(binlogs))
 	for _, field := range binlogs {
 		fids = append(fids, field.GetFieldID())
-		paths = append(paths, &internalpb.StringList{Values: field.GetBinlogs()})
+		binlogs := field.GetBinlogs()
+		p := make([]string, 0, len(binlogs))
+		for _, log := range binlogs {
+			p = append(p, log.GetLogPath())
+		}
+		paths = append(paths, &internalpb.StringList{Values: p})
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.FieldIDs = fids
@@ -500,7 +505,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segmentIDs := s.meta.GetSegmentsIDOfPartition(collectionID, partitionID)
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2StatsBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
-	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.DeltaLogInfo)
+	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segmentsNumOfRows := make(map[UniqueID]int64)
 
 	flushedIDs := make(map[int64]struct{})
@@ -526,7 +531,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			flushedIDs[id] = struct{}{}
 		}
 
-		field2Binlog := make(map[UniqueID][]string)
+		field2Binlog := make(map[UniqueID][]*datapb.Binlog)
 		for _, field := range binlogs {
 			field2Binlog[field.GetFieldID()] = append(field2Binlog[field.GetFieldID()], field.GetBinlogs()...)
 		}
@@ -542,7 +547,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		segmentsNumOfRows[id] = segment.NumOfRows
 
 		statsBinlogs := segment.GetStatslogs()
-		field2StatsBinlog := make(map[UniqueID][]string)
+		field2StatsBinlog := make(map[UniqueID][]*datapb.Binlog)
 		for _, field := range statsBinlogs {
 			field2StatsBinlog[field.GetFieldID()] = append(field2StatsBinlog[field.GetFieldID()], field.GetBinlogs()...)
 		}
@@ -555,7 +560,9 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2StatsBinlogs[id] = append(segment2StatsBinlogs[id], fieldBinlogs)
 		}
 
-		segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
+		if len(segment.GetDeltalogs()) > 0 {
+			segment2DeltaBinlogs[id] = append(segment2DeltaBinlogs[id], segment.GetDeltalogs()...)
+		}
 	}
 
 	binlogs := make([]*datapb.SegmentBinlogs, 0, len(segment2Binlogs))
