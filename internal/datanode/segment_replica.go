@@ -600,7 +600,7 @@ func (replica *SegmentReplica) getSegmentStatisticsUpdates(segID UniqueID) (*dat
 		return updates, nil
 	}
 
-	return nil, fmt.Errorf("Error, there's no segment %v", segID)
+	return nil, fmt.Errorf("error, there's no segment %v", segID)
 }
 
 // --- collection ---
