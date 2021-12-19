@@ -326,7 +326,7 @@ func TestSegmentLoader_estimateSegmentSize(t *testing.T) {
 	binlog := []*datapb.FieldBinlog{
 		{
 			FieldID: simpleConstField.id,
-			Binlogs: []string{"^&^%*&%&&(*^*&"},
+			Binlogs: []*datapb.Binlog{{LogPath: "^&^%*&%&&(*^*&"}},
 		},
 	}
 

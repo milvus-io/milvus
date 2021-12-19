@@ -843,9 +843,9 @@ func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.Dat
 		// get binlog size
 		for _, binlogPath := range loadInfo.BinlogPaths {
 			for _, path := range binlogPath.Binlogs {
-				binlogSize, err := storage.EstimateMemorySize(kvClient, path)
+				binlogSize, err := storage.EstimateMemorySize(kvClient, path.GetLogPath())
 				if err != nil {
-					binlogSize, err = storage.GetBinlogSize(kvClient, path)
+					binlogSize, err = storage.GetBinlogSize(kvClient, path.GetLogPath())
 					if err != nil {
 						return 0, err
 					}

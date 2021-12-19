@@ -124,9 +124,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 	t.Run("hit, no gc", func(t *testing.T) {
 		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Flushed
-		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{inserts[0]}}}
-		segment.Statslogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{stats[0]}}}
-		segment.Deltalogs = []*datapb.DeltaLogInfo{{DeltaLogPath: delta[0]}}
+		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
+		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
+		segment.Deltalogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, delta[0])}
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
@@ -153,9 +153,10 @@ func Test_garbageCollector_scan(t *testing.T) {
 		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().Add(-time.Hour).UnixNano())
-		segment.Binlogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{inserts[0]}}}
-		segment.Statslogs = []*datapb.FieldBinlog{{FieldID: 0, Binlogs: []string{stats[0]}}}
-		segment.Deltalogs = []*datapb.DeltaLogInfo{{DeltaLogPath: delta[0]}}
+		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
+		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
+		segment.Deltalogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, delta[0])}
+
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 

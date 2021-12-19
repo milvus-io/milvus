@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 )
@@ -113,7 +114,7 @@ func (gc *garbageCollector) scan() {
 	valid := gc.meta.ListSegmentFiles()
 	vm := make(map[string]struct{})
 	for _, k := range valid {
-		vm[k] = struct{}{}
+		vm[k.GetLogPath()] = struct{}{}
 	}
 
 	// walk only data cluster related prefixes
@@ -165,8 +166,8 @@ func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 	return time.Since(droptime) > gc.option.dropTolerance
 }
 
-func getLogs(sinfo *SegmentInfo) []string {
-	var logs []string
+func getLogs(sinfo *SegmentInfo) []*datapb.Binlog {
+	var logs []*datapb.Binlog
 	for _, flog := range sinfo.GetBinlogs() {
 		logs = append(logs, flog.GetBinlogs()...)
 	}
@@ -175,16 +176,16 @@ func getLogs(sinfo *SegmentInfo) []string {
 		logs = append(logs, flog.GetBinlogs()...)
 	}
 
-	for _, dlog := range sinfo.GetDeltalogs() {
-		logs = append(logs, dlog.GetDeltaLogPath())
+	for _, flog := range sinfo.GetDeltalogs() {
+		logs = append(logs, flog.GetBinlogs()...)
 	}
 	return logs
 }
 
-func (gc *garbageCollector) removeLogs(logs []string) bool {
+func (gc *garbageCollector) removeLogs(logs []*datapb.Binlog) bool {
 	delFlag := true
 	for _, l := range logs {
-		err := gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, l, minio.RemoveObjectOptions{})
+		err := gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, l.GetLogPath(), minio.RemoveObjectOptions{})
 		errResp := minio.ToErrorResponse(err)
 		if errResp.Code != "" && errResp.Code != "NoSuchKey" {
 			delFlag = false

@@ -236,14 +236,14 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		meta, err := newMeta(memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
-		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0"}}},
-			Statslogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog0"}}}}}
+		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog0")},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog0")}}}
 		err = meta.AddSegment(segment1)
 		assert.Nil(t, err)
 
-		err = meta.UpdateFlushSegmentsInfo(1, true, false, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog1"}}},
-			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog1"}}},
-			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
+		err = meta.UpdateFlushSegmentsInfo(1, true, false, []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog1")},
+			[]*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog1")},
+			[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.Nil(t, err)
 
@@ -251,9 +251,9 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		expected := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Flushing, NumOfRows: 10,
 			StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}},
-			Binlogs:       []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog0", "binlog1"}}},
-			Statslogs:     []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog0", "statslog1"}}},
-			Deltalogs:     []*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
+			Binlogs:       []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog0", "binlog1")},
+			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog0", "statslog1")},
+			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 		}}
 		assert.True(t, proto.Equal(expected, updated))
 	})
@@ -296,9 +296,9 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		}
 		meta.segments.SetSegment(1, segmentInfo)
 
-		err = meta.UpdateFlushSegmentsInfo(1, true, false, []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"binlog"}}},
-			[]*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog"}}},
-			[]*datapb.DeltaLogInfo{{RecordEntries: 1, TimestampFrom: 100, TimestampTo: 200, DeltaLogSize: 1000}},
+		err = meta.UpdateFlushSegmentsInfo(1, true, false, []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog")},
+			[]*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog")},
+			[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
 		assert.NotNil(t, err)
 		assert.Equal(t, "mocked fail", err.Error())
@@ -357,15 +357,15 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 				&SegmentsInfo{map[int64]*SegmentInfo{
 					1: {SegmentInfo: &datapb.SegmentInfo{
 						ID:        1,
-						Binlogs:   []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1", "log2"}}},
-						Statslogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog1", "statlog2"}}},
-						Deltalogs: []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog1"}, {DeltaLogPath: "deltalog2"}},
+						Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+						Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+						Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
 					}},
 					2: {SegmentInfo: &datapb.SegmentInfo{
 						ID:        2,
-						Binlogs:   []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3", "log4"}}},
-						Statslogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog3", "statlog4"}}},
-						Deltalogs: []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog3"}, {DeltaLogPath: "deltalog4"}},
+						Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
+						Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
+						Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
 					}},
 				}},
 			},
@@ -373,22 +373,22 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 				[]*datapb.CompactionSegmentBinlogs{
 					{
 						SegmentID:           1,
-						FieldBinlogs:        []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1", "log2"}}},
-						Field2StatslogPaths: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog1", "statlog2"}}},
-						Deltalogs:           []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog1"}, {DeltaLogPath: "deltalog2"}},
+						FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+						Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+						Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
 					},
 					{
 						SegmentID:           2,
-						FieldBinlogs:        []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3", "log4"}}},
-						Field2StatslogPaths: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog3", "statlog4"}}},
-						Deltalogs:           []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog3"}, {DeltaLogPath: "deltalog4"}},
+						FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
+						Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
+						Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
 					},
 				},
 				&datapb.CompactionResult{
 					SegmentID:           3,
-					InsertLogs:          []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log5"}}},
-					Field2StatslogPaths: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statslog5"}}},
-					Deltalogs:           []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog5"}},
+					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log5")},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog5")},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
 				},
 			},
 			false,
@@ -443,9 +443,9 @@ func Test_meta_CompleteInnerCompaction(t *testing.T) {
 					map[int64]*SegmentInfo{
 						1: {SegmentInfo: &datapb.SegmentInfo{
 							ID:        1,
-							Binlogs:   []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1", "log2"}}},
-							Statslogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog1", "statlog2"}}},
-							Deltalogs: []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog1"}, {DeltaLogPath: "deltalog2"}},
+							Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+							Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+							Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
 						}},
 					},
 				},
@@ -453,24 +453,24 @@ func Test_meta_CompleteInnerCompaction(t *testing.T) {
 			args{
 				&datapb.CompactionSegmentBinlogs{
 					SegmentID:           1,
-					FieldBinlogs:        []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}},
-					Field2StatslogPaths: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog1"}}},
-					Deltalogs:           []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog1"}},
+					FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1")},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1")},
 				},
 				&datapb.CompactionResult{
 					SegmentID:           1,
-					InsertLogs:          []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}},
-					Field2StatslogPaths: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog3"}}},
-					Deltalogs:           []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog3"}},
+					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3")},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3")},
 				},
 			},
 			false,
 			&SegmentInfo{
 				SegmentInfo: &datapb.SegmentInfo{
 					ID:        1,
-					Binlogs:   []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2", "log3"}}},
-					Statslogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"statlog2", "statlog3"}}},
-					Deltalogs: []*datapb.DeltaLogInfo{{DeltaLogPath: "deltalog2"}, {DeltaLogPath: "deltalog3"}},
+					Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2", "log3")},
+					Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog2", "statlog3")},
+					Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog2", "deltalog3")},
 				},
 			},
 		},

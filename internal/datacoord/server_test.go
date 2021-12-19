@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"os"
 	"path"
@@ -333,9 +334,13 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
-					Binlogs: []string{
-						"dev/datacoord/testsegment/1/part1",
-						"dev/datacoord/testsegment/1/part2",
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath: "dev/datacoord/testsegment/1/part1",
+						},
+						{
+							LogPath: "dev/datacoord/testsegment/1/part2",
+						},
 					},
 				},
 			},
@@ -360,9 +365,13 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
-					Binlogs: []string{
-						"dev/datacoord/testsegment/1/part1",
-						"dev/datacoord/testsegment/1/part2",
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath: "dev/datacoord/testsegment/1/part1",
+						},
+						{
+							LogPath: "dev/datacoord/testsegment/1/part2",
+						},
 					},
 				},
 			},
@@ -786,9 +795,13 @@ func TestSaveBinlogPaths(t *testing.T) {
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
-					Binlogs: []string{
-						"/by-dev/test/0/1/2/1/Allo1",
-						"/by-dev/test/0/1/2/1/Allo2",
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath: "/by-dev/test/0/1/2/1/Allo1",
+						},
+						{
+							LogPath: "/by-dev/test/0/1/2/1/Allo2",
+						},
 					},
 				},
 			},
@@ -817,8 +830,8 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.NotNil(t, fieldBinlogs)
 		assert.EqualValues(t, 2, len(fieldBinlogs.GetBinlogs()))
 		assert.EqualValues(t, 1, fieldBinlogs.GetFieldID())
-		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", fieldBinlogs.GetBinlogs()[0])
-		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", fieldBinlogs.GetBinlogs()[1])
+		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", fieldBinlogs.GetBinlogs()[1].GetLogPath())
 
 		segmentInfo := svr.meta.GetSegment(0)
 		assert.NotNil(t, segmentInfo)
@@ -935,25 +948,37 @@ func TestDropVirtualChannel(t *testing.T) {
 				Field2BinlogPaths: []*datapb.FieldBinlog{
 					{
 						FieldID: 1,
-						Binlogs: []string{
-							"/by-dev/test/0/1/2/1/Allo1",
-							"/by-dev/test/0/1/2/1/Allo2",
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "/by-dev/test/0/1/2/1/Allo1",
+							},
+							{
+								LogPath: "/by-dev/test/0/1/2/1/Allo2",
+							},
 						},
 					},
 				},
 				Field2StatslogPaths: []*datapb.FieldBinlog{
 					{
 						FieldID: 1,
-						Binlogs: []string{
-							"/by-dev/test/0/1/2/1/stats1",
-							"/by-dev/test/0/1/2/1/stats2",
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "/by-dev/test/0/1/2/1/stats1",
+							},
+							{
+								LogPath: "/by-dev/test/0/1/2/1/stats2",
+							},
 						},
 					},
 				},
-				Deltalogs: []*datapb.DeltaLogInfo{
+				Deltalogs: []*datapb.FieldBinlog{
 					{
-						RecordEntries: 1,
-						DeltaLogPath:  "/by-dev/test/0/1/2/1/delta1",
+						Binlogs: []*datapb.Binlog{
+							{
+								EntriesNum: 1,
+								LogPath:    "/by-dev/test/0/1/2/1/delta1",
+							},
+						},
 					},
 				},
 				CheckPoint: &internalpb.MsgPosition{
@@ -1611,27 +1636,39 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Field2BinlogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
-					Binlogs: []string{
-						"/binlog/file1",
-						"/binlog/file2",
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath: "/binlog/file1",
+						},
+						{
+							LogPath: "/binlog/file2",
+						},
 					},
 				},
 			},
 			Field2StatslogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 1,
-					Binlogs: []string{
-						"/stats_log/file1",
-						"/stats_log/file2",
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath: "/stats_log/file1",
+						},
+						{
+							LogPath: "/stats_log/file2",
+						},
 					},
 				},
 			},
-			Deltalogs: []*datapb.DeltaLogInfo{
+			Deltalogs: []*datapb.FieldBinlog{
 				{
-					TimestampFrom: 0,
-					TimestampTo:   1,
-					DeltaLogPath:  "/stats_log/file1",
-					DeltaLogSize:  1,
+					Binlogs: []*datapb.Binlog{
+						{
+							TimestampFrom: 0,
+							TimestampTo:   1,
+							LogPath:       "/stats_log/file1",
+							LogSize:       1,
+						},
+					},
 				},
 			},
 		}
@@ -1659,7 +1696,9 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 0, resp.GetBinlogs()[0].GetSegmentID())
 		assert.EqualValues(t, 1, len(resp.GetBinlogs()[0].GetFieldBinlogs()))
 		assert.EqualValues(t, 1, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetFieldID())
-		assert.ElementsMatch(t, []string{"/binlog/file1", "/binlog/file2"}, resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs())
+		for i, binlog := range resp.GetBinlogs()[0].GetFieldBinlogs()[0].GetBinlogs() {
+			assert.Equal(t, fmt.Sprintf("/binlog/file%d", i+1), binlog.GetLogPath())
+		}
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
 		svr := newTestServer(t, nil)

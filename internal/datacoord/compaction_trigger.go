@@ -401,10 +401,12 @@ func (t *compactionTrigger) shouldDoSingleCompaction(segment *SegmentInfo, timet
 
 	totalDeletedRows := 0
 	totalDeleteLogSize := int64(0)
-	for _, l := range segment.GetDeltalogs() {
-		if l.TimestampTo < timetravel.time {
-			totalDeletedRows += int(l.GetRecordEntries())
-			totalDeleteLogSize += l.GetDeltaLogSize()
+	for _, fbl := range segment.GetDeltalogs() {
+		for _, l := range fbl.GetBinlogs() {
+			if l.TimestampTo < timetravel.time {
+				totalDeletedRows += int(l.GetEntriesNum())
+				totalDeleteLogSize += l.GetLogSize()
+			}
 		}
 	}
 

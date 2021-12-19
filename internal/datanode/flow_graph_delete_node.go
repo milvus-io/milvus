@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -51,33 +52,31 @@ type deleteNode struct {
 // DelDataBuf buffers insert data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type DelDataBuf struct {
-	delData  *DeleteData
-	size     int64
-	tsFrom   Timestamp
-	tsTo     Timestamp
-	fileSize int64
-	filePath string
+	datapb.Binlog
+	delData *DeleteData
 }
 
 func (ddb *DelDataBuf) updateSize(size int64) {
-	ddb.size += size
+	ddb.EntriesNum += size
 }
 
 func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
-	if tr.timestampMin < ddb.tsFrom {
-		ddb.tsFrom = tr.timestampMin
+	if tr.timestampMin < ddb.TimestampFrom {
+		ddb.TimestampFrom = tr.timestampMin
 	}
-	if tr.timestampMax > ddb.tsTo {
-		ddb.tsTo = tr.timestampMax
+	if tr.timestampMax > ddb.TimestampTo {
+		ddb.TimestampTo = tr.timestampMax
 	}
 }
 
 func newDelDataBuf() *DelDataBuf {
 	return &DelDataBuf{
 		delData: &DeleteData{},
-		size:    0,
-		tsFrom:  math.MaxUint64,
-		tsTo:    0,
+		Binlog: datapb.Binlog{
+			EntriesNum:    0,
+			TimestampFrom: math.MaxUint64,
+			TimestampTo:   0,
+		},
 	}
 }
 
@@ -155,7 +154,7 @@ func (dn *deleteNode) showDelBuf() {
 			delDataBuf, _ := v.(*DelDataBuf)
 			log.Debug("delta buffer status",
 				zap.Int64("segID", segID),
-				zap.Int64("size", delDataBuf.size),
+				zap.Int64("size", delDataBuf.GetEntriesNum()),
 				zap.String("vchannel", dn.channelName))
 			// TODO control the printed length
 			length := len(delDataBuf.delData.Pks)

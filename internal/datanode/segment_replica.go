@@ -401,12 +401,14 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 	}
 
 	// filter stats binlog files which is pk field stats log
-	bloomFilterFiles := make([]string, 0)
+	var bloomFilterFiles []string
 	for _, binlog := range statsBinlogs {
 		if binlog.FieldID != pkField {
 			continue
 		}
-		bloomFilterFiles = append(bloomFilterFiles, binlog.Binlogs...)
+		for _, log := range binlog.GetBinlogs() {
+			bloomFilterFiles = append(bloomFilterFiles, log.GetLogPath())
+		}
 	}
 
 	values, err := replica.minIOKV.MultiLoad(bloomFilterFiles)

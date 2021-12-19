@@ -210,7 +210,8 @@ message SegmentInfo {
   // binlogs consist of insert binlogs
   repeated FieldBinlog binlogs = 11;
   repeated FieldBinlog statslogs = 12;
-  repeated DeltaLogInfo deltalogs = 13;
+  // deltalogs consists of delete binlogs. FieldID is not used yet since delete is always applied on primary key
+  repeated FieldBinlog deltalogs = 13;
   
   bool createdByCompaction = 14;
   repeated int64 compactionFrom = 15;
@@ -231,7 +232,7 @@ message SaveBinlogPathsRequest {
   repeated SegmentStartPosition start_positions = 6;
   bool flushed = 7;
   repeated FieldBinlog field2StatslogPaths = 8;
-  repeated DeltaLogInfo deltalogs = 9;
+  repeated FieldBinlog deltalogs = 9;
   bool dropped = 10;
 }
 
@@ -283,12 +284,20 @@ message SegmentBinlogs {
   repeated FieldBinlog fieldBinlogs = 2;
   int64 num_of_rows = 3;
   repeated FieldBinlog statslogs = 4;
-  repeated DeltaLogInfo deltalogs = 5;
+  repeated FieldBinlog deltalogs = 5;
 }
 
 message FieldBinlog{
   int64 fieldID = 1;
-  repeated string binlogs = 2;
+  repeated Binlog binlogs = 2;
+}
+
+message Binlog {
+  int64 entries_num = 1;
+  uint64 timestamp_from = 2;
+  uint64 timestamp_to = 3;
+  string log_path = 4;
+  int64 log_size = 5; 
 }
 
 message GetRecoveryInfoResponse {
@@ -335,7 +344,7 @@ message CompactionSegmentBinlogs {
   int64 segmentID = 1;
   repeated FieldBinlog fieldBinlogs = 2;
   repeated FieldBinlog field2StatslogPaths = 3;
-  repeated DeltaLogInfo deltalogs = 4;
+  repeated FieldBinlog deltalogs = 4;
 }
 
 message CompactionPlan {
@@ -354,7 +363,7 @@ message CompactionResult {
   int64 num_of_rows = 3;
   repeated FieldBinlog insert_logs = 4;
   repeated FieldBinlog field2StatslogPaths = 5;
-  repeated DeltaLogInfo deltalogs = 6;
+  repeated FieldBinlog deltalogs = 6;
 }
 
 // Deprecated
@@ -383,7 +392,7 @@ message DropVirtualChannelSegment {
   int64 collectionID = 2;
   repeated FieldBinlog field2BinlogPaths = 3;
   repeated FieldBinlog field2StatslogPaths = 4;
-  repeated DeltaLogInfo deltalogs = 5;
+  repeated FieldBinlog deltalogs = 5;
   internal.MsgPosition startPosition = 6;
   internal.MsgPosition checkPoint = 7;
   int64 numOfRows = 8;

@@ -1041,7 +1041,7 @@ func TestSegment_BasicMetrics(t *testing.T) {
 		info := &VectorFieldInfo{
 			fieldBinlog: &datapb.FieldBinlog{
 				FieldID: fieldID,
-				Binlogs: []string{},
+				Binlogs: []*datapb.Binlog{},
 			},
 		}
 		segment.setVectorFieldInfo(fieldID, info)
@@ -1078,7 +1078,7 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 		info := &VectorFieldInfo{
 			fieldBinlog: &datapb.FieldBinlog{
 				FieldID: fieldID,
-				Binlogs: []string{},
+				Binlogs: []*datapb.Binlog{},
 			},
 		}
 		segment.setVectorFieldInfo(fieldID, info)

@@ -70,7 +70,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 		binlogs := make([]*datapb.FieldBinlog, 0)
 		binlogs = append(binlogs, &datapb.FieldBinlog{
 			FieldID: 0,
-			Binlogs: []string{funcutil.RandomString(tt.binlogSize)},
+			Binlogs: []*datapb.Binlog{{LogPath: funcutil.RandomString(tt.binlogSize)}},
 		})
 		for id := 0; id < 10; id++ {
 			segmentInfo := &querypb.SegmentLoadInfo{

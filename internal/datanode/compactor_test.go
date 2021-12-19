@@ -155,7 +155,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 						pk2ts, db, err := task.mergeDeltalogs(test.dBlobs, test.timetravel)
 						assert.NoError(t, err)
 						assert.Equal(t, 3, len(pk2ts))
-						assert.Equal(t, int64(3), db.size)
+						assert.Equal(t, int64(3), db.GetEntriesNum())
 						assert.Equal(t, int64(3), db.delData.RowCount)
 						assert.ElementsMatch(t, []UniqueID{1, 4, 5}, db.delData.Pks)
 						assert.ElementsMatch(t, []Timestamp{30000, 50000, 50000}, db.delData.Tss)
@@ -228,7 +228,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					pk2ts, db, err := task.mergeDeltalogs(dBlobs, test.timetravel)
 					assert.NoError(t, err)
 					assert.Equal(t, test.expectedpk2ts, len(pk2ts))
-					assert.Equal(t, test.expecteddb, int(db.size))
+					assert.Equal(t, test.expecteddb, int(db.GetEntriesNum()))
 				})
 			}
 		})
@@ -355,7 +355,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 					SegmentID:           segID,
 					FieldBinlogs:        cpaths.inPaths,
 					Field2StatslogPaths: cpaths.statsPaths,
-					Deltalogs:           []*datapb.DeltaLogInfo{cpaths.deltaInfo},
+					Deltalogs:           cpaths.deltaInfo,
 				},
 			},
 			StartTime:        0,
@@ -460,13 +460,13 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 					SegmentID:           segID1,
 					FieldBinlogs:        cpaths1.inPaths,
 					Field2StatslogPaths: cpaths1.statsPaths,
-					Deltalogs:           []*datapb.DeltaLogInfo{cpaths1.deltaInfo},
+					Deltalogs:           cpaths1.deltaInfo,
 				},
 				{
 					SegmentID:           segID2,
 					FieldBinlogs:        cpaths2.inPaths,
 					Field2StatslogPaths: cpaths2.statsPaths,
-					Deltalogs:           []*datapb.DeltaLogInfo{cpaths2.deltaInfo},
+					Deltalogs:           cpaths2.deltaInfo,
 				},
 			},
 			StartTime:        0,

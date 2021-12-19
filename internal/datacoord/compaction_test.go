@@ -129,7 +129,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 						plan: &datapb.CompactionPlan{
 							PlanID: 1,
 							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-								{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
+								{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
 							},
 							Type: datapb.CompactionType_InnerCompaction,
 						},
@@ -140,7 +140,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 					client: memkv.NewMemoryKV(),
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
-							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}}},
+							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
 						},
 					},
 				},
@@ -150,7 +150,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				result: &datapb.CompactionResult{
 					PlanID:     1,
 					SegmentID:  1,
-					InsertLogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}},
+					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")},
 				},
 			},
 			false,
@@ -160,7 +160,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				plan: &datapb.CompactionPlan{
 					PlanID: 1,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
 					},
 					Type: datapb.CompactionType_InnerCompaction,
 				},
@@ -176,8 +176,9 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 						plan: &datapb.CompactionPlan{
 							PlanID: 1,
 							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-								{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
-								{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}},
+
+								{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
+								{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
 							},
 							Type: datapb.CompactionType_MergeCompaction,
 						},
@@ -188,8 +189,9 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 					client: memkv.NewMemoryKV(),
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
-							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}}},
-							2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}}},
+
+							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
+							2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}}},
 						},
 					},
 				},
@@ -199,7 +201,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				result: &datapb.CompactionResult{
 					PlanID:     1,
 					SegmentID:  3,
-					InsertLogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}},
+					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")},
 				},
 			},
 			false,
@@ -209,8 +211,8 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				plan: &datapb.CompactionPlan{
 					PlanID: 1,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
-						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
+						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
 					},
 					Type: datapb.CompactionType_MergeCompaction,
 				},

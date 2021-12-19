@@ -374,7 +374,7 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 			var vecPath string
 			for index, idBinlogRowSize := range s.idBinlogRowSizes {
 				if offset < idBinlogRowSize {
-					vecPath = vecFieldInfo.fieldBinlog.Binlogs[index]
+					vecPath = vecFieldInfo.fieldBinlog.Binlogs[index].GetLogPath()
 					break
 				} else {
 					offset -= idBinlogRowSize

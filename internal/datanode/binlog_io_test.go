@@ -44,15 +44,16 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		iData := genInsertData()
 		dData := &DeleteData{
-			Pks: []int64{888},
-			Tss: []uint64{666666},
+			RowCount: 1,
+			Pks:      []int64{888},
+			Tss:      []uint64{666666},
 		}
 
 		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
 		assert.NoError(t, err)
 		assert.Equal(t, 11, len(p.inPaths))
 		assert.Equal(t, 3, len(p.statsPaths))
-		assert.NotNil(t, p.deltaInfo.GetDeltaLogPath())
+		assert.NotNil(t, p.deltaInfo)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -243,8 +244,8 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 		log.Debug("test paths",
 			zap.Any("kvs no.", len(kvs)),
-			zap.String("insert paths field0", pin[0].GetBinlogs()[0]),
-			zap.String("stats paths field0", pstats[0].GetBinlogs()[0]))
+			zap.String("insert paths field0", pin[0].GetBinlogs()[0].GetLogPath()),
+			zap.String("stats paths field0", pstats[0].GetBinlogs()[0].GetLogPath()))
 	})
 
 	t.Run("Test genInsertBlobs error", func(t *testing.T) {

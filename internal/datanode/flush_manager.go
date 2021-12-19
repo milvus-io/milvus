@@ -54,9 +54,9 @@ type flushManager interface {
 // segmentFlushPack contains result to save into meta
 type segmentFlushPack struct {
 	segmentID  UniqueID
-	insertLogs map[UniqueID]string
-	statsLogs  map[UniqueID]string
-	deltaLogs  []*DelDataBuf
+	insertLogs map[UniqueID]*datapb.Binlog
+	statsLogs  map[UniqueID]*datapb.Binlog
+	deltaLogs  []*datapb.Binlog
 	pos        *internalpb.MsgPosition
 	flushed    bool
 	dropped    bool
@@ -162,7 +162,7 @@ func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInj
 }
 
 // enqueueInsertBuffer put insert buffer data into queue
-func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
 	q.getFlushTaskRunner(pos).runFlushInsert(task, binlogs, statslogs, flushed, dropped, pos)
 }
 
@@ -257,7 +257,7 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 	return queue
 }
 
-func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]string, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
 	// in dropping mode
 	if m.dropping.Load() {
 		r := &flushTaskRunner{
@@ -313,7 +313,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	if data == nil || data.buffer == nil {
 		//m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
 		//	map[UniqueID]string{}, map[UniqueID]string{}, flushed, dropped, pos)
-		m.handleInsertTask(segmentID, &flushBufferInsertTask{}, map[UniqueID]string{}, map[UniqueID]string{},
+		m.handleInsertTask(segmentID, &flushBufferInsertTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{},
 			flushed, dropped, pos)
 		return nil
 	}
@@ -336,9 +336,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		return err
 	}
 
-	field2Insert := make(map[UniqueID]string, len(binLogs))
+	field2Insert := make(map[UniqueID]*datapb.Binlog, len(binLogs))
 	kvs := make(map[string]string, len(binLogs))
-	paths := make([]string, 0, len(binLogs))
 	field2Logidx := make(map[UniqueID]UniqueID, len(binLogs))
 	for idx, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
@@ -353,13 +352,18 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
 		key := path.Join(Params.InsertBinlogRootPath, k)
-		paths = append(paths, key)
 		kvs[key] = string(blob.Value[:])
-		field2Insert[fieldID] = key
+		field2Insert[fieldID] = &datapb.Binlog{
+			EntriesNum:    data.size,
+			TimestampFrom: 0, //TODO
+			TimestampTo:   0, //TODO,
+			LogPath:       key,
+			LogSize:       int64(len(blob.Value)),
+		}
 		field2Logidx[fieldID] = logidx
 	}
 
-	field2Stats := make(map[UniqueID]string)
+	field2Stats := make(map[UniqueID]*datapb.Binlog)
 	// write stats binlog
 	for _, blob := range statsBinlogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
@@ -374,16 +378,17 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
 		key := path.Join(Params.StatsBinlogRootPath, k)
-		kvs[key] = string(blob.Value[:])
-		field2Stats[fieldID] = key
+		kvs[key] = string(blob.Value)
+		field2Stats[fieldID] = &datapb.Binlog{
+			EntriesNum:    0,
+			TimestampFrom: 0, //TODO
+			TimestampTo:   0, //TODO,
+			LogPath:       key,
+			LogSize:       int64(len(blob.Value)),
+		}
 	}
 
 	m.updateSegmentCheckPoint(segmentID)
-	/*
-		m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{
-			BaseKV: m.BaseKV,
-			data:   kvs,
-		}, field2Insert, field2Stats, flushed, dropped, pos)*/
 	m.handleInsertTask(segmentID, &flushBufferInsertTask{
 		BaseKV: m.BaseKV,
 		data:   kvs,
@@ -397,9 +402,6 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 
 	// del signal with empty data
 	if data == nil || data.delData == nil {
-		/*
-			m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{}, nil, pos)
-		*/
 		m.handleDeleteTask(segmentID, &flushBufferDeleteTask{}, nil, pos)
 		return nil
 	}
@@ -425,14 +427,9 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 	blobKey := JoinIDPath(collID, partID, segmentID, logID)
 	blobPath := path.Join(Params.DeleteBinlogRootPath, blobKey)
 	kvs := map[string]string{blobPath: string(blob.Value[:])}
-	data.fileSize = int64(len(blob.Value))
-	data.filePath = blobPath
+	data.LogSize = int64(len(blob.Value))
+	data.LogPath = blobPath
 	log.Debug("delete blob path", zap.String("path", blobPath))
-	/*
-		m.getFlushQueue(segmentID).enqueueDelFlush(&flushBufferDeleteTask{
-			BaseKV: m.BaseKV,
-			data:   kvs,
-		}, data, pos)*/
 	m.handleDeleteTask(segmentID, &flushBufferDeleteTask{
 		BaseKV: m.BaseKV,
 		data:   kvs,
@@ -607,7 +604,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 				if fieldBinlogs == nil {
 					segment.Field2BinlogPaths = append(segment.Field2BinlogPaths, &datapb.FieldBinlog{
 						FieldID: k,
-						Binlogs: []string{v},
+						Binlogs: []*datapb.Binlog{v},
 					})
 				} else {
 					fieldBinlogs.Binlogs = append(fieldBinlogs.Binlogs, v)
@@ -618,15 +615,15 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 				if fieldStatsLogs == nil {
 					segment.Field2StatslogPaths = append(segment.Field2StatslogPaths, &datapb.FieldBinlog{
 						FieldID: k,
-						Binlogs: []string{v},
+						Binlogs: []*datapb.Binlog{v},
 					})
 				} else {
 					fieldStatsLogs.Binlogs = append(fieldStatsLogs.Binlogs, v)
 				}
 			}
-			for _, delData := range pack.deltaLogs {
-				segment.Deltalogs = append(segment.Deltalogs, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogPath: delData.filePath, DeltaLogSize: delData.fileSize})
-			}
+			segment.Deltalogs = append(segment.Deltalogs, &datapb.FieldBinlog{
+				Binlogs: pack.deltaLogs,
+			})
 			updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
 			segment.NumOfRows = updates.GetNumRows()
 			if pack.pos != nil {
@@ -683,17 +680,15 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		}
 		fieldInsert := []*datapb.FieldBinlog{}
 		fieldStats := []*datapb.FieldBinlog{}
-		deltaInfos := []*datapb.DeltaLogInfo{}
+		deltaInfos := []*datapb.FieldBinlog{}
 		checkPoints := []*datapb.CheckPoint{}
 		for k, v := range pack.insertLogs {
-			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
+			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
 		for k, v := range pack.statsLogs {
-			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []string{v}})
+			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
-		for _, delData := range pack.deltaLogs {
-			deltaInfos = append(deltaInfos, &datapb.DeltaLogInfo{RecordEntries: uint64(delData.size), TimestampFrom: delData.tsFrom, TimestampTo: delData.tsTo, DeltaLogPath: delData.filePath, DeltaLogSize: delData.fileSize})
-		}
+		deltaInfos = append(deltaInfos, &datapb.FieldBinlog{Binlogs: pack.deltaLogs})
 
 		// only current segment checkpoint info,
 		updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)

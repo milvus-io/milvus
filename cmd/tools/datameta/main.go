@@ -112,8 +112,10 @@ func printSegmentInfo(info *datapb.SegmentInfo) {
 		fmt.Println("**************************************")
 		fmt.Println("Delta Logs:")
 		for _, log := range info.GetDeltalogs() {
-			fmt.Printf("Entries: %d From: %v - To: %v\n", log.RecordEntries, log.TimestampFrom, log.TimestampTo)
-			fmt.Printf("Path: %v\n", log.DeltaLogPath)
+			for _, l := range log.GetBinlogs() {
+				fmt.Printf("Entries: %d From: %v - To: %v\n", l.EntriesNum, l.TimestampFrom, l.TimestampTo)
+				fmt.Printf("Path: %v\n", l.LogPath)
+			}
 		}
 	}
 

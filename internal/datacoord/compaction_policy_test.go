@@ -7,6 +7,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
+	l := &datapb.FieldBinlog{
+		FieldID: id,
+		Binlogs: make([]*datapb.Binlog, 0, len(paths)),
+	}
+	for _, path := range paths {
+		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogPath: path})
+	}
+	return l
+}
+
 func Test_greedyMergeCompaction(t *testing.T) {
 	type args struct {
 		segments   []*SegmentInfo
@@ -21,18 +32,18 @@ func Test_greedyMergeCompaction(t *testing.T) {
 			"test normal merge",
 			args{
 				[]*SegmentInfo{
-					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 1, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 1, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}}}},
+
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 1, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 1, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")}}},
 				},
 				&timetravel{1000},
 			},
 			[]*datapb.CompactionPlan{
 				{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
-						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}}},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
+						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")}},
 					},
-
 					Type:       datapb.CompactionType_MergeCompaction,
 					Timetravel: 1000,
 				},
@@ -42,17 +53,17 @@ func Test_greedyMergeCompaction(t *testing.T) {
 			"test unmergable segments",
 			args{
 				[]*SegmentInfo{
-					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 1, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 99, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 99, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 1, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: "log1"}}}}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 99, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: "log2"}}}}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 99, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{LogPath: "log3"}}}}}},
 				},
 				&timetravel{1000},
 			},
 			[]*datapb.CompactionPlan{
 				{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
-						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
+						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
 					},
 					Type:       datapb.CompactionType_MergeCompaction,
 					Timetravel: 1000,
@@ -63,26 +74,26 @@ func Test_greedyMergeCompaction(t *testing.T) {
 			"test multi plans",
 			args{
 				[]*SegmentInfo{
-					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}}}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log4"}}}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 3, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 4, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log4")}}},
 				},
 				&timetravel{1000},
 			},
 			[]*datapb.CompactionPlan{
 				{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}},
-						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log2"}}}},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
+						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
 					},
 					Type:       datapb.CompactionType_MergeCompaction,
 					Timetravel: 1000,
 				},
 				{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 3, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}}},
-						{SegmentID: 4, FieldBinlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log4"}}}},
+						{SegmentID: 3, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")}},
+						{SegmentID: 4, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log4")}},
 					},
 					Type:       datapb.CompactionType_MergeCompaction,
 					Timetravel: 1000,
@@ -93,8 +104,8 @@ func Test_greedyMergeCompaction(t *testing.T) {
 			"test empty plan",
 			args{
 				[]*SegmentInfo{
-					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log1"}}}}},
-					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 51, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []string{"log3"}}}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 1, NumOfRows: 50, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
+					{SegmentInfo: &datapb.SegmentInfo{ID: 2, NumOfRows: 51, MaxRowNum: 100, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")}}},
 				},
 				&timetravel{1000},
 			},
