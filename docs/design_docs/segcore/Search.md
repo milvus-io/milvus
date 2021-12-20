@@ -10,7 +10,7 @@ Search now supports two modes: json DSL mode and Boolean Expr mode. We will talk
 
 The execution mode of Boolean Expr works as follows:
 
-1. client packs search expr, topk and query vector into proto and sends to Proxy node.
+1. client packs search expr, topk, and query vector into proto and sends to Proxy node.
 2. Proxy Node unmarshals the proto, parses it to logical plan, makes static check, and generates protobuf IR.
 3. Query Node unmarshals the plan, generates an executable plan AST, and queries in the segcore.
 
