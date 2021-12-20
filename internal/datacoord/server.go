@@ -429,9 +429,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	}
 	ttMsgStream.AsConsumerWithPosition([]string{Params.TimeTickChannelName},
 		Params.DataCoordSubscriptionName, mqclient.SubscriptionPositionLatest)
-	log.Debug("dataCoord create time tick channel consumer",
-		zap.String("timeTickChannelName", Params.TimeTickChannelName),
-		zap.String("subscriptionName", Params.DataCoordSubscriptionName))
+	log.Debug("DataCoord creates the timetick channel consumer",
+		zap.String("timeTickChannel", Params.TimeTickChannelName),
+		zap.String("subscription", Params.DataCoordSubscriptionName))
 	ttMsgStream.Start()
 
 	go func() {
