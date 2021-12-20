@@ -251,7 +251,7 @@ func (s *Server) Start() error {
 	var err error
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarAddress,
-		"ReceiveBufSize": 1024,
+		"receiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err = s.msFactory.SetParams(m)
 	if err != nil {
