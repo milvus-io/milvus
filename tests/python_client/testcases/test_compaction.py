@@ -13,7 +13,6 @@ prefix = "compact"
 tmp_nb = 100
 
 
-# @pytest.mark.skip(reason="Ci failed")
 class TestCompactionParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -502,7 +501,6 @@ class TestCompactionOperation(TestcaseBase):
         for hits in search_res:
             assert len(hits) == ct.default_limit
 
-    # @pytest.mark.skip(reason="Todo")
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_search_after_delete_channel(self):
         """
@@ -662,7 +660,6 @@ class TestCompactionOperation(TestcaseBase):
         assert len(c_plans.plans) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.skip(reason="issue #12957")
     def test_compact_manual_and_auto(self):
         """
         target: test compact manual and auto
