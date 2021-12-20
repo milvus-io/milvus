@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
