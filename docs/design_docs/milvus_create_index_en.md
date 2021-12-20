@@ -61,7 +61,7 @@ type createIndexTask struct {
 3. There is a background service in `Proxy`, this service would get the `CreateIndexTask` from `DdTaskQueue`, and execute it in three phases.
 
    - `PreExecute`, do some static checking at this phase, such as check if the index param is legal, etc.
-   - `Execute`, at this phase, `Proxy` would send `CreateIndex` request to `RootCoord` via `Grpc`, and wait the response, the `proto` is defined as the follow:
+   - `Execute`, at this phase, `Proxy` would send `CreateIndex` request to `RootCoord` via `Grpc`, and wait the response, the `proto` is defined as the following:
 
    ```proto
        service RootCoord {
