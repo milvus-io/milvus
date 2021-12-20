@@ -12,7 +12,7 @@ Growing segment has the following additional interfaces:
 
 Growing segment stores data in the form of chunk. The number of rows in each chunk is restricted by configs.
 
-Rows per segment is controlled by parameters `size_per_Chunk ` config
+Rows per segment are controlled by parameters `size_per_Chunk ` config
 
 When inserting, first allocate enough space to ensure `total_size <= num_chunk * size_per_chunk`, and then convert data from row format to column format.
 
