@@ -27,15 +27,15 @@ func TestParamTable(t *testing.T) {
 	Params.Init()
 
 	assert.Equal(t, Params.InsertChannelPrefixName, "by-dev-insert-channel-")
-	t.Logf("data coord insert channel = %s", Params.InsertChannelPrefixName)
+	t.Logf("DataCoord insert channel = %s", Params.InsertChannelPrefixName)
 
 	assert.Equal(t, Params.TimeTickChannelName, "by-dev-datacoord-timetick-channel")
-	t.Logf("data coord timetick channel = %s", Params.TimeTickChannelName)
+	t.Logf("DataCoord timetick channel = %s", Params.TimeTickChannelName)
 
 	assert.Equal(t, Params.SegmentInfoChannelName, "by-dev-segment-info-channel")
-	t.Logf("data coord segment info channel = %s", Params.SegmentInfoChannelName)
+	t.Logf("DataCoord segment info channel = %s", Params.SegmentInfoChannelName)
 
 	assert.Equal(t, Params.DataCoordSubscriptionName, "by-dev-dataCoord")
-	t.Logf("data coord subscription channel = %s", Params.DataCoordSubscriptionName)
+	t.Logf("DataCoord subscription channel = %s", Params.DataCoordSubscriptionName)
 
 }
