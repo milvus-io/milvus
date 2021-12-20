@@ -29,26 +29,21 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
-
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 func TestMain(m *testing.M) {
