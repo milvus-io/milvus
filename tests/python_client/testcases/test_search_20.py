@@ -486,7 +486,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_without_load(prefix, True, 10, partition_num)[0]
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num,is_index=ct.default_index)[0]
         par = collection_w.partitions
         par_name = par[partition_num].name
         # 2. release partition
@@ -1157,7 +1157,7 @@ class TestCollectionSearch(TestcaseBase):
     #     expected: search successfully
     #     """
     #     # 1. initialize without data
-    #     collection_w, _, _, insert_ids, time_stamp = self.init_collection_without_load(prefix, True, nb,
+    #     collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
     #                                                                               1, auto_id=auto_id,
     #                                                                               dim=dim)[0:5]
     #     # 2. release collection
