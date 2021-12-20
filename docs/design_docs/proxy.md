@@ -126,18 +126,17 @@ to the collection to increase the parallelism and thus increase the system throu
 future work.
 
 For DqRequest, request and result data are written to the stream. The request data will be written to DqRequestChannel,
-and the result data will be written to DqResultChannel. The proxy will write the request of the collection into the
+and the result data will be written to DqResultChannel. Proxy will write the request of the collection into the
 DqRequestChannel, and the DqReqeustChannel will be jointly subscribed by a group of query nodes. When all query nodes
 receive the DqRequest, they will write the query results into the DqResultChannel corresponding to the collection. As
-the consumer of the DqResultChannel, the proxy is responsible for collecting the query results and aggregating them,
+the consumer of the DqResultChannel, Proxy is responsible for collecting the query results and aggregating them,
 The result is then returned to the client.
 
-The allocation logic of DqRequestChannel and DqResultChannel of a collection is allocated by the Query Coordinator. The
-proxy needs to ask the Query Coordinator for the names of DqRequestChannel and DqResultChannel of a collection.
+The allocation logic of DqRequestChannel and DqResultChannel of a collection is allocated by the Query Coordinator. Proxy needs to ask the Query Coordinator for the names of DqRequestChannel and DqResultChannel of a collection.
 DqRequestChannel and DqResultChannel do not need to be persisted and can be freely allocated by Query Coordinator. In
 the actual implementation, the DqRequestChannel of each collection can be exclusive, and the DqResultChannel can be
-exclusive or shared by all collections on the proxy. When the proxy applies for the DqRequestChannel and DqResultChannel
-information of the collection from the Query Coordinator, it can attach the proxy's own ID: ProxyID.
+exclusive or shared by all collections on the proxy. When Proxy applies for the DqRequestChannel and DqResultChannel
+information of the collection from the Query Coordinator, it can attach Proxy's own ID: ProxyID.
 
 With DqRequestChannel of the collection, the proxy will create a msgstream object to generate data into
 DqRequestChannel. With the DqResultChannel of the collection, the proxy will create a msgstream object, and Proxy will
