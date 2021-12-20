@@ -175,7 +175,7 @@ func SetSegmentManager(manager Manager) Option {
 	}
 }
 
-// CreateServer create `Server` instance
+// CreateServer creates a `Server` instance
 func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
@@ -209,7 +209,7 @@ func (s *Server) QuitSignal() <-chan struct{} {
 	return s.quitCh
 }
 
-// Register register data service at etcd
+// Register registers data service at etcd
 func (s *Server) Register() error {
 	s.session.Register()
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
