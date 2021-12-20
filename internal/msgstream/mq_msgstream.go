@@ -995,7 +995,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 				headerMsg := commonpb.MsgHeader{}
 				err := proto.Unmarshal(msg.Payload(), &headerMsg)
 				if err != nil {
-					return fmt.Errorf("Failed to unmarshal message header, err %s", err.Error())
+					return fmt.Errorf("failed to unmarshal message header, err %s", err.Error())
 				}
 				tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
 				if err != nil {
