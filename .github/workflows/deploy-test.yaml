@@ -76,6 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        mode: [standalone,cluster]
         task: [reinstall,upgrade]    
     steps:
       
@@ -114,10 +115,27 @@ jobs:
           helm repo update
 
           # if the task is reinstall, install milvus with latest image in repo milvusdb/milvus-dev
-          if [ ${{ matrix.task }} == "reinstall" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml; fi
+          # for cluster mode
+          if [ ${{ matrix.task }} == "reinstall" ] && [ ${{ matrix.mode }} == "cluster" ]; then
+              echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
+              helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml;
+          fi
+          # for standalone mode
+          if [ ${{ matrix.task }} == "reinstall" ] && [ ${{ matrix.mode }} == "standalone" ]; then
+              echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
+              helm install --wait --timeout 720s deploy-testing milvus/milvus -f standalone-values.yaml;
+          fi
 
           # if the task is upgrade, install milvus with latest rc image in repo milvusdb/milvus
-          if [ ${{ matrix.task }} == "upgrade" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus-dev --set image.all.tag=master-20211216-7e56f08 -f cluster-values.yaml; fi
+          if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "cluster" ]; then
+              echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus -f cluster-values.yaml;
+          fi
+          if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "standalone" ]; then
+              echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus -f standalone-values.yaml;
+          fi
+
           kubectl get pods
           sleep 20s
           kubectl get pods
@@ -140,8 +158,8 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy     
         run: |
-          # 
-          helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml
+          if [ ${{ matrix.mode }} == "cluster" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml; fi
+          if [ ${{ matrix.mode }} == "standalone" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f standalone-values.yaml; fi
           kubectl get pods
           sleep 20s
           kubectl get pods
