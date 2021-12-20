@@ -68,7 +68,7 @@ Proxy handles the DdRequest sequentially. When and only when the earlier entered
 would be handled. Proxy forwards these requests to Root Coordinator, waits until getting results from Root Coordinator, and then
 returns to clients with results or errors.
 
-Milvus does not support transaction, but it should guarantee the deterministic execution of every operation. A timestamp
+Milvus does not support transactions, but it should guarantee the deterministic execution of every operation. A timestamp
 is tagged on each request. When a request enters Milvus, Proxy tags a timestamp that was assigned by Root Coordinator.
 The component that assigns timestamp in Root Coordinator is called `Timestamp Oracle (TSO)`. TSO ensures that each
 timestamp is globally increasing.
