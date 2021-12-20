@@ -486,7 +486,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 10, partition_num,is_index=ct.default_index)[0]
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
         par = collection_w.partitions
         par_name = par[partition_num].name
         # 2. release partition

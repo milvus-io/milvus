@@ -832,7 +832,7 @@ class TestUtilityBase(TestcaseBase):
         """
         half = ct.default_nb
         # insert entities into two partitions, collection flush and load
-        collection_w,partition_w,_, _ = self.insert_entities_into_two_partitions_in_half(half)
+        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
         partition_w.release()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
         assert res[num_total_entities] == half * 2
