@@ -370,7 +370,7 @@ func (s *Server) initServiceDiscovery() error {
 		log.Debug("dataCoord initServiceDiscovery failed", zap.Error(err))
 		return err
 	}
-	log.Debug("registered sessions", zap.Any("sessions", sessions))
+	log.Debug("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
 
 	datanodes := make([]*NodeInfo, 0, len(sessions))
 	for _, session := range sessions {
