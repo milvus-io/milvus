@@ -3,6 +3,7 @@ import time
 import logging
 import string
 import random
+import requests
 import json
 import os
 from yaml.representer import SafeRepresenter
@@ -263,3 +264,15 @@ def read_json_file(file_name):
     with open(file_name) as f:
         file_dict = json.load(f)
     return file_dict
+
+
+def get_token(url):
+    """ get the request token and return the value """
+    rep = requests.get(url)
+    data = json.loads(rep.text)
+    if 'token' in data:
+        token = data['token']
+    else:
+        token = ''
+        print("Can not get token.")
+    return token
