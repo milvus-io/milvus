@@ -317,43 +317,43 @@ func (p *msgChannelConfig) initRootCoordDelta() {
 }
 
 func (p *msgChannelConfig) initMsgChannelSearch() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.search")
+	p.Search = p.initChanNamePrefix("msgChannel.chanNamePrefix.search")
 }
 
 func (p *msgChannelConfig) initMsgChannelSearchResult() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.searchResult")
+	p.SearchResult = p.initChanNamePrefix("msgChannel.chanNamePrefix.searchResult")
 }
 
 func (p *msgChannelConfig) initProxyTimeTick() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.proxyTimeTick")
+	p.ProxyTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.proxyTimeTick")
 }
 
 func (p *msgChannelConfig) initQueryTimeTick() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryTimeTick")
+	p.QueryTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryTimeTick")
 }
 
 func (p *msgChannelConfig) initQueryNodeStats() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryNodeStats")
+	p.QueryNodeStats = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryNodeStats")
 }
 
 func (p *msgChannelConfig) initMsgChannelCmd() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.cmd")
+	p.Cmd = p.initChanNamePrefix("msgChannel.chanNamePrefix.cmd")
 }
 
 func (p *msgChannelConfig) initDataCoordInsertChannel() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordInsertChannel")
+	p.DataCoordInsertChannel = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordInsertChannel")
 }
 
 func (p *msgChannelConfig) initDataCoordStatistic() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordStatistic")
+	p.DataCoordStatistic = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordStatistic")
 }
 
 func (p *msgChannelConfig) initDataCoordTimeTick() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordTimeTick")
+	p.DataCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordTimeTick")
 }
 
 func (p *msgChannelConfig) initDataCoordSegmentInfo() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
+	p.DataCoordSegmentInfo = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
 }
 
 // --- msgChannel.subNamePrefix ---
@@ -362,19 +362,19 @@ func (p *msgChannelConfig) initRootCoordSubNamePrefix() {
 }
 
 func (p *msgChannelConfig) initProxySubNamePrefix() {
-	p.RootCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.proxySubNamePrefix")
+	p.ProxySubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.proxySubNamePrefix")
 }
 
 func (p *msgChannelConfig) initQueryNodeSubNamePrefix() {
-	p.RootCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
+	p.QueryNodeSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
 }
 
 func (p *msgChannelConfig) initDataNodeSubNamePrefix() {
-	p.RootCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
+	p.DataNodeSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
 }
 
 func (p *msgChannelConfig) initDataCoordSubNamePrefix() {
-	p.RootCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
+	p.DataCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
 }
 
 ///////////////////////////////////////////////////////////////////////////////
