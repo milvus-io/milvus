@@ -76,7 +76,7 @@ func (s BlobList) Len() int {
 	return len(s)
 }
 
-// Len implements Less in sort.Interface
+// Less implements Less in sort.Interface
 func (s BlobList) Less(i, j int) bool {
 	leftValues := strings.Split(s[i].Key, "/")
 	rightValues := strings.Split(s[j].Key, "/")
@@ -85,7 +85,7 @@ func (s BlobList) Less(i, j int) bool {
 	return left < right
 }
 
-// Len implements Swap in sort.Interface
+// Swap implements Swap in sort.Interface
 func (s BlobList) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
