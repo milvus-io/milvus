@@ -1,6 +1,6 @@
 # Brief
 
-This document will help sdk developers to understand each API of milvus RPC proto.
+This document will help SDK developers to understand each API of Milvus RPC proto.
 
 # Table of contents
 =================
