@@ -42,7 +42,7 @@ type Session struct {
 	isDisposed    bool
 }
 
-// NewSession create a new session
+// NewSession creates a new session
 func NewSession(info *NodeInfo, creator dataNodeCreatorFunc) *Session {
 	return &Session{
 		info:          info,
@@ -81,7 +81,7 @@ func (n *Session) initClient(ctx context.Context) (err error) {
 	return n.client.Start()
 }
 
-// Dispose release client connection
+// Dispose releases client connection
 func (n *Session) Dispose() {
 	n.Lock()
 	defer n.Unlock()
