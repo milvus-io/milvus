@@ -213,7 +213,7 @@ func (s *Server) QuitSignal() <-chan struct{} {
 func (s *Server) Register() error {
 	s.session.Register()
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		log.Error("DataCoord disconnected from etcd, process will exit", zap.Int64("ServerID", s.session.ServerID))
+		log.Error("DataCoord disconnected from etcd and exited", zap.Int64("ServerID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
