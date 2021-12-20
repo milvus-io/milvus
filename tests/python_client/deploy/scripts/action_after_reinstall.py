@@ -5,7 +5,7 @@ from utils import *
 def task_1():
     """
     task_1:
-        before reinstall: create collection and insert data
+        before reinstall: create collection and insert data, load and search
         after reinstall: get collection, load, search, create index, load, and search
     """
     prefix = "task_1_"
@@ -18,7 +18,7 @@ def task_1():
 def task_2():
     """
     task_2:
-        before reinstall: create collection, insert data and create index
+        before reinstall: create collection, insert data and create index, load and search
         after reinstall: get collection, load, search, insert data, create index, load, and search
     """
     prefix = "task_2_"

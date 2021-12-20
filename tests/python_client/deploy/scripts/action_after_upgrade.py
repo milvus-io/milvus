@@ -5,7 +5,7 @@ from utils import *
 def task_1():
     """
     task_1:
-        before upgrade: create collection and insert data
+        before upgrade: create collection and insert data, load and search
         after upgrade: get collection, load, search, create index, load, and search
     """
     prefix = "task_1_"
@@ -13,12 +13,14 @@ def task_1():
     get_collections(prefix)
     load_and_search(prefix)
     create_collections_and_insert_data(prefix)
+    create_index(prefix)
+    load_and_search(prefix)
 
 
 def task_2():
     """
     task_2:
-        before upgrade: create collection, insert data and create index
+        before upgrade: create collection, insert data and create index, load and search
         after upgrade: get collection, load, search, insert data, create index, load, and search
     """
     prefix = "task_2_"
