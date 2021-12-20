@@ -10,15 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <memory>
-#include <vector>
+
 #include <any>
-#include <string>
-#include <optional>
 #include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
 #include "common/Schema.h"
 
 namespace milvus::query {
+
 class ExprVisitor;
 
 // Base of all Exprs
@@ -129,4 +132,5 @@ struct CompareExpr : Expr {
     void
     accept(ExprVisitor&) override;
 };
+
 }  // namespace milvus::query
