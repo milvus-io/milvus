@@ -58,7 +58,7 @@ class TestAliasOperation(TestcaseBase):
         target: test collection creating alias
         method: 
                 1.create a collection and create 10 partitions for it
-                2.collection create an alias, then init a collection with this alias name but not create partitions
+                2.collection create an alias, then init a collection with this alias but not create partitions
         expected: collection is equal to alias
         """
         self._connect()
