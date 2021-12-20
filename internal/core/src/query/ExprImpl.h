@@ -10,12 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "Expr.h"
+
 #include <tuple>
 #include <vector>
 #include <boost/container/vector.hpp>
 
+#include "Expr.h"
+
 namespace milvus::query {
+
 template <typename T>
 struct TermExprImpl : TermExpr {
     boost::container::vector<T> terms_;
@@ -31,4 +34,5 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
     T lower_value_;
     T upper_value_;
 };
+
 }  // namespace milvus::query
