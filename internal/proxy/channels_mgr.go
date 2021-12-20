@@ -102,6 +102,7 @@ func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFunc
 	}
 }
 
+// getDqlChannelsFunc returns a function about how to get query channels of a collection.
 func getDqlChannelsFunc(ctx context.Context, proxyID int64, qc createQueryChannelInterface) getChannelsFuncType {
 	return func(collectionID UniqueID) (map[vChan]pChan, error) {
 		req := &querypb.CreateQueryChannelRequest{
