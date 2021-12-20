@@ -21,11 +21,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/mock"
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 )
 
 func Test_NewClient(t *testing.T) {
@@ -40,7 +40,7 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
-	Params.Init()
+	ClientParams.InitOnce(typeutil.QueryNodeRole)
 
 	err = client.Start()
 	assert.Nil(t, err)

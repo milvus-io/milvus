@@ -21,21 +21,20 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	"github.com/milvus-io/milvus/internal/util/mock"
-	"google.golang.org/grpc"
-
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 )
 
 func Test_NewClient(t *testing.T) {
-	Params.Init()
+	ClientParams.InitOnce(typeutil.IndexNodeRole)
 	ctx := context.Background()
 	client, err := NewClient(ctx, "")
 	assert.Nil(t, client)

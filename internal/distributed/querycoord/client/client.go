@@ -34,7 +34,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-var Params paramtable.GrpcClientConfig
+var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client of QueryCoord.
 type Client struct {
@@ -50,11 +50,11 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	Params.InitOnce(typeutil.QueryCoordRole)
+	ClientParams.InitOnce(typeutil.QueryCoordRole)
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase{
-			ClientMaxRecvSize: Params.ClientMaxRecvSize,
-			ClientMaxSendSize: Params.ClientMaxSendSize,
+			ClientMaxRecvSize: ClientParams.ClientMaxRecvSize,
+			ClientMaxSendSize: ClientParams.ClientMaxSendSize,
 		},
 		sess: sess,
 	}
