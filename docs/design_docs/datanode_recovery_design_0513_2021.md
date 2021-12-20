@@ -155,7 +155,7 @@ WatchDmChannels -> new dataSyncService -> HEALTH
 
 ![datanode_design](graphs/collection_flowgraph_1_n.png)
 
-• If collection:flowgraph = n : 1, in the blue cases, datanode must have ability to scale flowgraph. In the brown cases, flowgraph must be able to scale channels.
+• If collection:flowgraph = n : 1, in the blue cases, datanode must have the ability to scale flowgraph. In the brown cases, flowgraph must be able to scale channels.
 
 ![datanode_design](graphs/collection_flowgraph_n_1.jpg)
 
