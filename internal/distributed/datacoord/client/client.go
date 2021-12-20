@@ -20,9 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -33,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var ClientParams paramtable.GrpcClientConfig
