@@ -674,7 +674,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMetaFunc {
 	return func(pack *segmentFlushPack) {
 		if pack.err != nil {
-			log.Warn("flush pack with error, data node quit now")
+			log.Error("flush pack with error, DataNode quit now", zap.Error(pack.err))
 			// TODO silverxia change to graceful stop datanode
 			panic(pack.err)
 		}
