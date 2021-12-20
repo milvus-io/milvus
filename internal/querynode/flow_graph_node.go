@@ -18,6 +18,7 @@ package querynode
 
 import "github.com/milvus-io/milvus/internal/util/flowgraph"
 
+// baseNode is type flowgraph.BaseNode
 type baseNode = flowgraph.BaseNode
 type node = flowgraph.Node
 type inputNode = flowgraph.InputNode
