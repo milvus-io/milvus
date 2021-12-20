@@ -453,6 +453,7 @@ func (s *Server) RegisterLink(ctx context.Context, request *milvuspb.RegisterLin
 	return s.proxy.RegisterLink(ctx, request)
 }
 
+// GetMetrics gets the metrics info of proxy.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.proxy.GetMetrics(ctx, request)
 }
