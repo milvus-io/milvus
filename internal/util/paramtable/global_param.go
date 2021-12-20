@@ -42,6 +42,7 @@ const (
 // GlobalParamTable is a derived struct of BaseParamTable.
 // It is used to quickly and easily access global system configuration.
 type GlobalParamTable struct {
+	once       sync.Once
 	BaseParams BaseParamTable
 
 	EtcdCfg       etcdConfig
@@ -64,7 +65,7 @@ type GlobalParamTable struct {
 
 // InitOnce initialize once
 func (p *GlobalParamTable) InitOnce() {
-	once.Do(func() {
+	p.once.Do(func() {
 		p.Init()
 	})
 }
