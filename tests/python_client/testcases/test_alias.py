@@ -44,9 +44,9 @@ class TestAliasParamsInvalid(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         error = {ct.err_code: 1, ct.err_msg: f"Invalid collection alias: {alias_name}"}
-        collection_w.create_alias(alias_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items=error)
+        self.utility_wrap.create_alias(collection_w.name, alias_name,
+                                       check_task=CheckTasks.err_res,
+                                       check_items=error)
 
 
 class TestAliasOperation(TestcaseBase):
@@ -73,7 +73,7 @@ class TestAliasOperation(TestcaseBase):
             assert collection_w.has_partition(partition_name)[0]
 
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
@@ -108,7 +108,7 @@ class TestAliasOperation(TestcaseBase):
             assert collection_1.has_partition(partition_name)[0]        
         
         alias_a_name = cf.gen_unique_str(prefix)
-        collection_1.create_alias(alias_a_name)
+        self.utility_wrap.create_alias(collection_1.name, alias_a_name)
         collection_alias_a, _ = self.collection_wrap.init_collection(name=alias_a_name,
                                                                      check_task=CheckTasks.check_collection_property,
                                                                      check_items={exp_name: alias_a_name,
@@ -129,7 +129,7 @@ class TestAliasOperation(TestcaseBase):
             assert collection_2.has_partition(partition_name)[0]
 
         alias_b_name = cf.gen_unique_str(prefix)
-        collection_2.create_alias(alias_b_name)
+        self.utility_wrap.create_alias(collection_2.name, alias_b_name)
         collection_alias_b, _ = self.collection_wrap.init_collection(name=alias_b_name,
                                                                      check_task=CheckTasks.check_collection_property,
                                                                      check_items={exp_name: alias_b_name,
@@ -138,7 +138,7 @@ class TestAliasOperation(TestcaseBase):
         assert [p.name for p in collection_2.partitions] == [p.name for p in collection_alias_b.partitions]
         
         # collection_1 alter alias to alias_b
-        collection_1.alter_alias(alias_b_name)
+        self.utility_wrap.alter_alias(collection_1.name, alias_b_name)
 
         # collection_1 has two alias name, alias_a and alias_b, but collection_2 has no alias any more
         assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_b.partitions]
@@ -169,15 +169,15 @@ class TestAliasOperation(TestcaseBase):
             assert collection_w.has_partition(partition_name)[0]
 
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
                                                                                 exp_schema: default_schema})
         # assert collection is equal to alias according to partitions
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
-
-        collection_w.drop_alias(alias_name)
+        self.utility_wrap.drop_alias(alias_name)
         error = {ct.err_code: 0,
                  ct.err_msg: f"Collection '{alias_name}' not exist, or you can pass in schema to create one"}
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
@@ -210,7 +210,8 @@ class TestAliasOperation(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
@@ -314,8 +315,9 @@ class TestAliasOperation(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         
-        alias_name = cf.gen_unique_str(prefix)     
-        collection_w.create_alias(alias_name)
+        alias_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
@@ -339,8 +341,9 @@ class TestAliasOperation(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         
-        alias_name = cf.gen_unique_str(prefix)     
-        collection_w.create_alias(alias_name)
+        alias_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
@@ -370,8 +373,9 @@ class TestAliasOperation(TestcaseBase):
         partition_name = cf.gen_unique_str("partition")
         self.init_partition_wrap(collection_w, partition_name)
         
-        alias_name = cf.gen_unique_str(prefix)     
-        collection_w.create_alias(alias_name)
+        alias_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
@@ -400,16 +404,20 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_1_name, exp_schema: default_schema})
         alias_a_name = cf.gen_unique_str(prefix)
-        collection_1.create_alias(alias_a_name)
+        self.utility_wrap.create_alias(collection_1.name, alias_a_name)
+        # collection_1.create_alias(alias_a_name)
 
         c_2_name = cf.gen_unique_str("collection")
         collection_2 = self.init_collection_wrap(name=c_2_name, schema=default_schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_2_name, exp_schema: default_schema})
         error = {ct.err_code: 1, ct.err_msg: "Create alias failed: duplicate collection alias"}                                         
-        collection_2.create_alias(alias_a_name,
-                                  check_task=CheckTasks.err_res,
-                                  check_items=error) 
+        self.utility_wrap.create_alias(collection_2.name, alias_a_name,
+                                       check_task=CheckTasks.err_res,
+                                       check_items=error)
+        # collection_2.create_alias(alias_a_name,
+        #                           check_task=CheckTasks.err_res,
+        #                           check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_alter_not_exist_alias(self):
@@ -427,13 +435,17 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
 
         alias_not_exist_name = cf.gen_unique_str(prefix)
         error = {ct.err_code: 1, ct.err_msg: "Alter alias failed: alias does not exist"}                                         
-        collection_w.alter_alias(alias_not_exist_name,
-                                 check_task=CheckTasks.err_res,
-                                 check_items=error)
+        self.utility_wrap.alter_alias(collection_w.name, alias_not_exist_name,
+                                      check_task=CheckTasks.err_res,
+                                      check_items=error)
+        # collection_w.alter_alias(alias_not_exist_name,
+        #                          check_task=CheckTasks.err_res,
+        #                          check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_not_exist_alias(self):
@@ -450,13 +462,18 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
 
         alias_not_exist_name = cf.gen_unique_str(prefix)
         error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}                                         
-        collection_w.drop_alias(alias_not_exist_name,
-                                check_task=CheckTasks.err_res,
-                                check_items=error)
+        self.utility_wrap.drop_alias(alias_not_exist_name,
+                                     check_task=CheckTasks.err_res,
+                                     check_items=error)
+        #
+        # collection_w.drop_alias(alias_not_exist_name,
+        #                         check_task=CheckTasks.err_res,
+        #                         check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_same_alias_twice(self):
@@ -474,13 +491,18 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
-        collection_w.drop_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        self.utility_wrap.drop_alias(alias_name)
+        # collection_w.create_alias(alias_name)
+        # collection_w.drop_alias(alias_name)
 
-        error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}                                         
-        collection_w.drop_alias(alias_name,
-                                check_task=CheckTasks.err_res,
-                                check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}
+        self.utility_wrap.drop_alias(alias_name,
+                                     check_task=CheckTasks.err_res,
+                                     check_items=error)
+        # collection_w.drop_alias(alias_name,
+        #                         check_task=CheckTasks.err_res,
+        #                         check_items=error)
     
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_create_dup_name_collection(self):
@@ -497,7 +519,8 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
 
         error = {ct.err_code: 0,
                  ct.err_msg: "The collection already exist, but the schema is not the same as the schema passed in"}
@@ -520,7 +543,8 @@ class TestAliasOperationInvalid(TestcaseBase):
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         alias_name = cf.gen_unique_str(prefix)
-        collection_w.create_alias(alias_name)
+        self.utility_wrap.create_alias(collection_w.name, alias_name)
+        # collection_w.create_alias(alias_name)
         collection_alias, _ = self.collection_wrap.init_collection(name=alias_name,
                                                                    check_task=CheckTasks.check_collection_property,
                                                                    check_items={exp_name: alias_name,
