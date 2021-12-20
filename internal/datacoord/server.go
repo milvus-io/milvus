@@ -448,7 +448,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Debug("data node tt loop shutdown")
+				log.Debug("DataNode timetick loop shutdown")
 				return
 			default:
 			}
