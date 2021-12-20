@@ -79,7 +79,7 @@ in the object storage to improve failure recovery efficiency and query performan
 down into bounded windows, Milvus embraces a new watermark mechanism, which slices the stream data into multiple message
 packs according to write time or event time, and maintains a timeline for users to query by time.
 
-To support this watermark mechanism, Proxy should report the timestamp statistics of physical channel to Root
+To support this watermark mechanism, Proxy should report the timestamp statistics of the physical channel to Root
 Coordinator periodically. When Proxy knows all operations of a specific were done before a `ts`, then Proxy will report
 the `ts` and inform Root Coordinator that updates the timestamp statistics.
 
