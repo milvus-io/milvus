@@ -164,7 +164,6 @@ def update_values(src_values_file, deploy_params_file):
     cluster = False
     if deploy_mode in [config.CLUSTER_DEPLOY_MODE, config.CLUSTER_3RD_DEPLOY_MODE]:
         cluster = True
-        # values_dict["cluster"]["enabled"] = True
     # elif deploy_mode == config.CLUSTER_3RD_DEPLOY_MODE:
     #     cluster = True
     elif deploy_mode == config.SINGLE_DEPLOY_MODE:
