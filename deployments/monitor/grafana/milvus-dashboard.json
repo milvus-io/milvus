@@ -554,7 +554,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of show_partitions requests",
+      "description": "per-minute increasing rate of show_partitions requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
