@@ -194,7 +194,7 @@ class TestcaseBase(Base):
         df_default = cf.gen_default_dataframe_data(nb=half, start=half)
         collection_w.insert(df_default)
         conn.flush([collection_w.name])
-        collection_w.load(partition_names=[partition_w.name,"_default"])
+        collection_w.load(partition_names=[partition_w.name, "_default"])
         return collection_w, partition_w,df_partition, df_default
 
     def collection_insert_multi_segments_one_shard(self, collection_prefix, num_of_segment=2, nb_of_segment=1,
