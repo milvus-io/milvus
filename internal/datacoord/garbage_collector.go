@@ -74,7 +74,7 @@ func newGarbageCollector(meta *meta, opt GcOption) *garbageCollector {
 func (gc *garbageCollector) start() {
 	if gc.option.enabled {
 		if gc.option.cli == nil {
-			log.Warn("datacoord gc enabled, but SSO client is not provided")
+			log.Warn("DataCoord gc enabled, but SSO client is not provided")
 			return
 		}
 		gc.startOnce.Do(func() {
