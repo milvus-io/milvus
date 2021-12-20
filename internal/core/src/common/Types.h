@@ -97,7 +97,7 @@ struct RetrieveResult {
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
 
 namespace impl {
-// hide identifier name to make auto completion happy
+// hide identifier name to make auto-completion happy
 struct FieldIdTag;
 struct FieldNameTag;
 struct FieldOffsetTag;
