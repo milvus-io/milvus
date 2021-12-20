@@ -357,12 +357,12 @@ func (colReplica *collectionReplica) getSegmentInfosByColID(collectionID UniqueI
 	for _, partitionID := range collection.partitionIDs {
 		partition, ok := colReplica.partitions[partitionID]
 		if !ok {
-			return nil, errors.New("the meta of collection and partition are inconsistent in query node")
+			return nil, errors.New("the meta of collection and partition are inconsistent in QueryNode")
 		}
 		for _, segmentID := range partition.segmentIDs {
 			segment, ok := colReplica.segments[segmentID]
 			if !ok {
-				return nil, errors.New("the meta of partition and segment are inconsistent in query node")
+				return nil, errors.New("the meta of partition and segment are inconsistent in QueryNode")
 			}
 			segmentInfo := getSegmentInfo(segment)
 			segmentInfos = append(segmentInfos, segmentInfo)
