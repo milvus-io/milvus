@@ -76,7 +76,7 @@ struct SearchResult {
     std::vector<int64_t> ids_;
 
  public:
-    // TODO(gexi): utilize these field
+    // TODO(gexi): utilize these fields
     void* segment_;
     std::vector<int64_t> result_offsets_;
     std::vector<int64_t> primary_keys_;
