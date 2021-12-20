@@ -37,7 +37,7 @@ static const auto metric_bimap = [] {
 
 MetricType
 GetMetricType(const std::string& type_name) {
-    // Assume Metric is all upper at knowhere
+    // Assume Metric is all upper at Knowhere
     auto real_name = to_upper_copy(type_name);
     AssertInfo(metric_bimap.left.count(real_name), "metric type not found: (" + type_name + ")");
     return metric_bimap.left.at(real_name);
