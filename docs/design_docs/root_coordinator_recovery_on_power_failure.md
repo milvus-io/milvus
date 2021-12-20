@@ -12,23 +12,23 @@
 
 ### 2.1 Read meta from etcd
 
-1. `RC` needs to load meta from etcd when it starts, this part is already done.
+1. `RootCoord` needs to load meta from etcd when it starts, this part is already done.
 
 ### 2.2 `dd requests` from grpc
 
 1. The `dd requests`, such as create_collection, create_partition, etc., from grpc are marked as done only if the related meta has been written into etcd.
 2. The `dd requests` should be sent to `dd msgstream` when the operation is done.
-3. There may be a fault here, that is, the `dd request` has been written to etcd, but it has not been sent to `dd msgstream` yet, then the `RC` has crashed.
-4. For the scenarios mentioned in item 3, `RC` needs to check if all `dd requests` are sent to `dd msgstream` when it starts up.
-5. `RC`'s built-in scheduler ensures that all grpc requests are executed serially, so it only needs to check whether the most recent `dd requests` are sent to the `dd msgstream`, and resend them if not.
+3. There may be a fault here, that is, the `dd request` has been written to etcd, but it has not been sent to `dd msgstream` yet, then the `RootCoord` has crashed.
+4. For the scenarios mentioned in item 3, `RootCoord` needs to check if all `dd requests` are sent to `dd msgstream` when it starts up.
+5. `RootCoord`'s built-in scheduler ensures that all grpc requests are executed serially, so it only needs to check whether the most recent `dd requests` are sent to the `dd msgstream`, and resend them if not.
 6. Take `create_collection` as an example to illustrate the process
    - When `create collection` is written to etcd, 2 additional keys are updated, `dd_msg` and `dd_type`.
    - `dd_msg` is the serialization of the `dd_msg`.
    - `dd_type` is the message type of `dd_msg`, such as `create_collection`, `create_partition`, `drop_collection,` etc. It's used to deserialize `dd_msg`.
    - Update the meta of `create_collection`, `dd_msg` and `dd_type` at the same time in a transactional manner.
    - When `dd_msg` has been sent to `dd msgstream`, delete `dd_msg` and `dd_type` from etcd.
-   - When the `RC` starts, first check whether there are `dd_msg` and `dd_type` in etcd. If yes, then deserialize `dd_msg` according to `dd_type`, and then send it to the `dd msgstream`. Otherwise, no processing will be done.
-   - There may be a failure here, that is, `dd_msg` has been sent to the `dd msgstream` , but has not been deleted from etcd yet, then the `RC` crashed. In this case, the `dd_msg` would be sent to `dd msgstream` repeatedly, so the receiver needs to count this case.
+   - When the `RootCoord` starts, first check whether there are `dd_msg` and `dd_type` in etcd. If yes, then deserialize `dd_msg` according to `dd_type`, and then send it to the `dd msgstream`. Otherwise, no processing will be done.
+   - There may be a failure here, that is, `dd_msg` has been sent to the `dd msgstream` , but has not been deleted from etcd yet, then the `RootCoord` crashed. In this case, the `dd_msg` would be sent to `dd msgstream` repeatedly, so the receiver needs to count this case.
 
 ### 2.3 `create index` requests from grpc
 
