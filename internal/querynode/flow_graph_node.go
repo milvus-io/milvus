@@ -20,4 +20,6 @@ import "github.com/milvus-io/milvus/internal/util/flowgraph"
 
 type baseNode = flowgraph.BaseNode
 type node = flowgraph.Node
+
+// inputNode is type flowgraph.InputNode
 type inputNode = flowgraph.InputNode
