@@ -69,7 +69,6 @@ RUN echo "Installing Packages ..." \
         && chmod 700 get_helm.sh \
         && ./get_helm.sh \
         && rm ./get_helm.sh \
-        && helm plugin install https://github.com/marckhouzam/helm-fullstatus \
     && echo "Installing Docker ..." \
         && curl -fsSL "https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg" | apt-key add - \
         && add-apt-repository \
