@@ -1913,7 +1913,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 						Reason:    filterReason,
 					},
 				}
-				return fmt.Errorf("no Available Query node result, filter reason %s: id %d", filterReason, st.ID())
+				return fmt.Errorf("no Available QueryNode result, filter reason %s: id %d", filterReason, st.ID())
 			}
 
 			validSearchResults, err := decodeSearchResults(filterSearchResults)
