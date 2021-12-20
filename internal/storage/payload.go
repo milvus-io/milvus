@@ -300,7 +300,7 @@ func (w *PayloadWriter) AddBinaryVectorToPayload(binVec []byte, dim int) error {
 	return HandleCStatus(&status, "AddBinaryVectorToPayload failed")
 }
 
-// dimension > 0 && (%8 == 0)
+// AddFloatVectorToPayload dimension > 0 && (%8 == 0)
 func (w *PayloadWriter) AddFloatVectorToPayload(floatVec []float32, dim int) error {
 	length := len(floatVec)
 	if length <= 0 {
