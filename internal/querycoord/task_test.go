@@ -30,6 +30,7 @@ import (
 )
 
 func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCollectionTask {
+	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
 	req := &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
@@ -51,6 +52,7 @@ func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCol
 }
 
 func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *loadPartitionTask {
+	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
 	req := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
@@ -104,6 +106,7 @@ func genReleasePartitionTask(ctx context.Context, queryCoord *QueryCoord) *relea
 		baseTask:                 baseTask,
 		ReleasePartitionsRequest: req,
 		cluster:                  queryCoord.cluster,
+		meta:                     queryCoord.meta,
 	}
 
 	return releasePartitionTask
@@ -178,10 +181,11 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	parentTask.addChildTask(watchDmChannelTask)
 	watchDmChannelTask.setParentTask(parentTask)
 
-	queryCoord.meta.addCollection(defaultCollectionID, schema)
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, schema)
 	return watchDmChannelTask
 }
 func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *loadSegmentTask {
+	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
 	schema := genCollectionSchema(defaultCollectionID, false)
 	segmentInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    defaultSegmentID,
@@ -231,7 +235,7 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 	parentTask.addChildTask(loadSegmentTask)
 	loadSegmentTask.setParentTask(parentTask)
 
-	queryCoord.meta.addCollection(defaultCollectionID, schema)
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, schema)
 	return loadSegmentTask
 }
 
@@ -701,14 +705,15 @@ func Test_AssignInternalTask(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_LoadSegments,
 			},
-			DstNodeID: node1.queryNodeID,
-			Schema:    schema,
-			Infos:     []*querypb.SegmentLoadInfo{segmentInfo},
+			DstNodeID:    node1.queryNodeID,
+			Schema:       schema,
+			Infos:        []*querypb.SegmentLoadInfo{segmentInfo},
+			CollectionID: defaultCollectionID,
 		}
 		loadSegmentRequests = append(loadSegmentRequests, req)
 	}
 
-	internalTasks, err := assignInternalTask(queryCoord.loopCtx, defaultCollectionID, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, nil, false, nil, nil)
+	internalTasks, err := assignInternalTask(queryCoord.loopCtx, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false, nil, nil)
 	assert.Nil(t, err)
 
 	assert.NotEqual(t, 1, len(internalTasks))

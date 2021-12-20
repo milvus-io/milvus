@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	nodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
@@ -33,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
@@ -43,14 +41,8 @@ type Node interface {
 	start() error
 	stop()
 	getNodeInfo() (Node, error)
-	clearNodeInfo() error
 
-	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
-	setCollectionInfo(info *querypb.CollectionInfo) error
-	showCollections() []*querypb.CollectionInfo
 	releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error
-
-	addPartition(collectionID UniqueID, partitionID UniqueID) error
 	releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error
 
 	watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error
@@ -85,7 +77,6 @@ type queryNode struct {
 	kvClient *etcdkv.EtcdKV
 
 	sync.RWMutex
-	collectionInfos      map[UniqueID]*querypb.CollectionInfo
 	watchedQueryChannels map[UniqueID]*querypb.QueryChannelInfo
 	watchedDeltaChannels map[UniqueID][]*datapb.VchannelInfo
 	state                nodeState
@@ -98,7 +89,6 @@ type queryNode struct {
 }
 
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
-	collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
 	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
 	watchedDeltaChannels := make(map[UniqueID][]*datapb.VchannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
@@ -114,7 +104,6 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 		address:              address,
 		client:               client,
 		kvClient:             kv,
-		collectionInfos:      collectionInfo,
 		watchedQueryChannels: watchedChannels,
 		watchedDeltaChannels: watchedDeltaChannels,
 		state:                disConnect,
@@ -151,185 +140,6 @@ func (qn *queryNode) stop() {
 	}
 	qn.cancel()
 }
-
-func (qn *queryNode) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
-	qn.Lock()
-	defer qn.Unlock()
-
-	if _, ok := qn.collectionInfos[collectionID]; !ok {
-		partitions := make([]UniqueID, 0)
-		channels := make([]*querypb.DmChannelWatchInfo, 0)
-		newCollection := &querypb.CollectionInfo{
-			CollectionID: collectionID,
-			PartitionIDs: partitions,
-			ChannelInfos: channels,
-			Schema:       schema,
-		}
-		qn.collectionInfos[collectionID] = newCollection
-		err := saveNodeCollectionInfo(collectionID, newCollection, qn.id, qn.kvClient)
-		if err != nil {
-			log.Error("addCollection: save collectionInfo error", zap.Int64("nodeID", qn.id), zap.Int64("collectionID", collectionID), zap.Any("error", err.Error()))
-			return err
-		}
-		log.Debug("queryNode addCollection", zap.Int64("nodeID", qn.id), zap.Any("collectionInfo", newCollection))
-	}
-
-	return nil
-}
-
-func (qn *queryNode) setCollectionInfo(info *querypb.CollectionInfo) error {
-	qn.Lock()
-	defer qn.Unlock()
-
-	qn.collectionInfos[info.CollectionID] = info
-	err := saveNodeCollectionInfo(info.CollectionID, info, qn.id, qn.kvClient)
-	if err != nil {
-		log.Error("setCollectionInfo: save collectionInfo error", zap.Int64("nodeID", qn.id), zap.Int64("collectionID", info.CollectionID), zap.Any("error", err.Error()))
-		return err
-	}
-	return nil
-}
-
-func (qn *queryNode) showCollections() []*querypb.CollectionInfo {
-	qn.RLock()
-	defer qn.RUnlock()
-
-	results := make([]*querypb.CollectionInfo, 0)
-	for _, info := range qn.collectionInfos {
-		results = append(results, proto.Clone(info).(*querypb.CollectionInfo))
-	}
-
-	return results
-}
-
-func (qn *queryNode) addPartition(collectionID UniqueID, partitionID UniqueID) error {
-	qn.Lock()
-	defer qn.Unlock()
-	if col, ok := qn.collectionInfos[collectionID]; ok {
-		for _, id := range col.PartitionIDs {
-			if id == partitionID {
-				return nil
-			}
-		}
-		col.PartitionIDs = append(col.PartitionIDs, partitionID)
-		err := saveNodeCollectionInfo(collectionID, col, qn.id, qn.kvClient)
-		if err != nil {
-			log.Error("AddPartition: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-		}
-		log.Debug("queryNode add partition", zap.Int64("nodeID", qn.id), zap.Any("collectionInfo", col))
-		return nil
-	}
-	return errors.New("AddPartition: can't find collection when add partition")
-}
-
-func (qn *queryNode) releaseCollectionInfo(collectionID UniqueID) error {
-	qn.Lock()
-	defer qn.Unlock()
-	if _, ok := qn.collectionInfos[collectionID]; ok {
-		err := removeNodeCollectionInfo(collectionID, qn.id, qn.kvClient)
-		if err != nil {
-			log.Error("ReleaseCollectionInfo: remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-			return err
-		}
-		delete(qn.collectionInfos, collectionID)
-	}
-
-	delete(qn.watchedQueryChannels, collectionID)
-	return nil
-}
-
-func (qn *queryNode) releasePartitionsInfo(collectionID UniqueID, partitionIDs []UniqueID) error {
-	qn.Lock()
-	defer qn.Unlock()
-
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		newPartitionIDs := make([]UniqueID, 0)
-		for _, id := range info.PartitionIDs {
-			match := false
-			for _, partitionID := range partitionIDs {
-				if id == partitionID {
-					match = true
-					break
-				}
-			}
-			if !match {
-				newPartitionIDs = append(newPartitionIDs, id)
-			}
-		}
-		info.PartitionIDs = newPartitionIDs
-		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
-		if err != nil {
-			log.Error("ReleasePartitionsInfo: remove collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-			return err
-		}
-		log.Debug("queryNode release partition info", zap.Int64("nodeID", qn.id), zap.Any("info", info))
-	}
-
-	return nil
-}
-
-func (qn *queryNode) addDmChannel(collectionID UniqueID, channels []string) error {
-	qn.Lock()
-	defer qn.Unlock()
-
-	//before add channel, should ensure toAddedChannels not in MetaReplica
-	if info, ok := qn.collectionInfos[collectionID]; ok {
-		findNodeID := false
-		for _, channelInfo := range info.ChannelInfos {
-			if channelInfo.NodeIDLoaded == qn.id {
-				findNodeID = true
-				channelInfo.ChannelIDs = append(channelInfo.ChannelIDs, channels...)
-			}
-		}
-		if !findNodeID {
-			newChannelInfo := &querypb.DmChannelWatchInfo{
-				NodeIDLoaded: qn.id,
-				ChannelIDs:   channels,
-			}
-			info.ChannelInfos = append(info.ChannelInfos, newChannelInfo)
-		}
-		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
-		if err != nil {
-			log.Error("AddDmChannel: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-			return err
-		}
-		return nil
-	}
-
-	return errors.New("AddDmChannels: can't find collection in watchedQueryChannel")
-}
-
-//func (qn *queryNode) removeDmChannel(collectionID UniqueID, channels []string) error {
-//	qn.Lock()
-//	defer qn.Unlock()
-//
-//	if info, ok := qn.collectionInfos[collectionID]; ok {
-//		for _, channelInfo := range info.ChannelInfos {
-//			if channelInfo.NodeIDLoaded == qn.id {
-//				newChannelIDs := make([]string, 0)
-//				for _, channelID := range channelInfo.ChannelIDs {
-//					findChannel := false
-//					for _, channel := range channels {
-//						if channelID == channel {
-//							findChannel = true
-//						}
-//					}
-//					if !findChannel {
-//						newChannelIDs = append(newChannelIDs, channelID)
-//					}
-//				}
-//				channelInfo.ChannelIDs = newChannelIDs
-//			}
-//		}
-//
-//		err := saveNodeCollectionInfo(collectionID, info, qn.id, qn.kvClient)
-//		if err != nil {
-//			log.Error("RemoveDmChannel: save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-//		}
-//	}
-//
-//	return errors.New("RemoveDmChannel: can't find collection in watchedQueryChannel")
-//}
 
 func (qn *queryNode) hasWatchedQueryChannel(collectionID UniqueID) bool {
 	qn.RLock()
@@ -383,14 +193,6 @@ func (qn *queryNode) removeQueryChannelInfo(collectionID UniqueID) {
 	delete(qn.watchedQueryChannels, collectionID)
 }
 
-func (qn *queryNode) clearNodeInfo() error {
-	qn.RLock()
-	defer qn.RUnlock()
-	// delete query node meta and all the collection info
-	key := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, qn.id)
-	return qn.kvClient.RemoveWithPrefix(key)
-}
-
 func (qn *queryNode) setState(state nodeState) {
 	qn.stateLock.Lock()
 	defer qn.stateLock.Unlock()
@@ -432,16 +234,8 @@ func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmCha
 	if status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(status.Reason)
 	}
-	channels := make([]string, 0)
-	for _, info := range in.Infos {
-		channels = append(channels, info.ChannelName)
-	}
-	err = qn.addCollection(in.CollectionID, in.Schema)
-	if err != nil {
-		return err
-	}
-	err = qn.addDmChannel(in.CollectionID, channels)
-	return err
+
+	return nil
 }
 
 func (qn *queryNode) watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error {
@@ -513,10 +307,10 @@ func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseC
 		return errors.New(status.Reason)
 	}
 
-	err = qn.releaseCollectionInfo(in.CollectionID)
-	if err != nil {
-		return err
-	}
+	qn.Lock()
+	delete(qn.watchedDeltaChannels, in.CollectionID)
+	delete(qn.watchedQueryChannels, in.CollectionID)
+	qn.Unlock()
 
 	return nil
 }
@@ -532,10 +326,6 @@ func (qn *queryNode) releasePartitions(ctx context.Context, in *querypb.ReleaseP
 	}
 	if status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(status.Reason)
-	}
-	err = qn.releasePartitionsInfo(in.CollectionID, in.PartitionIDs)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -597,16 +387,6 @@ func (qn *queryNode) loadSegments(ctx context.Context, in *querypb.LoadSegmentsR
 		return errors.New(status.Reason)
 	}
 
-	for _, info := range in.Infos {
-		err = qn.addCollection(info.CollectionID, in.Schema)
-		if err != nil {
-			return err
-		}
-		err = qn.addPartition(info.CollectionID, info.PartitionID)
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -664,22 +444,4 @@ func (qn *queryNode) getNodeInfo() (Node, error) {
 		memUsageRate: qn.memUsageRate,
 		cpuUsage:     qn.cpuUsage,
 	}, nil
-}
-
-//****************************************************//
-
-func saveNodeCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, nodeID int64, kv *etcdkv.EtcdKV) error {
-	infoBytes, err := proto.Marshal(info)
-	if err != nil {
-		log.Error("QueryNode::saveNodeCollectionInfo ", zap.Error(err))
-		return err
-	}
-
-	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, nodeID, collectionID)
-	return kv.Save(key, string(infoBytes))
-}
-
-func removeNodeCollectionInfo(collectionID UniqueID, nodeID int64, kv *etcdkv.EtcdKV) error {
-	key := fmt.Sprintf("%s/%d/%d", queryNodeMetaPrefix, nodeID, collectionID)
-	return kv.Remove(key)
 }

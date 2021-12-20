@@ -324,6 +324,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			baseTask:                 baseTask,
 			ReleasePartitionsRequest: &loadReq,
 			cluster:                  scheduler.cluster,
+			meta:                     scheduler.meta,
 		}
 		newTask = releasePartitionTask
 	case commonpb.MsgType_LoadSegments:

@@ -641,6 +641,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 			baseTask:                 baseTask,
 			ReleasePartitionsRequest: req,
 			cluster:                  qc.cluster,
+			meta:                     qc.meta,
 		}
 	}
 	err := qc.scheduler.Enqueue(releaseTask)

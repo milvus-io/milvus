@@ -83,7 +83,8 @@ func (tt *testTask) execute(ctx context.Context) error {
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadSegments,
 				},
-				Infos: []*querypb.SegmentLoadInfo{segmentInfo},
+				Infos:        []*querypb.SegmentLoadInfo{segmentInfo},
+				CollectionID: defaultCollectionID,
 			}
 			loadTask := &loadSegmentTask{
 				baseTask: &baseTask{
@@ -110,7 +111,8 @@ func (tt *testTask) execute(ctx context.Context) error {
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadSegments,
 				},
-				DstNodeID: tt.nodeID,
+				DstNodeID:    tt.nodeID,
+				CollectionID: defaultCollectionID,
 			},
 			meta:           tt.meta,
 			cluster:        tt.cluster,

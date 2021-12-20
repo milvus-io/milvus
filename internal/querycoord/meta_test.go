@@ -68,23 +68,23 @@ func TestReplica_Release(t *testing.T) {
 	assert.Nil(t, err)
 	meta, err := newMeta(context.Background(), etcdKV, nil, nil)
 	assert.Nil(t, err)
-	err = meta.addCollection(1, nil)
+	err = meta.addCollection(1, querypb.LoadType_loadCollection, nil)
 	require.NoError(t, err)
 
 	collections := meta.showCollections()
 	assert.Equal(t, 1, len(collections))
 
-	err = meta.addPartition(1, 100)
+	err = meta.addPartitions(1, []UniqueID{100})
 	assert.NoError(t, err)
 	partitions, err := meta.showPartitions(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(partitions))
 
-	meta.releasePartition(1, 100)
+	meta.releasePartitions(1, []UniqueID{100})
 	partitions, err = meta.showPartitions(1)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(partitions))
-	meta.releasePartition(1, 100)
+	meta.releasePartitions(1, []UniqueID{100})
 
 	meta.releaseCollection(1)
 	collections = meta.showCollections()
@@ -96,15 +96,24 @@ func TestMetaFunc(t *testing.T) {
 	refreshParams()
 	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
 	assert.Nil(t, err)
+
+	nodeID := defaultQueryNodeID
+	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
+	segmentInfos[defaultSegmentID] = &querypb.SegmentInfo{
+		CollectionID: defaultCollectionID,
+		PartitionID:  defaultPartitionID,
+		SegmentID:    defaultSegmentID,
+		NodeID:       nodeID,
+	}
 	meta := &MetaReplica{
 		client:             kv,
 		collectionInfos:    map[UniqueID]*querypb.CollectionInfo{},
-		segmentInfos:       map[UniqueID]*querypb.SegmentInfo{},
+		segmentInfos:       segmentInfos,
 		queryChannelInfos:  map[UniqueID]*querypb.QueryChannelInfo{},
+		dmChannelInfos:     map[string]*querypb.DmChannelWatchInfo{},
 		globalSeekPosition: &internalpb.MsgPosition{},
 	}
 
-	nodeID := int64(100)
 	dmChannels := []string{"testDm1", "testDm2"}
 
 	t.Run("Test ShowPartitionFail", func(t *testing.T) {
@@ -129,7 +138,7 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test GetSegmentInfoByIDFail", func(t *testing.T) {
-		res, err := meta.getSegmentInfoByID(defaultSegmentID)
+		res, err := meta.getSegmentInfoByID(defaultSegmentID + 100)
 		assert.NotNil(t, err)
 		assert.Nil(t, res)
 	})
@@ -152,17 +161,6 @@ func TestMetaFunc(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	t.Run("Test GetDmChannelsByNodeIDFail", func(t *testing.T) {
-		res, err := meta.getDmChannelsByNodeID(defaultCollectionID, nodeID)
-		assert.NotNil(t, err)
-		assert.Nil(t, res)
-	})
-
-	t.Run("Test AddDmChannelFail", func(t *testing.T) {
-		err := meta.addDmChannel(defaultCollectionID, nodeID, dmChannels)
-		assert.NotNil(t, err)
-	})
-
 	t.Run("Test SetLoadTypeFail", func(t *testing.T) {
 		err := meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
 		assert.NotNil(t, err)
@@ -175,7 +173,7 @@ func TestMetaFunc(t *testing.T) {
 
 	t.Run("Test AddCollection", func(t *testing.T) {
 		schema := genCollectionSchema(defaultCollectionID, false)
-		err := meta.addCollection(defaultCollectionID, schema)
+		err := meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, schema)
 		assert.Nil(t, err)
 	})
 
@@ -185,7 +183,7 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test AddPartition", func(t *testing.T) {
-		err := meta.addPartition(defaultCollectionID, defaultPartitionID)
+		err := meta.addPartitions(defaultCollectionID, []UniqueID{defaultPartitionID})
 		assert.Nil(t, err)
 	})
 
@@ -218,27 +216,21 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test AddDmChannel", func(t *testing.T) {
-		err := meta.addDmChannel(defaultCollectionID, nodeID, dmChannels)
+		var dmChannelWatchInfos []*querypb.DmChannelWatchInfo
+		for _, channel := range dmChannels {
+			dmChannelWatchInfos = append(dmChannelWatchInfos, &querypb.DmChannelWatchInfo{
+				CollectionID: defaultCollectionID,
+				DmChannel:    channel,
+				NodeIDLoaded: nodeID,
+			})
+		}
+		err = meta.setDmChannelInfos(dmChannelWatchInfos)
 		assert.Nil(t, err)
 	})
 
 	t.Run("Test GetDmChannelsByNodeID", func(t *testing.T) {
-		channels, err := meta.getDmChannelsByNodeID(defaultCollectionID, nodeID)
-		assert.Nil(t, err)
-		assert.Equal(t, 2, len(channels))
-	})
-
-	t.Run("Test SetSegmentInfo", func(t *testing.T) {
-		info := &querypb.SegmentInfo{
-			SegmentID:    defaultSegmentID,
-			PartitionID:  defaultPartitionID,
-			CollectionID: defaultCollectionID,
-			NodeID:       nodeID,
-		}
-		segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
-		segmentInfos[defaultSegmentID] = info
-		err := meta.setSegmentInfos(segmentInfos)
-		assert.Nil(t, err)
+		channelInfos := meta.getDmChannelInfosByNodeID(nodeID)
+		assert.Equal(t, 2, len(channelInfos))
 	})
 
 	t.Run("Test ShowSegmentInfo", func(t *testing.T) {
@@ -250,6 +242,7 @@ func TestMetaFunc(t *testing.T) {
 	t.Run("Test GetSegmentInfoByNode", func(t *testing.T) {
 		infos := meta.getSegmentInfosByNode(nodeID)
 		assert.Equal(t, 1, len(infos))
+		assert.Equal(t, defaultSegmentID, infos[0].SegmentID)
 	})
 
 	t.Run("Test getQueryChannel", func(t *testing.T) {
@@ -283,23 +276,8 @@ func TestMetaFunc(t *testing.T) {
 		assert.Equal(t, int64(100), info.InMemoryPercentage)
 	})
 
-	t.Run("Test RemoveDmChannel", func(t *testing.T) {
-		err := meta.removeDmChannel(defaultCollectionID, nodeID, dmChannels)
-		assert.Nil(t, err)
-		channels, err := meta.getDmChannelsByNodeID(defaultCollectionID, nodeID)
-		assert.Nil(t, err)
-		assert.Equal(t, 0, len(channels))
-	})
-
-	t.Run("Test DeleteSegmentInfoByNodeID", func(t *testing.T) {
-		err := meta.deleteSegmentInfoByNodeID(nodeID)
-		assert.Nil(t, err)
-		_, err = meta.getSegmentInfoByID(defaultSegmentID)
-		assert.NotNil(t, err)
-	})
-
 	t.Run("Test ReleasePartition", func(t *testing.T) {
-		err := meta.releasePartition(defaultCollectionID, defaultPartitionID)
+		err := meta.releasePartitions(defaultCollectionID, []UniqueID{defaultPartitionID})
 		assert.Nil(t, err)
 	})
 
@@ -318,6 +296,7 @@ func TestReloadMetaFromKV(t *testing.T) {
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
 		segmentInfos:      map[UniqueID]*querypb.SegmentInfo{},
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
+		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		deltaChannelInfos: map[UniqueID][]*datapb.VchannelInfo{},
 	}
 
@@ -357,6 +336,15 @@ func TestReloadMetaFromKV(t *testing.T) {
 		key := fmt.Sprintf("%s/%d/%s", deltaChannelMetaPrefix, defaultCollectionID, info.ChannelName)
 		kvs[key] = string(infoBytes)
 	}
+
+	dmChannelInfo := &querypb.DmChannelWatchInfo{
+		CollectionID: defaultCollectionID,
+		DmChannel:    "dm-channel1",
+	}
+	dmChannelInfoBlob, err := proto.Marshal(dmChannelInfo)
+	assert.Nil(t, err)
+	key := fmt.Sprintf("%s/%d/%s", dmChannelMetaPrefix, dmChannelInfo.CollectionID, dmChannelInfo.DmChannel)
+	kvs[key] = string(dmChannelInfoBlob)
 
 	err = kv.MultiSave(kvs)
 	assert.Nil(t, err)

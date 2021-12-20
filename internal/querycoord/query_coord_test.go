@@ -168,7 +168,7 @@ func TestWatchNodeLoop(t *testing.T) {
 		}
 		collectionBlobs, err := proto.Marshal(collectionInfo)
 		assert.Nil(t, err)
-		nodeKey := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, 100)
+		nodeKey := fmt.Sprintf("%s/%d", collectionMetaPrefix, 100)
 		kvs[nodeKey] = string(collectionBlobs)
 
 		err = kv.MultiSave(kvs)
@@ -178,9 +178,9 @@ func TestWatchNodeLoop(t *testing.T) {
 		assert.Nil(t, err)
 
 		for {
-			offlineNodes, err := queryCoord.cluster.offlineNodes()
-			if err == nil {
-				log.Warn("find offline Nodes", zap.Any("node map", offlineNodes))
+			offlineNodeIDs := queryCoord.cluster.offlineNodeIDs()
+			if len(offlineNodeIDs) != 0 {
+				log.Warn("find offline Nodes", zap.Int64s("offlineNodeIDs", offlineNodeIDs))
 				break
 			}
 			// if session id not exist, means querycoord already handled it and remove
@@ -224,14 +224,14 @@ func TestWatchNodeLoop(t *testing.T) {
 
 		nodeID := queryNode1.queryNodeID
 		waitQueryNodeOnline(queryCoord.cluster, nodeID)
-		nodes, err := queryCoord.cluster.onlineNodes()
-		assert.Nil(t, err)
+		onlineNodeIDs := queryCoord.cluster.onlineNodeIDs()
+		assert.Equal(t, 1, len(onlineNodeIDs))
 
 		queryNode1.stop()
 		err = removeNodeSession(nodeID)
 		assert.Nil(t, err)
 
-		waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+		waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs)
 
 		queryCoord.Stop()
 		err = removeAllSession()
@@ -310,6 +310,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
+	queryCoord.meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
 
 	t.Run("Test handoffGrowingSegment", func(t *testing.T) {
 		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
