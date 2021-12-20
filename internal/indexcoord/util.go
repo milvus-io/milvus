@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// getDimension gets the dimension of data from building index request.
 func getDimension(req *indexpb.BuildIndexRequest) (int64, error) {
 	for _, kvPair := range req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
