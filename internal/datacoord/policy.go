@@ -29,15 +29,15 @@ import (
 	"stathat.com/c/consistent"
 )
 
-// RegisterPolicy decide the channels mapping after registering the nodeID
+// RegisterPolicy decides the channels mapping after registering the nodeID
 type RegisterPolicy func(store ROChannelStore, nodeID int64) ChannelOpSet
 
-// EmptyRegister do nothing
+// EmptyRegister does nothing
 func EmptyRegister(store ROChannelStore, nodeID int64) ChannelOpSet {
 	return nil
 }
 
-// BufferChannelAssignPolicy assign buffer channels to new registered node
+// BufferChannelAssignPolicy assigns buffer channels to new registered node
 func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	info := store.GetBufferChannelInfo()
 	if info == nil || len(info.Channels) == 0 {
@@ -50,7 +50,7 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet 
 	return opSet
 }
 
-// AvgAssignRegisterPolicy assign channels with average to new registered node
+// AvgAssignRegisterPolicy assigns channels with average to new registered node
 func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	opSet := BufferChannelAssignPolicy(store, nodeID)
 	if len(opSet) != 0 {
