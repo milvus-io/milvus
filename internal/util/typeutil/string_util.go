@@ -1,6 +1,7 @@
 package typeutil
 
-// Add one to string, add one on empty string return empty
+// AddOne add one to last byte in string, on empty string return empty
+// it helps with key iteration upper bound
 func AddOne(data string) string {
 	if len(data) == 0 {
 		return data
