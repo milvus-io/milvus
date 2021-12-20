@@ -233,7 +233,7 @@ func (s *Server) Register() error {
 func (s *Server) initSession() error {
 	s.session = sessionutil.NewSession(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli)
 	if s.session == nil {
-		return errors.New("failed to initialize session")
+		return errors.New("failed to initialize DataCoord session")
 	}
 	s.session.Init(typeutil.DataCoordRole, Params.DataCoordCfg.Address, true, true)
 	Params.DataCoordCfg.NodeID = s.session.ServerID
