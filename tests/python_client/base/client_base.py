@@ -1,3 +1,4 @@
+from numpy.core.fromnumeric import _partition_dispatcher
 import pytest
 import sys
 from pymilvus import DefaultConfig
@@ -133,6 +134,49 @@ class TestcaseBase(Base):
                                       **kwargs)
         return partition_wrap
 
+    def init_collection_without_load(self, prefix, insert_data=False, nb=ct.default_nb,
+                                partition_num=0, is_binary=False, is_all_data_type=False,
+                                auto_id=False, dim=ct.default_dim, is_index=False):
+        """
+        target: create specified collections
+        method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
+                2. create partitions if specified
+                3. insert specified (binary/non-binary, default/all data type) data
+                   into each partition if any
+        expected: return collection and raw data, insert ids
+        """
+        log.info("Test case of search interface: initialize before test case")
+        self._connect()
+        collection_name = cf.gen_unique_str(prefix)
+        vectors = []
+        binary_raw_vectors = []
+        insert_ids = []
+        time_stamp = 0
+        # 1 create collection
+        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim)
+        if is_binary:
+            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
+        if is_all_data_type:
+            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim)
+        log.info("init_collection_general: collection creation")
+        collection_w = self.init_collection_wrap(name=collection_name,
+                                                 schema=default_schema)
+        # 2 add extra partitions if specified (default is 1 partition named "_default")
+        if partition_num > 0:
+            cf.gen_partitions(collection_w, partition_num)
+            
+        # 3 insert data if specified
+        if insert_data:
+            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
+            assert collection_w.is_empty is False
+            assert collection_w.num_entities == nb
+            log.info("insert_data: inserted data into collection %s (num_entities: %s)"
+                     % (collection_w.name, nb))
+
+        return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
+       
+
     def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
                                 auto_id=False, dim=ct.default_dim, is_index=False):
@@ -194,7 +238,30 @@ class TestcaseBase(Base):
         collection_w.insert(df_default)
         conn.flush([collection_w.name])
         collection_w.load()
-        return collection_w, partition_w, df_partition, df_default
+        return collection_w, partition_w,df_partition, df_default
+   
+
+    def insert_entities_into_two_partitions(self, half, prefix='query'):
+        """
+        insert default entities into two partitions(partition_w and _default) in half(int64 and float fields values)
+        :param half: half of nb
+        :return: collection wrap and partition wrap
+        """
+        conn = self._connect()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+        partition_e = self.init_partition_wrap(collection_wrap=collection_w)
+        # insert [0, half) into partition_w
+        df_partition = cf.gen_default_dataframe_data(nb=half, start=0)
+        partition_w.insert(df_partition)
+        # insert [half, nb) into _default
+        df_default = cf.gen_default_dataframe_data(nb=half, start=half)
+        partition_e.insert(df_default)
+        conn.flush([collection_w.name])
+        partition_w.load()
+        # partition_e.load()
+        return collection_w, partition_w, partition_e,df_default
+
 
     def collection_insert_multi_segments_one_shard(self, collection_prefix, num_of_segment=2, nb_of_segment=1,
                                                    is_dup=True):

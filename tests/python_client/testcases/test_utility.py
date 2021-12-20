@@ -823,18 +823,17 @@ class TestUtilityBase(TestcaseBase):
         assert res == exp_res
 
     @pytest.mark.tag(CaseLabel.L2)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_loading_progress_with_release_partition(self):
         """
         target: test loading progress after release part partitions
         method: 1.insert data into two partitions and flush
-                2.load collection and release onr partition
+                2.load one partiton and release one partition
         expected: loaded one partition entities
         """
         half = ct.default_nb
         # insert entities into two partitions, collection flush and load
-        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
-        partition_w.release()
+        collection_w, _, partition_e, _ = self.insert_entities_into_two_partitions(half)
+        partition_e.release()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
         assert res[num_total_entities] == half * 2
         assert res[num_loaded_entities] == half

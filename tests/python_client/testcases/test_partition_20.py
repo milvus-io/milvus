@@ -1,3 +1,4 @@
+from os import name
 import threading
 import pytest
 
@@ -233,21 +234,76 @@ class TestPartitionParams(TestcaseBase):
 
         # check that the partition not exists
         assert not collection_w.has_partition(partition_name)[0]
+   
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partiton_respectively(self):
+        """
+        target: test release the partiton after load partiton
+        method: load partiton1 and load other partiton
+        expected: raise exception
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w1 = self.init_partition_wrap(collection_w)
+        partition_w2 = self.init_partition_wrap(collection_w)
+        partition_w1.insert(cf.gen_default_list_data())
+        partition_w2.insert(cf.gen_default_list_data())
+        partition_w1.load()
+        error = {ct.err_code: 1, ct.err_msg: f'load the partition after load collection is not supported'}
+        partition_w2.load(check_task=CheckTasks.err_res,
+                             check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partitons_after_release(self):
+        """
+        target: test release the partiton after load partition
+        method: load partitons and release partitions
+        expected: no exception
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w1 = self.init_partition_wrap(collection_w,name="partition_w1")
+        partition_w2 = self.init_partition_wrap(collection_w,name="partition_w2")
+        partition_w1.insert(cf.gen_default_list_data())
+        partition_w2.insert(cf.gen_default_list_data())
+        partition_names=["partition_w1","partition_w2"]
+        collection_w.load(partition_names)
+        collection_w.release(partition_names)
+
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partiton_after_load_partition(self):
+        """
+        target: test release the partiton after load partition
+        method: load partition1 and release the partition1
+                load partition2
+        expected: no exception
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w1 = self.init_partition_wrap(collection_w)
+        partition_w2 = self.init_partition_wrap(collection_w)
+        partition_w1.insert(cf.gen_default_list_data())
+        partition_w2.insert(cf.gen_default_list_data())
+        partition_w1.load()
+        partition_w1.release()
+        partition_w2.load()
+
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
     def test_partition_release(self):
         """
         target: verify release partition
         method: 1. create a collection and two partitions
                 2. insert data into each partition
-                3. flush and load the both partitions
+                3. flush and load the  partition1
                 4. release partition1
-                5. release partition1 twice
+                5. release partition2
         expected: 1. the 1st partition is released
-                  2. the 2nd partition is not released
+                  2. the 2nd partition is released
         """
         # create collection
+
         collection_w = self.init_collection_wrap()
 
         # create two partitions
@@ -260,20 +316,17 @@ class TestPartitionParams(TestcaseBase):
 
         # load two partitions
         partition_w1.load()
-        partition_w2.load()
-
-        # search two partitions
+       
+        # search  partition1
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         res1, _ = partition_w1.search(data=search_vectors,
                                       anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32}, limit=1)
-        res2, _ = partition_w2.search(data=search_vectors,
-                                      anns_field=ct.default_float_vec_field_name,
-                                      params={"nprobe": 32}, limit=1)
-        assert len(res1) == 1 and len(res2) == 1
+        assert len(res1) == 1 
 
         # release the first partition
         partition_w1.release()
+        partition_w2.release()
 
         # check result
         res1, _ = partition_w1.search(data=search_vectors,
@@ -281,10 +334,6 @@ class TestPartitionParams(TestcaseBase):
                                       params={"nprobe": 32}, limit=1,
                                       check_task=ct.CheckTasks.err_res,
                                       check_items={ct.err_code: 1, ct.err_msg: "partitions have been released"})
-        res2, _ = partition_w2.search(data=search_vectors,
-                                      anns_field=ct.default_float_vec_field_name,
-                                      params={"nprobe": 32}, limit=1)
-        assert len(res2) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("data", [cf.gen_default_dataframe_data(10),
