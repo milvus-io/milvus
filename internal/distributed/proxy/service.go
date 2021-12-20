@@ -462,6 +462,7 @@ func (s *Server) LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceR
 	return s.proxy.LoadBalance(ctx, request)
 }
 
+// CreateAlias notifies Proxy to create alias
 func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateAlias(ctx, request)
 }
