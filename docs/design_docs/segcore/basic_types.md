@@ -4,7 +4,7 @@
 - `Segment`: The memory structure of storing a piece of data which supports concurrent insertion, deletion, query, index loading, monitoring and statistics
 - `Schema`: Definition of collection data format, including
   - `vector<FieldMeta>`: Order list of FieldMeta
-  - `isAutoId`: If set to True , default primary field is `RowId` and it is auto generated
+  - `isAutoId`: If set to True , the default primary field is `RowId` and it is auto generated
   - `primaryKey`: (When `isAutoId = False`) Specify primary key field
 - `FieldMeta`: Field properties, including
   - `DataType`: Data type, including Int8...Int64, Float, Double, FloatVector, BinaryVector and String later
