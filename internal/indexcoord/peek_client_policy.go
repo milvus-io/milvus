@@ -18,6 +18,7 @@ package indexcoord
 
 import "github.com/milvus-io/milvus/internal/proto/commonpb"
 
+// PeekClientPolicy defines how to choose IndexNode.
 type PeekClientPolicy func(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 	typeParams []*commonpb.KeyValuePair, pq *PriorityQueue) UniqueID
 
