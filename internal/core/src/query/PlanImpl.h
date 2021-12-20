@@ -11,22 +11,22 @@
 
 #pragma once
 
+#include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+#include <boost/dynamic_bitset.hpp>
+
 #include "Plan.h"
-#include "utils/Json.h"
 #include "PlanNode.h"
 #include "exceptions/EasyAssert.h"
 #include "pb/milvus.pb.h"
-#include <memory>
-#include <map>
-#include <string>
-#include <vector>
-#include <optional>
-#include <boost/dynamic_bitset.hpp>
+#include "utils/Json.h"
 
 namespace milvus::query {
-using Json = nlohmann::json;
 
-// class definitions
+using Json = nlohmann::json;
 
 struct ExtractedPlanInfo {
  public:
@@ -96,4 +96,5 @@ using PlanPtr = std::unique_ptr<Plan>;
 struct PlaceholderGroup : std::vector<Placeholder> {
     using std::vector<Placeholder>::vector;
 };
+
 }  // namespace milvus::query
