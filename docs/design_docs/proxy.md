@@ -22,7 +22,7 @@ collection, querying for specific records of a collection, etc.
 For every request, Proxy will first check if it's valid to be executed by Milvus and if the request is invalid then
 Proxy will return the error to clients and won't continue to forward this request to other components. The check
 operation of Proxy includes two parts, one part is static check and another is dynamic check. The static check includes
-parameters check, constraints check, etc. Dynamic check will check some related dependencies of the request, take
+parameters check, constraints check, etc. The dynamic check will check some related dependencies of the request, take
 search requests for example, Proxy should check if the related collection exists in Milvus.
 
 Also, Proxy will do some preprocessing for every request. Proxy will do little things for some requests in the
