@@ -52,6 +52,7 @@ type channelsMgr interface {
 type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
 type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
 
+// getDmlChannelsFunc returns a function about how to get dml channels of a collection.
 func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFuncType {
 	return func(collectionID UniqueID) (map[vChan]pChan, error) {
 		req := &milvuspb.DescribeCollectionRequest{
