@@ -26,23 +26,30 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
+	"github.com/milvus-io/milvus/internal/logutil"
+	"github.com/milvus-io/milvus/internal/types"
+
+	"go.uber.org/zap"
+
+	"google.golang.org/grpc"
+
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"google.golang.org/grpc/keepalive"
+
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/logutil"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -61,7 +68,7 @@ type Server struct {
 }
 
 // NewServer new data service grpc server
-func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord.Option) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory, opts ...datacoord.Option) (*Server, error) {
 	var err error
 	ctx1, cancel := context.WithCancel(ctx)
 
@@ -144,7 +151,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
 	//grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor))
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
-	grpc_prometheus.Register(s.grpcServer)
+	grpcprometheus.Register(s.grpcServer)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err

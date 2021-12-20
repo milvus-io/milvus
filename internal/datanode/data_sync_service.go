@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 
@@ -32,21 +32,21 @@ import (
 
 // dataSyncService controls a flowgraph for a specific collection
 type dataSyncService struct {
-	ctx          context.Context
-	cancelFn     context.CancelFunc
-	fg           *flowgraph.TimeTickedFlowGraph // internal flowgraph processes insert/delta messages
-	flushCh      chan flushMsg                  // chan to notify flush
-	replica      Replica                        // segment replica stores meta
-	idAllocator  allocatorInterface             // id/timestamp allocator
-	msFactory    msgstream.Factory
-	collectionID UniqueID // collection id of vchan for which this data sync service serves
-	vchannelName string
-	dataCoord    types.DataCoord // DataCoord instance to interact with
-	clearSignal  chan<- string   // signal channel to notify flowgraph close for collection/partition drop msg consumed
+	ctx              context.Context
+	cancelFn         context.CancelFunc
+	fg               *flowgraph.TimeTickedFlowGraph // internal flowgraph processes insert/delta messages
+	flushCh          chan flushMsg                  // chan to notify flush
+	replica          Replica                        // segment replica stores meta
+	idAllocator      allocatorInterface             // id/timestamp allocator
+	msgStreamFactory msgstream.MsgFactory
+	collectionID     UniqueID // collection id of vchan for which this data sync service serves
+	vchannelName     string
+	dataCoord        types.DataCoord // DataCoord instance to interact with
+	clearSignal      chan<- string   // signal channel to notify flowgraph close for collection/partition drop msg consumed
 
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
 	flushManager     flushManager // flush manager handles flush process
-	blobKV           kv.BaseKV
+	chunkManager     storage.ChunkManager
 	compactor        *compactionExecutor // reference to compaction executor
 }
 
@@ -54,12 +54,12 @@ func newDataSyncService(ctx context.Context,
 	flushCh chan flushMsg,
 	replica Replica,
 	alloc allocatorInterface,
-	factory msgstream.Factory,
+	factory msgstream.MsgFactory,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- string,
 	dataCoord types.DataCoord,
 	flushingSegCache *Cache,
-	blobKV kv.BaseKV,
+	chunkManager storage.ChunkManager,
 	compactor *compactionExecutor,
 ) (*dataSyncService, error) {
 
@@ -76,13 +76,13 @@ func newDataSyncService(ctx context.Context,
 		flushCh:          flushCh,
 		replica:          replica,
 		idAllocator:      alloc,
-		msFactory:        factory,
+		msgStreamFactory: factory,
 		collectionID:     vchan.GetCollectionID(),
 		vchannelName:     vchan.GetChannelName(),
 		dataCoord:        dataCoord,
 		clearSignal:      clearSignal,
 		flushingSegCache: flushingSegCache,
-		blobKV:           blobKV,
+		chunkManager:     chunkManager,
 		compactor:        compactor,
 	}
 
@@ -98,7 +98,7 @@ type parallelConfig struct {
 }
 
 type nodeConfig struct {
-	msFactory    msgstream.Factory // msgStream factory
+	msFactory    msgstream.MsgFactory // msgStream f
 	collectionID UniqueID
 	vChannelName string
 	replica      Replica // Segment replica
@@ -142,13 +142,13 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		"PulsarBufSize":  1024,
 	}
 
-	err := dsService.msFactory.SetParams(m)
+	err := dsService.msgStreamFactory.SetParams(m)
 	if err != nil {
 		return err
 	}
 
 	// initialize flush manager for DataSync Service
-	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica,
+	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.replica,
 		flushNotifyFunc(dsService), dropVirtualChannelFunc(dsService))
 
 	// recover segment checkpoints
@@ -205,7 +205,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	c := &nodeConfig{
-		msFactory:    dsService.msFactory,
+		msFactory:    dsService.msgStreamFactory,
 		collectionID: vchanInfo.GetCollectionID(),
 		vChannelName: vchanInfo.GetChannelName(),
 		replica:      dsService.replica,
@@ -220,7 +220,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	var ddNode Node = newDDNode(dsService.ctx, dsService.collectionID, vchanInfo, dsService.msFactory, dsService.compactor)
+	var ddNode Node = newDDNode(dsService.ctx, dsService.collectionID, vchanInfo, dsService.msgStreamFactory, dsService.compactor)
 	var insertBufferNode Node
 	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,

@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
@@ -252,16 +252,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 		return nil, err
 	}
 
-	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
-		CreateBucket:      true,
-	}
-
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +285,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	for _, index := range serializedIndexBlobs {
 		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := kv.Save(p, string(index.Value))
+		err := lcm.Write(p, index.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -353,32 +344,16 @@ func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
 	return genCollectionMeta(defaultCollectionID, simpleSchema)
 }
 
-// ---------- unittest util functions ----------
-// functions of third-party
-func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
-	bucketName := Params.QueryNodeCfg.MinioBucketName
-	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		BucketName:        bucketName,
-		CreateBucket:      true,
-	}
-	kv, err := minioKV.NewMinIOKV(ctx, option)
-	return kv, err
-}
-
 func genEtcdKV() (*etcdkv.EtcdKV, error) {
 	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 	return etcdKV, err
 }
 
-func genFactory() (msgstream.Factory, error) {
+func genFactory() (dependency.Factory, error) {
 	const receiveBufSize = 1024
 
 	pulsarURL := Params.QueryNodeCfg.PulsarAddress
-	msFactory := msgstream.NewPmsFactory()
+	msFactory := dependency.NewDistributedDependencyFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
 		"pulsarAddress":  pulsarURL,
@@ -402,38 +377,21 @@ func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return stream, nil
 }
 
-func genLocalChunkManager() (storage.ChunkManager, error) {
-	p, err := Params.BaseParams.Load("storage.path")
-	if err != nil {
-		return nil, err
-	}
-	lcm := storage.NewLocalChunkManager(p)
+func genLocalChunkManager() storage.ChunkManager {
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
-	return lcm, nil
+	return lcm
 }
 
-func genRemoteChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	client, err := genMinioKV(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rcm := storage.NewMinioChunkManager(client)
+func genRemoteChunkManager() storage.ChunkManager {
+	rcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
-	return rcm, nil
+	return rcm
 }
 
 func genVectorChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	p, err := Params.BaseParams.Load("storage.path")
-	if err != nil {
-		return nil, err
-	}
-	lcm := storage.NewLocalChunkManager(p)
-
-	client, err := genMinioKV(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rcm := storage.NewMinioChunkManager(client)
+	lcm := genLocalChunkManager()
+	rcm := genRemoteChunkManager()
 
 	schema := genSimpleInsertDataSchema()
 	vcm := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
@@ -658,7 +616,7 @@ func saveBinLog(ctx context.Context,
 	}
 
 	log.Debug(".. [query node unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
-	kvs := make(map[string]string, len(binLogs))
+	kvs := make(map[string][]byte, len(binLogs))
 
 	// write insert binlog
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
@@ -670,7 +628,7 @@ func saveBinLog(ctx context.Context,
 		}
 
 		key := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		kvs[key] = string(blob.Value[:])
+		kvs[key] = blob.Value[:]
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
 			Binlogs: []*datapb.Binlog{{LogPath: key}},
@@ -678,11 +636,8 @@ func saveBinLog(ctx context.Context,
 	}
 	log.Debug("[query node unittest] save binlog file to MinIO/S3")
 
-	kv, err := genMinioKV(ctx)
-	if err != nil {
-		return nil, err
-	}
-	err = kv.MultiSave(kvs)
+	cm := genLocalChunkManager()
+	err = cm.MultiWrite(kvs)
 	return fieldBinlog, err
 }
 
@@ -874,12 +829,13 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	return r, err
 }
 
-func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface) (*segmentLoader, error) {
+func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, f msgstream.MsgFactory) (*segmentLoader, error) {
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
 	}
-	return newSegmentLoader(ctx, newMockRootCoord(), newMockIndexCoord(), historicalReplica, streamingReplica, kv, msgstream.NewPmsFactory()), nil
+	cm := genLocalChunkManager()
+	return newSegmentLoader(ctx, newMockRootCoord(), newMockIndexCoord(), historicalReplica, streamingReplica, f, kv, cm), nil
 }
 
 func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
@@ -917,19 +873,11 @@ func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface
 }
 
 func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*streaming, error) {
-	kv, err := genEtcdKV()
-	if err != nil {
-		return nil, err
-	}
-	fac, err := genFactory()
-	if err != nil {
-		return nil, err
-	}
 	replica, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
 	}
-	s := newStreaming(ctx, replica, fac, kv, tSafeReplica)
+	s := newStreaming(replica, tSafeReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1286,6 +1234,8 @@ func saveChangeInfo(key string, value string) error {
 	return kv.Save(key, value)
 }
 
+var testLocalStorage = "/tmp/milvus/data"
+
 // node
 func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	fac, err := genFactory()
@@ -1316,12 +1266,12 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streaming.replica, historical.replica, node.tSafeReplica, node.msFactory)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streaming.replica, historical.replica, node.tSafeReplica, node.f)
 
 	node.streaming = streaming
 	node.historical = historical
 
-	loader, err := genSimpleSegmentLoader(node.queryNodeLoopCtx, historical.replica, streaming.replica)
+	loader, err := genSimpleSegmentLoader(node.queryNodeLoopCtx, historical.replica, streaming.replica, fac)
 	if err != nil {
 		return nil, err
 	}
@@ -1330,7 +1280,25 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	// start task scheduler
 	go node.scheduler.Start()
 
-	qs := newQueryService(ctx, node.historical, node.streaming, node.msFactory)
+	node.localChunkManager, err = node.f.NewLocalChunkManager(testLocalStorage)
+	if err != nil {
+		return nil, err
+	}
+
+	node.remoteChunkManager, err = node.f.NewRemoteChunkManager(node.queryNodeLoopCtx,
+		storage.Address(Params.QueryNodeCfg.MinioEndPoint),
+		storage.AccessKeyID(Params.QueryNodeCfg.MinioAccessKeyID),
+		storage.SecretAccessKeyID(Params.QueryNodeCfg.MinioSecretAccessKey),
+		storage.UseSSL(Params.QueryNodeCfg.MinioUseSSLStr),
+		storage.BucketName(Params.QueryNodeCfg.MinioBucketName),
+		storage.CreateBucket(true),
+		storage.RootPath(testLocalStorage),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	qs := newQueryService(ctx, node.historical, node.streaming, fac, node.localChunkManager, node.remoteChunkManager)
 	defer qs.close()
 	node.queryService = qs
 

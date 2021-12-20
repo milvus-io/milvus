@@ -29,13 +29,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
+	"go.uber.org/zap"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"go.uber.org/zap"
 )
 
 func setup() {
@@ -60,7 +61,7 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func NewQueryCoordTest(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+func NewQueryCoordTest(ctx context.Context, factory dependency.Factory) (*QueryCoord, error) {
 	queryCoord, err := NewQueryCoord(ctx, factory)
 	if err != nil {
 		return nil, err
@@ -70,7 +71,8 @@ func NewQueryCoordTest(ctx context.Context, factory msgstream.Factory) (*QueryCo
 }
 
 func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
-	factory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	factory := dependency.NewStandAloneDependencyFactory()
 
 	coord, err := NewQueryCoordTest(ctx, factory)
 	if err != nil {
@@ -114,7 +116,8 @@ func createDefaultPartition(ctx context.Context, queryCoord *QueryCoord) error {
 }
 
 func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
-	factory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	factory := dependency.NewStandAloneDependencyFactory()
 
 	coord, err := NewQueryCoordTest(ctx, factory)
 	if err != nil {

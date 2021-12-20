@@ -37,12 +37,12 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/healthz"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -50,11 +50,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
-func newMsgFactory(localMsg bool) msgstream.Factory {
+func newDependencyFactory(localMsg bool) dependency.Factory {
 	if localMsg {
-		return msgstream.NewRmsFactory()
+		return dependency.NewStandAloneDependencyFactory()
 	}
-	return msgstream.NewPmsFactory()
+	return dependency.NewDistributedDependencyFactory()
 }
 
 func initRocksmq() error {
@@ -95,7 +95,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 
 		f := setLoggerFunc()
 		rootcoord.Params.BaseParams.SetLogConfig(f)
-		factory := newMsgFactory(localMsg)
+		factory := newDependencyFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
 		if err != nil {
@@ -124,7 +124,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 
 		f := setLoggerFunc()
 		proxy.Params.BaseParams.SetLogConfig(f)
-		factory := newMsgFactory(localMsg)
+		factory := newDependencyFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
 		if err != nil {
@@ -152,7 +152,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 
 		f := setLoggerFunc()
 		querycoord.Params.BaseParams.SetLogConfig(f)
-		factory := newMsgFactory(localMsg)
+		factory := newDependencyFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
 		if err != nil {
@@ -181,7 +181,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 
 		f := setLoggerFunc()
 		querynode.Params.BaseParams.SetLogConfig(f)
-		factory := newMsgFactory(localMsg)
+		factory := newDependencyFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
 		if err != nil {
@@ -209,7 +209,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 
 		f := setLoggerFunc()
 		datacoord.Params.BaseParams.SetLogConfig(f)
-		factory := newMsgFactory(localMsg)
+		factory := newDependencyFactory(localMsg)
 		var err error
 		ds, err = components.NewDataCoord(ctx, factory)
 		if err != nil {
@@ -237,7 +237,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 		datanode.Params.InitOnce()
 		f := setLoggerFunc()
 		datanode.Params.BaseParams.SetLogConfig(f)
-		factory := newMsgFactory(localMsg)
+		factory := newDependencyFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
 		if err != nil {
@@ -265,8 +265,9 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 
 		f := setLoggerFunc()
 		indexcoord.Params.BaseParams.SetLogConfig(f)
+		factory := newDependencyFactory(localMsg)
 		var err error
-		is, err = components.NewIndexCoord(ctx)
+		is, err = components.NewIndexCoord(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -293,8 +294,9 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 
 		f := setLoggerFunc()
 		indexnode.Params.BaseParams.SetLogConfig(f)
+		factory := newDependencyFactory(localMsg)
 		var err error
-		in, err = components.NewIndexNode(ctx)
+		in, err = components.NewIndexNode(ctx, factory)
 		if err != nil {
 			panic(err)
 		}

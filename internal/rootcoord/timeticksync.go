@@ -22,6 +22,8 @@ import (
 	"math"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -31,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type timetickSync struct {
@@ -76,7 +77,7 @@ func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
 	return c.defaultTs
 }
 
-func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
+func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory msgstream.MsgFactory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
 	// initialize dml channels used for insert
 	dmlChannels := newDmlChannels(ctx, factory, Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DmlChannelNum)
 	// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels

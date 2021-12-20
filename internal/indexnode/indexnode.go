@@ -39,23 +39,27 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
+
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
+	"go.uber.org/zap"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // UniqueID is an alias of int64, is used as a unique identifier for the request.
@@ -77,8 +81,8 @@ type IndexNode struct {
 
 	once sync.Once
 
-	kv      kv.BaseKV
-	session *sessionutil.Session
+	chunkManager storage.ChunkManager
+	session      *sessionutil.Session
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -90,19 +94,22 @@ type IndexNode struct {
 	closer io.Closer
 
 	initOnce sync.Once
+
+	f dependency.Factory
 }
 
 // NewIndexNode creates a new IndexNode component.
-func NewIndexNode(ctx context.Context) (*IndexNode, error) {
+func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, error) {
 	log.Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
+		f:          factory,
 	}
 	b.UpdateStateCode(internalpb.StateCode_Abnormal)
-	sc, err := NewTaskScheduler(b.loopCtx, b.kv)
+	sc, err := NewTaskScheduler(b.loopCtx, b.chunkManager)
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +160,6 @@ func (i *IndexNode) initSession() error {
 func (i *IndexNode) Init() error {
 	var initErr error = nil
 	i.initOnce.Do(func() {
-		Params.Init()
-
 		i.UpdateStateCode(internalpb.StateCode_Initializing)
 		log.Debug("IndexNode init", zap.Any("State", i.stateCode.Load().(internalpb.StateCode)))
 		err := i.initSession()
@@ -178,24 +183,23 @@ func (i *IndexNode) Init() error {
 		}
 		log.Debug("IndexNode connected to etcd successfully")
 
-		option := &miniokv.Option{
-			Address:           Params.IndexNodeCfg.MinIOAddress,
-			AccessKeyID:       Params.IndexNodeCfg.MinIOAccessKeyID,
-			SecretAccessKeyID: Params.IndexNodeCfg.MinIOSecretAccessKey,
-			UseSSL:            Params.IndexNodeCfg.MinIOUseSSL,
-			BucketName:        Params.IndexNodeCfg.MinioBucketName,
-			CreateBucket:      true,
-		}
-		kv, err := miniokv.NewMinIOKV(i.loopCtx, option)
+		i.chunkManager, err = i.f.NewRemoteChunkManager(i.loopCtx,
+			storage.Address(Params.IndexNodeCfg.MinIOAddress),
+			storage.AccessKeyID(Params.IndexNodeCfg.MinIOAccessKeyID),
+			storage.SecretAccessKeyID(Params.IndexNodeCfg.MinIOSecretAccessKey),
+			storage.UseSSL(Params.IndexNodeCfg.MinIOUseSSL),
+			storage.BucketName(Params.IndexNodeCfg.MinioBucketName),
+			storage.CreateBucket(true),
+			storage.RootPath(Params.IndexNodeCfg.LocalStoragePath),
+		)
+
 		if err != nil {
-			log.Error("IndexNode NewMinIOKV failed", zap.Error(err))
+			log.Error("IndexNode failed to new remote chunk manager", zap.Error(err))
 			initErr = err
 			return
 		}
 
-		i.kv = kv
-
-		log.Debug("IndexNode NewMinIOKV succeeded")
+		log.Debug("IndexNode new remote chunk manager succeeded")
 		i.closer = trace.InitTracing("index_node")
 
 		i.initKnowhere()
@@ -284,7 +288,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 			done: make(chan error),
 		},
 		req:            request,
-		kv:             i.kv,
+		chunkManager:   i.chunkManager,
 		etcdKV:         i.etcdKV,
 		nodeID:         Params.IndexNodeCfg.NodeID,
 		serializedSize: 0,

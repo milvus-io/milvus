@@ -21,14 +21,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
 
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -42,7 +41,7 @@ type queryService struct {
 	queryCollectionMu sync.Mutex // guards queryCollections
 	queryCollections  map[UniqueID]*queryCollection
 
-	factory msgstream.Factory
+	factory msgstream.MsgFactory
 
 	localChunkManager  storage.ChunkManager
 	remoteChunkManager storage.ChunkManager
@@ -52,34 +51,11 @@ type queryService struct {
 func newQueryService(ctx context.Context,
 	historical *historical,
 	streaming *streaming,
-	factory msgstream.Factory) *queryService {
+	factory msgstream.MsgFactory,
+	lcm storage.ChunkManager,
+	rcm storage.ChunkManager) *queryService {
 
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
-
-	//TODO godchen: change this to configuration
-	path, err := Params.BaseParams.Load("localStorage.Path")
-	if err != nil {
-		path = "/tmp/milvus/data"
-	}
-	enabled, _ := Params.BaseParams.Load("localStorage.enabled")
-	localCacheEnabled, _ := strconv.ParseBool(enabled)
-
-	localChunkManager := storage.NewLocalChunkManager(path)
-
-	option := &miniokv.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
-	}
-
-	client, err := miniokv.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-	remoteChunkManager := storage.NewMinioChunkManager(client)
 
 	return &queryService{
 		ctx:    queryServiceCtx,
@@ -92,9 +68,9 @@ func newQueryService(ctx context.Context,
 
 		factory: factory,
 
-		localChunkManager:  localChunkManager,
-		remoteChunkManager: remoteChunkManager,
-		localCacheEnabled:  localCacheEnabled,
+		localChunkManager:  lcm,
+		remoteChunkManager: rcm,
+		localCacheEnabled:  Params.QueryNodeCfg.LocalCacheEnabled,
 	}
 }
 

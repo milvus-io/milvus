@@ -18,17 +18,22 @@ package indexcoord
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestGetSystemInfoMetrics(t *testing.T) {
 	ctx := context.Background()
-	ic, err := NewIndexCoord(ctx)
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
+	ic, err := NewIndexCoord(ctx, fac)
 	assert.Nil(t, err)
 	Params.Init()
 

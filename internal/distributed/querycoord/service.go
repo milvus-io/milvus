@@ -25,11 +25,17 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -40,9 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -58,7 +61,7 @@ type Server struct {
 
 	queryCoord types.QueryCoordComponent
 
-	msFactory msgstream.Factory
+	f dependency.Factory
 
 	dataCoord  types.DataCoord
 	rootCoord  types.RootCoord
@@ -68,7 +71,7 @@ type Server struct {
 }
 
 // NewServer create a new QueryCoord grpc server.
-func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	svr, err := qc.NewQueryCoord(ctx1, factory)
 	if err != nil {
@@ -80,7 +83,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		queryCoord:  svr,
 		loopCtx:     ctx1,
 		loopCancel:  cancel,
-		msFactory:   factory,
+		f:           factory,
 		grpcErrChan: make(chan error),
 	}, nil
 }
@@ -211,10 +214,7 @@ func (s *Server) init() error {
 
 	s.queryCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("QueryCoord", zap.Any("State", internalpb.StateCode_Initializing))
-	if err := s.queryCoord.Init(); err != nil {
-		return err
-	}
-	return nil
+	return s.queryCoord.Init()
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {

@@ -350,10 +350,7 @@ func (c *ChannelManager) RemoveChannel(channelName string) error {
 func (c *ChannelManager) remove(nodeID int64, ch *channel) error {
 	var op ChannelOpSet
 	op.Delete(nodeID, []*channel{ch})
-	if err := c.store.Update(op); err != nil {
-		return err
-	}
-	return nil
+	return c.store.Update(op)
 }
 
 func (c *ChannelManager) findChannel(channelName string) (int64, *channel) {

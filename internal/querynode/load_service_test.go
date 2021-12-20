@@ -25,7 +25,6 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/common"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -266,7 +265,7 @@ import (
 //	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
 //	assert.Equal(t, err, nil)
 //
-//	option := &minioKV.Option{
+//	option := &chunkManager.Option{
 //		Address:           Params.MinioEndPoint,
 //		AccessKeyID:       Params.MinioAccessKeyID,
 //		SecretAccessKeyID: Params.MinioSecretAccessKey,
@@ -275,7 +274,7 @@ import (
 //		CreateBucket:      true,
 //	}
 //
-//	minioKV, err := minioKV.NewMinIOKV(node.queryNodeLoopCtx, option)
+//	chunkManager, err := chunkManager.NewMinIOKV(node.queryNodeLoopCtx, option)
 //	assert.Equal(t, err, nil)
 //	//save index to minio
 //	binarySet, err := index.Serialize()
@@ -287,7 +286,7 @@ import (
 //	for _, index := range binarySet {
 //		path := strconv.Itoa(int(segmentID)) + "/" + index.Key
 //		indexPaths = append(indexPaths, path)
-//		minioKV.Save(path, string(index.Value))
+//		chunkManager.Save(path, string(index.Value))
 //	}
 //
 //	//test index search result
@@ -583,7 +582,7 @@ import (
 //	err = index.BuildBinaryVecIndexWithoutIds(indexRowData)
 //	assert.Equal(t, err, nil)
 //
-//	option := &minioKV.Option{
+//	option := &chunkManager.Option{
 //		Address:           Params.MinioEndPoint,
 //		AccessKeyID:       Params.MinioAccessKeyID,
 //		SecretAccessKeyID: Params.MinioSecretAccessKey,
@@ -592,7 +591,7 @@ import (
 //		CreateBucket:      true,
 //	}
 //
-//	minioKV, err := minioKV.NewMinIOKV(node.queryNodeLoopCtx, option)
+//	chunkManager, err := chunkManager.NewMinIOKV(node.queryNodeLoopCtx, option)
 //	assert.Equal(t, err, nil)
 //	//save index to minio
 //	binarySet, err := index.Serialize()
@@ -604,7 +603,7 @@ import (
 //	for _, index := range binarySet {
 //		path := strconv.Itoa(int(segmentID)) + "/" + index.Key
 //		indexPaths = append(indexPaths, path)
-//		minioKV.Save(path, string(index.Value))
+//		chunkManager.Save(path, string(index.Value))
 //	}
 //
 //	//test index search result
@@ -815,16 +814,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	}
 
 	// create minio client
-	bucketName := Params.QueryNodeCfg.MinioBucketName
-	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		BucketName:        bucketName,
-		CreateBucket:      true,
-	}
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
+	cm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -839,7 +829,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	for _, blob := range binLogs {
 		uid := rand.Int63n(100000000)
 		key := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
-		err = kv.Save(key, string(blob.Value[:]))
+		err = cm.Write(key, blob.Value[:])
 		if err != nil {
 			return nil, nil, err
 		}

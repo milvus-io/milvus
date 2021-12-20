@@ -31,7 +31,7 @@ import (
 )
 
 type mockFactory struct {
-	msgstream.Factory
+	msgstream.MsgFactory
 }
 
 func TestFlowGraph_DDNode_newDDNode(te *testing.T) {

@@ -21,6 +21,8 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -30,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type reqTask interface {
@@ -106,18 +107,18 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		zap.String("ConsistencyLevel", t.Req.ConsistencyLevel.String()))
 
 	for idx, field := range schema.Fields {
-		field.FieldID = int64(idx + StartOfUserFieldID)
+		field.FieldID = int64(idx + common.StartOfUserFieldID)
 	}
 	rowIDField := &schemapb.FieldSchema{
-		FieldID:      int64(RowIDField),
-		Name:         RowIDFieldName,
+		FieldID:      int64(common.RowIDField),
+		Name:         common.RowIDFieldName,
 		IsPrimaryKey: false,
 		Description:  "row id",
 		DataType:     schemapb.DataType_Int64,
 	}
 	timeStampField := &schemapb.FieldSchema{
-		FieldID:      int64(TimeStampField),
-		Name:         TimeStampFieldName,
+		FieldID:      int64(common.TimeStampField),
+		Name:         common.TimeStampFieldName,
 		IsPrimaryKey: false,
 		Description:  "time stamp",
 		DataType:     schemapb.DataType_Int64,

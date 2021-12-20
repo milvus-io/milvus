@@ -19,11 +19,10 @@ package components
 import (
 	"context"
 
+	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 // QueryNode implements QueryNode grpc server
@@ -33,7 +32,7 @@ type QueryNode struct {
 }
 
 // NewQueryNode creates a new QueryNode
-func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, error) {
+func NewQueryNode(ctx context.Context, factory dependency.Factory) (*QueryNode, error) {
 	svr, err := grpcquerynode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err

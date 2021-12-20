@@ -28,6 +28,9 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -47,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -54,8 +58,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // ------------------ struct -----------------------
@@ -161,20 +163,20 @@ type Core struct {
 
 	session *sessionutil.Session
 
-	msFactory ms.Factory
+	f dependency.Factory
 }
 
 // --------------------- function --------------------------
 
 // NewCore create rootcoord core
-func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
+func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	core := &Core{
-		ctx:       ctx,
-		cancel:    cancel,
-		ddlLock:   sync.Mutex{},
-		msFactory: factory,
+		ctx:     ctx,
+		cancel:  cancel,
+		ddlLock: sync.Mutex{},
+		f:       factory,
 	}
 	core.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return core, nil
@@ -454,7 +456,7 @@ func (c *Core) setMsgStreams() error {
 	if Params.RootCoordCfg.TimeTickChannel == "" {
 		return fmt.Errorf("timeTickChannel is empty")
 	}
-	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	timeTickStream, _ := c.f.NewMsgStream(c.ctx)
 	timeTickStream.AsProducer([]string{Params.RootCoordCfg.TimeTickChannel})
 	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.RootCoordCfg.TimeTickChannel))
 
@@ -1023,12 +1025,12 @@ func (c *Core) Init() error {
 			"PulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 			"ReceiveBufSize": 1024,
 			"PulsarBufSize":  1024}
-		if initError = c.msFactory.SetParams(m); initError != nil {
+		if initError = c.f.SetParams(m); initError != nil {
 			return
 		}
 
 		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
-		c.chanTimeTick = newTimeTickSync(c.ctx, c.session, c.msFactory, chanMap)
+		c.chanTimeTick = newTimeTickSync(c.ctx, c.session, c.f, chanMap)
 		c.chanTimeTick.addProxy(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 

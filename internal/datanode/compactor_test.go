@@ -21,20 +21,21 @@ import (
 	"testing"
 	"time"
 
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestCompactionTaskInnerMethods(t *testing.T) {
 	t.Run("Test getSegmentMeta", func(t *testing.T) {
 		rc := &RootCoordFactory{}
-		replica, err := newReplica(context.TODO(), rc, 1)
+		lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
+		replica, err := newReplica(rc, 1, lcm)
 		require.NoError(t, err)
 
 		task := &compactionTask{
@@ -329,9 +330,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		rc := &RootCoordFactory{}
 		dc := &DataCoordFactory{}
 		mockfm := &mockFlushManager{}
-		mockKv := memkv.NewMemoryKV()
-		mockbIO := &binlogIO{mockKv, alloc}
-		replica, err := newReplica(context.TODO(), rc, collID)
+		lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
+		mockbIO := &binlogIO{lcm, alloc}
+		replica, err := newReplica(rc, collID, lcm)
 		require.NoError(t, err)
 		replica.addFlushedSegmentWithPKs(segID, collID, partID, "channelname", 2, []UniqueID{1})
 
@@ -386,7 +387,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		// New test, remove all the binlogs in memkv
 		//  Deltas in timetravel range
-		err = mockKv.RemoveWithPrefix("/")
+		err = lcm.RemoveWithPrefix("/")
 		require.NoError(t, err)
 		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
 		require.NoError(t, err)
@@ -402,7 +403,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		// New test, remove all the binlogs in memkv
 		//  Timeout
-		err = mockKv.RemoveWithPrefix("/")
+		err = lcm.RemoveWithPrefix("/")
 		require.NoError(t, err)
 		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
 		require.NoError(t, err)
@@ -420,9 +421,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		rc := &RootCoordFactory{}
 		dc := &DataCoordFactory{}
 		mockfm := &mockFlushManager{}
-		mockKv := memkv.NewMemoryKV()
-		mockbIO := &binlogIO{mockKv, alloc}
-		replica, err := newReplica(context.TODO(), rc, collID)
+		lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
+		mockbIO := &binlogIO{lcm, alloc}
+		replica, err := newReplica(rc, collID, lcm)
 		require.NoError(t, err)
 
 		replica.addFlushedSegmentWithPKs(segID1, collID, partID, "channelname", 2, []UniqueID{1})
@@ -487,10 +488,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(2), updates.GetNumRows())
 
-		// New test, remove all the binlogs in memkv
-		//  Deltas in timetravel range
-		err = mockKv.RemoveWithPrefix("/")
-		require.NoError(t, err)
 		plan.PlanID++
 
 		plan.Timetravel = Timestamp(25000)
@@ -511,10 +508,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(3), updates.GetNumRows())
 
-		// New test, remove all the binlogs in memkv
-		//  Deltas in timetravel range
-		err = mockKv.RemoveWithPrefix("/")
-		require.NoError(t, err)
 		plan.PlanID++
 
 		plan.Timetravel = Timestamp(10000)

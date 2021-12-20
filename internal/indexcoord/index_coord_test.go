@@ -19,11 +19,13 @@ package indexcoord
 import (
 	"context"
 	"math/rand"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/milvus-io/milvus/internal/common"
 
@@ -48,6 +50,8 @@ import (
 )
 
 func TestIndexCoord(t *testing.T) {
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
 	ctx := context.Background()
 	inm0 := &indexnode.Mock{}
 	err := inm0.Init()
@@ -56,7 +60,7 @@ func TestIndexCoord(t *testing.T) {
 	assert.Nil(t, err)
 	err = inm0.Start()
 	assert.Nil(t, err)
-	ic, err := NewIndexCoord(ctx)
+	ic, err := NewIndexCoord(ctx, fac)
 	assert.Nil(t, err)
 	ic.reqTimeoutInterval = time.Second * 10
 	ic.durationInterval = time.Second
@@ -74,7 +78,7 @@ func TestIndexCoord(t *testing.T) {
 	err = inm0.Stop()
 	assert.Nil(t, err)
 
-	in, err := grpcindexnode.NewServer(ctx)
+	in, err := grpcindexnode.NewServer(ctx, fac)
 	assert.Nil(t, err)
 	assert.NotNil(t, in)
 	inm := &indexnode.Mock{

@@ -28,9 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -53,12 +51,12 @@ type segmentLoader struct {
 
 	dataCoord types.DataCoord
 
-	minioKV kv.DataKV // minio minioKV
-	etcdKV  *etcdkv.EtcdKV
+	chunkManager storage.ChunkManager // minio chunkManager
+	etcdKV       *etcdkv.EtcdKV
 
 	indexLoader *indexLoader
 
-	factory msgstream.Factory
+	factory msgstream.MsgFactory
 }
 
 func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
@@ -243,15 +241,15 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 			zap.Any("fieldID", fb.FieldID),
 			zap.String("paths", fmt.Sprintln(fb.Binlogs)),
 		)
-		for _, path := range fb.Binlogs {
-			binLog, err := loader.minioKV.Load(path.GetLogPath())
+		for _, filePath := range fb.Binlogs {
+			binLog, err := loader.chunkManager.Read(filePath.GetLogPath())
 			if err != nil {
 				// TODO: return or continue?
 				return err
 			}
 			blob := &storage.Blob{
-				Key:   path.GetLogPath(),
-				Value: []byte(binLog),
+				Key:   filePath.GetLogPath(),
+				Value: binLog,
 			}
 			blobs = append(blobs, blob)
 		}
@@ -398,7 +396,7 @@ func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPath
 		return nil
 	}
 
-	values, err := loader.minioKV.MultiLoad(binlogPaths)
+	values, err := loader.chunkManager.MultiRead(binlogPaths)
 	if err != nil {
 		return err
 	}
@@ -429,7 +427,7 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
 		for _, log := range deltaLog.GetBinlogs() {
-			value, err := loader.minioKV.Load(log.GetLogPath())
+			value, err := loader.chunkManager.Read(log.GetLogPath())
 			if err != nil {
 				return err
 			}
@@ -602,9 +600,9 @@ func (loader *segmentLoader) estimateSegmentSize(segment *Segment,
 			zap.Any("paths", fb.Binlogs),
 		)
 		for _, binlogPath := range fb.Binlogs {
-			logSize, err := storage.EstimateMemorySize(loader.minioKV, binlogPath.GetLogPath())
+			logSize, err := storage.EstimateMemorySize(loader.chunkManager, binlogPath.GetLogPath())
 			if err != nil {
-				logSize, err = storage.GetBinlogSize(loader.minioKV, binlogPath.GetLogPath())
+				logSize, err = storage.GetBinlogSize(loader.chunkManager, binlogPath.GetLogPath())
 				if err != nil {
 					return 0, err
 				}
@@ -666,32 +664,20 @@ func newSegmentLoader(ctx context.Context,
 	indexCoord types.IndexCoord,
 	historicalReplica ReplicaInterface,
 	streamingReplica ReplicaInterface,
+	f msgstream.MsgFactory,
 	etcdKV *etcdkv.EtcdKV,
-	factory msgstream.Factory) *segmentLoader {
-	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
-	}
+	cm storage.ChunkManager) *segmentLoader {
 
-	client, err := minioKV.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-
-	iLoader := newIndexLoader(ctx, rootCoord, indexCoord, historicalReplica)
+	iLoader := newIndexLoader(ctx, rootCoord, indexCoord, historicalReplica, cm)
 	return &segmentLoader{
 		historicalReplica: historicalReplica,
 		streamingReplica:  streamingReplica,
 
-		minioKV: client,
-		etcdKV:  etcdKV,
+		factory: f,
+
+		chunkManager: cm,
+		etcdKV:       etcdKV,
 
 		indexLoader: iLoader,
-
-		factory: factory,
 	}
 }

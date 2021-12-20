@@ -23,12 +23,13 @@ import (
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/common"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/stretchr/testify/assert"
 )
 
 type mockReplica struct {
@@ -214,8 +215,8 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		pks    = []int64{3, 17, 44, 190, 425}
 	)
 	replica := genMockReplica(segIDs, pks, chanName)
-	kv := memkv.NewMemoryKV()
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), kv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), lcm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 	t.Run("Test get segment by primary keys", func(te *testing.T) {
 		c := &nodeConfig{
 			replica:      replica,

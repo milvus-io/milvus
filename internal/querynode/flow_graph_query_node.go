@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 )
@@ -45,7 +46,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	streamingReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	channel Channel,
-	factory msgstream.Factory) *queryNodeFlowGraph {
+	factory dependency.Factory) *queryNodeFlowGraph {
 
 	ctx1, cancel := context.WithCancel(ctx)
 
@@ -112,7 +113,7 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 	historicalReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	channel Channel,
-	factory msgstream.Factory) *queryNodeFlowGraph {
+	factory dependency.Factory) *queryNodeFlowGraph {
 
 	ctx1, cancel := context.WithCancel(ctx)
 
@@ -174,7 +175,7 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 }
 
 // newDmInputNode returns a new inputNode
-func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
+func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory dependency.Factory) *flowgraph.InputNode {
 	insertStream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
 		log.Warn(err.Error())

@@ -27,7 +27,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -103,7 +102,7 @@ func (bt *BaseTask) Notify(err error) {
 type IndexBuildTask struct {
 	BaseTask
 	index          Index
-	kv             kv.BaseKV
+	chunkManager   storage.ChunkManager
 	etcdKV         *etcdkv.EtcdKV
 	savePaths      []string
 	req            *indexpb.CreateIndexRequest
@@ -303,7 +302,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		return path
 	}
 	getValueByPath := func(path string) ([]byte, error) {
-		data, err := it.kv.Load(path)
+		data, err := it.chunkManager.Read(path)
 		if err != nil {
 			return nil, err
 		}
@@ -427,7 +426,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 				strconv.Itoa(int(partitionID)), strconv.Itoa(int(segmentID)), key)
 		}
 		saveBlob := func(path string, value []byte) error {
-			return it.kv.Save(path, string(value))
+			return it.chunkManager.Write(path, value)
 		}
 
 		it.savePaths = make([]string, len(serializedIndexBlobs))

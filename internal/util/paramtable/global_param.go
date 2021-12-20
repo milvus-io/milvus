@@ -22,9 +22,10 @@ import (
 	"time"
 
 	"github.com/go-basic/ipv4"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -752,6 +753,8 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage float64
 	BalanceIntervalSeconds              int64
 	MemoryUsageMaxDifferencePercentage  float64
+
+	LocalStoragePath string
 }
 
 func (p *queryCoordConfig) init(bp *BaseParamTable) {
@@ -792,6 +795,8 @@ func (p *queryCoordConfig) init(bp *BaseParamTable) {
 	p.initOverloadedMemoryThresholdPercentage()
 	p.initBalanceIntervalSeconds()
 	p.initMemoryUsageMaxDifferencePercentage()
+
+	p.initLocalStoragePath()
 }
 
 func (p *queryCoordConfig) initClusterMsgChannelPrefix() {
@@ -992,6 +997,14 @@ func (p *queryCoordConfig) initDeltaChannelName() {
 	p.DeltaChannelPrefix = strings.Join(s, "-")
 }
 
+func (p *queryCoordConfig) initLocalStoragePath() {
+	root, err := p.BaseParams.Load("localStorage.Path")
+	if err != nil {
+		root = "/tmp/milvus/data"
+	}
+	p.LocalStoragePath = root
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
@@ -1057,6 +1070,9 @@ type queryNodeConfig struct {
 
 	// memory limit
 	OverloadedMemoryThresholdPercentage float64
+
+	LocalStoragePath  string
+	LocalCacheEnabled bool
 }
 
 func (p *queryNodeConfig) init(bp *BaseParamTable) {
@@ -1099,6 +1115,9 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 
 	p.initSkipQueryChannelRecovery()
 	p.initOverloadedMemoryThresholdPercentage()
+
+	p.initLocalStoragePath()
+	p.initLocalStorageEnabled()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -1309,6 +1328,17 @@ func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {
 		panic(err)
 	}
 	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
+}
+
+func (p *queryNodeConfig) initLocalStoragePath() {
+	root, err := p.BaseParams.Load("localStorage.Path")
+	if err != nil {
+		root = "/tmp/milvus/data"
+	}
+	p.LocalStoragePath = root
+}
+func (p *queryNodeConfig) initLocalStorageEnabled() {
+	p.LocalCacheEnabled = p.BaseParams.ParseBool("localStorage.enabled", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1699,6 +1729,8 @@ type dataNodeConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	LocalStoragePath string
 }
 
 func (p *dataNodeConfig) init(bp *BaseParamTable) {
@@ -1733,6 +1765,7 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.initDeltaChannelName()
 
 	//p.initRoleName()
+	p.initLocalStoragePath()
 }
 
 // Refresh is called after session init
@@ -1911,6 +1944,14 @@ func (p *dataNodeConfig) initDeltaChannelName() {
 	p.DeltaChannelName = strings.Join(s, "-")
 }
 
+func (p *dataNodeConfig) initLocalStoragePath() {
+	root, err := p.BaseParams.Load("localStorage.Path")
+	if err != nil {
+		root = "/tmp/milvus/data"
+	}
+	p.LocalStoragePath = root
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- indexcoord ---
 type indexCoordConfig struct {
@@ -1932,6 +1973,8 @@ type indexCoordConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	LocalStoragePath string
 }
 
 func (p *indexCoordConfig) init(bp *BaseParamTable) {
@@ -1947,6 +1990,7 @@ func (p *indexCoordConfig) init(bp *BaseParamTable) {
 	p.initMinioBucketName()
 	p.initIndexStorageRootPath()
 	//p.initRoleName()
+	p.initLocalStoragePath()
 }
 
 func (p *indexCoordConfig) initEtcdEndpoints() {
@@ -2038,6 +2082,14 @@ func (p *indexCoordConfig) initIndexStorageRootPath() {
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
 }
 
+func (p *indexCoordConfig) initLocalStoragePath() {
+	root, err := p.BaseParams.Load("localStorage.Path")
+	if err != nil {
+		root = "/tmp/milvus/data"
+	}
+	p.LocalStoragePath = root
+}
+
 //func (p *indexCoordConfig) initRoleName() {
 //	p.RoleName = "indexcoord"
 //}
@@ -2068,6 +2120,8 @@ type indexNodeConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	LocalStoragePath string
 }
 
 func (p *indexNodeConfig) init(bp *BaseParamTable) {
@@ -2083,6 +2137,7 @@ func (p *indexNodeConfig) init(bp *BaseParamTable) {
 	p.initIndexStorageRootPath()
 	//p.initRoleName()
 	p.initKnowhereSimdType()
+	p.initLocalStoragePath()
 }
 
 // InitAlias initializes an alias for the IndexNode role.
@@ -2169,6 +2224,14 @@ func (p *indexNodeConfig) initKnowhereSimdType() {
 	simdType := p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
 	p.SimdType = simdType
 	log.Debug("initialize the knowhere simd type", zap.String("simd_type", p.SimdType))
+}
+
+func (p *indexNodeConfig) initLocalStoragePath() {
+	root, err := p.BaseParams.Load("localStorage.Path")
+	if err != nil {
+		root = "/tmp/milvus/data"
+	}
+	p.LocalStoragePath = root
 }
 
 ///////////////////////////////////////////////////////////////////////////////

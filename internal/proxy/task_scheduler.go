@@ -24,20 +24,19 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"go.uber.org/zap"
+
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type taskQueue interface {
@@ -381,18 +380,18 @@ type taskScheduler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	msFactory msgstream.Factory
+	f msgstream.MsgFactory
 }
 
 func newTaskScheduler(ctx context.Context,
 	idAllocatorIns idAllocatorInterface,
 	tsoAllocatorIns tsoAllocator,
-	factory msgstream.Factory) (*taskScheduler, error) {
+	factory msgstream.MsgFactory) (*taskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &taskScheduler{
-		ctx:       ctx1,
-		cancel:    cancel,
-		msFactory: factory,
+		ctx:    ctx1,
+		cancel: cancel,
+		f:      factory,
 	}
 	s.ddQueue = newDdTaskQueue(tsoAllocatorIns, idAllocatorIns)
 	s.dmQueue = newDmTaskQueue(tsoAllocatorIns, idAllocatorIns)
@@ -629,7 +628,7 @@ func (qr *queryResultBuf) addPartialResult(result *internalpb.RetrieveResults) {
 func (sched *taskScheduler) collectResultLoop() {
 	defer sched.wg.Done()
 
-	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
+	queryResultMsgStream, _ := sched.f.NewQueryMsgStream(sched.ctx)
 	// proxy didn't need to walk through all the search results in channel, because it no longer has client connections.
 	queryResultMsgStream.AsConsumerWithPosition(Params.ProxyCfg.SearchResultChannelNames, Params.ProxyCfg.ProxySubName, mqclient.SubscriptionPositionLatest)
 	log.Debug("Proxy", zap.Strings("SearchResultChannelNames", Params.ProxyCfg.SearchResultChannelNames),

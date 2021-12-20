@@ -20,12 +20,12 @@ import (
 	"context"
 	"io"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/opentracing/opentracing-go"
 
 	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
-	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/opentracing/opentracing-go"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 // RootCoord implements RoodCoord grpc server
@@ -38,7 +38,7 @@ type RootCoord struct {
 }
 
 // NewRootCoord creates a new RoorCoord
-func NewRootCoord(ctx context.Context, factory msgstream.Factory) (*RootCoord, error) {
+func NewRootCoord(ctx context.Context, factory dependency.Factory) (*RootCoord, error) {
 	svr, err := rc.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err

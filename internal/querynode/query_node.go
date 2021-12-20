@@ -41,11 +41,15 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.uber.org/zap"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -54,8 +58,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	"go.uber.org/zap"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -103,23 +105,24 @@ type QueryNode struct {
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
 
-	msFactory msgstream.Factory
+	f         dependency.Factory
 	scheduler *taskScheduler
 
 	session *sessionutil.Session
 
-	minioKV kv.BaseKV // minio minioKV
-	etcdKV  *etcdkv.EtcdKV
+	remoteChunkManager storage.ChunkManager // minio chunkManager
+	localChunkManager  storage.ChunkManager // minio chunkManager
+	etcdKV             *etcdkv.EtcdKV
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
-func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
+func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		queryService:        nil,
-		msFactory:           factory,
+		f:                   factory,
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
@@ -211,6 +214,28 @@ func (node *QueryNode) Init() error {
 		)
 		node.tSafeReplica = newTSafeReplica()
 
+		node.localChunkManager, err = node.f.NewLocalChunkManager(Params.QueryNodeCfg.LocalStoragePath)
+		if err != nil {
+			log.Debug("queryNode try to init local chunk manager failed", zap.Error(err))
+			initError = err
+			return
+		}
+
+		node.remoteChunkManager, err = node.f.NewRemoteChunkManager(node.queryNodeLoopCtx,
+			storage.Address(Params.QueryNodeCfg.MinioEndPoint),
+			storage.AccessKeyID(Params.QueryNodeCfg.MinioAccessKeyID),
+			storage.SecretAccessKeyID(Params.QueryNodeCfg.MinioSecretAccessKey),
+			storage.UseSSL(Params.QueryNodeCfg.MinioUseSSLStr),
+			storage.BucketName(Params.QueryNodeCfg.MinioBucketName),
+			storage.CreateBucket(true),
+			storage.RootPath(Params.QueryNodeCfg.LocalStoragePath),
+		)
+		if err != nil {
+			log.Debug("queryNode try to new remote chunk manager failed", zap.Error(err))
+			initError = err
+			return
+		}
+
 		streamingReplica := newCollectionReplica(node.etcdKV)
 		historicalReplica := newCollectionReplica(node.etcdKV)
 
@@ -219,10 +244,8 @@ func (node *QueryNode) Init() error {
 			node.etcdKV,
 			node.tSafeReplica,
 		)
-		node.streaming = newStreaming(node.queryNodeLoopCtx,
+		node.streaming = newStreaming(
 			streamingReplica,
-			node.msFactory,
-			node.etcdKV,
 			node.tSafeReplica,
 		)
 
@@ -231,11 +254,12 @@ func (node *QueryNode) Init() error {
 			node.indexCoord,
 			node.historical.replica,
 			node.streaming.replica,
+			node.f,
 			node.etcdKV,
-			node.msFactory)
+			node.remoteChunkManager)
 
-		node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
-		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
+		node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.f)
+		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.f)
 
 		node.InitSegcore()
 
@@ -266,7 +290,7 @@ func (node *QueryNode) Start() error {
 		"PulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
-	err = node.msFactory.SetParams(m)
+	err = node.f.SetParams(m)
 	if err != nil {
 		return err
 	}
@@ -276,7 +300,9 @@ func (node *QueryNode) Start() error {
 	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
-		node.msFactory)
+		node.f,
+		node.localChunkManager,
+		node.remoteChunkManager)
 
 	// start task scheduler
 	go node.scheduler.Start()

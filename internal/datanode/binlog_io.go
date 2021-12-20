@@ -17,21 +17,20 @@
 package datanode
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"path"
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -54,7 +53,7 @@ type uploader interface {
 }
 
 type binlogIO struct {
-	kv.BaseKV
+	storage.ChunkManager
 	allocatorInterface
 }
 
@@ -64,7 +63,7 @@ var _ uploader = (*binlogIO)(nil)
 func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error) {
 	var (
 		err = errStart
-		vs  = []string{}
+		vs  [][]byte
 	)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -81,7 +80,10 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 					<-time.After(50 * time.Millisecond)
 					log.Warn("Try multiloading again", zap.Strings("paths", paths))
 				}
-				vs, err = b.MultiLoad(paths)
+				vs, err = b.MultiRead(paths)
+				if err != nil {
+					log.Warn("multi read failed", zap.Error(err))
+				}
 			}
 		}
 		return nil
@@ -93,7 +95,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 
 	rst := make([]*Blob, len(vs))
 	for i := range rst {
-		rst[i] = &Blob{Value: bytes.NewBufferString(vs[i]).Bytes()}
+		rst[i] = &Blob{Value: vs[i]}
 	}
 
 	return rst, nil
@@ -114,7 +116,7 @@ func (b *binlogIO) upload(
 
 	p := &cpaths{}
 
-	kvs := make(map[string]string)
+	kvs := make(map[string][]byte)
 
 	for _, iData := range iDatas {
 		tf, ok := iData.Data[common.TimeStampField]
@@ -149,7 +151,7 @@ func (b *binlogIO) upload(
 			return nil, err
 		}
 
-		kvs[k] = bytes.NewBuffer(v).String()
+		kvs[k] = v
 		p.deltaInfo = append(p.deltaInfo, &datapb.FieldBinlog{
 			//Field id shall be primary key id
 			Binlogs: []*datapb.Binlog{
@@ -175,7 +177,10 @@ func (b *binlogIO) upload(
 					<-time.After(50 * time.Millisecond)
 					log.Info("retry save binlogs")
 				}
-				err = b.MultiSave(kvs)
+				err = b.MultiWrite(kvs)
+				if err != nil {
+					log.Debug("multi write error", zap.Error(err))
+				}
 			}
 		}
 		return nil
@@ -208,14 +213,14 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 }
 
 // genInsertBlobs returns kvs, insert-paths, stats-paths
-func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string]string, []*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string][]byte, []*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
 	inCodec := storage.NewInsertCodec(meta)
 	inlogs, statslogs, err := inCodec.Serialize(partID, segID, data)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	kvs := make(map[string]string, len(inlogs)+len(statslogs))
+	kvs := make(map[string][]byte, len(inlogs)+len(statslogs))
 	inpaths := make([]*datapb.FieldBinlog, 0, len(inlogs))
 	statspaths := make([]*datapb.FieldBinlog, 0, len(statslogs))
 
@@ -233,7 +238,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		k := JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
 		key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
 
-		value := bytes.NewBuffer(blob.GetValue()).String()
+		value := blob.GetValue()
 		fileLen := len(value)
 
 		kvs[key] = value
@@ -255,7 +260,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		k := JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
 		key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
 
-		value := bytes.NewBuffer(blob.GetValue()).String()
+		value := blob.GetValue()
 		fileLen := len(value)
 
 		kvs[key] = value
@@ -298,5 +303,4 @@ func (b *binlogIO) idxGenerator(n int, done <-chan struct{}) (<-chan UniqueID, e
 }
 
 func (b *binlogIO) close() {
-	b.Close()
 }

@@ -74,8 +74,7 @@ type MsgStream interface {
 	SeekReaders(msgPositions []*internalpb.MsgPosition) error
 }
 
-// Factory is an interface that can be used to generate a new msgstream object
-type Factory interface {
+type MsgFactory interface {
 	SetParams(params map[string]interface{}) error
 	NewMsgStream(ctx context.Context) (MsgStream, error)
 	NewTtMsgStream(ctx context.Context) (MsgStream, error)

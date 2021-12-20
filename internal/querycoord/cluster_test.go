@@ -29,9 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -54,6 +52,7 @@ const (
 	defaultDim        = 128
 	defaultMetricType = "JACCARD"
 	defaultKVRootPath = "query-coord-unittest"
+	testLocalStorage  = "/tmp/milvus/data"
 )
 
 type constFieldParam struct {
@@ -92,7 +91,7 @@ var uidField = constFieldParam{
 
 type indexParam = map[string]string
 
-func segSizeEstimateForTest(segments *querypb.LoadSegmentsRequest, dataKV kv.DataKV) (int64, error) {
+func segSizeEstimateForTest(segments *querypb.LoadSegmentsRequest, cm storage.ChunkManager) (int64, error) {
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(segments.Schema)
 	if err != nil {
 		return 0, err
@@ -237,8 +236,8 @@ func genStorageBlob(collectionID UniqueID,
 	return binLogs, err
 }
 
-func saveSimpleBinLog(ctx context.Context, schema *schemapb.CollectionSchema, dataKV kv.DataKV) ([]*datapb.FieldBinlog, error) {
-	return saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultNumRowPerSegment, schema, dataKV)
+func saveSimpleBinLog(ctx context.Context, schema *schemapb.CollectionSchema, cm storage.ChunkManager) ([]*datapb.FieldBinlog, error) {
+	return saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultNumRowPerSegment, schema, cm)
 }
 
 func saveBinLog(ctx context.Context,
@@ -247,14 +246,14 @@ func saveBinLog(ctx context.Context,
 	segmentID UniqueID,
 	msgLength int,
 	schema *schemapb.CollectionSchema,
-	dataKV kv.DataKV) ([]*datapb.FieldBinlog, error) {
+	cm storage.ChunkManager) ([]*datapb.FieldBinlog, error) {
 	binLogs, err := genStorageBlob(collectionID, partitionID, segmentID, msgLength, schema)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Debug(".. [query coord unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
-	kvs := make(map[string]string, len(binLogs))
+	kvs := make(map[string][]byte, len(binLogs))
 
 	// write insert binlog
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
@@ -266,7 +265,7 @@ func saveBinLog(ctx context.Context,
 		}
 
 		key := genKey(collectionID, partitionID, segmentID, fieldID)
-		kvs[key] = string(blob.Value[:])
+		kvs[key] = blob.Value[:]
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
 			Binlogs: []*datapb.Binlog{{LogPath: key}},
@@ -274,7 +273,7 @@ func saveBinLog(ctx context.Context,
 	}
 	log.Debug("[QueryCoord unittest] save binlog file to MinIO/S3")
 
-	err = dataKV.MultiSave(kvs)
+	err = cm.MultiWrite(kvs)
 	return fieldBinlog, err
 }
 
@@ -334,16 +333,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 		return nil, err
 	}
 
-	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
-		CreateBucket:      true,
-	}
-
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
+	cm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +366,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	for _, index := range serializedIndexBlobs {
 		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := kv.Save(p, string(index.Value))
+		err := cm.Write(p, index.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -649,17 +639,8 @@ func TestGrpcRequest(t *testing.T) {
 func TestEstimateSegmentSize(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
-	}
 
-	dataKV, err := minioKV.NewMinIOKV(baseCtx, option)
-	assert.Nil(t, err)
+	cm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 	schema := genCollectionSchema(defaultCollectionID, false)
 	binlog := []*datapb.FieldBinlog{
 		{
@@ -682,16 +663,16 @@ func TestEstimateSegmentSize(t *testing.T) {
 		CollectionID: defaultCollectionID,
 	}
 
-	size, err := estimateSegmentsSize(loadReq, dataKV)
+	size, err := estimateSegmentsSize(loadReq, cm)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1024), size)
 
-	binlog, err = saveSimpleBinLog(baseCtx, schema, dataKV)
+	binlog, err = saveSimpleBinLog(baseCtx, schema, cm)
 	assert.NoError(t, err)
 
 	loadInfo.BinlogPaths = binlog
 
-	size, err = estimateSegmentsSize(loadReq, dataKV)
+	size, err = estimateSegmentsSize(loadReq, cm)
 	assert.NoError(t, err)
 	assert.NotEqual(t, int64(1024), size)
 
@@ -705,15 +686,17 @@ func TestEstimateSegmentSize(t *testing.T) {
 	loadInfo.IndexPathInfos = []*indexpb.IndexFilePathInfo{indexInfo}
 	loadInfo.EnableIndex = true
 
-	size, err = estimateSegmentsSize(loadReq, dataKV)
+	size, err = estimateSegmentsSize(loadReq, cm)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1024), size)
 
 	indexInfo.IndexFilePaths = []string{"&*^*(^*(&*%^&*^(&"}
 	indexInfo.SerializedSize = 0
-	size, err = estimateSegmentsSize(loadReq, dataKV)
+	size, err = estimateSegmentsSize(loadReq, cm)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(0), size)
 
+	err = cm.RemoveWithPrefix(testLocalStorage)
+	assert.Nil(t, err)
 	cancel()
 }

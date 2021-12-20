@@ -30,22 +30,24 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	"go.uber.org/zap"
 )
 
 const (
@@ -94,7 +96,7 @@ type QueryCoord struct {
 	stateCode  atomic.Value
 	enableGrpc bool
 
-	msFactory msgstream.Factory
+	f dependency.Factory
 }
 
 // Register register query service at etcd
@@ -169,14 +171,28 @@ func (qc *QueryCoord) Init() error {
 		}
 
 		// init meta
-		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.msFactory, qc.idAllocator)
+		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.f, qc.idAllocator)
 		if initError != nil {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
 			return
 		}
 
+		chunkManager, initError := qc.f.NewRemoteChunkManager(qc.loopCtx,
+			storage.Address(Params.QueryCoordCfg.MinioEndPoint),
+			storage.AccessKeyID(Params.QueryCoordCfg.MinioAccessKeyID),
+			storage.SecretAccessKeyID(Params.QueryCoordCfg.MinioSecretAccessKey),
+			storage.UseSSL(Params.QueryCoordCfg.MinioUseSSLStr),
+			storage.BucketName(Params.QueryCoordCfg.MinioBucketName),
+			storage.CreateBucket(true),
+			storage.RootPath(Params.QueryCoordCfg.LocalStoragePath),
+		)
+		if initError != nil {
+			log.Error("query coordinator init chunkManager failed", zap.Error(initError))
+			return
+		}
+
 		// init cluster
-		qc.cluster, initError = newQueryNodeCluster(qc.loopCtx, qc.meta, qc.kvClient, qc.newNodeFn, qc.session)
+		qc.cluster, initError = newQueryNodeCluster(qc.loopCtx, qc.meta, qc.kvClient, qc.newNodeFn, qc.session, chunkManager)
 		if initError != nil {
 			log.Error("query coordinator init cluster failed", zap.Error(initError))
 			return
@@ -208,7 +224,7 @@ func (qc *QueryCoord) Start() error {
 		"PulsarAddress":  Params.QueryCoordCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
-	err := qc.msFactory.SetParams(m)
+	err := qc.f.SetParams(m)
 	if err != nil {
 		return err
 	}
@@ -267,7 +283,7 @@ func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 }
 
 // NewQueryCoord creates a QueryCoord object.
-func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	queryChannels := make([]*queryChannelInfo, 0)
 	channelID := len(queryChannels)
@@ -285,7 +301,7 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	service := &QueryCoord{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
-		msFactory:  factory,
+		f:          factory,
 		newNodeFn:  newQueryNode,
 	}
 

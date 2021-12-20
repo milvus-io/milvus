@@ -20,11 +20,12 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"go.uber.org/zap"
 )
 
 type statsService struct {
@@ -34,10 +35,10 @@ type statsService struct {
 
 	fieldStatsChan chan []*internalpb.FieldStats
 	statsStream    msgstream.MsgStream
-	msFactory      msgstream.Factory
+	msgFactory     msgstream.MsgFactory
 }
 
-func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsChan chan []*internalpb.FieldStats, factory msgstream.Factory) *statsService {
+func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsChan chan []*internalpb.FieldStats, factory msgstream.MsgFactory) *statsService {
 
 	return &statsService{
 		ctx: ctx,
@@ -47,7 +48,7 @@ func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsCh
 		fieldStatsChan: fieldStatsChan,
 		statsStream:    nil,
 
-		msFactory: factory,
+		msgFactory: factory,
 	}
 }
 
@@ -57,7 +58,7 @@ func (sService *statsService) start() {
 	// start pulsar
 	producerChannels := []string{Params.QueryNodeCfg.StatsChannelName}
 
-	statsStream, _ := sService.msFactory.NewMsgStream(sService.ctx)
+	statsStream, _ := sService.msgFactory.NewMsgStream(sService.ctx)
 	statsStream.AsProducer(producerChannels)
 	log.Debug("QueryNode statsService AsProducer succeed", zap.Strings("channels", producerChannels))
 

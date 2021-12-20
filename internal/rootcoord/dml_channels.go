@@ -36,14 +36,14 @@ type dmlMsgStream struct {
 
 type dmlChannels struct {
 	ctx        context.Context
-	factory    msgstream.Factory
+	factory    msgstream.MsgFactory
 	namePrefix string
 	capacity   int64
 	idx        *atomic.Int64
 	pool       sync.Map
 }
 
-func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePrefix string, chanNum int64) *dmlChannels {
+func newDmlChannels(ctx context.Context, factory msgstream.MsgFactory, chanNamePrefix string, chanNum int64) *dmlChannels {
 	d := &dmlChannels{
 		ctx:        ctx,
 		factory:    factory,

@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -115,7 +116,7 @@ func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
 	collectionID UniqueID,
 	channel Channel,
-	factory msgstream.Factory) *serviceTimeNode {
+	factory dependency.Factory) *serviceTimeNode {
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism

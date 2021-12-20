@@ -18,7 +18,10 @@ package grpcindexcoordclient
 
 import (
 	"context"
+	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 	"github.com/milvus-io/milvus/internal/indexcoord"
@@ -26,14 +29,16 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestIndexCoordClient(t *testing.T) {
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
 	ClientParams.InitOnce(typeutil.IndexCoordRole)
 	ctx := context.Background()
-	server, err := grpcindexcoord.NewServer(ctx)
+	server, err := grpcindexcoord.NewServer(ctx, fac)
 	assert.Nil(t, err)
 	icm := &indexcoord.Mock{}
 	err = server.SetClient(icm)

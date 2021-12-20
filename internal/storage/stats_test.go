@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -39,6 +38,6 @@ func TestStatsWriter_StatsInt64(t *testing.T) {
 	}
 
 	msgs := []int64{}
-	err = sw.StatsInt64(rootcoord.RowIDField, true, msgs)
+	err = sw.StatsInt64(common.RowIDField, true, msgs)
 	assert.Nil(t, err)
 }

@@ -27,23 +27,27 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+
 	dn "github.com/milvus-io/milvus/internal/datanode"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+
+	"google.golang.org/grpc/keepalive"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -56,8 +60,6 @@ type Server struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	msFactory msgstream.Factory
-
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
@@ -68,12 +70,11 @@ type Server struct {
 }
 
 // NewServer new data node grpc server
-func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	var s = &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
-		msFactory:   factory,
 		grpcErrChan: make(chan error),
 		newRootCoordClient: func(etcdMetaRoot string, etcdEndpoints []string) (types.RootCoord, error) {
 			return rcc.NewClient(ctx1, etcdMetaRoot, etcdEndpoints)
@@ -83,7 +84,7 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		},
 	}
 
-	s.datanode = dn.NewDataNode(s.ctx, s.msFactory)
+	s.datanode = dn.NewDataNode(s.ctx, factory)
 
 	return s, nil
 }

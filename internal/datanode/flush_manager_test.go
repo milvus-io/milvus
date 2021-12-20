@@ -17,20 +17,20 @@
 package datanode
 
 import (
-	"context"
 	"crypto/rand"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 type emptyFlushTask struct{}
@@ -137,13 +137,13 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 }
 
 func TestRendezvousFlushManager(t *testing.T) {
-	kv := memkv.NewMemoryKV()
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
 	size := 1000
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+	m := NewRendezvousFlushManager(&allocator{}, lcm, newMockReplica(), func(pack *segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
 	}, emptyFlushAndDropFunc)
@@ -173,7 +173,7 @@ func TestRendezvousFlushManager(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_Inject(t *testing.T) {
-	kv := memkv.NewMemoryKV()
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
 	size := 1000
 	var counter atomic.Int64
@@ -181,7 +181,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	finish.Add(size)
 	var packMut sync.Mutex
 	packs := make([]*segmentFlushPack, 0, size+3)
-	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+	m := NewRendezvousFlushManager(&allocator{}, lcm, newMockReplica(), func(pack *segmentFlushPack) {
 		packMut.Lock()
 		packs = append(packs, pack)
 		packMut.Unlock()
@@ -275,9 +275,9 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
-	memkv := memkv.NewMemoryKV()
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 	replica := newMockReplica()
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, replica, func(*segmentFlushPack) {
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), lcm, replica, func(*segmentFlushPack) {
 	}, emptyFlushAndDropFunc)
 
 	// non exists segment
@@ -296,13 +296,13 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
-	kv := memkv.NewMemoryKV()
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
 	size := 1000
 	var counter atomic.Int64
 	var finish sync.WaitGroup
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+	m := NewRendezvousFlushManager(&allocator{}, lcm, newMockReplica(), func(pack *segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
 	}, emptyFlushAndDropFunc)
@@ -366,13 +366,13 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 
 func TestRendezvousFlushManager_dropMode(t *testing.T) {
 	t.Run("test drop mode", func(t *testing.T) {
-		kv := memkv.NewMemoryKV()
+		lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
 		var mut sync.Mutex
 		var result []*segmentFlushPack
 		signal := make(chan struct{})
 
-		m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+		m := NewRendezvousFlushManager(&allocator{}, lcm, newMockReplica(), func(pack *segmentFlushPack) {
 		}, func(packs []*segmentFlushPack) {
 			mut.Lock()
 			result = packs
@@ -418,13 +418,13 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		assert.Equal(t, len(target), len(output))
 	})
 	t.Run("test drop mode with injection", func(t *testing.T) {
-		kv := memkv.NewMemoryKV()
+		lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
 		var mut sync.Mutex
 		var result []*segmentFlushPack
 		signal := make(chan struct{})
 
-		m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+		m := NewRendezvousFlushManager(&allocator{}, lcm, newMockReplica(), func(pack *segmentFlushPack) {
 		}, func(packs []*segmentFlushPack) {
 			mut.Lock()
 			result = packs
@@ -477,13 +477,13 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_close(t *testing.T) {
-	kv := memkv.NewMemoryKV()
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
 	size := 1000
 	var counter atomic.Int64
 	finish := sync.WaitGroup{}
 	finish.Add(size)
-	m := NewRendezvousFlushManager(&allocator{}, kv, newMockReplica(), func(pack *segmentFlushPack) {
+	m := NewRendezvousFlushManager(&allocator{}, lcm, newMockReplica(), func(pack *segmentFlushPack) {
 		counter.Inc()
 		finish.Done()
 	}, emptyFlushAndDropFunc)
@@ -514,10 +514,10 @@ func TestRendezvousFlushManager_close(t *testing.T) {
 }
 
 func TestFlushNotifyFunc(t *testing.T) {
-	ctx := context.Background()
 	rcf := &RootCoordFactory{}
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 
-	replica, err := newReplica(ctx, rcf, 1)
+	replica, err := newReplica(rcf, 1, lcm)
 	require.NoError(t, err)
 
 	dataCoord := &DataCoordFactory{}
@@ -565,9 +565,9 @@ func TestFlushNotifyFunc(t *testing.T) {
 }
 
 func TestDropVirtualChannelFunc(t *testing.T) {
-	ctx := context.Background()
 	rcf := &RootCoordFactory{}
-	replica, err := newReplica(ctx, rcf, 1)
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
+	replica, err := newReplica(rcf, 1, lcm)
 	require.NoError(t, err)
 
 	dataCoord := &DataCoordFactory{}

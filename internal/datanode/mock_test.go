@@ -23,6 +23,7 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -50,7 +52,8 @@ const debug = false
 var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
 
 func newIDLEDataNodeMock(ctx context.Context) *DataNode {
-	msFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	msFactory := dependency.NewStandAloneDependencyFactory()
 	node := NewDataNode(ctx, msFactory)
 
 	rc := &RootCoordFactory{
@@ -81,7 +84,8 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 		}()
 	}
 
-	msFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	msFactory := dependency.NewStandAloneDependencyFactory()
 	node := NewDataNode(ctx, msFactory)
 
 	ms := &RootCoordFactory{
@@ -208,7 +212,7 @@ func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.
 func (mf *MetaFactory) GetCollectionMeta(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
 	sch := schemapb.CollectionSchema{
 		Name:        collectionName,
-		Description: "test collection by meta factory",
+		Description: "test collection by meta f",
 		AutoID:      true,
 		Fields: []*schemapb.FieldSchema{
 			{
@@ -693,7 +697,7 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.
 
 // FailMessageStreamFactory mock MessageStreamFactory failure
 type FailMessageStreamFactory struct {
-	msgstream.Factory
+	dependency.Factory
 }
 
 func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {

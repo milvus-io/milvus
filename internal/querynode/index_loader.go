@@ -25,8 +25,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -50,7 +48,7 @@ type indexLoader struct {
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
 
-	kv kv.DataKV // minio kv
+	chunkManager storage.ChunkManager // minio chunkManager
 }
 
 func (loader *indexLoader) loadIndex(segment *Segment, fieldID FieldID) error {
@@ -116,7 +114,7 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 	indexCodec := storage.NewIndexFileBinlogCodec()
 	for _, p := range indexPath {
 		log.Debug("", zap.String("load path", fmt.Sprintln(p)))
-		indexPiece, err := loader.kv.Load(p)
+		indexPiece, err := loader.chunkManager.Read(p)
 		if err != nil {
 			return nil, nil, "", err
 		}
@@ -155,9 +153,9 @@ func (loader *indexLoader) estimateIndexBinlogSize(segment *Segment, fieldID Fie
 	indexSize := int64(0)
 	indexPaths := segment.getIndexPaths(fieldID)
 	for _, p := range indexPaths {
-		logSize, err := storage.EstimateMemorySize(loader.kv, p)
+		logSize, err := storage.EstimateMemorySize(loader.chunkManager, p)
 		if err != nil {
-			logSize, err = storage.GetBinlogSize(loader.kv, p)
+			logSize, err = storage.GetBinlogSize(loader.chunkManager, p)
 			if err != nil {
 				return 0, err
 			}
@@ -238,21 +236,11 @@ func (loader *indexLoader) setIndexInfo(segment *Segment, info *indexInfo) {
 	segment.setIndexInfo(info.fieldID, info)
 }
 
-func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface) *indexLoader {
-	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
-	}
-
-	client, err := minioKV.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-
+func newIndexLoader(ctx context.Context,
+	rootCoord types.RootCoord,
+	indexCoord types.IndexCoord,
+	replica ReplicaInterface,
+	cm storage.ChunkManager) *indexLoader {
 	return &indexLoader{
 		ctx:     ctx,
 		replica: replica,
@@ -260,10 +248,9 @@ func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord t
 		fieldIndexes:   make(map[string][]*internalpb.IndexStats),
 		fieldStatsChan: make(chan []*internalpb.FieldStats, 1024),
 
-		rootCoord:  rootCoord,
-		indexCoord: indexCoord,
-
-		kv: client,
+		rootCoord:    rootCoord,
+		indexCoord:   indexCoord,
+		chunkManager: cm,
 	}
 }
 

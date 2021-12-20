@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 
 	"go.uber.org/zap"
@@ -81,10 +82,9 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/querynode"
 
-	"github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/querycoord"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
@@ -97,14 +97,7 @@ const (
 	sleepDuration = time.Millisecond * 200
 )
 
-func newMsgFactory(localMsg bool) msgstream.Factory {
-	if localMsg {
-		return msgstream.NewRmsFactory()
-	}
-	return msgstream.NewPmsFactory()
-}
-
-func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
+func runRootCoord(ctx context.Context, localMsg bool, factory dependency.Factory) *grpcrootcoord.Server {
 	var rc *grpcrootcoord.Server
 	var wg sync.WaitGroup
 
@@ -116,7 +109,6 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
 		var err error
 		rc, err = grpcrootcoord.NewServer(ctx, factory)
 		if err != nil {
@@ -134,7 +126,7 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	return rc
 }
 
-func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
+func runQueryCoord(ctx context.Context, localMsg bool, factory dependency.Factory) *grpcquerycoord.Server {
 	var qs *grpcquerycoord.Server
 	var wg sync.WaitGroup
 
@@ -147,7 +139,6 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
 		var err error
 		qs, err = grpcquerycoord.NewServer(ctx, factory)
 		if err != nil {
@@ -165,7 +156,7 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 	return qs
 }
 
-func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcquerynode.Server {
+func runQueryNode(ctx context.Context, localMsg bool, alias string, factory dependency.Factory) *grpcquerynode.Server {
 	var qn *grpcquerynode.Server
 	var wg sync.WaitGroup
 
@@ -179,7 +170,6 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
 		var err error
 		qn, err = grpcquerynode.NewServer(ctx, factory)
 		if err != nil {
@@ -197,7 +187,7 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 	return qn
 }
 
-func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Server {
+func runDataCoord(ctx context.Context, localMsg bool, factory dependency.Factory) *grpcdatacoordclient.Server {
 	var ds *grpcdatacoordclient.Server
 	var wg sync.WaitGroup
 
@@ -210,7 +200,6 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
 		var err error
 		ds, err = grpcdatacoordclient.NewServer(ctx, factory)
 		if err != nil {
@@ -228,7 +217,7 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 	return ds
 }
 
-func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode.Server {
+func runDataNode(ctx context.Context, localMsg bool, alias string, factory dependency.Factory) *grpcdatanode.Server {
 	var dn *grpcdatanode.Server
 	var wg sync.WaitGroup
 
@@ -242,7 +231,6 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
 		var err error
 		dn, err = grpcdatanode.NewServer(ctx, factory)
 		if err != nil {
@@ -260,7 +248,7 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 	return dn
 }
 
-func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
+func runIndexCoord(ctx context.Context, localMsg bool, factory dependency.Factory) *grpcindexcoord.Server {
 	var is *grpcindexcoord.Server
 	var wg sync.WaitGroup
 
@@ -274,7 +262,7 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 		}
 
 		var err error
-		is, err = grpcindexcoord.NewServer(ctx)
+		is, err = grpcindexcoord.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -290,7 +278,7 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 	return is
 }
 
-func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexnode.Server {
+func runIndexNode(ctx context.Context, localMsg bool, alias string, factory dependency.Factory) *grpcindexnode.Server {
 	var in *grpcindexnode.Server
 	var wg sync.WaitGroup
 
@@ -305,7 +293,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 		}
 
 		var err error
-		in, err = grpcindexnode.NewServer(ctx)
+		in, err = grpcindexnode.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -331,10 +319,11 @@ func TestProxy(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	localMsg := true
-	factory := newMsgFactory(localMsg)
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	factory := dependency.NewStandAloneDependencyFactory()
 	alias := "TestProxy"
 
-	rc := runRootCoord(ctx, localMsg)
+	rc := runRootCoord(ctx, localMsg, factory)
 	log.Info("running root coordinator ...")
 
 	if rc != nil {
@@ -345,7 +334,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	dc := runDataCoord(ctx, localMsg)
+	dc := runDataCoord(ctx, localMsg, factory)
 	log.Info("running data coordinator ...")
 
 	if dc != nil {
@@ -356,7 +345,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	dn := runDataNode(ctx, localMsg, alias)
+	dn := runDataNode(ctx, localMsg, alias, factory)
 	log.Info("running data node ...")
 
 	if dn != nil {
@@ -367,7 +356,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	qc := runQueryCoord(ctx, localMsg)
+	qc := runQueryCoord(ctx, localMsg, factory)
 	log.Info("running query coordinator ...")
 
 	if qc != nil {
@@ -378,7 +367,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	qn := runQueryNode(ctx, localMsg, alias)
+	qn := runQueryNode(ctx, localMsg, alias, factory)
 	log.Info("running query node ...")
 
 	if qn != nil {
@@ -389,7 +378,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	ic := runIndexCoord(ctx, localMsg)
+	ic := runIndexCoord(ctx, localMsg, factory)
 	log.Info("running index coordinator ...")
 
 	if ic != nil {
@@ -400,7 +389,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	in := runIndexNode(ctx, localMsg, alias)
+	in := runIndexNode(ctx, localMsg, alias, factory)
 	log.Info("running index node ...")
 
 	if in != nil {

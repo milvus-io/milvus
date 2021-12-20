@@ -19,9 +19,10 @@ package datacoord
 import (
 	"testing"
 
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/stretchr/testify/assert"
 	"stathat.com/c/consistent"
+
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )
 
 func TestReload(t *testing.T) {

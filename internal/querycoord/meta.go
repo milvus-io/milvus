@@ -93,7 +93,7 @@ type MetaReplica struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	client      kv.MetaKv // client of a reliable kv service, i.e. etcd client
-	msFactory   msgstream.Factory
+	msFactory   msgstream.MsgFactory
 	idAllocator func() (UniqueID, error)
 
 	//sync.RWMutex
@@ -113,7 +113,7 @@ type MetaReplica struct {
 	//partitionStates map[UniqueID]*querypb.PartitionStates
 }
 
-func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
+func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.MsgFactory, idAllocator func() (UniqueID, error)) (Meta, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)

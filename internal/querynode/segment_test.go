@@ -1104,7 +1104,7 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 			Offset:     []int64{0},
 			FieldsData: fieldData,
 		}
-		err = segment.fillVectorFieldsData(defaultCollectionID, vecCM, result)
+		err = segment.fillVectorFieldsData(vecCM, result)
 		assert.Error(t, err)
 	})
 }

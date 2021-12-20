@@ -575,8 +575,8 @@ func TestWatchChannel(t *testing.T) {
 		bs, err = proto.Marshal(&info)
 		assert.NoError(t, err)
 
-		node.msFactory = &FailMessageStreamFactory{
-			node.msFactory,
+		node.f = &FailMessageStreamFactory{
+			node.f,
 		}
 		node.handleWatchInfo("test3", bs)
 		node.chanMut.RLock()

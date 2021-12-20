@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
 	"sync"
 	"testing"
@@ -29,8 +30,9 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -41,10 +43,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 type proxyMock struct {
@@ -66,6 +68,9 @@ func TestGrpcService(t *testing.T) {
 		fieldID   = 100
 		segID     = 1001
 	)
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
+
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
@@ -74,8 +79,7 @@ func TestGrpcService(t *testing.T) {
 	t.Log("newParams.Address:", Params.GetAddress())
 
 	ctx := context.Background()
-	msFactory := msgstream.NewPmsFactory()
-	svr, err := NewServer(ctx, msFactory)
+	svr, err := NewServer(ctx, fac)
 	assert.Nil(t, err)
 
 	rootcoord.Params.Init()

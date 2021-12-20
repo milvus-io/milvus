@@ -33,29 +33,35 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/common"
+
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -112,17 +118,17 @@ type DataNode struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	session *sessionutil.Session
-	watchKv kv.MetaKv
-	blobKv  kv.BaseKV
+	session      *sessionutil.Session
+	watchKv      kv.MetaKv
+	chunkManager storage.ChunkManager
 
 	closer io.Closer
 
-	msFactory msgstream.Factory
+	f dependency.Factory
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
+func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
@@ -132,7 +138,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
 		rootCoord:          nil,
 		dataCoord:          nil,
-		msFactory:          factory,
+		f:                  factory,
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
@@ -328,7 +334,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return nil
 	}
 
-	replica, err := newReplica(node.ctx, node.rootCoord, vchan.CollectionID)
+	replica, err := newReplica(node.rootCoord, vchan.CollectionID, node.chunkManager)
 	if err != nil {
 		return err
 	}
@@ -342,7 +348,7 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 
 	flushCh := make(chan flushMsg, 100)
 
-	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache, node.blobKv, node.compactionExecutor)
+	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.f, vchan, node.clearSignal, node.dataCoord, node.segmentCache, node.chunkManager, node.compactionExecutor)
 	if err != nil {
 		return err
 	}
@@ -423,21 +429,19 @@ func (node *DataNode) Start() error {
 		return errors.New("DataNode fail to connect etcd")
 	}
 
-	option := &miniokv.Option{
-		Address:           Params.DataNodeCfg.MinioAddress,
-		AccessKeyID:       Params.DataNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.DataNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.DataNodeCfg.MinioUseSSL,
-		CreateBucket:      true,
-		BucketName:        Params.DataNodeCfg.MinioBucketName,
-	}
+	node.chunkManager, err = node.f.NewRemoteChunkManager(node.ctx,
+		storage.Address(Params.DataNodeCfg.MinioAddress),
+		storage.AccessKeyID(Params.DataNodeCfg.MinioAccessKeyID),
+		storage.SecretAccessKeyID(Params.DataNodeCfg.MinioSecretAccessKey),
+		storage.UseSSL(Params.DataNodeCfg.MinioUseSSL),
+		storage.BucketName(Params.DataNodeCfg.MinioBucketName),
+		storage.CreateBucket(true),
+		storage.RootPath(Params.DataNodeCfg.LocalStoragePath),
+	)
 
-	kv, err := miniokv.NewMinIOKV(node.ctx, option)
 	if err != nil {
 		return err
 	}
-
-	node.blobKv = kv
 
 	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
 		return errors.New("DataNode fail to start")
@@ -770,7 +774,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return status, nil
 	}
 
-	binlogIO := &binlogIO{node.blobKv, ds.idAllocator}
+	binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
 	task := newCompactionTask(
 		node.ctx,
 		binlogIO, binlogIO,

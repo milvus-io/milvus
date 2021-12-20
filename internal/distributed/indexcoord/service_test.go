@@ -18,19 +18,24 @@ package grpcindexcoord
 
 import (
 	"context"
+	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 func TestIndexCoordinateServer(t *testing.T) {
 	ctx := context.Background()
-	server, err := NewServer(ctx)
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
+	server, err := NewServer(ctx, fac)
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 	indexCoordClient := &indexcoord.Mock{}

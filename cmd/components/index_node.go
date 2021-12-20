@@ -19,10 +19,10 @@ package components
 import (
 	"context"
 
+	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 // IndexNode implements IndexNode grpc server
@@ -31,10 +31,10 @@ type IndexNode struct {
 }
 
 // NewIndexNode creates a new IndexNode
-func NewIndexNode(ctx context.Context) (*IndexNode, error) {
+func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, error) {
 	var err error
 	n := &IndexNode{}
-	svr, err := grpcindexnode.NewServer(ctx)
+	svr, err := grpcindexnode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}

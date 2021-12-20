@@ -25,6 +25,10 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -32,13 +36,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -225,9 +227,9 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 // NewServer create a new IndexCoord grpc server.
-func NewServer(ctx context.Context) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	serverImp, err := indexcoord.NewIndexCoord(ctx)
+	serverImp, err := indexcoord.NewIndexCoord(ctx, factory)
 	if err != nil {
 		defer cancel()
 		return nil, err

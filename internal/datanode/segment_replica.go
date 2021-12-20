@@ -27,8 +27,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -105,8 +103,8 @@ type SegmentReplica struct {
 	flushedSegments   map[UniqueID]*Segment
 	compactedSegments map[UniqueID]*Segment
 
-	metaService *metaService
-	minIOKV     kv.BaseKV
+	metaService  *metaService
+	chunkManager storage.ChunkManager
 }
 
 func (s *Segment) updatePKRange(pks []int64) {
@@ -130,21 +128,7 @@ func (s *Segment) updatePKRange(pks []int64) {
 
 var _ Replica = &SegmentReplica{}
 
-func newReplica(ctx context.Context, rc types.RootCoord, collID UniqueID) (*SegmentReplica, error) {
-	// MinIO
-	option := &miniokv.Option{
-		Address:           Params.DataNodeCfg.MinioAddress,
-		AccessKeyID:       Params.DataNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.DataNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.DataNodeCfg.MinioUseSSL,
-		CreateBucket:      true,
-		BucketName:        Params.DataNodeCfg.MinioBucketName,
-	}
-
-	minIOKV, err := miniokv.NewMinIOKV(ctx, option)
-	if err != nil {
-		return nil, err
-	}
+func newReplica(rc types.RootCoord, collID UniqueID, cm storage.ChunkManager) (*SegmentReplica, error) {
 
 	metaService := newMetaService(rc, collID)
 
@@ -156,8 +140,8 @@ func newReplica(ctx context.Context, rc types.RootCoord, collID UniqueID) (*Segm
 		flushedSegments:   make(map[UniqueID]*Segment),
 		compactedSegments: make(map[UniqueID]*Segment),
 
-		metaService: metaService,
-		minIOKV:     minIOKV,
+		metaService:  metaService,
+		chunkManager: cm,
 	}
 
 	return replica, nil
@@ -440,7 +424,7 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 		}
 	}
 
-	values, err := replica.minIOKV.MultiLoad(bloomFilterFiles)
+	values, err := replica.chunkManager.MultiRead(bloomFilterFiles)
 	if err != nil {
 		return err
 	}

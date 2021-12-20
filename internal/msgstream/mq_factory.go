@@ -21,7 +21,9 @@ import (
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/mitchellh/mapstructure"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 	rocksmqserver "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
@@ -69,7 +71,7 @@ func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 }
 
 // NewPmsFactory is used to generate a new PmsFactory object
-func NewPmsFactory() Factory {
+func NewPmsFactory() *PmsFactory {
 	f := &PmsFactory{
 		dispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    64,
@@ -123,13 +125,16 @@ func (f *RmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 }
 
 // NewRmsFactory is used to generate a new RmsFactory object
-func NewRmsFactory() Factory {
+func NewRmsFactory() *RmsFactory {
 	f := &RmsFactory{
 		dispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    1024,
 		RmqBufSize:        1024,
 	}
 
-	rocksmqserver.InitRocksMQ()
+	err := rocksmqserver.InitRocksMQ()
+	if err != nil {
+		log.Debug("init rocks mq failed", zap.Error(err))
+	}
 	return f
 }

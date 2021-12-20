@@ -28,12 +28,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
@@ -73,7 +73,7 @@ func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 type testInfo struct {
 	isValidCase  bool
 	replicaNil   bool
-	inMsgFactory msgstream.Factory
+	inMsgFactory msgstream.MsgFactory
 
 	collID   UniqueID
 	chanName string
@@ -94,6 +94,10 @@ type testInfo struct {
 func TestDataSyncService_newDataSyncService(te *testing.T) {
 
 	ctx := context.Background()
+
+	chunkFactory := storage.NewStandAloneChunkManagerFactory()
+	lcm, err := chunkFactory.NewLocalChunkManager(Params.DataNodeCfg.LocalStoragePath)
+	assert.Nil(te, err)
 
 	tests := []*testInfo{
 		{false, false, &mockMsgStreamFactory{false, true},
@@ -132,7 +136,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 		te.Run(test.description, func(t *testing.T) {
 			df := &DataCoordFactory{}
 
-			replica, err := newReplica(context.Background(), &RootCoordFactory{}, test.collID)
+			replica, err := newReplica(&RootCoordFactory{}, test.collID, lcm)
 			assert.Nil(t, err)
 			if test.replicaNil {
 				replica = nil
@@ -147,7 +151,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				make(chan string),
 				df,
 				newCache(),
-				memkv.NewMemoryKV(),
+				lcm,
 				newCompactionExecutor(),
 			)
 
@@ -184,8 +188,12 @@ func TestDataSyncService_Start(t *testing.T) {
 	mockRootCoord := &RootCoordFactory{}
 	collectionID := UniqueID(1)
 
+	chunkFactory := storage.NewStandAloneChunkManagerFactory()
+	lcm, err := chunkFactory.NewLocalChunkManager(Params.DataNodeCfg.LocalStoragePath)
+	assert.Nil(t, err)
+
 	flushChan := make(chan flushMsg, 100)
-	replica, err := newReplica(context.Background(), mockRootCoord, collectionID)
+	replica, err := newReplica(mockRootCoord, collectionID, lcm)
 	assert.Nil(t, err)
 
 	allocFactory := NewAllocatorFactory(1)
@@ -225,7 +233,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan string, 100)
-	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), memkv.NewMemoryKV(), newCompactionExecutor())
+	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), lcm, newCompactionExecutor())
 
 	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)

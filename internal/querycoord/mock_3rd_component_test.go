@@ -26,8 +26,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -116,7 +114,7 @@ func genETCDCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.Collect
 	return &collectionMeta
 }
 
-func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, keyPrefix string, kv kv.BaseKV) (map[int64]string, error) {
+func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, keyPrefix string, cm storage.ChunkManager) (map[int64]string, error) {
 	const (
 		msgLength = 1000
 		DIM       = 16
@@ -184,7 +182,7 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	for _, blob := range binLogs {
 		uid := rand.Int63n(100000000)
 		path := path.Join(keyPrefix, blob.Key, strconv.FormatInt(uid, 10))
-		err = kv.Save(path, string(blob.Value[:]))
+		err = cm.Write(path, blob.Value[:])
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +292,7 @@ func (rc *rootCoordMock) DescribeSegment(ctx context.Context, req *milvuspb.Desc
 
 type dataCoordMock struct {
 	types.DataCoord
-	minioKV             kv.BaseKV
+	cm                  storage.ChunkManager
 	collections         []UniqueID
 	col2DmChannels      map[UniqueID][]*datapb.VchannelInfo
 	partitionID2Segment map[UniqueID][]UniqueID
@@ -309,22 +307,9 @@ func newDataCoordMock(ctx context.Context) (*dataCoordMock, error) {
 	partitionID2Segments := make(map[UniqueID][]UniqueID)
 	segment2Binglog := make(map[UniqueID]*datapb.SegmentBinlogs)
 
-	// create minio client
-	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
-		CreateBucket:      true,
-	}
-	kv, err := minioKV.NewMinIOKV(ctx, option)
-	if err != nil {
-		return nil, err
-	}
-
+	lcm := storage.NewLocalChunkManager(storage.RootPath(testLocalStorage))
 	return &dataCoordMock{
-		minioKV:             kv,
+		cm:                  lcm,
 		collections:         collectionIDs,
 		col2DmChannels:      col2DmChannels,
 		partitionID2Segment: partitionID2Segments,
@@ -343,7 +328,7 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 		for i := 0; i < data.channelNumPerCol; i++ {
 			segmentID := data.baseSegmentID
 			if _, ok := data.Segment2Binlog[segmentID]; !ok {
-				fieldID2Paths, err := generateInsertBinLog(collectionID, partitionID, segmentID, "queryCoorf-mockDataCoord", data.minioKV)
+				fieldID2Paths, err := generateInsertBinLog(collectionID, partitionID, segmentID, "queryCoorf-mockDataCoord", data.cm)
 				if err != nil {
 					return nil, err
 				}

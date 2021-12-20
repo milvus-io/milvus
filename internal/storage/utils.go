@@ -22,8 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-
-	"github.com/milvus-io/milvus/internal/kv"
 )
 
 // GetBinlogSize get size of a binlog file.
@@ -31,9 +29,8 @@ import (
 //		key not exist, size = 0, error = nil;
 //		key not in binlog format, size = (a not accurate number), error != nil;
 //		failed to read event reader, size = (a not accurate number), error != nil;
-func GetBinlogSize(kv kv.DataKV, key string) (int64, error) {
-
-	return kv.GetSize(key)
+func GetBinlogSize(cm ChunkManager, key string) (int64, error) {
+	return cm.GetSize(key)
 }
 
 // EstimateMemorySize get approximate memory size of a binlog file.
@@ -44,7 +41,7 @@ func GetBinlogSize(kv kv.DataKV, key string) (int64, error) {
 //		5, original_size not in extra, size = 0, error != nil;
 //		6, original_size not in int format, size = 0, error != nil;
 //		7, normal binlog with original_size, return original_size, error = nil;
-func EstimateMemorySize(kv kv.DataKV, key string) (int64, error) {
+func EstimateMemorySize(cm ChunkManager, key string) (int64, error) {
 	total := int64(0)
 
 	header := &eventHeader{}
@@ -54,7 +51,7 @@ func EstimateMemorySize(kv kv.DataKV, key string) (int64, error) {
 	endPos := startPos + headerSize
 
 	// get header
-	headerContent, err := kv.LoadPartial(key, int64(startPos), int64(endPos))
+	headerContent, err := cm.ReadAt(key, int64(startPos), int64(endPos))
 	if err != nil {
 		return total, err
 	}
@@ -72,7 +69,7 @@ func EstimateMemorySize(kv kv.DataKV, key string) (int64, error) {
 
 	var desc *descriptorEvent
 	endPos = startPos + int(header.EventLength)
-	descContent, err := kv.LoadPartial(key, int64(startPos), int64(endPos))
+	descContent, err := cm.ReadAt(key, int64(startPos), int64(endPos))
 	if err != nil {
 		return total, err
 	}

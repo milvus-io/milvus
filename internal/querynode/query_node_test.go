@@ -28,12 +28,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 // mock of query coordinator client
@@ -192,19 +192,23 @@ func newQueryNodeMock() *QueryNode {
 		panic(err)
 	}
 
-	msFactory, err := newMessageStreamFactory()
+	dependencyFactory, err := newDependencyFactory()
 	if err != nil {
 		panic(err)
 	}
-	svr := NewQueryNode(ctx, msFactory)
+	svr := NewQueryNode(ctx, dependencyFactory)
 	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
 	historicalReplica := newCollectionReplica(etcdKV)
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, historicalReplica, etcdKV, tsReplica)
-	svr.streaming = newStreaming(ctx, streamingReplica, msFactory, etcdKV, tsReplica)
-	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, msFactory)
-	svr.statsService = newStatsService(ctx, svr.historical.replica, nil, msFactory)
-	svr.loader = newSegmentLoader(ctx, nil, nil, svr.historical.replica, svr.streaming.replica, etcdKV, msgstream.NewPmsFactory())
+	svr.streaming = newStreaming(streamingReplica, tsReplica)
+	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, dependencyFactory)
+	svr.statsService = newStatsService(ctx, svr.historical.replica, nil, dependencyFactory)
+	cm, err := dependencyFactory.NewLocalChunkManager(testLocalStorage)
+	if err != nil {
+		panic(err)
+	}
+	svr.loader = newSegmentLoader(ctx, nil, nil, svr.historical.replica, svr.streaming.replica, dependencyFactory, etcdKV, cm)
 	svr.etcdKV = etcdKV
 
 	return svr
@@ -218,14 +222,13 @@ func makeNewChannelNames(names []string, suffix string) []string {
 	return ret
 }
 
-func newMessageStreamFactory() (msgstream.Factory, error) {
+func newDependencyFactory() (dependency.Factory, error) {
 	const receiveBufSize = 1024
 
-	pulsarURL := Params.QueryNodeCfg.PulsarAddress
-	msFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	msFactory := dependency.NewStandAloneDependencyFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  pulsarURL,
 		"pulsarBufSize":  1024}
 	err := msFactory.SetParams(m)
 	return msFactory, err

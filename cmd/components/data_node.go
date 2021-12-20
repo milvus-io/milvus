@@ -19,11 +19,10 @@ package components
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 // DataNode implements DataNode grpc server
@@ -33,7 +32,7 @@ type DataNode struct {
 }
 
 // NewDataNode creates a new DataNode
-func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, error) {
+func NewDataNode(ctx context.Context, factory dependency.Factory) (*DataNode, error) {
 	svr, err := grpcdatanode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err

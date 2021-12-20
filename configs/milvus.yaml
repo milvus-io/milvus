@@ -205,7 +205,7 @@ dataNode:
 
 # Configure whether to store the vector and the local path when querying/searching in Querynode.
 localStorage:
-  path: /var/lib/milvus/data/
+  path: /tmp/milvus/data/
   enabled: true
 
 # Configures the system log output.

@@ -22,12 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -35,24 +37,25 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const TestDMLChannelNum = 32
@@ -306,18 +309,18 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	}
 
 	for idx, field := range schema.Fields {
-		field.FieldID = int64(idx + StartOfUserFieldID)
+		field.FieldID = int64(idx + common.StartOfUserFieldID)
 	}
 	rowIDField := &schemapb.FieldSchema{
-		FieldID:      int64(RowIDField),
-		Name:         RowIDFieldName,
+		FieldID:      int64(common.RowIDField),
+		Name:         common.RowIDFieldName,
 		IsPrimaryKey: false,
 		Description:  "row id",
 		DataType:     schemapb.DataType_Int64,
 	}
 	timeStampField := &schemapb.FieldSchema{
-		FieldID:      int64(TimeStampField),
-		Name:         TimeStampFieldName,
+		FieldID:      int64(common.TimeStampField),
+		Name:         common.TimeStampFieldName,
 		IsPrimaryKey: false,
 		Description:  "time stamp",
 		DataType:     schemapb.DataType_Int64,
@@ -423,14 +426,15 @@ type loadPrefixFailKV struct {
 
 // LoadWithPrefix override behavior
 func (kv *loadPrefixFailKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	return []string{}, []string{}, retry.Unrecoverable(errors.New("mocked fail"))
+	return []string{}, []string{}, errorutil.Unrecoverable(errors.New("mocked fail"))
 }
 
 func TestRootCoordInit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	coreFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	coreFactory := dependency.NewStandAloneDependencyFactory()
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, coreFactory)
@@ -457,7 +461,7 @@ func TestRootCoordInit(t *testing.T) {
 	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
-		return nil, retry.Unrecoverable(errors.New("injected"))
+		return nil, errorutil.Unrecoverable(errors.New("injected"))
 	}
 	err = core.Init()
 	assert.NotNil(t, err)
@@ -476,7 +480,7 @@ func TestRootCoordInit(t *testing.T) {
 
 	core.kvBaseCreate = func(root string) (kv.TxnKV, error) {
 		if root == Params.RootCoordCfg.MetaRootPath {
-			return nil, retry.Unrecoverable(errors.New("injected"))
+			return nil, errorutil.Unrecoverable(errors.New("injected"))
 		}
 		return memkv.NewMemoryKV(), nil
 	}
@@ -538,7 +542,8 @@ func TestRootCoord(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	coreFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	coreFactory := dependency.NewStandAloneDependencyFactory()
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, coreFactory)
@@ -600,20 +605,11 @@ func TestRootCoord(t *testing.T) {
 	err = core.SetQueryCoord(qm)
 	assert.Nil(t, err)
 
-	tmpFactory := msgstream.NewPmsFactory()
-
-	m := map[string]interface{}{
-		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024}
-	err = tmpFactory.SetParams(m)
-	assert.Nil(t, err)
-
-	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
+	timeTickStream, _ := coreFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 
-	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
+	dmlStream, _ := coreFactory.NewMsgStream(ctx)
 	clearMsgChan(1500*time.Millisecond, dmlStream.Chan())
 
 	err = core.Init()
@@ -2210,10 +2206,11 @@ func TestRootCoord2(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	dependencyFactory := dependency.NewStandAloneDependencyFactory()
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
-	core, err := NewCore(ctx, msFactory)
+	core, err := NewCore(ctx, dependencyFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
@@ -2261,10 +2258,10 @@ func TestRootCoord2(t *testing.T) {
 		"receiveBufSize": 1024,
 		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = dependencyFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream, _ := dependencyFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 
@@ -2302,7 +2299,7 @@ func TestRootCoord2(t *testing.T) {
 
 		collInfo, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
-		dmlStream, _ := msFactory.NewMsgStream(ctx)
+		dmlStream, _ := dependencyFactory.NewMsgStream(ctx)
 		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.RootCoordCfg.MsgChannelSubName)
 		dmlStream.Start()
 
@@ -2478,10 +2475,11 @@ func TestCheckFlushedSegments(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	dependencyFactory := dependency.NewStandAloneDependencyFactory()
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
-	core, err := NewCore(ctx, msFactory)
+	core, err := NewCore(ctx, dependencyFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
@@ -2529,10 +2527,10 @@ func TestCheckFlushedSegments(t *testing.T) {
 		"receiveBufSize": 1024,
 		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = dependencyFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream, _ := dependencyFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 
@@ -2634,11 +2632,12 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	dependencyFactory := dependency.NewStandAloneDependencyFactory()
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
-	core, err := NewCore(ctx, msFactory)
+	core, err := NewCore(ctx, dependencyFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
@@ -2686,10 +2685,10 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 		"receiveBufSize": 1024,
 		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = dependencyFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	timeTickStream, _ := msFactory.NewMsgStream(ctx)
+	timeTickStream, _ := dependencyFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 

@@ -26,26 +26,31 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/types"
+
+	"github.com/opentracing/opentracing-go"
+	"google.golang.org/grpc/keepalive"
+
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -69,7 +74,7 @@ type Server struct {
 }
 
 // NewServer create a Proxy server.
-func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 
 	var err error
 	server := &Server{

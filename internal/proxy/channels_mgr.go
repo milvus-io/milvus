@@ -156,7 +156,7 @@ type singleTypeChannelsMgr struct {
 
 	singleStreamType streamType
 
-	msgStreamFactory msgstream.Factory
+	msgFactory msgstream.MsgFactory
 }
 
 func getAllKeys(m map[vChan]pChan) []vChan {
@@ -380,9 +380,9 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 
 	var stream msgstream.MsgStream
 	if mgr.singleStreamType == dqlStreamType {
-		stream, err = mgr.msgStreamFactory.NewQueryMsgStream(context.Background())
+		stream, err = mgr.msgFactory.NewQueryMsgStream(context.Background())
 	} else {
-		stream, err = mgr.msgStreamFactory.NewMsgStream(context.Background())
+		stream, err = mgr.msgFactory.NewMsgStream(context.Background())
 	}
 	if err != nil {
 		return err
@@ -441,7 +441,7 @@ func (mgr *singleTypeChannelsMgr) removeAllStream() error {
 
 func newSingleTypeChannelsMgr(
 	getChannelsFunc getChannelsFuncType,
-	msgStreamFactory msgstream.Factory,
+	msgFactory msgstream.MsgFactory,
 	repackFunc repackFuncType,
 	singleStreamType streamType,
 ) *singleTypeChannelsMgr {
@@ -454,7 +454,7 @@ func newSingleTypeChannelsMgr(
 		getChannelsFunc:           getChannelsFunc,
 		repackFunc:                repackFunc,
 		singleStreamType:          singleStreamType,
-		msgStreamFactory:          msgStreamFactory,
+		msgFactory:                msgFactory,
 	}
 }
 
@@ -511,10 +511,10 @@ func newChannelsMgrImpl(
 	dmlRepackFunc repackFuncType,
 	getDqlChannelsFunc getChannelsFuncType,
 	dqlRepackFunc repackFuncType,
-	msgStreamFactory msgstream.Factory,
+	msgFactory msgstream.MsgFactory,
 ) *channelsMgrImpl {
 	return &channelsMgrImpl{
-		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory, dmlRepackFunc, dmlStreamType),
-		dqlChannelsMgr: newSingleTypeChannelsMgr(getDqlChannelsFunc, msgStreamFactory, dqlRepackFunc, dqlStreamType),
+		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgFactory, dmlRepackFunc, dmlStreamType),
+		dqlChannelsMgr: newSingleTypeChannelsMgr(getDqlChannelsFunc, msgFactory, dqlRepackFunc, dqlStreamType),
 	}
 }

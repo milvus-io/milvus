@@ -27,13 +27,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/opentracing/opentracing-go"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
 )
 
 var _ MsgStream = (*mqMsgStream)(nil)
@@ -166,11 +167,11 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 	}
 }
 
-// AsReader create producer to send message to channels
+// AsReader creates reader to read message from channels
 func (ms *mqMsgStream) AsReader(channels []string, subName string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
-			log.Error("MsgStream asProducer's channel is a empty string")
+			log.Error("MsgStream asReader's channel is a empty string")
 			break
 		}
 		fn := func() error {
@@ -194,7 +195,7 @@ func (ms *mqMsgStream) AsReader(channels []string, subName string) {
 		}
 		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200))
 		if err != nil {
-			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
+			errMsg := "Failed to create reader " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
 	}

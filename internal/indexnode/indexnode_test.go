@@ -19,17 +19,20 @@ package indexnode
 import (
 	"container/list"
 	"context"
+	"os"
 	"path"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -45,12 +48,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func TestIndexNode(t *testing.T) {
 	ctx := context.Background()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
 
 	indexID := UniqueID(999)
 	indexBuildID1 := UniqueID(54321)
@@ -67,9 +73,10 @@ func TestIndexNode(t *testing.T) {
 	floatVectorBinlogPath := "float_vector_binlog"
 	binaryVectorBinlogPath := "binary_vector_binlog"
 
-	in, err := NewIndexNode(ctx)
+	in, err := NewIndexNode(ctx, fac)
 	assert.Nil(t, err)
 	Params.Init()
+	Params.IndexNodeCfg.LocalStoragePath = "/tmp/milvus/data"
 
 	err = in.Init()
 	assert.Nil(t, err)
@@ -120,14 +127,14 @@ func TestIndexNode(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -185,10 +192,10 @@ func TestIndexNode(t *testing.T) {
 			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				err = in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
 				assert.Nil(t, err)
 			}
 		}()
@@ -235,14 +242,14 @@ func TestIndexNode(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(binaryVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -296,10 +303,10 @@ func TestIndexNode(t *testing.T) {
 			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				err = in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
 				assert.Nil(t, err)
 			}
 		}()
@@ -347,14 +354,14 @@ func TestIndexNode(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -413,10 +420,10 @@ func TestIndexNode(t *testing.T) {
 			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				err = in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
 				assert.Nil(t, err)
 			}
 		}()
@@ -461,6 +468,8 @@ func TestIndexNode(t *testing.T) {
 
 func TestCreateIndexFailed(t *testing.T) {
 	ctx := context.Background()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
 
 	indexID := UniqueID(1001)
 	indexBuildID1 := UniqueID(54322)
@@ -473,9 +482,10 @@ func TestCreateIndexFailed(t *testing.T) {
 	metaPath2 := "FloatVector2"
 	floatVectorBinlogPath := "float_vector_binlog"
 
-	in, err := NewIndexNode(ctx)
+	in, err := NewIndexNode(ctx, fac)
 	assert.Nil(t, err)
 	Params.Init()
+	Params.IndexNodeCfg.LocalStoragePath = "/tmp/milvus/data"
 
 	err = in.Init()
 	assert.Nil(t, err)
@@ -526,14 +536,14 @@ func TestCreateIndexFailed(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -595,10 +605,10 @@ func TestCreateIndexFailed(t *testing.T) {
 			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				err = in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
 				assert.Nil(t, err)
 			}
 		}()
@@ -644,14 +654,14 @@ func TestCreateIndexFailed(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta2 := &indexpb.IndexMeta{
@@ -714,10 +724,10 @@ func TestCreateIndexFailed(t *testing.T) {
 			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				err = in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
 				assert.Nil(t, err)
 			}
 		}()
@@ -739,10 +749,13 @@ func TestCreateIndexFailed(t *testing.T) {
 
 func TestIndexNode_Error(t *testing.T) {
 	ctx := context.Background()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
 
-	in, err := NewIndexNode(ctx)
+	in, err := NewIndexNode(ctx, fac)
 	assert.Nil(t, err)
 	Params.Init()
+	Params.IndexNodeCfg.LocalStoragePath = "/tmp/milvus/data"
 
 	err = in.Init()
 	assert.Nil(t, err)

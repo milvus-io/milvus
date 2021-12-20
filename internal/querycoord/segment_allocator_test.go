@@ -23,8 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -49,17 +49,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 		segSizeEstimator: segSizeEstimateForTest,
 	}
 
-	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
-	}
-
-	cluster.dataKV, err = minioKV.NewMinIOKV(baseCtx, option)
-	assert.Nil(t, err)
+	cluster.chunkManager = storage.NewLocalChunkManager(storage.RootPath(Params.QueryCoordCfg.LocalStoragePath))
 
 	schema := genCollectionSchema(defaultCollectionID, false)
 	firstReq := &querypb.LoadSegmentsRequest{

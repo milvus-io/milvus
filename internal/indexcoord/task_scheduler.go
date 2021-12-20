@@ -24,12 +24,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
+
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -205,9 +206,9 @@ func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
 type TaskScheduler struct {
 	IndexAddQueue TaskQueue
 
-	idAllocator *allocator.GlobalIDAllocator
-	metaTable   *metaTable
-	kv          kv.BaseKV
+	idAllocator  *allocator.GlobalIDAllocator
+	metaTable    *metaTable
+	chunkManager storage.ChunkManager
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -217,15 +218,15 @@ type TaskScheduler struct {
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context,
 	idAllocator *allocator.GlobalIDAllocator,
-	kv kv.BaseKV,
+	cm storage.ChunkManager,
 	table *metaTable) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		idAllocator: idAllocator,
-		metaTable:   table,
-		kv:          kv,
-		ctx:         ctx1,
-		cancel:      cancel,
+		idAllocator:  idAllocator,
+		metaTable:    table,
+		chunkManager: cm,
+		ctx:          ctx1,
+		cancel:       cancel,
 	}
 	s.IndexAddQueue = NewIndexAddTaskQueue(s)
 	return s, nil

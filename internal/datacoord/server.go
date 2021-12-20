@@ -26,26 +26,30 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.uber.org/zap"
+
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
+	"github.com/milvus-io/milvus/internal/logutil"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/mqclient"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	"go.uber.org/zap"
 )
 
 const (
@@ -117,8 +121,8 @@ type Server struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
-	flushCh   chan UniqueID
-	msFactory msgstream.Factory
+	flushCh chan UniqueID
+	f       dependency.Factory
 
 	session *sessionutil.Session
 	eventCh <-chan *sessionutil.SessionEvent
@@ -176,13 +180,13 @@ func SetSegmentManager(manager Manager) Option {
 	}
 }
 
-// CreateServer creates a `Server` instance
-func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) (*Server, error) {
+// CreateServer creates `Server` instance
+func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) (*Server, error) {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:                    ctx,
 		quitCh:                 make(chan struct{}),
-		msFactory:              factory,
+		f:                      factory,
 		flushCh:                make(chan UniqueID, 1024),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
@@ -254,7 +258,7 @@ func (s *Server) Start() error {
 		"PulsarAddress":  Params.DataCoordCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
-	err = s.msFactory.SetParams(m)
+	err = s.f.SetParams(m)
 	if err != nil {
 		return err
 	}
@@ -435,7 +439,7 @@ func (s *Server) startServerLoop() {
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
 // tt msg stands for the currently consumed timestamp for each channel
 func (s *Server) startDataNodeTtLoop(ctx context.Context) {
-	ttMsgStream, err := s.msFactory.NewMsgStream(ctx)
+	ttMsgStream, err := s.f.NewMsgStream(ctx)
 	if err != nil {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		return

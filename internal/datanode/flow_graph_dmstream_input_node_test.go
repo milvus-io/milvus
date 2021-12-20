@@ -21,10 +21,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
-	"github.com/stretchr/testify/assert"
 )
 
 type mockMsgStreamFactory struct {
@@ -32,7 +33,7 @@ type mockMsgStreamFactory struct {
 	NewMsgStreamNoError bool
 }
 
-var _ msgstream.Factory = &mockMsgStreamFactory{}
+var _ msgstream.MsgFactory = &mockMsgStreamFactory{}
 
 func (mm *mockMsgStreamFactory) SetParams(params map[string]interface{}) error {
 	if !mm.SetParamsReturnNil {

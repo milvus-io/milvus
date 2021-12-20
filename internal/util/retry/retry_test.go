@@ -19,6 +19,8 @@ import (
 
 	"github.com/lingdor/stackerror"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 )
 
 func TestDo(t *testing.T) {
@@ -91,7 +93,7 @@ func TestUnRecoveryError(t *testing.T) {
 
 	testFn := func() error {
 		attempts++
-		return Unrecoverable(fmt.Errorf("some error"))
+		return errorutil.Unrecoverable(fmt.Errorf("some error"))
 	}
 
 	err := Do(ctx, testFn, Attempts(3))

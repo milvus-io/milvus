@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -96,10 +97,12 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 		QueryResultChannel: genQueryResultChannel(),
 	}
 
+	log.Debug("xxxxxxxxxxxxxxxxxxxxxxxxxxx")
 	status, err := node.AddQueryChannel(ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
+	log.Debug("xxxxxxxxxxxxxxxxxxxxxxxxxxx")
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	status, err = node.AddQueryChannel(ctx, req)
 	assert.NoError(t, err)

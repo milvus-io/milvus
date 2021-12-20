@@ -29,21 +29,28 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 func TestMain(m *testing.M) {
@@ -612,7 +619,8 @@ func TestGetFlushedSegments(t *testing.T) {
 }
 
 func TestService_WatchServices(t *testing.T) {
-	factory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	factory := dependency.NewStandAloneDependencyFactory()
 	svr, err := CreateServer(context.TODO(), factory)
 	assert.Nil(t, err)
 	svr.serverLoopWg.Add(1)
@@ -1062,7 +1070,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Partitions: []int64{0},
 		})
 
-		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+		ttMsgStream, err := svr.f.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
@@ -1130,7 +1138,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Schema:     newTestSchema(),
 			Partitions: []int64{0},
 		})
-		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+		ttMsgStream, err := svr.f.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
@@ -1212,7 +1220,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Partitions: []int64{0},
 		})
 
-		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+		ttMsgStream, err := svr.f.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
@@ -1990,7 +1998,8 @@ func TestOptions(t *testing.T) {
 		})
 		assert.NotNil(t, opt)
 
-		factory := msgstream.NewPmsFactory()
+		os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+		factory := dependency.NewStandAloneDependencyFactory()
 
 		svr, err := CreateServer(context.TODO(), factory, opt)
 		assert.Nil(t, err)
@@ -2234,10 +2243,11 @@ func TestGetFlushState(t *testing.T) {
 }
 
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	factory := dependency.NewStandAloneDependencyFactory()
 	Params.Init()
 	Params.DataCoordCfg.TimeTickChannelName = Params.DataCoordCfg.TimeTickChannelName + strconv.Itoa(rand.Int())
 	var err error
-	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"pulsarAddress":  Params.DataCoordCfg.PulsarAddress,
 		"receiveBufSize": 1024,

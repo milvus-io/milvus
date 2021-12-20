@@ -19,10 +19,10 @@ package components
 import (
 	"context"
 
+	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 // IndexCoord implements IndexCoord grpc server
@@ -31,10 +31,10 @@ type IndexCoord struct {
 }
 
 // NewIndexCoord creates a new IndexCoord
-func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
+func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord, error) {
 	var err error
 	s := &IndexCoord{}
-	svr, err := grpcindexcoord.NewServer(ctx)
+	svr, err := grpcindexcoord.NewServer(ctx, factory)
 
 	if err != nil {
 		return nil, err

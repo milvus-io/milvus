@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -156,10 +157,7 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	m.Lock()
 	defer m.Unlock()
 	m.segments.SetSegment(segment.GetID(), segment)
-	if err := m.saveSegmentInfo(segment); err != nil {
-		return err
-	}
-	return nil
+	return m.saveSegmentInfo(segment)
 }
 
 // Deprecated

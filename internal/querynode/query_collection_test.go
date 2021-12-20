@@ -61,12 +61,8 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		return nil, err
 	}
 
-	localCM, err := genLocalChunkManager()
-	if err != nil {
-		return nil, err
-	}
-
-	remoteCM, err := genRemoteChunkManager(ctx)
+	localCM := genLocalChunkManager()
+	remoteCM := genRemoteChunkManager()
 	if err != nil {
 		return nil, err
 	}
@@ -123,13 +119,13 @@ func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 }
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {
-	ctx := context.Background()
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
-	factory := msgstream.NewPmsFactory()
-	err := factory.SetParams(m)
+	factory, err := genFactory()
+	assert.Nil(t, err)
+	err = factory.SetParams(m)
 	assert.Nil(t, err)
 	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 	assert.Nil(t, err)
@@ -164,7 +160,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	//create a streaming
-	streaming := newStreaming(ctx, streamingReplica, factory, etcdKV, tsReplica)
+	streaming := newStreaming(streamingReplica, tsReplica)
 	err = streaming.replica.addCollection(0, schema)
 	assert.Nil(t, err)
 	err = streaming.replica.addPartition(0, 1)

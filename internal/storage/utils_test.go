@@ -24,18 +24,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
-	"github.com/milvus-io/milvus/internal/kv"
-
 	"github.com/stretchr/testify/assert"
-
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )
 
-type mockLessHeaderDataKV struct {
-	kv.BaseKV
+type mockLessHeaderDataChunkManager struct {
+	ChunkManager
 }
 
-func (kv *mockLessHeaderDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
+func (cm *mockLessHeaderDataChunkManager) ReadAt(key string, start, end int64) ([]byte, error) {
 	header := &baseEventHeader{}
 
 	headerSize := binary.Size(header)
@@ -46,19 +42,19 @@ func (kv *mockLessHeaderDataKV) LoadPartial(key string, start, end int64) ([]byt
 	return ret, nil
 }
 
-func (kv *mockLessHeaderDataKV) GetSize(key string) (int64, error) {
+func (cm *mockLessHeaderDataChunkManager) GetSize(key string) (int64, error) {
 	return 0, errors.New("less header")
 }
 
-func newMockLessHeaderDataKV() *mockLessHeaderDataKV {
-	return &mockLessHeaderDataKV{}
+func newMockLessHeaderDataChunkManager() *mockLessHeaderDataChunkManager {
+	return &mockLessHeaderDataChunkManager{}
 }
 
-type mockWrongHeaderDataKV struct {
-	kv.BaseKV
+type mockWrongHeaderDataChunkManager struct {
+	ChunkManager
 }
 
-func (kv *mockWrongHeaderDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
+func (cm *mockWrongHeaderDataChunkManager) ReadAt(key string, start, end int64) ([]byte, error) {
 	header := &baseEventHeader{}
 
 	header.EventLength = -1
@@ -70,26 +66,24 @@ func (kv *mockWrongHeaderDataKV) LoadPartial(key string, start, end int64) ([]by
 	return buffer.Bytes(), nil
 }
 
-func (kv *mockWrongHeaderDataKV) GetSize(key string) (int64, error) {
+func (cm *mockWrongHeaderDataChunkManager) GetSize(key string) (int64, error) {
 	return 0, errors.New("wrong header")
 }
 
-func newMockWrongHeaderDataKV() kv.DataKV {
-	return &mockWrongHeaderDataKV{}
+func newMockWrongHeaderDataChunkManager() ChunkManager {
+	return &mockWrongHeaderDataChunkManager{}
 }
 
 func TestGetBinlogSize(t *testing.T) {
-	memoryKV := memkv.NewMemoryKV()
-	defer memoryKV.Close()
+	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	key := "TestGetBinlogSize"
 
 	var size int64
 	var err error
 
-	// key not in memoryKV
-	size, err = GetBinlogSize(memoryKV, key)
-	assert.NoError(t, err)
+	size, err = GetBinlogSize(lcm, key)
+	assert.Error(t, err)
 	assert.Zero(t, size)
 
 	// normal binlog key, for example, index binlog
@@ -124,46 +118,46 @@ func TestGetBinlogSize(t *testing.T) {
 	assert.Nil(t, err)
 
 	for _, blob := range serializedBlobs {
-		err = memoryKV.Save(blob.Key, string(blob.Value))
+		err = lcm.Write(blob.Key, blob.Value)
 		assert.Nil(t, err)
 
-		size, err = GetBinlogSize(memoryKV, blob.Key)
+		size, err = GetBinlogSize(lcm, blob.Key)
 		assert.Nil(t, err)
 		assert.Equal(t, size, int64(len(blob.Value)))
 	}
+	err = lcm.RemoveWithPrefix(localPath)
+	assert.Nil(t, err)
 }
 
 // cover case that failed to read event header
 func TestGetBinlogSize_less_header(t *testing.T) {
-	mockKV := newMockLessHeaderDataKV()
+	mockCM := newMockLessHeaderDataChunkManager()
 
 	key := "TestGetBinlogSize_less_header"
 
-	_, err := GetBinlogSize(mockKV, key)
+	_, err := GetBinlogSize(mockCM, key)
 	assert.Error(t, err)
 }
 
 // cover case that file not in binlog format
 func TestGetBinlogSize_not_in_binlog_format(t *testing.T) {
-	mockKV := newMockWrongHeaderDataKV()
+	mockCM := newMockWrongHeaderDataChunkManager()
 
 	key := "TestGetBinlogSize_not_in_binlog_format"
 
-	_, err := GetBinlogSize(mockKV, key)
+	_, err := GetBinlogSize(mockCM, key)
 	assert.Error(t, err)
 }
 
 func TestEstimateMemorySize(t *testing.T) {
-	memoryKV := memkv.NewMemoryKV()
-	defer memoryKV.Close()
+	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	key := "TestEstimateMemorySize"
 
 	var size int64
 	var err error
 
-	// key not in memoryKV
-	_, err = EstimateMemorySize(memoryKV, key)
+	_, err = EstimateMemorySize(lcm, key)
 	assert.Error(t, err)
 
 	// normal binlog key, for example, index binlog
@@ -198,7 +192,7 @@ func TestEstimateMemorySize(t *testing.T) {
 	assert.Nil(t, err)
 
 	for _, blob := range serializedBlobs {
-		err = memoryKV.Save(blob.Key, string(blob.Value))
+		err = lcm.Write(blob.Key, blob.Value)
 		assert.Nil(t, err)
 
 		buf := bytes.NewBuffer(blob.Value)
@@ -206,37 +200,39 @@ func TestEstimateMemorySize(t *testing.T) {
 		_, _ = readMagicNumber(buf)
 		desc, _ := ReadDescriptorEvent(buf)
 
-		size, err = EstimateMemorySize(memoryKV, blob.Key)
+		size, err = EstimateMemorySize(lcm, blob.Key)
 		assert.Nil(t, err)
 		assert.Equal(t, fmt.Sprintf("%v", desc.Extras[originalSizeKey]), fmt.Sprintf("%v", size))
 	}
+	err = lcm.RemoveWithPrefix(localPath)
+	assert.Nil(t, err)
 }
 
 // cover case that failed to read event header
 func TestEstimateMemorySize_less_header(t *testing.T) {
-	mockKV := newMockLessHeaderDataKV()
+	mockCM := newMockLessHeaderDataChunkManager()
 
 	key := "TestEstimateMemorySize_less_header"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := EstimateMemorySize(mockCM, key)
 	assert.Error(t, err)
 }
 
 // cover case that file not in binlog format
 func TestEstimateMemorySize_not_in_binlog_format(t *testing.T) {
-	mockKV := newMockWrongHeaderDataKV()
+	mockCM := newMockWrongHeaderDataChunkManager()
 
 	key := "TestEstimateMemorySize_not_in_binlog_format"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := EstimateMemorySize(mockCM, key)
 	assert.Error(t, err)
 }
 
-type mockFailedToGetDescDataKV struct {
-	kv.BaseKV
+type mockFailedToGetDescDataChunkManager struct {
+	ChunkManager
 }
 
-func (kv *mockFailedToGetDescDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
+func (cm *mockFailedToGetDescDataChunkManager) ReadAt(key string, start, end int64) ([]byte, error) {
 	header := &eventHeader{}
 	header.EventLength = 20
 	headerSize := binary.Size(header)
@@ -250,29 +246,29 @@ func (kv *mockFailedToGetDescDataKV) LoadPartial(key string, start, end int64) (
 	return buf.Bytes(), nil
 }
 
-func (kv *mockFailedToGetDescDataKV) GetSize(key string) (int64, error) {
+func (cm *mockFailedToGetDescDataChunkManager) GetSize(key string) (int64, error) {
 	return 0, nil
 }
 
-func newMockFailedToGetDescDataKV() *mockFailedToGetDescDataKV {
-	return &mockFailedToGetDescDataKV{}
+func newMockFailedToGetDescDataChunkManager() *mockFailedToGetDescDataChunkManager {
+	return &mockFailedToGetDescDataChunkManager{}
 }
 
 // cover case that failed to get descriptor event content
 func TestEstimateMemorySize_failed_to_load_desc(t *testing.T) {
-	mockKV := newMockFailedToGetDescDataKV()
+	mockCM := newMockFailedToGetDescDataChunkManager()
 
 	key := "TestEstimateMemorySize_failed_to_load_desc"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := EstimateMemorySize(mockCM, key)
 	assert.Error(t, err)
 }
 
-type mockLessDescDataKV struct {
-	kv.BaseKV
+type mockLessDescDataChunkManager struct {
+	ChunkManager
 }
 
-func (kv *mockLessDescDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
+func (cm *mockLessDescDataChunkManager) ReadAt(key string, start, end int64) ([]byte, error) {
 	header := &baseEventHeader{}
 	header.EventLength = 20
 
@@ -293,46 +289,46 @@ func (kv *mockLessDescDataKV) LoadPartial(key string, start, end int64) ([]byte,
 	*/
 }
 
-func (kv *mockLessDescDataKV) GetSize(key string) (int64, error) {
+func (cm *mockLessDescDataChunkManager) GetSize(key string) (int64, error) {
 	return 0, nil
 }
 
-func newMockLessDescDataKV() *mockLessDescDataKV {
-	return &mockLessDescDataKV{}
+func newMockLessDescDataChunkManager() *mockLessDescDataChunkManager {
+	return &mockLessDescDataChunkManager{}
 }
 
 func TestEstimateMemorySize_less_desc_data(t *testing.T) {
-	mockKV := newMockLessDescDataKV()
+	mockChunkManager := newMockLessDescDataChunkManager()
 
 	key := "TestEstimateMemorySize_less_desc_data"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := EstimateMemorySize(mockChunkManager, key)
 	assert.Error(t, err)
 }
 
-type mockOriginalSizeDataKV struct {
-	kv.BaseKV
+type mockOriginalSizeDataChunkManager struct {
+	ChunkManager
 	impl func(key string, start, end int64) ([]byte, error)
 }
 
-func (kv *mockOriginalSizeDataKV) LoadPartial(key string, start, end int64) ([]byte, error) {
-	if kv.impl != nil {
-		return kv.impl(key, start, end)
+func (cm *mockOriginalSizeDataChunkManager) ReadAt(key string, start, end int64) ([]byte, error) {
+	if cm.impl != nil {
+		return cm.impl(key, start, end)
 	}
 	return nil, nil
 }
 
-func (kv *mockOriginalSizeDataKV) GetSize(key string) (int64, error) {
+func (cm *mockOriginalSizeDataChunkManager) GetSize(key string) (int64, error) {
 	return 0, nil
 }
 
-func newMockOriginalSizeDataKV() *mockOriginalSizeDataKV {
-	return &mockOriginalSizeDataKV{}
+func newMockOriginalSizeDataChunkManager() *mockOriginalSizeDataChunkManager {
+	return &mockOriginalSizeDataChunkManager{}
 }
 
 func TestEstimateMemorySize_no_original_size(t *testing.T) {
-	mockKV := newMockOriginalSizeDataKV()
-	mockKV.impl = func(key string, start, end int64) ([]byte, error) {
+	mockChunkManager := newMockOriginalSizeDataChunkManager()
+	mockChunkManager.impl = func(key string, start, end int64) ([]byte, error) {
 		desc := &descriptorEvent{}
 		desc.descriptorEventHeader.EventLength = 20
 		desc.descriptorEventData = *newDescriptorEventData()
@@ -349,13 +345,13 @@ func TestEstimateMemorySize_no_original_size(t *testing.T) {
 
 	key := "TestEstimateMemorySize_no_original_size"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := EstimateMemorySize(mockChunkManager, key)
 	assert.Error(t, err)
 }
 
 func TestEstimateMemorySize_cannot_convert_original_size_to_int(t *testing.T) {
-	mockKV := newMockOriginalSizeDataKV()
-	mockKV.impl = func(key string, start, end int64) ([]byte, error) {
+	mockCM := newMockOriginalSizeDataChunkManager()
+	mockCM.impl = func(key string, start, end int64) ([]byte, error) {
 		desc := &descriptorEvent{}
 		desc.descriptorEventHeader.EventLength = 20
 		desc.descriptorEventData = *newDescriptorEventData()
@@ -372,7 +368,7 @@ func TestEstimateMemorySize_cannot_convert_original_size_to_int(t *testing.T) {
 
 	key := "TestEstimateMemorySize_cannot_convert_original_size_to_int"
 
-	_, err := EstimateMemorySize(mockKV, key)
+	_, err := EstimateMemorySize(mockCM, key)
 	assert.Error(t, err)
 }
 

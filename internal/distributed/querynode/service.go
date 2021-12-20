@@ -26,24 +26,25 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qn "github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -68,7 +69,7 @@ type Server struct {
 }
 
 // NewServer create a new QueryNode grpc server.
-func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 
 	s := &Server{

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func loadFields(segment *Segment, DIM int, N int) error {
@@ -63,7 +64,7 @@ func loadFields(segment *Segment, DIM int, N int) error {
 
 func sendSearchRequest(ctx context.Context, DIM int) error {
 	// init message stream
-	msFactory, err := newMessageStreamFactory()
+	msFactory, err := newDependencyFactory()
 	if err != nil {
 		return err
 	}
@@ -142,14 +143,31 @@ func TestSearch_Search(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, collectionID, UniqueID(0))
 
-	msFactory, err := newMessageStreamFactory()
+	dependencyFactory, err := newDependencyFactory()
 	assert.NoError(t, err)
+
+	lcm, err := dependencyFactory.NewLocalChunkManager(testLocalStorage)
+	assert.Nil(t, err)
+
+	rcm, err := dependencyFactory.NewRemoteChunkManager(node.queryNodeLoopCtx,
+		storage.Address(Params.QueryNodeCfg.MinioEndPoint),
+		storage.AccessKeyID(Params.QueryNodeCfg.MinioAccessKeyID),
+		storage.SecretAccessKeyID(Params.QueryNodeCfg.MinioSecretAccessKey),
+		storage.UseSSL(Params.QueryNodeCfg.MinioUseSSLStr),
+		storage.BucketName(Params.QueryNodeCfg.MinioBucketName),
+		storage.CreateBucket(true),
+		storage.RootPath(testLocalStorage),
+	)
+	assert.Nil(t, err)
 
 	// start search service
 	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
-		msFactory)
+		dependencyFactory,
+		lcm,
+		rcm,
+	)
 
 	// load segment
 	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
@@ -185,14 +203,31 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, collectionID, UniqueID(0))
 
-	msFactory, err := newMessageStreamFactory()
+	dependencyFactory, err := newDependencyFactory()
 	assert.NoError(t, err)
+
+	lcm, err := dependencyFactory.NewLocalChunkManager(testLocalStorage)
+	assert.Nil(t, err)
+
+	rcm, err := dependencyFactory.NewRemoteChunkManager(node.queryNodeLoopCtx,
+		storage.Address(Params.QueryNodeCfg.MinioEndPoint),
+		storage.AccessKeyID(Params.QueryNodeCfg.MinioAccessKeyID),
+		storage.SecretAccessKeyID(Params.QueryNodeCfg.MinioSecretAccessKey),
+		storage.UseSSL(Params.QueryNodeCfg.MinioUseSSLStr),
+		storage.BucketName(Params.QueryNodeCfg.MinioBucketName),
+		storage.CreateBucket(true),
+		storage.RootPath(testLocalStorage),
+	)
+	assert.Nil(t, err)
 
 	// start search service
 	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
-		msFactory)
+		dependencyFactory,
+		lcm,
+		rcm,
+	)
 	node.queryService.addQueryCollection(collectionID)
 	//err = node.queryService.addQueryCollection(collectionID)
 	//TODO: Why error
@@ -236,8 +271,22 @@ func TestQueryService_addQueryCollection(t *testing.T) {
 	fac, err := genFactory()
 	assert.NoError(t, err)
 
+	lcm, err := fac.NewLocalChunkManager(testLocalStorage)
+	assert.Nil(t, err)
+
+	rcm, err := fac.NewRemoteChunkManager(ctx,
+		storage.Address(Params.QueryNodeCfg.MinioEndPoint),
+		storage.AccessKeyID(Params.QueryNodeCfg.MinioAccessKeyID),
+		storage.SecretAccessKeyID(Params.QueryNodeCfg.MinioSecretAccessKey),
+		storage.UseSSL(Params.QueryNodeCfg.MinioUseSSLStr),
+		storage.BucketName(Params.QueryNodeCfg.MinioBucketName),
+		storage.CreateBucket(true),
+		storage.RootPath(testLocalStorage),
+	)
+	assert.Nil(t, err)
+
 	// start search service
-	qs := newQueryService(ctx, his, str, fac)
+	qs := newQueryService(ctx, his, str, fac, lcm, rcm)
 	assert.NotNil(t, qs)
 
 	err = qs.addQueryCollection(defaultCollectionID)

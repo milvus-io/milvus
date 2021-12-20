@@ -24,9 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 )
 
@@ -36,11 +34,9 @@ type streaming struct {
 
 	replica      ReplicaInterface
 	tSafeReplica TSafeReplicaInterface
-
-	msFactory msgstream.Factory
 }
 
-func newStreaming(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory, etcdKV *etcdkv.EtcdKV, tSafeReplica TSafeReplicaInterface) *streaming {
+func newStreaming(replica ReplicaInterface, tSafeReplica TSafeReplicaInterface) *streaming {
 
 	return &streaming{
 		replica:      replica,

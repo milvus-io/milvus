@@ -24,13 +24,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -44,9 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -89,7 +91,7 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 }
 
 // NewServer create a new RootCoord grpc server.
-func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &Server{
 		ctx:         ctx1,

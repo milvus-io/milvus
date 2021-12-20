@@ -19,18 +19,21 @@ package grpcindexnodeclient
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
 
 func Test_NewClient(t *testing.T) {
@@ -117,8 +120,9 @@ func Test_NewClient(t *testing.T) {
 
 func TestIndexNodeClient(t *testing.T) {
 	ctx := context.Background()
-
-	ins, err := grpcindexnode.NewServer(ctx)
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	fac := dependency.NewStandAloneDependencyFactory()
+	ins, err := grpcindexnode.NewServer(ctx, fac)
 	assert.Nil(t, err)
 	assert.NotNil(t, ins)
 

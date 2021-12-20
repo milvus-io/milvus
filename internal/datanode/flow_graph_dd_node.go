@@ -23,6 +23,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/opentracing/opentracing-go"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -31,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -266,7 +267,7 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelInfo,
-	msFactory msgstream.Factory, compactor *compactionExecutor) *ddNode {
+	dependencyFactory msgstream.MsgFactory, compactor *compactionExecutor) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength)
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism)
@@ -278,7 +279,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		zap.Int("No. Segment", len(vchanInfo.GetFlushedSegments())),
 	)
 
-	deltaStream, err := msFactory.NewMsgStream(ctx)
+	deltaStream, err := dependencyFactory.NewMsgStream(ctx)
 	if err != nil {
 		log.Error(err.Error())
 		return nil

@@ -105,7 +105,7 @@ func TestDmChannelsFailure(t *testing.T) {
 
 // FailMessageStreamFactory mock MessageStreamFactory failure
 type FailMessageStreamFactory struct {
-	msgstream.Factory
+	msgstream.MsgFactory
 	errBroadcast bool
 }
 

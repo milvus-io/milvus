@@ -21,10 +21,11 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
 // dataSyncService manages a lot of flow graphs
@@ -38,7 +39,7 @@ type dataSyncService struct {
 	streamingReplica  ReplicaInterface
 	historicalReplica ReplicaInterface
 	tSafeReplica      TSafeReplicaInterface
-	msFactory         msgstream.Factory
+	dependencyFactory dependency.Factory
 }
 
 // addFlowGraphsForDMLChannels add flowGraphs to dmlChannel2FlowGraph
@@ -59,7 +60,7 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 			dsService.streamingReplica,
 			dsService.tSafeReplica,
 			channel,
-			dsService.msFactory)
+			dsService.dependencyFactory)
 		dsService.dmlChannel2FlowGraph[channel] = newFlowGraph
 		log.Debug("add DML flow graph",
 			zap.Any("collectionID", collectionID),
@@ -85,9 +86,9 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 			dsService.historicalReplica,
 			dsService.tSafeReplica,
 			channel,
-			dsService.msFactory)
+			dsService.dependencyFactory)
 		dsService.deltaChannel2FlowGraph[channel] = newFlowGraph
-		log.Debug("add delta flow graph",
+		log.Debug("add collection flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
 	}
@@ -184,7 +185,7 @@ func newDataSyncService(ctx context.Context,
 	streamingReplica ReplicaInterface,
 	historicalReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
-	factory msgstream.Factory) *dataSyncService {
+	factory dependency.Factory) *dataSyncService {
 
 	return &dataSyncService{
 		ctx:                    ctx,
@@ -193,7 +194,7 @@ func newDataSyncService(ctx context.Context,
 		streamingReplica:       streamingReplica,
 		historicalReplica:      historicalReplica,
 		tSafeReplica:           tSafeReplica,
-		msFactory:              factory,
+		dependencyFactory:      factory,
 	}
 }
 

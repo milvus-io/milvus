@@ -25,20 +25,21 @@ import (
 	"syscall"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -86,7 +87,7 @@ type Proxy struct {
 
 	session *sessionutil.Session
 
-	msFactory msgstream.Factory
+	f dependency.Factory
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -94,13 +95,13 @@ type Proxy struct {
 }
 
 // NewProxy returns a Proxy struct.
-func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &Proxy{
-		ctx:       ctx1,
-		cancel:    cancel,
-		msFactory: factory,
+		ctx:    ctx1,
+		cancel: cancel,
+		f:      factory,
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
@@ -175,7 +176,7 @@ func (node *Proxy) Init() error {
 		"PulsarAddress": Params.ProxyCfg.PulsarAddress,
 		"PulsarBufSize": 1024}
 	log.Debug("set parameters for ms factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", m))
-	if err := node.msFactory.SetParams(m); err != nil {
+	if err := node.f.SetParams(m); err != nil {
 		log.Warn("failed to set parameters for ms factory",
 			zap.Error(err),
 			zap.String("role", typeutil.ProxyRole),
@@ -221,12 +222,11 @@ func (node *Proxy) Init() error {
 	log.Debug("create channels manager", zap.String("role", typeutil.ProxyRole))
 	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
 	dqlChannelsFunc := getDqlChannelsFunc(node.ctx, node.session.ServerID, node.queryCoord)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, dqlChannelsFunc, nil, node.msFactory)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, dqlChannelsFunc, nil, node.f)
 	node.chMgr = chMgr
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("create task scheduler", zap.String("role", typeutil.ProxyRole))
-	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
+	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.f)
 	if err != nil {
 		log.Warn("failed to create task scheduler", zap.Error(err), zap.String("role", typeutil.ProxyRole))
 		return err

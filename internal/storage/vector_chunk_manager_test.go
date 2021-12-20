@@ -15,34 +15,15 @@ import (
 	"context"
 	"os"
 	"path"
-	"strconv"
 	"testing"
 
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
-
-func newMinIOKVClient(ctx context.Context, bucketName string) (*miniokv.MinIOKV, error) {
-	endPoint, _ := Params.Load("_MinioAddress")
-	accessKeyID, _ := Params.Load("minio.accessKeyID")
-	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
-	useSSLStr, _ := Params.Load("minio.useSSL")
-	useSSL, _ := strconv.ParseBool(useSSLStr)
-	option := &miniokv.Option{
-		Address:           endPoint,
-		AccessKeyID:       accessKeyID,
-		SecretAccessKeyID: secretAccessKey,
-		UseSSL:            useSSL,
-		BucketName:        bucketName,
-		CreateBucket:      true,
-	}
-	client, err := miniokv.NewMinIOKV(ctx, option)
-	return client, err
-}
 
 func initMeta() *etcdpb.CollectionMeta {
 	meta := &etcdpb.CollectionMeta{
@@ -136,18 +117,17 @@ func buildVectorChunkManager(t *testing.T, localPath string, localCacheEnable bo
 	ctx, cancel := context.WithCancel(context.Background())
 
 	bucketName := "vector-chunk-manager"
-	minIOKV, err := newMinIOKVClient(ctx, bucketName)
-	assert.Nil(t, err)
 
-	rcm := NewMinioChunkManager(minIOKV)
-	lcm := NewLocalChunkManager(localPath)
+	rcm, err := newMinIOChunkManager(ctx, bucketName)
+	assert.Nil(t, err)
+	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	meta := initMeta()
 	vcm := NewVectorChunkManager(lcm, rcm, meta, localCacheEnable)
 	assert.NotNil(t, vcm)
 
 	var allCancel context.CancelFunc = func() {
-		err := minIOKV.RemoveWithPrefix("")
+		err := rcm.RemoveWithPrefix("")
 		assert.Nil(t, err)
 		cancel()
 	}
@@ -155,7 +135,7 @@ func buildVectorChunkManager(t *testing.T, localPath string, localCacheEnable bo
 }
 
 var Params paramtable.BaseTable
-var localPath = "/tmp/milvus/test_data"
+var localPath = "/tmp/milvus/test_data/"
 
 func TestMain(m *testing.M) {
 	Params.Init()
@@ -242,10 +222,8 @@ func TestVectorChunkManager_Read(t *testing.T) {
 	}
 	assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
-	content = make([]byte, 8*4)
-	byteLen, err := vcm.ReadAt("109", content, 8*4)
+	content, err = vcm.ReadAt("109", 8*4, 8*4)
 	assert.Nil(t, err)
-	assert.Equal(t, 32, byteLen)
 
 	floatResult = make([]float32, 0)
 	for i := 0; i < len(content)/4; i++ {
@@ -254,20 +232,20 @@ func TestVectorChunkManager_Read(t *testing.T) {
 	}
 	assert.Equal(t, []float32{0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
-	byteLen, err = vcm.ReadAt("9999", content, 0)
+	content, err = vcm.ReadAt("9999", 0, 8*4)
 	assert.Error(t, err)
-	assert.Equal(t, -1, byteLen)
+	assert.Nil(t, content)
 
 	vcm.localCacheEnable = false
-	byteLen, err = vcm.ReadAt("109", content, 8*4)
+	content, err = vcm.ReadAt("109", 8*4, 8*4)
 	assert.Nil(t, err)
-	assert.Equal(t, 32, byteLen)
+	assert.Equal(t, 32, len(content))
 
-	byteLen, err = vcm.ReadAt("109", content, 9999)
+	content, err = vcm.ReadAt("109", 9999, 8*4)
 	assert.Error(t, err)
-	assert.Equal(t, 0, byteLen)
+	assert.Nil(t, content)
 
-	byteLen, err = vcm.ReadAt("9999", content, 0)
+	content, err = vcm.ReadAt("9999", 0, 8*4)
 	assert.Error(t, err)
-	assert.Equal(t, -1, byteLen)
+	assert.Nil(t, content)
 }

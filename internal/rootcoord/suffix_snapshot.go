@@ -27,11 +27,12 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 var (
@@ -81,7 +82,7 @@ var _ kv.SnapShotKV = (*suffixSnapshot)(nil)
 // newSuffixSnapshot creates a newSuffixSnapshot with provided kv
 func newSuffixSnapshot(txnKV kv.TxnKV, sep, root, snapshot string) (*suffixSnapshot, error) {
 	if txnKV == nil {
-		return nil, retry.Unrecoverable(errors.New("txnKV is nil"))
+		return nil, errorutil.Unrecoverable(errors.New("txnKV is nil"))
 	}
 
 	// handles trailing / logic

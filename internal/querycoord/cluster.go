@@ -27,14 +27,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -93,10 +92,10 @@ const (
 )
 
 type queryNodeCluster struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	client *etcdkv.EtcdKV
-	dataKV kv.DataKV
+	ctx          context.Context
+	cancel       context.CancelFunc
+	client       *etcdkv.EtcdKV
+	chunkManager storage.ChunkManager
 
 	session        *sessionutil.Session
 	sessionVersion int64
@@ -107,10 +106,15 @@ type queryNodeCluster struct {
 	newNodeFn        newQueryNodeFn
 	segmentAllocator SegmentAllocatePolicy
 	channelAllocator ChannelAllocatePolicy
-	segSizeEstimator func(request *querypb.LoadSegmentsRequest, dataKV kv.DataKV) (int64, error)
+	segSizeEstimator func(request *querypb.LoadSegmentsRequest, chunkNamanger storage.ChunkManager) (int64, error)
 }
 
-func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn, session *sessionutil.Session) (Cluster, error) {
+func newQueryNodeCluster(ctx context.Context,
+	clusterMeta Meta,
+	kv *etcdkv.EtcdKV,
+	newNodeFn newQueryNodeFn,
+	session *sessionutil.Session,
+	cm storage.ChunkManager) (Cluster, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	nodes := make(map[int64]Node)
 	c := &queryNodeCluster{
@@ -124,22 +128,9 @@ func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdK
 		segmentAllocator: defaultSegAllocatePolicy(),
 		channelAllocator: defaultChannelAllocatePolicy(),
 		segSizeEstimator: defaultSegEstimatePolicy(),
+		chunkManager:     cm,
 	}
 	err := c.reloadFromKV()
-	if err != nil {
-		return nil, err
-	}
-
-	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
-	}
-
-	c.dataKV, err = minioKV.NewMinIOKV(ctx, option)
 	if err != nil {
 		return nil, err
 	}
@@ -696,16 +687,16 @@ func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs
 }
 
 func (c *queryNodeCluster) estimateSegmentsSize(segments *querypb.LoadSegmentsRequest) (int64, error) {
-	return c.segSizeEstimator(segments, c.dataKV)
+	return c.segSizeEstimator(segments, c.chunkManager)
 }
 
 func defaultSegEstimatePolicy() segEstimatePolicy {
 	return estimateSegmentsSize
 }
 
-type segEstimatePolicy func(request *querypb.LoadSegmentsRequest, dataKv kv.DataKV) (int64, error)
+type segEstimatePolicy func(request *querypb.LoadSegmentsRequest, cm storage.ChunkManager) (int64, error)
 
-func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.DataKV) (int64, error) {
+func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, cm storage.ChunkManager) (int64, error) {
 	segmentSize := int64(0)
 
 	//TODO:: collection has multi vector field

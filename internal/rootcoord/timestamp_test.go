@@ -20,10 +20,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -31,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
 )
 
 type tbd struct {
@@ -80,7 +82,8 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
+	msFactory := dependency.NewStandAloneDependencyFactory()
 	Params.Init()
 	core, err := NewCore(ctx, msFactory)
 
