@@ -76,7 +76,7 @@ struct SearchResult {
     std::vector<int64_t> ids_;
 
  public:
-    // TODO(gexi): utilize these field
+    // TODO(gexi): utilize these fields
     void* segment_;
     std::vector<int64_t> result_offsets_;
     std::vector<int64_t> primary_keys_;
@@ -97,7 +97,7 @@ struct RetrieveResult {
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
 
 namespace impl {
-// hide identifier name to make auto completion happy
+// hide identifier name to make auto-completion happy
 struct FieldIdTag;
 struct FieldNameTag;
 struct FieldOffsetTag;
