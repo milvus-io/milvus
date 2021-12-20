@@ -72,24 +72,24 @@ func (p *GlobalParamTable) InitOnce() {
 
 func (p *GlobalParamTable) Init() {
 	p.BaseParams.Init()
-	p.BaseParams.RoleName = "rootcoord"
+	//p.BaseParams.RoleName = "rootcoord"
 
-	p.EtcdCfg.Init(&p.BaseParams)
-	p.MinioCfg.Init(&p.BaseParams)
-	p.PulsarCfg.Init(&p.BaseParams)
-	p.RocksdbCfg.Init(&p.BaseParams)
-	p.CommonCfg.Init(&p.BaseParams)
-	p.KnowhereCfg.Init(&p.BaseParams)
-	p.MsgChannelCfg.Init(&p.BaseParams)
+	p.EtcdCfg.init(&p.BaseParams)
+	p.MinioCfg.init(&p.BaseParams)
+	p.PulsarCfg.init(&p.BaseParams)
+	p.RocksdbCfg.init(&p.BaseParams)
+	p.CommonCfg.init(&p.BaseParams)
+	p.KnowhereCfg.init(&p.BaseParams)
+	p.MsgChannelCfg.init(&p.BaseParams)
 
-	p.RootCoordCfg.Init(&p.BaseParams)
-	p.ProxyCfg.Init(&p.BaseParams)
-	p.QueryCoordCfg.Init(&p.BaseParams)
-	p.QueryNodeCfg.Init(&p.BaseParams)
-	p.DataCoordCfg.Init(&p.BaseParams)
-	p.DataNodeCfg.Init(&p.BaseParams)
-	p.IndexCoordCfg.Init(&p.BaseParams)
-	p.IndexNodeCfg.Init(&p.BaseParams)
+	p.RootCoordCfg.init(&p.BaseParams)
+	p.ProxyCfg.init(&p.BaseParams)
+	p.QueryCoordCfg.init(&p.BaseParams)
+	p.QueryNodeCfg.init(&p.BaseParams)
+	p.DataCoordCfg.init(&p.BaseParams)
+	p.DataNodeCfg.init(&p.BaseParams)
+	p.IndexCoordCfg.init(&p.BaseParams)
+	p.IndexNodeCfg.init(&p.BaseParams)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -98,7 +98,7 @@ type etcdConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *etcdConfig) Init(bp *BaseParamTable) {
+func (p *etcdConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -108,7 +108,7 @@ type minioConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *minioConfig) Init(bp *BaseParamTable) {
+func (p *minioConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -120,7 +120,7 @@ type pulsarConfig struct {
 	Address string
 }
 
-func (p *pulsarConfig) Init(bp *BaseParamTable) {
+func (p *pulsarConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
 	p.initPulsarAddress()
@@ -140,7 +140,7 @@ type rocksdbConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *rocksdbConfig) Init(bp *BaseParamTable) {
+func (p *rocksdbConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -153,7 +153,7 @@ type commonConfig struct {
 	DefaultIndexName     string
 }
 
-func (p *commonConfig) Init(bp *BaseParamTable) {
+func (p *commonConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 	p.initDefaultPartitionName()
 	p.initDefaultIndexName()
@@ -175,7 +175,7 @@ type knowhereConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *knowhereConfig) Init(bp *BaseParamTable) {
+func (p *knowhereConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -209,7 +209,7 @@ type msgChannelConfig struct {
 	DataCoordSubNamePrefix string
 }
 
-func (p *msgChannelConfig) Init(bp *BaseParamTable) {
+func (p *msgChannelConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 	// Has to init global msgchannel prefix before other channel names
 	p.initClusterPrefix()
@@ -299,8 +299,7 @@ type rootCoordConfig struct {
 //	})
 //}
 
-// Init initialize param table
-func (p *rootCoordConfig) Init(bp *BaseParamTable) {
+func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
 	//p.initPulsarAddress()
@@ -461,7 +460,7 @@ type proxyConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *proxyConfig) Init(bp *BaseParamTable) {
+func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -471,7 +470,7 @@ type queryCoordConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *queryCoordConfig) Init(bp *BaseParamTable) {
+func (p *queryCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -481,7 +480,7 @@ type queryNodeConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *queryNodeConfig) Init(bp *BaseParamTable) {
+func (p *queryNodeConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -491,7 +490,7 @@ type dataCoordConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *dataCoordConfig) Init(bp *BaseParamTable) {
+func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -501,7 +500,7 @@ type dataNodeConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *dataNodeConfig) Init(bp *BaseParamTable) {
+func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -511,7 +510,7 @@ type indexCoordConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *indexCoordConfig) Init(bp *BaseParamTable) {
+func (p *indexCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
@@ -521,7 +520,7 @@ type indexNodeConfig struct {
 	BaseParams *BaseParamTable
 }
 
-func (p *indexNodeConfig) Init(bp *BaseParamTable) {
+func (p *indexNodeConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 }
 
