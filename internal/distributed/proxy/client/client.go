@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-var Params paramtable.GrpcClientConfig
+var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client for Proxy
 type Client struct {
@@ -44,12 +44,12 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
-	Params.InitOnce(typeutil.ProxyRole)
+	ClientParams.InitOnce(typeutil.ProxyRole)
 	client := &Client{
 		addr: addr,
 		grpcClient: &grpcclient.ClientBase{
-			ClientMaxRecvSize: Params.ClientMaxRecvSize,
-			ClientMaxSendSize: Params.ClientMaxSendSize,
+			ClientMaxRecvSize: ClientParams.ClientMaxRecvSize,
+			ClientMaxSendSize: ClientParams.ClientMaxSendSize,
 		},
 	}
 	client.grpcClient.SetRole(typeutil.ProxyRole)

@@ -31,7 +31,7 @@ import (
 )
 
 func TestIndexCoordClient(t *testing.T) {
-	Params.InitOnce(typeutil.IndexCoordRole)
+	ClientParams.InitOnce(typeutil.IndexCoordRole)
 	ctx := context.Background()
 	server, err := grpcindexcoord.NewServer(ctx)
 	assert.Nil(t, err)

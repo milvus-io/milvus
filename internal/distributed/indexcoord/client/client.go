@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-var Params paramtable.GrpcClientConfig
+var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client of IndexCoord.
 type Client struct {
@@ -51,11 +51,11 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 		log.Debug("IndexCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	Params.InitOnce(typeutil.IndexCoordRole)
+	ClientParams.InitOnce(typeutil.IndexCoordRole)
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase{
-			ClientMaxRecvSize: Params.ClientMaxRecvSize,
-			ClientMaxSendSize: Params.ClientMaxSendSize,
+			ClientMaxRecvSize: ClientParams.ClientMaxRecvSize,
+			ClientMaxSendSize: ClientParams.ClientMaxSendSize,
 		},
 		sess: sess,
 	}

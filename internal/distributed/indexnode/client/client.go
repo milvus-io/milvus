@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-var Params paramtable.GrpcClientConfig
+var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client of IndexNode.
 type Client struct {
@@ -44,12 +44,12 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
-	Params.InitOnce(typeutil.IndexNodeRole)
+	ClientParams.InitOnce(typeutil.IndexNodeRole)
 	client := &Client{
 		addr: addr,
 		grpcClient: &grpcclient.ClientBase{
-			ClientMaxRecvSize: Params.ClientMaxRecvSize,
-			ClientMaxSendSize: Params.ClientMaxSendSize,
+			ClientMaxRecvSize: ClientParams.ClientMaxRecvSize,
+			ClientMaxSendSize: ClientParams.ClientMaxSendSize,
 		},
 	}
 	client.grpcClient.SetRole(typeutil.IndexNodeRole)

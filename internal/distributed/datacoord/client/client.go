@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-var Params paramtable.GrpcClientConfig
+var ClientParams paramtable.GrpcClientConfig
 
 // Client is the datacoord grpc client
 type Client struct {
@@ -51,11 +51,11 @@ func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*C
 		log.Debug("DataCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	Params.InitOnce(typeutil.DataCoordRole)
+	ClientParams.InitOnce(typeutil.DataCoordRole)
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase{
-			ClientMaxRecvSize: Params.ClientMaxRecvSize,
-			ClientMaxSendSize: Params.ClientMaxSendSize,
+			ClientMaxRecvSize: ClientParams.ClientMaxRecvSize,
+			ClientMaxSendSize: ClientParams.ClientMaxSendSize,
 		},
 		sess: sess,
 	}
