@@ -419,7 +419,7 @@ func TestProxy(t *testing.T) {
 	Params.Init()
 	log.Info("Initialize parameter table of proxy")
 
-	rootCoordClient, err := rcc.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	rootCoordClient, err := rcc.NewClient(ctx, Params.BaseParams.MetaRootPath, Params.BaseParams.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = rootCoordClient.Init()
 	assert.NoError(t, err)
@@ -428,7 +428,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetRootCoordClient(rootCoordClient)
 	log.Info("Proxy set root coordinator client")
 
-	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.BaseParams.MetaRootPath, Params.BaseParams.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = dataCoordClient.Init()
 	assert.NoError(t, err)
@@ -437,7 +437,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetDataCoordClient(dataCoordClient)
 	log.Info("Proxy set data coordinator client")
 
-	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.BaseParams.MetaRootPath, Params.BaseParams.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = queryCoordClient.Init()
 	assert.NoError(t, err)
@@ -446,7 +446,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetQueryCoordClient(queryCoordClient)
 	log.Info("Proxy set query coordinator client")
 
-	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.BaseParams.MetaRootPath, Params.BaseParams.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = indexCoordClient.Init()
 	assert.NoError(t, err)
@@ -477,7 +477,7 @@ func TestProxy(t *testing.T) {
 		states, err := proxy.GetComponentStates(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
-		assert.Equal(t, Params.ProxyID, states.State.NodeID)
+		assert.Equal(t, Params.ProxyCfg.ProxyID, states.State.NodeID)
 		assert.Equal(t, typeutil.ProxyRole, states.State.Role)
 		assert.Equal(t, proxy.stateCode.Load().(internalpb.StateCode), states.State.StateCode)
 	})

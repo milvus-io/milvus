@@ -37,6 +37,9 @@ const (
 
 	// DefaultClientMaxRecvSize defines the maximum size of data per grpc request can receive by client side.
 	DefaultClientMaxRecvSize = 100 * 1024 * 1024
+
+	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
+	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
 )
 
 // GlobalParamTable is a derived struct of BaseParamTable.
@@ -92,6 +95,22 @@ func (p *GlobalParamTable) Init() {
 	p.IndexNodeCfg.init(&p.BaseParams)
 }
 
+func (p *GlobalParamTable) InitProxyAlias(alias string) {
+	p.ProxyCfg.initAlias(alias)
+}
+
+func (p *GlobalParamTable) InitDataNodeAlias(alias string) {
+	//p.DataNodeCfg.initAlias(alias)
+}
+
+func (p *GlobalParamTable) InitIndexNodeAlias(alias string) {
+	//p.IndexNodeCfg.initAlias(alias)
+}
+
+func (p *GlobalParamTable) InitProxyNodeAlias(alias string) {
+	//p.QueryNodeCfg.initAlias(alias)
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- etcd ---
 type etcdConfig struct {
@@ -118,12 +137,15 @@ type pulsarConfig struct {
 	BaseParams *BaseParamTable
 
 	Address string
+
+	MaxMessageSize int
 }
 
 func (p *pulsarConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
 	p.initPulsarAddress()
+	p.initMaxMessageSize()
 }
 
 func (p *pulsarConfig) initPulsarAddress() {
@@ -134,14 +156,38 @@ func (p *pulsarConfig) initPulsarAddress() {
 	p.Address = addr
 }
 
+func (p *pulsarConfig) initMaxMessageSize() {
+	maxMessageSizeStr, err := p.BaseParams.Load("pulsar.maxMessageSize")
+	if err != nil {
+		p.MaxMessageSize = SuggestPulsarMaxMessageSize
+	} else {
+		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
+		if err != nil {
+			p.MaxMessageSize = SuggestPulsarMaxMessageSize
+		} else {
+			p.MaxMessageSize = maxMessageSize
+		}
+	}
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- rocksdb ---
 type rocksdbConfig struct {
 	BaseParams *BaseParamTable
+
+	RocksmqPath string
 }
 
 func (p *rocksdbConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
+}
+
+func (p *rocksdbConfig) initRocksmqPath() {
+	path, err := p.BaseParams.Load("_RocksmqPath")
+	if err != nil {
+		panic(err)
+	}
+	p.RocksmqPath = path
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -529,10 +575,228 @@ func (p *rootCoordConfig) initTimeTickInterval() {
 // --- proxy ---
 type proxyConfig struct {
 	BaseParams *BaseParamTable
+
+	// NetworkPort & IP are not used
+	IP      string
+	Port    int
+	Address string
+
+	Alias string
+
+	//EtcdEndpoints []string
+	//MetaRootPath  string
+	//PulsarAddress string
+
+	RocksmqPath string // not used in Proxy
+
+	ProxyID                  UniqueID
+	TimeTickInterval         time.Duration
+	MsgStreamTimeTickBufSize int64
+	MaxNameLength            int64
+	MaxFieldNum              int64
+	MaxShardNum              int32
+	MaxDimension             int64
+	//DefaultPartitionName     string
+	//DefaultIndexName         string
+	BufFlagExpireTime      time.Duration
+	BufFlagCleanupInterval time.Duration
+
+	// --- Channels ---
+	//ClusterChannelPrefix      string
+	//ProxyTimeTickChannelNames []string
+	//ProxySubName              string
+
+	// required from query coord
+	SearchResultChannelNames   []string
+	RetrieveResultChannelNames []string
+
+	MaxTaskNum int64
+
+	PulsarMaxMessageSize int
+
+	CreatedTime time.Time
+	UpdatedTime time.Time
 }
 
 func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
+
+	//p.initEtcdEndpoints()
+	//p.initMetaRootPath()
+	//p.initPulsarAddress()
+	//p.initRocksmqPath()
+	p.initTimeTickInterval()
+	// Has to init global msgchannel prefix before other channel names
+	//p.initClusterMsgChannelPrefix()
+	//p.initProxySubName()
+	//p.initProxyTimeTickChannelNames()
+	p.initMsgStreamTimeTickBufSize()
+	p.initMaxNameLength()
+	p.initMaxFieldNum()
+	p.initMaxShardNum()
+	p.initMaxDimension()
+	//p.initDefaultPartitionName()
+	//p.initDefaultIndexName()
+
+	//p.initPulsarMaxMessageSize()
+
+	p.initMaxTaskNum()
+	p.initBufFlagExpireTime()
+	p.initBufFlagCleanupInterval()
+}
+
+func (p *proxyConfig) initAlias(alias string) {
+	p.Alias = alias
+}
+
+//func (p *proxyConfig) initPulsarAddress() {
+//	ret, err := p.Load("_PulsarAddress")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.PulsarAddress = ret
+//}
+
+//func (p *proxyConfig) initRocksmqPath() {
+//	path, err := p.Load("_RocksmqPath")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.RocksmqPath = path
+//}
+
+func (p *proxyConfig) initTimeTickInterval() {
+	interval := p.BaseParams.ParseIntWithDefault("proxy.timeTickInterval", 200)
+	p.TimeTickInterval = time.Duration(interval) * time.Millisecond
+}
+
+//func (p *proxyConfig) initClusterMsgChannelPrefix() {
+//	config, err := p.Load("msgChannel.chanNamePrefix.cluster")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.ClusterChannelPrefix = config
+//}
+
+//func (p *proxyConfig) initProxySubName() {
+//	config, err := p.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
+//	if err != nil {
+//		panic(err)
+//	}
+//	s := []string{p.ClusterChannelPrefix, config, strconv.FormatInt(p.ProxyID, 10)}
+//	p.ProxySubName = strings.Join(s, "-")
+//}
+
+//func (p *proxyConfig) initProxyTimeTickChannelNames() {
+//	config, err := p.Load("msgChannel.chanNamePrefix.proxyTimeTick")
+//	if err != nil {
+//		panic(err)
+//	}
+//	s := []string{p.ClusterChannelPrefix, config, "0"}
+//	prefix := strings.Join(s, "-")
+//	p.ProxyTimeTickChannelNames = []string{prefix}
+//}
+
+func (p *proxyConfig) initMsgStreamTimeTickBufSize() {
+	p.MsgStreamTimeTickBufSize = p.BaseParams.ParseInt64WithDefault("proxy.msgStream.timeTick.bufSize", 512)
+}
+
+func (p *proxyConfig) initMaxNameLength() {
+	str := p.BaseParams.LoadWithDefault("proxy.maxNameLength", "255")
+	maxNameLength, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxNameLength = maxNameLength
+}
+
+func (p *proxyConfig) initMaxShardNum() {
+	str := p.BaseParams.LoadWithDefault("proxy.maxShardNum", "256")
+	maxShardNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxShardNum = int32(maxShardNum)
+}
+
+func (p *proxyConfig) initMaxFieldNum() {
+	str := p.BaseParams.LoadWithDefault("proxy.maxFieldNum", "64")
+	maxFieldNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxFieldNum = maxFieldNum
+}
+
+func (p *proxyConfig) initMaxDimension() {
+	str := p.BaseParams.LoadWithDefault("proxy.maxDimension", "32768")
+	maxDimension, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxDimension = maxDimension
+}
+
+//func (p *proxyConfig) initDefaultPartitionName() {
+//	name := p.LoadWithDefault("common.defaultPartitionName", "_default")
+//	p.DefaultPartitionName = name
+//}
+
+//func (p *proxyConfig) initDefaultIndexName() {
+//	name := p.LoadWithDefault("common.defaultIndexName", "_default_idx")
+//	p.DefaultIndexName = name
+//}
+
+//func (p *proxyConfig) initPulsarMaxMessageSize() {
+//	maxMessageSizeStr, err := p.Load("pulsar.maxMessageSize")
+//	if err != nil {
+//		p.PulsarMaxMessageSize = SuggestPulsarMaxMessageSize
+//	} else {
+//		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
+//		if err != nil {
+//			p.PulsarMaxMessageSize = SuggestPulsarMaxMessageSize
+//		} else {
+//			p.PulsarMaxMessageSize = maxMessageSize
+//		}
+//	}
+//}
+
+//func (p *proxyConfig) initRoleName() {
+//	p.RoleName = "proxy"
+//}
+
+//func (p *proxyConfig) initEtcdEndpoints() {
+//	endpoints, err := p.Load("_EtcdEndpoints")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.EtcdEndpoints = strings.Split(endpoints, ",")
+//}
+
+//func (p *proxyConfig) initMetaRootPath() {
+//	rootPath, err := p.Load("etcd.rootPath")
+//	if err != nil {
+//		panic(err)
+//	}
+//	subPath, err := p.Load("etcd.metaSubPath")
+//	if err != nil {
+//		panic(err)
+//	}
+//	p.MetaRootPath = path.Join(rootPath, subPath)
+//}
+
+func (p *proxyConfig) initMaxTaskNum() {
+	p.MaxTaskNum = p.BaseParams.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
+}
+
+func (p *proxyConfig) initBufFlagExpireTime() {
+	expireTime := p.BaseParams.ParseInt64WithDefault("proxy.bufFlagExpireTime", 3600)
+	p.BufFlagExpireTime = time.Duration(expireTime) * time.Second
+}
+
+func (p *proxyConfig) initBufFlagCleanupInterval() {
+	interval := p.BaseParams.ParseInt64WithDefault("proxy.bufFlagCleanupInterval", 600)
+	p.BufFlagCleanupInterval = time.Duration(interval) * time.Second
 }
 
 ///////////////////////////////////////////////////////////////////////////////

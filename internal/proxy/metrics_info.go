@@ -46,7 +46,7 @@ func getSystemInfoMetrics(
 
 	identifierMap := make(map[string]int)
 
-	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyID)
+	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.ProxyID)
 	identifierMap[proxyRoleName] = int(node.session.ServerID)
 
 	proxyTopologyNode := metricsinfo.SystemTopologyNode{
@@ -67,14 +67,14 @@ func getSystemInfoMetrics(
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
-				CreatedTime: Params.CreatedTime.String(),
-				UpdatedTime: Params.UpdatedTime.String(),
+				CreatedTime: Params.ProxyCfg.CreatedTime.String(),
+				UpdatedTime: Params.ProxyCfg.UpdatedTime.String(),
 				Type:        typeutil.ProxyRole,
 				ID:          node.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.ProxyConfiguration{
-				DefaultPartitionName: Params.DefaultPartitionName,
-				DefaultIndexName:     Params.DefaultIndexName,
+				DefaultPartitionName: Params.CommonCfg.DefaultPartitionName,
+				DefaultIndexName:     Params.CommonCfg.DefaultIndexName,
 			},
 		},
 	}
@@ -424,7 +424,7 @@ func getSystemInfoMetrics(
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.ProxyID),
 		}, nil
 	}
 
@@ -434,6 +434,6 @@ func getSystemInfoMetrics(
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.ProxyID),
 	}, nil
 }

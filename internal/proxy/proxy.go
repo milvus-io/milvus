@@ -25,23 +25,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/logutil"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	"github.com/milvus-io/milvus/internal/metrics"
-
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/logutil"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -55,6 +53,8 @@ const channelMgrTickerInterval = 100 * time.Millisecond
 
 // make sure Proxy implements types.Proxy
 var _ types.Proxy = (*Proxy)(nil)
+
+var Params paramtable.GlobalParamTable
 
 // Proxy of milvus
 type Proxy struct {
@@ -125,13 +125,13 @@ func (node *Proxy) Register() error {
 }
 
 func (node *Proxy) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	node.session = sessionutil.NewSession(node.ctx, Params.BaseParams.MetaRootPath, Params.BaseParams.EtcdEndpoints)
 	if node.session == nil {
 		return errors.New("new session failed, maybe etcd cannot be connected")
 	}
-	node.session.Init(typeutil.ProxyRole, Params.NetworkAddress, false)
-	Params.ProxyID = node.session.ServerID
-	Params.SetLogger(Params.ProxyID)
+	node.session.Init(typeutil.ProxyRole, Params.ProxyCfg.Address, false)
+	Params.ProxyCfg.ProxyID = node.session.ServerID
+	Params.BaseParams.SetLogger(Params.ProxyCfg.ProxyID)
 	return nil
 }
 
@@ -142,7 +142,8 @@ func (node *Proxy) Init() error {
 		log.Error("Proxy init session failed", zap.Error(err))
 		return err
 	}
-	Params.initProxySubName()
+	//Params.initProxySubName()
+	Params.InitOnce()
 	// wait for datacoord state changed to Healthy
 	if node.dataCoord != nil {
 		log.Debug("Proxy wait for dataCoord ready")
@@ -191,28 +192,28 @@ func (node *Proxy) Init() error {
 
 		// TODO SearchResultChannelNames and RetrieveResultChannelNames should not be part in the Param table
 		// we should maintain a separate map for search result
-		Params.SearchResultChannelNames = []string{resp.QueryResultChannel}
-		Params.RetrieveResultChannelNames = []string{resp.QueryResultChannel}
-		log.Debug("Proxy CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.SearchResultChannelNames))
-		log.Debug("Proxy CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.RetrieveResultChannelNames))
+		Params.ProxyCfg.SearchResultChannelNames = []string{resp.QueryResultChannel}
+		Params.ProxyCfg.RetrieveResultChannelNames = []string{resp.QueryResultChannel}
+		log.Debug("Proxy CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.ProxyCfg.SearchResultChannelNames))
+		log.Debug("Proxy CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.ProxyCfg.RetrieveResultChannelNames))
 	}
 
 	m := map[string]interface{}{
-		"PulsarAddress": Params.PulsarAddress,
+		"PulsarAddress": Params.PulsarCfg.Address,
 		"PulsarBufSize": 1024}
 	err = node.msFactory.SetParams(m)
 	if err != nil {
 		return err
 	}
 
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyID)
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.ProxyID)
 	if err != nil {
 		return err
 	}
 
 	node.idAllocator = idAllocator
 
-	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyID)
+	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.ProxyID)
 	if err != nil {
 		return err
 	}
@@ -223,7 +224,7 @@ func (node *Proxy) Init() error {
 		panic(err)
 	}
 	node.segAssigner = segAssigner
-	node.segAssigner.PeerID = Params.ProxyID
+	node.segAssigner.PeerID = Params.ProxyCfg.ProxyID
 
 	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
 	dqlChannelsFunc := getDqlChannelsFunc(node.ctx, node.session.ServerID, node.queryCoord)
@@ -349,8 +350,8 @@ func (node *Proxy) Start() error {
 		cb()
 	}
 
-	Params.CreatedTime = time.Now()
-	Params.UpdatedTime = time.Now()
+	Params.ProxyCfg.CreatedTime = time.Now()
+	Params.ProxyCfg.UpdatedTime = time.Now()
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("Proxy", zap.Any("State", node.stateCode.Load()))

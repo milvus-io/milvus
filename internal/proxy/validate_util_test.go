@@ -102,13 +102,13 @@ func TestValidateFieldName(t *testing.T) {
 
 func TestValidateDimension(t *testing.T) {
 	assert.Nil(t, validateDimension(1, false))
-	assert.Nil(t, validateDimension(Params.MaxDimension, false))
+	assert.Nil(t, validateDimension(Params.ProxyCfg.MaxDimension, false))
 	assert.Nil(t, validateDimension(8, true))
-	assert.Nil(t, validateDimension(Params.MaxDimension, true))
+	assert.Nil(t, validateDimension(Params.ProxyCfg.MaxDimension, true))
 
 	// invalid dim
 	assert.NotNil(t, validateDimension(-1, false))
-	assert.NotNil(t, validateDimension(Params.MaxDimension+1, false))
+	assert.NotNil(t, validateDimension(Params.ProxyCfg.MaxDimension+1, false))
 	assert.NotNil(t, validateDimension(9, true))
 }
 

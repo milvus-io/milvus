@@ -32,7 +32,7 @@ func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 
 	ctx := context.Background()
-	client, err := NewClient(ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
+	client, err := NewClient(ctx, proxy.Params.BaseParams.MetaRootPath, proxy.Params.BaseParams.EtcdEndpoints)
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 

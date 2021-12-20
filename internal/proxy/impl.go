@@ -1956,7 +1956,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.DefaultPartitionName
+		it.PartitionName = Params.CommonCfg.DefaultPartitionName
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -2126,9 +2126,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		SearchRequest: &internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Search,
-				SourceID: Params.ProxyID,
+				SourceID: Params.ProxyCfg.ProxyID,
 			},
-			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+			ResultChannelID: strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 		},
 		resultBuf: make(chan []*internalpb.SearchResults),
 		query:     request,
@@ -2329,9 +2329,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		RetrieveRequest: &internalpb.RetrieveRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyID,
+				SourceID: Params.ProxyCfg.ProxyID,
 			},
-			ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+			ResultChannelID: strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 		},
 		resultBuf: make(chan []*internalpb.RetrieveResults),
 		query:     queryRequest,
@@ -2711,9 +2711,9 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			RetrieveRequest: &internalpb.RetrieveRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Retrieve,
-					SourceID: Params.ProxyID,
+					SourceID: Params.ProxyCfg.ProxyID,
 				},
-				ResultChannelID: strconv.FormatInt(Params.ProxyID, 10),
+				ResultChannelID: strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 			},
 			resultBuf: make(chan []*internalpb.RetrieveResults),
 			query:     queryRequest,
@@ -3142,7 +3142,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		SegmentIDs: segments,
 	})
@@ -3202,7 +3202,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		CollectionID: collID,
 		SegmentIDs:   segments,
@@ -3244,7 +3244,7 @@ func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, c
 			MsgType:   commonpb.MsgType_DescribeCollection,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -3261,7 +3261,7 @@ func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, c
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -3281,7 +3281,7 @@ func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, c
 				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     0,
 				Timestamp: 0,
-				SourceID:  Params.ProxyID,
+				SourceID:  Params.ProxyCfg.ProxyID,
 			},
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
@@ -3367,19 +3367,19 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("Proxy.GetMetrics",
-		zap.Int64("node_id", Params.ProxyID),
+		zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 		zap.String("req", req.Request))
 
 	if !node.checkHealthy() {
 		log.Warn("Proxy.GetMetrics failed",
-			zap.Int64("node_id", Params.ProxyID),
+			zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 			zap.String("req", req.Request),
-			zap.Error(errProxyIsUnhealthy(Params.ProxyID)))
+			zap.Error(errProxyIsUnhealthy(Params.ProxyCfg.ProxyID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgProxyIsUnhealthy(Params.ProxyID),
+				Reason:    msgProxyIsUnhealthy(Params.ProxyCfg.ProxyID),
 			},
 			Response: "",
 		}, nil
@@ -3388,7 +3388,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("Proxy.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.ProxyID),
+			zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -3414,7 +3414,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		MsgType:   commonpb.MsgType_SystemInfo,
 		MsgID:     msgID,
 		Timestamp: 0,
-		SourceID:  Params.ProxyID,
+		SourceID:  Params.ProxyCfg.ProxyID,
 	}
 
 	if metricType == metricsinfo.SystemInfoMetrics {
@@ -3428,7 +3428,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 
 		log.Debug("Proxy.GetMetrics",
-			zap.Int64("node_id", Params.ProxyID),
+			zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
@@ -3440,7 +3440,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	}
 
 	log.Debug("Proxy.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.ProxyID),
+		zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 
@@ -3456,7 +3456,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 // LoadBalance would do a load balancing operation between query nodes
 func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
 	log.Debug("Proxy.LoadBalance",
-		zap.Int64("proxy_id", Params.ProxyID),
+		zap.Int64("proxy_id", Params.ProxyCfg.ProxyID),
 		zap.Any("req", req))
 
 	if !node.checkHealthy() {
@@ -3471,7 +3471,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 			MsgType:   commonpb.MsgType_LoadBalanceSegments,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		SourceNodeIDs:    []int64{req.SrcNodeID},
 		DstNodeIDs:       req.DstNodeIDs,

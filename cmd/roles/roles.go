@@ -119,11 +119,11 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 
 	wg.Add(1)
 	go func() {
-		proxy.Params.InitAlias(alias)
 		proxy.Params.InitOnce()
+		proxy.Params.InitProxyAlias(alias)
 
 		f := setLoggerFunc()
-		proxy.Params.SetLogConfig(f)
+		proxy.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
