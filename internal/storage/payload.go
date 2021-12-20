@@ -80,6 +80,7 @@ type PayloadReader struct {
 	colType          schemapb.DataType
 }
 
+// NewPayloadWriter is constructor of PayloadWriter
 func NewPayloadWriter(colType schemapb.DataType) (*PayloadWriter, error) {
 	w := C.NewPayloadWriter(C.int(colType))
 	if w == nil {
