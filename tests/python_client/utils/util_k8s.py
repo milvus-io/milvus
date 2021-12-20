@@ -79,7 +79,7 @@ def get_pod_list(namespace, label_selector):
         raise Exception(str(e))
 
 
-def export_pods_log(namespace, label_selector):
+def export_pod_logs(namespace, label_selector):
     """
     export pod logs with label selector to '/tmp/milvus'
 
@@ -90,14 +90,14 @@ def export_pods_log(namespace, label_selector):
     :type label_selector: str
 
     :example:
-            >>> export_logs("chaos-testing", "app.kubernetes.io/instance=mic-milvus")
+            >>> export_pod_logs("chaos-testing", "app.kubernetes.io/instance=mic-milvus")
     """
-    pod_log_path = '/tmp/milvus'
+    pod_log_path = '/tmp/milvus_logs'
     if not os.path.isdir(pod_log_path):
         os.makedirs(pod_log_path)
 
     # get pods and export logs
-    items = get_pod_list("chaos-testing", label_selector=label)
+    items = get_pod_list(namespace, label_selector=label_selector)
     try:
         for item in items:
             pod_name = item.metadata.name
@@ -110,4 +110,4 @@ def export_pods_log(namespace, label_selector):
 if __name__ == '__main__':
     label = "app.kubernetes.io/instance=test-proxy-pod-failure, component=proxy"
     res = get_pod_list("chaos-testing", label_selector=label)
-    export_pods_log(namespace='chaos-testing', label_selector=label)
+    export_pod_logs(namespace='chaos-testing', label_selector=label)
