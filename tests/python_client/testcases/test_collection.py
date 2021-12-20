@@ -1073,6 +1073,54 @@ class TestCollectionOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
+   
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_load_partition(self):
+        """
+        target: test release the partition after load collection
+        method: load collection and load the partition
+        expected: raise exception
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w1 = self.init_partition_wrap(collection_w)
+        partition_w1.insert(cf.gen_default_list_data())
+        collection_w.load()
+        error = {ct.err_code: 1, ct.err_msg: f'load the partition after load collection is not supported'}
+        partition_w1.load(check_task=CheckTasks.err_res,
+                             check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_release_partition(self):
+        """
+        target: test release the partition after load collection
+        method: load collection and release the partition
+        expected: raise exception
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w1 = self.init_partition_wrap(collection_w)
+        partition_w1.insert(cf.gen_default_list_data())
+        collection_w.load()
+        error = {ct.err_code: 1, ct.err_msg: f'releasing the partition after load collection is not supported'}
+        partition_w1.release(check_task=CheckTasks.err_res,
+                             check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_collection_after_release_collection(self):
+        """
+        target: test release the collection after load collection
+        method: load collection and release the collection
+        expected: no exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: c_name, exp_schema: default_schema})
+        collection_w.insert(cf.gen_default_list_data())
+        collection_w.load()
+        collection_w.release()
+
 
 
 class TestCollectionDataframe(TestcaseBase):
