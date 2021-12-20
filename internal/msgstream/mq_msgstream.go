@@ -999,7 +999,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 				}
 				tsMsg, err := ms.unmarshal.Unmarshal(msg.Payload(), headerMsg.Base.MsgType)
 				if err != nil {
-					return fmt.Errorf("Failed to unmarshal tsMsg, err %s", err.Error())
+					return fmt.Errorf("failed to unmarshal tsMsg, err %s", err.Error())
 				}
 				if tsMsg.Type() == commonpb.MsgType_TimeTick && tsMsg.BeginTs() >= mp.Timestamp {
 					runLoop = false
