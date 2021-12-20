@@ -22,7 +22,7 @@ import (
 )
 
 func msgDataNodeIsUnhealthy(nodeID UniqueID) string {
-	return fmt.Sprintf("data node %d is not ready", nodeID)
+	return fmt.Sprintf("DataNode %d is not ready", nodeID)
 }
 
 func errDataNodeIsUnhealthy(nodeID UniqueID) error {
