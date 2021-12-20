@@ -454,7 +454,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 			}
 			msgPack := ttMsgStream.Consume()
 			if msgPack == nil {
-				log.Debug("receive nil tt msg, shutdown tt channel")
+				log.Debug("receive nil timetick msg and shutdown timetick channel")
 				return
 			}
 			for _, msg := range msgPack.Msgs {
