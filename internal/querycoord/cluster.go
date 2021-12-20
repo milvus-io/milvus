@@ -831,6 +831,10 @@ func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.Dat
 					if err != nil {
 						indexSize, err = storage.GetBinlogSize(kvClient, path)
 						if err != nil {
+							log.Warn("estimate index size wrong",
+								zap.Int64("segmentID", loadInfo.GetSegmentID()),
+								zap.String("path", path),
+								zap.Error(err))
 							return 0, err
 						}
 					}
@@ -847,6 +851,10 @@ func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.Dat
 				if err != nil {
 					binlogSize, err = storage.GetBinlogSize(kvClient, path.GetLogPath())
 					if err != nil {
+						log.Warn("estimate binlog size wrong",
+							zap.Int64("segmentID", loadInfo.GetSegmentID()),
+							zap.String("binlog path", path.GetLogPath()),
+							zap.Error(err))
 						return 0, err
 					}
 				}

@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -101,23 +101,30 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 	}
 	log.Debug("shuffleSegmentsToQueryNodeV2: start estimate the size of loadReqs")
 	dataSizePerReq := make([]int64, len(reqs))
-	estimateError := make([]error, len(reqs))
-	var estimateWg sync.WaitGroup
-	estimateReqFn := func(offset int, req *querypb.LoadSegmentsRequest) {
-		defer estimateWg.Done()
-		dataSizePerReq[offset], estimateError[offset] = cluster.estimateSegmentsSize(req)
-	}
+
+	// use errgroup to collect errors of goroutines
+	g, _ := errgroup.WithContext(ctx)
 	for offset, req := range reqs {
-		estimateWg.Add(1)
-		go estimateReqFn(offset, req)
+		r, i := req, offset
+
+		g.Go(func() error {
+			size, err := cluster.estimateSegmentsSize(r)
+			if err != nil {
+				log.Warn("estimate segment size error",
+					zap.Int64("collectionID", r.GetCollectionID()),
+					zap.Error(err))
+				return err
+			}
+			dataSizePerReq[i] = size
+			return nil
+		})
 	}
-	estimateWg.Wait()
-	for _, err := range estimateError {
-		if err != nil {
-			log.Debug("shuffleSegmentsToQueryNodeV2: estimate segment size error", zap.Error(err))
-			return err
-		}
+
+	if err := g.Wait(); err != nil {
+		log.Warn("shuffleSegmentsToQueryNodeV2: estimate segment size error", zap.Error(err))
+		return err
 	}
+
 	log.Debug("shuffleSegmentsToQueryNodeV2: estimate the size of loadReqs end")
 	for {
 		// online nodes map and totalMem, usedMem, memUsage of every node
