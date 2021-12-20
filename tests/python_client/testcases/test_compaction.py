@@ -261,7 +261,6 @@ class TestCompactionParams(TestcaseBase):
         """
         pass
 
-    @pytest.mark.xfail(reason="Issue 12344")
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_max_time_interval(self):
         """
@@ -275,16 +274,29 @@ class TestCompactionParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
         collection_w.compact()
 
-        for i in range(2):
+        # Notice:The merge segments compaction triggered by max_compaction_interval also needs to meet
+        # the compaction_segment_ num_threshold
+        for i in range(ct.compact_segment_num_threshold):
             df = cf.gen_default_dataframe_data(tmp_nb)
             collection_w.insert(df)
             assert collection_w.num_entities == tmp_nb * (i + 1)
 
-        sleep(61)
+        sleep(ct.max_compaction_interval + 1)
 
         # verify queryNode load the compacted segments
         collection_w.load()
         segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        assert len(segment_info) == 1
+
+    @pytest.mark.skip(reason="TODO")
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_delta_max_time_interval(self):
+        """
+        target: test merge insert and delta log triggered by max_compaction_interval
+        method: todo
+        expected: auto merge
+        """
+        pass
 
 
 class TestCompactionOperation(TestcaseBase):
@@ -340,7 +352,8 @@ class TestCompactionOperation(TestcaseBase):
                 4.search
         expected: Verify segment info and index info
         """
-        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb, is_dup=False)
+        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
+                                                                       is_dup=False)
 
         # create index
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
@@ -426,7 +439,8 @@ class TestCompactionOperation(TestcaseBase):
                 4.load and search
         expected: Verify search result and index info
         """
-        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb, is_dup=False)
+        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
+                                                                       is_dup=False)
 
         # compact
         collection_w.compact()
@@ -486,7 +500,8 @@ class TestCompactionOperation(TestcaseBase):
                 3.load and search
         expected: Verify search result
         """
-        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb, is_dup=False)
+        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
+                                                                       is_dup=False)
 
         # compact
         collection_w.compact()
