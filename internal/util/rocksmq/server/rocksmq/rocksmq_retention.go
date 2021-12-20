@@ -13,6 +13,7 @@ package rocksmq
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -289,6 +290,7 @@ func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 		}
 		ackedSize += size
 	}
+	log.Debug("aaaaa", zap.Any("topic", topic), zap.Any("size", ackedSize))
 	if err := pageIter.Err(); err != nil {
 		return -1, err
 	}
@@ -342,22 +344,14 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 // DeleteMessages in rocksdb by range of [startID, endID)
 func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) error {
 	// Delete msg by range of startID and endID
-	startKey, err := combKey(topic, startID)
-	if err != nil {
-		log.Debug("RocksMQ: combKey(" + topic + "," + strconv.FormatInt(startID, 10) + ")")
-		return err
-	}
-	endKey, err := combKey(topic, endID+1)
-	if err != nil {
-		log.Debug("RocksMQ: combKey(" + topic + "," + strconv.FormatInt(endID, 10) + ")")
-		return err
-	}
+	startKey := path.Join(topic, strconv.FormatInt(startID, 10))
+	endKey := path.Join(topic, strconv.FormatInt(endID+1, 10))
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
 	writeBatch.DeleteRange([]byte(startKey), []byte(endKey))
 	opts := gorocksdb.NewDefaultWriteOptions()
 	defer opts.Destroy()
-	err = db.Write(opts, writeBatch)
+	err := db.Write(opts, writeBatch)
 	if err != nil {
 		return err
 	}

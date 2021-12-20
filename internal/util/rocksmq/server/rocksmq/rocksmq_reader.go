@@ -38,8 +38,8 @@ type rocksmqReader struct {
 //Seek seek the rocksmq reader to the pointed position
 func (rr *rocksmqReader) Seek(msgID UniqueID) { //nolint:govet
 	rr.currentID = msgID
-	fixChanName, _ := fixChannelName(rr.topic)
-	dataKey := path.Join(fixChanName, strconv.FormatInt(msgID, 10))
+	fixTopicName := rr.topic + "/"
+	dataKey := path.Join(fixTopicName, strconv.FormatInt(msgID, 10))
 	rr.iter.Seek([]byte(dataKey))
 	if !rr.messageIDInclusive {
 		rr.currentID++
@@ -57,7 +57,7 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 		val := iter.Value()
 		tmpKey := string(key.Data())
 		var msgID UniqueID
-		msgID, err = strconv.ParseInt(tmpKey[FixedChannelNameLen+1:], 10, 64)
+		msgID, err = strconv.ParseInt(tmpKey[len(rr.topic)+1:], 10, 64)
 		msg = &ConsumerMessage{
 			MsgID: msgID,
 		}
@@ -87,12 +87,8 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 		}
 		rr.iter.Close()
 		rr.iter = rr.store.NewIterator(rr.readOpts)
-		fixChanName, err := fixChannelName(rr.topic)
-		if err != nil {
-			log.Debug("RocksMQ: fixChannelName " + rr.topic + " failed")
-			return nil, err
-		}
-		dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID+1, 10))
+		fixTopicName := rr.topic + "/"
+		dataKey := path.Join(fixTopicName, strconv.FormatInt(rr.currentID+1, 10))
 		iter = rr.iter
 		iter.Seek([]byte(dataKey))
 		if !iter.Valid() {
@@ -115,12 +111,8 @@ func (rr *rocksmqReader) HasNext() bool {
 		}
 		rr.iter.Close()
 		rr.iter = rr.store.NewIterator(rr.readOpts)
-		fixChanName, err := fixChannelName(rr.topic)
-		if err != nil {
-			log.Debug("RocksMQ: fixChannelName " + rr.topic + " failed")
-			return false
-		}
-		dataKey := path.Join(fixChanName, strconv.FormatInt(rr.currentID+1, 10))
+		fixTopicName := rr.topic + "/"
+		dataKey := path.Join(fixTopicName, strconv.FormatInt(rr.currentID+1, 10))
 		rr.iter.Seek([]byte(dataKey))
 		return rr.iter.Valid()
 	default:
