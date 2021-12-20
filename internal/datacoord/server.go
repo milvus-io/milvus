@@ -290,7 +290,7 @@ func (s *Server) Start() error {
 	Params.CreatedTime = time.Now()
 	Params.UpdatedTime = time.Now()
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
-	log.Debug("dataCoordinator startup success")
+	log.Debug("DataCoord startup success")
 
 	return nil
 }
