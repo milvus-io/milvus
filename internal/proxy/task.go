@@ -2570,6 +2570,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.CreatedTimestamp = result.CreatedTimestamp
 		dct.result.CreatedUtcTimestamp = result.CreatedUtcTimestamp
 		dct.result.ShardsNum = result.ShardsNum
+		dct.result.ConsistencyLevel = result.ConsistencyLevel
 		for _, field := range result.Schema.Fields {
 			if field.FieldID >= common.StartOfUserFieldID {
 				dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{

@@ -396,6 +396,7 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, tmp_nb]}',
                            check_task=CheckTasks.check_query_empty)
 
+    @pytest.mark.skip("enable this later using session/strong consistency")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_search(self):
         """
@@ -420,6 +421,8 @@ class TestDeleteOperation(TestcaseBase):
         # assert search result is not equal to entity
         log.debug(f"Second search result ids: {search_res_2[0].ids}")
         inter = set(ids[:ct.default_nb // 2]).intersection(set(search_res_2[0].ids))
+        # Using bounded staleness, we could still search the "deleted" entities,
+        # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
         assert len(inter) == 0
 
     @pytest.mark.tags(CaseLabel.L1)

@@ -1057,6 +1057,7 @@ class CreateCollectionRequest :
     kSchemaFieldNumber = 4,
     kBaseFieldNumber = 1,
     kShardsNumFieldNumber = 5,
+    kConsistencyLevelFieldNumber = 6,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -1104,6 +1105,11 @@ class CreateCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::int32 shards_num() const;
   void set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value);
 
+  // .milvus.proto.common.ConsistencyLevel consistency_level = 6;
+  void clear_consistency_level();
+  ::milvus::proto::common::ConsistencyLevel consistency_level() const;
+  void set_consistency_level(::milvus::proto::common::ConsistencyLevel value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.CreateCollectionRequest)
  private:
   class _Internal;
@@ -1114,6 +1120,7 @@ class CreateCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr schema_;
   ::milvus::proto::common::MsgBase* base_;
   ::PROTOBUF_NAMESPACE_ID::int32 shards_num_;
+  int consistency_level_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -2031,6 +2038,7 @@ class DescribeCollectionResponse :
     kCreatedTimestampFieldNumber = 6,
     kCreatedUtcTimestampFieldNumber = 7,
     kShardsNumFieldNumber = 8,
+    kConsistencyLevelFieldNumber = 11,
   };
   // repeated string virtual_channel_names = 4;
   int virtual_channel_names_size() const;
@@ -2130,6 +2138,11 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::int32 shards_num() const;
   void set_shards_num(::PROTOBUF_NAMESPACE_ID::int32 value);
 
+  // .milvus.proto.common.ConsistencyLevel consistency_level = 11;
+  void clear_consistency_level();
+  ::milvus::proto::common::ConsistencyLevel consistency_level() const;
+  void set_consistency_level(::milvus::proto::common::ConsistencyLevel value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.DescribeCollectionResponse)
  private:
   class _Internal;
@@ -2145,6 +2158,7 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::uint64 created_timestamp_;
   ::PROTOBUF_NAMESPACE_ID::uint64 created_utc_timestamp_;
   ::PROTOBUF_NAMESPACE_ID::int32 shards_num_;
+  int consistency_level_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -13859,6 +13873,20 @@ inline void CreateCollectionRequest::set_shards_num(::PROTOBUF_NAMESPACE_ID::int
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.CreateCollectionRequest.shards_num)
 }
 
+// .milvus.proto.common.ConsistencyLevel consistency_level = 6;
+inline void CreateCollectionRequest::clear_consistency_level() {
+  consistency_level_ = 0;
+}
+inline ::milvus::proto::common::ConsistencyLevel CreateCollectionRequest::consistency_level() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.CreateCollectionRequest.consistency_level)
+  return static_cast< ::milvus::proto::common::ConsistencyLevel >(consistency_level_);
+}
+inline void CreateCollectionRequest::set_consistency_level(::milvus::proto::common::ConsistencyLevel value) {
+  
+  consistency_level_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.CreateCollectionRequest.consistency_level)
+}
+
 // -------------------------------------------------------------------
 
 // DropCollectionRequest
@@ -14887,6 +14915,20 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common:
 DescribeCollectionResponse::start_positions() const {
   // @@protoc_insertion_point(field_list:milvus.proto.milvus.DescribeCollectionResponse.start_positions)
   return start_positions_;
+}
+
+// .milvus.proto.common.ConsistencyLevel consistency_level = 11;
+inline void DescribeCollectionResponse::clear_consistency_level() {
+  consistency_level_ = 0;
+}
+inline ::milvus::proto::common::ConsistencyLevel DescribeCollectionResponse::consistency_level() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.consistency_level)
+  return static_cast< ::milvus::proto::common::ConsistencyLevel >(consistency_level_);
+}
+inline void DescribeCollectionResponse::set_consistency_level(::milvus::proto::common::ConsistencyLevel value) {
+  
+  consistency_level_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.consistency_level)
 }
 
 // -------------------------------------------------------------------

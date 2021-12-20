@@ -338,6 +338,34 @@ inline bool CompactionState_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<CompactionState>(
     CompactionState_descriptor(), name, value);
 }
+enum ConsistencyLevel : int {
+  Strong = 0,
+  Session = 1,
+  Bounded = 2,
+  Eventually = 3,
+  Customized = 4,
+  ConsistencyLevel_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ConsistencyLevel_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool ConsistencyLevel_IsValid(int value);
+constexpr ConsistencyLevel ConsistencyLevel_MIN = Strong;
+constexpr ConsistencyLevel ConsistencyLevel_MAX = Customized;
+constexpr int ConsistencyLevel_ARRAYSIZE = ConsistencyLevel_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ConsistencyLevel_descriptor();
+template<typename T>
+inline const std::string& ConsistencyLevel_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ConsistencyLevel>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function ConsistencyLevel_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    ConsistencyLevel_descriptor(), enum_t_value);
+}
+inline bool ConsistencyLevel_Parse(
+    const std::string& name, ConsistencyLevel* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ConsistencyLevel>(
+    ConsistencyLevel_descriptor(), name, value);
+}
 // ===================================================================
 
 class Status :
@@ -2184,6 +2212,11 @@ template <> struct is_proto_enum< ::milvus::proto::common::CompactionState> : ::
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::CompactionState>() {
   return ::milvus::proto::common::CompactionState_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::ConsistencyLevel> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ConsistencyLevel>() {
+  return ::milvus::proto::common::ConsistencyLevel_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE
