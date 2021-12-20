@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -275,6 +276,12 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
+
+	// Check if topicName contains "/"
+	if strings.Contains(topicName, "/") {
+		log.Error("RocksMQ: create topic failed because topic name contains \"/\"", zap.String("topic", topicName))
+		return retry.Unrecoverable(fmt.Errorf("topic name = %s contains \"/\"", topicName))
+	}
 
 	// TopicBeginIDTitle is the only identifier of a topic exist or not
 	topicIDKey := TopicIDTitle + topicName
