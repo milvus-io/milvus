@@ -37,6 +37,7 @@ func (rr *rmqReader) Seek(id MessageID) error {
 	return rr.r.Seek(msgID)
 }
 
+// Close closes the rocksmq reader
 func (rr *rmqReader) Close() {
 	rr.r.Close()
 }
