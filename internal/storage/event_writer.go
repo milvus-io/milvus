@@ -96,6 +96,7 @@ func readMagicNumber(buffer io.Reader) (int32, error) {
 	return magicNumber, nil
 }
 
+// ReadDescriptorEvent reads a descriptorEvent from buffer
 func ReadDescriptorEvent(buffer io.Reader) (*descriptorEvent, error) {
 	header, err := readDescriptorEventHeader(buffer)
 	if err != nil {
