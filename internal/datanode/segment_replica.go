@@ -618,7 +618,7 @@ func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp
 			zap.Int64("Want", replica.collectionID),
 			zap.Int64("Actual", collID),
 		)
-		return nil, fmt.Errorf("Not supported collection %v", collID)
+		return nil, fmt.Errorf("not supported collection %v", collID)
 	}
 
 	if replica.collSchema == nil {
