@@ -23,4 +23,6 @@ type baseNode = flowgraph.BaseNode
 
 // node is type flowgraph.Node
 type node = flowgraph.Node
+
+// inputNode is type flowgraph.InputNode
 type inputNode = flowgraph.InputNode
