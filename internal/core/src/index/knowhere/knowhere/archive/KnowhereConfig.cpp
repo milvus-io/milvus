@@ -113,7 +113,7 @@ KnowhereConfig::InitGPUResource(const std::vector<int64_t>& gpu_ids) {
 
 void
 KnowhereConfig::FreeGPUResource() {
-    knowhere::FaissGpuResourceMgr::GetInstance().Free();  // free gpu resource.
+    knowhere::FaissGpuResourceMgr::GetInstance().Free();  // Release gpu resources.
 }
 #endif
 
