@@ -424,7 +424,7 @@ type DropPartitionMsg struct {
 
 #### 6.3 Create Index automatically
 
-`RC` would notify `IC(Index Coord)` to build index automatically when the segment has been flushed.
+`RootCoord` would notify `IndexCoord(Index Coordinator)` to build index automatically when the segment has been flushed.
 <img src="./figs/root_coord_create_index_automatically.png">
 
 #### 6.4 RootCoord Instance
