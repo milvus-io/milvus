@@ -424,7 +424,7 @@ func (s *Server) startServerLoop() {
 func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	ttMsgStream, err := s.msFactory.NewMsgStream(ctx)
 	if err != nil {
-		log.Error("new msg stream failed", zap.Error(err))
+		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		return
 	}
 	ttMsgStream.AsConsumerWithPosition([]string{Params.TimeTickChannelName},
