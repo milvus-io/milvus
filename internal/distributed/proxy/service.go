@@ -467,6 +467,7 @@ func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasR
 	return s.proxy.CreateAlias(ctx, request)
 }
 
+// DropAlias notifies Proxy to drop an alias
 func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	return s.proxy.DropAlias(ctx, request)
 }
