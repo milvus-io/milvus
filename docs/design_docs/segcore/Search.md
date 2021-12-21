@@ -6,7 +6,7 @@ update: 9.16.2021, by [xiaofan-luan](https://github.com/xiaofan-luan)
 
 ## Search
 
-Search now supports two modes: json DSL mode and Boolean Expr mode. We will talk about the latter one in detail because the former has been deprecated and is only used in test.
+Search now supports two modes: json DSL mode and Boolean Expr mode. We will talk about the latter one in detail because the former has been deprecated and is only used in tests.
 
 The execution mode of Boolean Expr works as follows:
 
