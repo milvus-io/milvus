@@ -451,7 +451,7 @@ func Test_LoadPartitionExecuteFailAfterLoadCollection(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	createDefaultPartition(ctx, queryCoord)
 	node.watchDmChannels = returnFailedResult
@@ -511,7 +511,7 @@ func Test_LoadSegmentReschedule(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	node1.stop()
 	node2.stop()
@@ -540,7 +540,7 @@ func Test_WatchDmChannelReschedule(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	node1.stop()
 	node2.stop()
@@ -588,7 +588,7 @@ func Test_RescheduleDmChannelWithWatchQueryChannel(t *testing.T) {
 	loadCollectionTask := watchDmChannelTask.parentTask
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	queryCoord.Stop()
 	err = removeAllSession()
@@ -615,7 +615,7 @@ func Test_RescheduleSegmentWithWatchQueryChannel(t *testing.T) {
 	loadCollectionTask := loadSegmentTask.parentTask
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	queryCoord.Stop()
 	err = removeAllSession()
@@ -735,7 +735,7 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
 	queryCoord.scheduler.Enqueue(loadCollectionTask)
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	node2, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
@@ -771,15 +771,15 @@ func Test_handoffSegmentFail(t *testing.T) {
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	node1.loadSegment = returnFailedResult
 
 	infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
 	assert.NotEqual(t, 0, len(infos))
 	segmentID := defaultSegmentID + 4
-	baseTask := newBaseTask(ctx, querypb.TriggerCondition_Handoff)
 
+	baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 	segmentInfo := &querypb.SegmentInfo{
 		SegmentID:    segmentID,
 		CollectionID: defaultCollectionID,
@@ -824,7 +824,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 
 		err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 		assert.Nil(t, err)
-		waitTaskFinalState(loadCollectionTask, taskExpired)
+		waitTaskFinalState(loadCollectionTask, taskSuccess)
 	})
 
 	node2, err := startQueryNodeServer(ctx)
@@ -832,7 +832,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
 	t.Run("Test LoadBalanceBySegmentID", func(t *testing.T) {
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask: baseTask,
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -850,11 +850,11 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 		}
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)
-		waitTaskFinalState(loadBalanceTask, taskExpired)
+		waitTaskFinalState(loadBalanceTask, taskSuccess)
 	})
 
 	t.Run("Test LoadBalanceByNotExistSegmentID", func(t *testing.T) {
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask: baseTask,
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -876,7 +876,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("Test LoadBalanceByNode", func(t *testing.T) {
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask: baseTask,
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -893,11 +893,11 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 		}
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)
-		waitTaskFinalState(loadBalanceTask, taskExpired)
+		waitTaskFinalState(loadBalanceTask, taskSuccess)
 	})
 
 	t.Run("Test LoadBalanceWithEmptySourceNode", func(t *testing.T) {
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask: baseTask,
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -917,7 +917,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("Test LoadBalanceByNotExistNode", func(t *testing.T) {
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask: baseTask,
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -967,13 +967,13 @@ func TestLoadBalanceIndexedSegmentsTask(t *testing.T) {
 
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	node2, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
-	baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+	baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_LoadBalance)
 	loadBalanceTask := &loadBalanceTask{
 		baseTask: baseTask,
 		LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -991,7 +991,7 @@ func TestLoadBalanceIndexedSegmentsTask(t *testing.T) {
 	}
 	err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(loadBalanceTask, taskExpired)
+	waitTaskFinalState(loadBalanceTask, taskSuccess)
 
 	node1.stop()
 	node2.stop()
@@ -1014,7 +1014,7 @@ func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	node2, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)

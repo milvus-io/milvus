@@ -277,10 +277,10 @@ func TestHandoffSegmentLoop(t *testing.T) {
 	loadPartitionTask := genLoadPartitionTask(baseCtx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(loadPartitionTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(loadPartitionTask, taskExpired)
+	waitTaskFinalState(loadPartitionTask, taskSuccess)
 
 	t.Run("Test partitionNotLoaded", func(t *testing.T) {
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_Handoff)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:    defaultSegmentID,
 			CollectionID: defaultCollectionID,
@@ -303,21 +303,21 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		err = queryCoord.scheduler.Enqueue(handoffTask)
 		assert.Nil(t, err)
 
-		waitTaskFinalState(handoffTask, taskExpired)
+		waitTaskFinalState(handoffTask, taskSuccess)
 	})
 
 	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 	queryCoord.meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
 
 	t.Run("Test handoffGrowingSegment", func(t *testing.T) {
 		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
 		assert.NotEqual(t, 0, len(infos))
 		segmentID := defaultSegmentID + 4
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_Handoff)
 
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:    segmentID,
 			CollectionID: defaultCollectionID,
@@ -340,11 +340,11 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		err = queryCoord.scheduler.Enqueue(handoffTask)
 		assert.Nil(t, err)
 
-		waitTaskFinalState(handoffTask, taskExpired)
+		waitTaskFinalState(handoffTask, taskSuccess)
 	})
 
 	t.Run("Test binlogNotExist", func(t *testing.T) {
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_Handoff)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:    defaultSegmentID + 100,
 			CollectionID: defaultCollectionID,
@@ -371,7 +371,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 	})
 
 	t.Run("Test sealedSegmentExist", func(t *testing.T) {
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_Handoff)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:    defaultSegmentID,
 			CollectionID: defaultCollectionID,
@@ -401,8 +401,8 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
 		assert.NotEqual(t, 0, len(infos))
 		segmentID := defaultSegmentID + 5
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_Handoff)
 
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:      segmentID,
 			CollectionID:   defaultCollectionID,
@@ -426,7 +426,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		err = queryCoord.scheduler.Enqueue(handoffTask)
 		assert.Nil(t, err)
 
-		waitTaskFinalState(handoffTask, taskExpired)
+		waitTaskFinalState(handoffTask, taskSuccess)
 
 		_, err = queryCoord.meta.getSegmentInfoByID(segmentID)
 		assert.Nil(t, err)
@@ -440,8 +440,8 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
 		assert.NotEqual(t, 0, len(infos))
 		segmentID := defaultSegmentID + 6
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_Handoff)
 
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:      segmentID,
 			CollectionID:   defaultCollectionID,
@@ -478,10 +478,10 @@ func TestHandoffSegmentLoop(t *testing.T) {
 	releasePartitionTask := genReleasePartitionTask(baseCtx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(releasePartitionTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(releasePartitionTask, taskExpired)
+	waitTaskFinalState(releasePartitionTask, taskSuccess)
 
 	t.Run("Test handoffReleasedPartition", func(t *testing.T) {
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_Handoff)
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_Handoff)
 		segmentInfo := &querypb.SegmentInfo{
 			SegmentID:    defaultSegmentID,
 			CollectionID: defaultCollectionID,
@@ -504,7 +504,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		err = queryCoord.scheduler.Enqueue(handoffTask)
 		assert.Nil(t, err)
 
-		waitTaskFinalState(handoffTask, taskExpired)
+		waitTaskFinalState(handoffTask, taskSuccess)
 	})
 
 	queryCoord.Stop()
@@ -528,7 +528,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskSuccess)
 
 	partitionID := defaultPartitionID
 	for {
@@ -540,7 +540,8 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 			PartitionIDs: []UniqueID{partitionID},
 			Schema:       genCollectionSchema(defaultCollectionID, false),
 		}
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_GrpcRequest)
+
+		baseTask := newBaseTask(queryCoord.scheduler.ctx, querypb.TriggerCondition_GrpcRequest)
 		loadPartitionTask := &loadPartitionTask{
 			baseTask:              baseTask,
 			LoadPartitionsRequest: req,
@@ -552,7 +553,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		}
 		err = queryCoord.scheduler.Enqueue(loadPartitionTask)
 		assert.Nil(t, err)
-		waitTaskFinalState(loadPartitionTask, taskExpired)
+		waitTaskFinalState(loadPartitionTask, taskSuccess)
 		nodeInfo, err := queryCoord.cluster.getNodeInfoByID(queryNode1.queryNodeID)
 		assert.Nil(t, err)
 		if nodeInfo.(*queryNode).memUsageRate >= Params.OverloadedMemoryThresholdPercentage {

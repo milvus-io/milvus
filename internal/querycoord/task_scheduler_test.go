@@ -163,7 +163,7 @@ func (tt *testTask) postExecute(ctx context.Context) error {
 	return nil
 }
 
-func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
+func TestWatchQueryChannel_ClearEtcdInfoAfterTaskFailed(t *testing.T) {
 	refreshParams()
 	baseCtx := context.Background()
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -190,10 +190,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 		nodeID:  nodeID,
 	}
 	queryCoord.scheduler.Enqueue(testTask)
-
-	queryNode.stop()
-	err = removeNodeSession(queryNode.queryNodeID)
-	assert.Nil(t, err)
+	waitTaskFinalState(testTask, taskFailed)
 	for {
 		newActiveTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
 		assert.Nil(t, err)

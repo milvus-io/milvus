@@ -46,6 +46,7 @@ const (
 
 // Cluster manages all query node connections and grpc requests
 type Cluster interface {
+	close()
 	reloadFromKV() error
 	getComponentInfos(ctx context.Context) []*internalpb.ComponentInfo
 
@@ -65,7 +66,7 @@ type Cluster interface {
 	getSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
 	getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error)
 
-	registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error
+	registerNode(session *sessionutil.Session, id UniqueID, state nodeState) error
 	getNodeInfoByID(nodeID int64) (Node, error)
 	removeNodeInfo(nodeID int64) error
 	stopNode(nodeID int64)
@@ -148,6 +149,11 @@ func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdK
 	return c, nil
 }
 
+// close all query node's grpc connect, and failed all internalTasks
+func (c *queryNodeCluster) close() {
+	c.cancel()
+}
+
 // Reload trigger task, trigger task states, internal task, internal task state from etcd
 // Assign the internal task to the corresponding trigger task as a child task
 func (c *queryNodeCluster) reloadFromKV() error {
@@ -161,7 +167,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 	}
 	for nodeID, session := range onlineSessionMap {
 		log.Debug("reloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
-		err := c.registerNode(c.ctx, session, nodeID, disConnect)
+		err := c.registerNode(session, nodeID, disConnect)
 		if err != nil {
 			log.Error("query node failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
@@ -189,7 +195,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 				log.Error("watchNodeLoop: unmarshal session error", zap.Error(err))
 				return err
 			}
-			err = c.registerNode(context.Background(), session, nodeID, offline)
+			err = c.registerNode(session, nodeID, offline)
 			if err != nil {
 				log.Debug("reloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 				return err
@@ -416,7 +422,7 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 	if targetNode != nil {
 		err := targetNode.releasePartitions(ctx, in)
 		if err != nil {
-			log.Debug("releasePartitions: queryNode release partitions error", zap.String("error", err.Error()))
+			log.Error("releasePartitions: queryNode release partitions error", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs), zap.Error(err))
 			return err
 		}
 
@@ -547,7 +553,7 @@ func (c *queryNodeCluster) getMetrics(ctx context.Context, in *milvuspb.GetMetri
 	return ret
 }
 
-func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error {
+func (c *queryNodeCluster) registerNode(session *sessionutil.Session, id UniqueID, state nodeState) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -562,7 +568,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		if err != nil {
 			return err
 		}
-		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
+		node, err := c.newNodeFn(c.ctx, session.Address, id, c.client)
 		if err != nil {
 			log.Debug("registerNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err

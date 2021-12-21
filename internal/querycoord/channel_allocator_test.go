@@ -76,7 +76,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	assert.Nil(t, err)
 	nodeSession := node.session
 	nodeID := node.queryNodeID
-	cluster.registerNode(baseCtx, nodeSession, nodeID, disConnect)
+	cluster.registerNode(nodeSession, nodeID, disConnect)
 	waitQueryNodeOnline(cluster, nodeID)
 
 	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, meta, false, nil)

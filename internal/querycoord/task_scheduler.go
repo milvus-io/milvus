@@ -126,13 +126,12 @@ func NewTaskQueue() *TaskQueue {
 
 // TaskScheduler controls the scheduling of trigger tasks and internal tasks
 type TaskScheduler struct {
-	triggerTaskQueue         *TaskQueue
-	activateTaskChan         chan task
-	meta                     Meta
-	cluster                  Cluster
-	taskIDAllocator          func() (UniqueID, error)
-	client                   *etcdkv.EtcdKV
-	stopActivateTaskLoopChan chan int
+	triggerTaskQueue *TaskQueue
+	activateTaskChan chan task
+	meta             Meta
+	cluster          Cluster
+	taskIDAllocator  func() (UniqueID, error)
+	client           *etcdkv.EtcdKV
 
 	rootCoord  types.RootCoord
 	dataCoord  types.DataCoord
@@ -154,19 +153,17 @@ func NewTaskScheduler(ctx context.Context,
 	idAllocator func() (UniqueID, error)) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
-	stopTaskLoopChan := make(chan int, 1)
 	s := &TaskScheduler{
-		ctx:                      ctx1,
-		cancel:                   cancel,
-		meta:                     meta,
-		cluster:                  cluster,
-		taskIDAllocator:          idAllocator,
-		activateTaskChan:         taskChan,
-		client:                   kv,
-		stopActivateTaskLoopChan: stopTaskLoopChan,
-		rootCoord:                rootCoord,
-		dataCoord:                dataCoord,
-		indexCoord:               indexCoord,
+		ctx:              ctx1,
+		cancel:           cancel,
+		meta:             meta,
+		cluster:          cluster,
+		taskIDAllocator:  idAllocator,
+		activateTaskChan: taskChan,
+		client:           kv,
+		rootCoord:        rootCoord,
+		dataCoord:        dataCoord,
+		indexCoord:       indexCoord,
 	}
 	s.triggerTaskQueue = NewTaskQueue()
 
@@ -561,13 +558,8 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		return err
 	}
 	log.Debug("processTask: update etcd success", zap.Int64("parent taskID", t.getTaskID()))
-	if t.msgType() == commonpb.MsgType_LoadCollection || t.msgType() == commonpb.MsgType_LoadPartitions {
-		t.notify(nil)
-	}
 
 	t.setState(taskDone)
-	t.updateTaskProcess()
-
 	return nil
 }
 
@@ -589,7 +581,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		activeTaskWg.Wait()
 	}
 
-	removeTaskFromKVFn := func(triggerTask task) error {
+	removeTaskFromKVFn := func(triggerTask task) {
 		childTasks := triggerTask.getChildTask()
 		for _, t := range childTasks {
 			childTaskKeys := make([]string, 0)
@@ -598,8 +590,10 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			childTaskKeys = append(childTaskKeys, taskKey)
 			childTaskKeys = append(childTaskKeys, stateKey)
 			err := scheduler.client.MultiRemove(childTaskKeys)
-			// after recover, child Task's state will be TaskDone, will not be repeatedly executed
+			// after query coord restart, it will redo the triggerTask
+			// after recover, if child Task's state is TaskDone, will not be repeatedly executed
 			if err != nil {
+				log.Error("scheduleLoop: error when remove internal tasks from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
 				panic(err)
 			}
 		}
@@ -609,53 +603,61 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		triggerTaskKeys = append(triggerTaskKeys, taskKey)
 		triggerTaskKeys = append(triggerTaskKeys, stateKey)
 		err := scheduler.client.MultiRemove(triggerTaskKeys)
+		// after query coord restart, it will redo the triggerTask
+		// after recover, if child Task's state is TaskDone, will not be repeatedly executed
 		if err != nil {
+			log.Error("scheduleLoop: error when remove trigger task from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
 			panic(err)
 		}
-		return nil
 	}
 
 	for {
 		var err error
 		select {
 		case <-scheduler.ctx.Done():
-			scheduler.stopActivateTaskLoopChan <- 1
 			return
 		case <-scheduler.triggerTaskQueue.Chan():
+			hasNotify := false
 			triggerTask = scheduler.triggerTaskQueue.popTask()
 			log.Debug("scheduleLoop: pop a triggerTask from triggerTaskQueue", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
-			alreadyNotify := true
+			// the persistent task state is only taskUndo, taskDoing, taskDone
+			// taskUndo and taskDoing indicate that the assignment of internTasks for triggerTask was not completed
+			// taskDone said it had successfully completed the internTasks allocation for triggerTask
 			if triggerTask.getState() == taskUndo || triggerTask.getState() == taskDoing {
+				// if err == nil, the state of the triggerTask is already taskDone
+				// if err != nil, set the state of he triggerTask to taskFailed
 				err = scheduler.processTask(triggerTask)
 				if err != nil {
 					log.Debug("scheduleLoop: process triggerTask failed", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
-					alreadyNotify = false
+					triggerTask.setState(taskFailed)
+				} else {
+					if triggerTask.msgType() == commonpb.MsgType_LoadCollection || triggerTask.msgType() == commonpb.MsgType_LoadCollection {
+						hasNotify = true
+						triggerTask.notify(nil)
+					}
 				}
-			}
-			if triggerTask.msgType() != commonpb.MsgType_LoadCollection && triggerTask.msgType() != commonpb.MsgType_LoadPartitions {
-				alreadyNotify = false
 			}
 
-			childTasks := triggerTask.getChildTask()
-			if len(childTasks) != 0 {
-				// process loadSegment before watchDmChannel, avoid delete not taking effect
-				highPriorityTasks, lowPriorityTasks := sortInternalTaskByPriority(childTasks, commonpb.MsgType_LoadSegments)
-				processInternalTaskFn(highPriorityTasks, triggerTask)
-				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
-					processInternalTaskFn(lowPriorityTasks, triggerTask)
-				}
-				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
-					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
-					if err != nil {
-						triggerTask.setResultInfo(err)
+			// int this step, triggerTask's state is either taskDone or taskFailed
+			if triggerTask.getState() == taskDone {
+				childTasks := triggerTask.getChildTask()
+				if len(childTasks) != 0 {
+					// process loadSegment before watchDmChannel, avoid delete not taking effect
+					highPriorityTasks, lowPriorityTasks := sortInternalTaskByPriority(childTasks, commonpb.MsgType_LoadSegments)
+					processInternalTaskFn(highPriorityTasks, triggerTask)
+					if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+						processInternalTaskFn(lowPriorityTasks, triggerTask)
+					}
+					if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+						err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
+						if err != nil {
+							triggerTask.setResultInfo(err)
+						}
 					}
 				}
 				resultInfo := triggerTask.getResultInfo()
 				if resultInfo.ErrorCode != commonpb.ErrorCode_Success {
-					if !alreadyNotify {
-						triggerTask.notify(errors.New(resultInfo.Reason))
-						alreadyNotify = true
-					}
+					triggerTask.setState(taskFailed)
 					rollBackTasks := triggerTask.rollBack(scheduler.ctx)
 					log.Debug("scheduleLoop: start rollBack after triggerTask failed",
 						zap.Int64("triggerTaskID", triggerTask.getTaskID()),
@@ -664,30 +666,28 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 					// After queryCoord recover, it will retry failed childTask
 					// if childTask still execute failed, then reProduce rollBacked tasks
 					processInternalTaskFn(rollBackTasks, triggerTask)
+				} else {
+					triggerTask.setState(taskSuccess)
 				}
 			}
 
-			err = removeTaskFromKVFn(triggerTask)
-			if err != nil {
-				log.Error("scheduleLoop: error when remove trigger and internal tasks from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
-				triggerTask.setResultInfo(err)
-			} else {
-				log.Debug("scheduleLoop: trigger task done and delete from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
-			}
+			// int this step, triggerTask's state is either taskSuccess or taskFailed
+			// updateTaskProcess will update global meta cache according the triggerTask's state
+			// if load failed, this step will clean meta
+			// if release success, this step will remove collection/partition info from global meta cache
+			triggerTask.updateTaskProcess()
+			// remove all triggerTask ans internalTasks from etcd
+			removeTaskFromKVFn(triggerTask)
 
-			resultStatus := triggerTask.getResultInfo()
-			if resultStatus.ErrorCode != commonpb.ErrorCode_Success {
-				triggerTask.setState(taskFailed)
-				if !alreadyNotify {
+			if !hasNotify {
+				resultStatus := triggerTask.getResultInfo()
+				if resultStatus.ErrorCode != commonpb.ErrorCode_Success {
 					triggerTask.notify(errors.New(resultStatus.Reason))
-				}
-			} else {
-				triggerTask.updateTaskProcess()
-				triggerTask.setState(taskExpired)
-				if !alreadyNotify {
+				} else {
 					triggerTask.notify(nil)
 				}
 			}
+			log.Debug("scheduleLoop: trigger task done and delete from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
 		}
 	}
 }
@@ -696,8 +696,16 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task, triggerTask task) {
 	defer wg.Done()
 	var err error
-	redoFunc1 := func() {
-		if !t.isValid() || !t.isRetryable() {
+	redoFunc1 := func(err error) {
+		if !t.isValid() {
+			log.Error("waitActivateTaskDone: ctx done when redo interTask",
+				zap.Int64("taskID", t.getTaskID()),
+				zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+			triggerTask.setResultInfo(err)
+			return
+		}
+
+		if !t.isRetryable() {
 			log.Debug("waitActivateTaskDone: reSchedule the activate task",
 				zap.Int64("taskID", t.getTaskID()),
 				zap.Int64("triggerTaskID", triggerTask.getTaskID()))
@@ -777,21 +785,26 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 	}
 
 	redoFunc2 := func(err error) {
-		if t.isValid() {
-			if !t.isRetryable() {
-				log.Error("waitActivateTaskDone: activate task failed after retry",
-					zap.Int64("taskID", t.getTaskID()),
-					zap.Int64("triggerTaskID", triggerTask.getTaskID()))
-				triggerTask.setResultInfo(err)
-				return
-			}
-			log.Debug("waitActivateTaskDone: retry the active task",
+		if !t.isValid() {
+			log.Error("waitActivateTaskDone: ctx done when redo interTask",
 				zap.Int64("taskID", t.getTaskID()),
 				zap.Int64("triggerTaskID", triggerTask.getTaskID()))
-			scheduler.activateTaskChan <- t
-			wg.Add(1)
-			go scheduler.waitActivateTaskDone(wg, t, triggerTask)
+			triggerTask.setResultInfo(err)
+			return
 		}
+		if !t.isRetryable() {
+			log.Error("waitActivateTaskDone: activate task failed after retry",
+				zap.Int64("taskID", t.getTaskID()),
+				zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+			triggerTask.setResultInfo(err)
+			return
+		}
+		log.Debug("waitActivateTaskDone: retry the active task",
+			zap.Int64("taskID", t.getTaskID()),
+			zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+		scheduler.activateTaskChan <- t
+		wg.Add(1)
+		go scheduler.waitActivateTaskDone(wg, t, triggerTask)
 	}
 	err = t.waitToFinish()
 	if err != nil {
@@ -802,9 +815,9 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 
 		switch t.msgType() {
 		case commonpb.MsgType_LoadSegments:
-			redoFunc1()
+			redoFunc1(err)
 		case commonpb.MsgType_WatchDmChannels:
-			redoFunc1()
+			redoFunc1(err)
 		case commonpb.MsgType_WatchDeltaChannels:
 			redoFunc2(err)
 		case commonpb.MsgType_WatchQueryChannels:
@@ -830,10 +843,9 @@ func (scheduler *TaskScheduler) processActivateTaskLoop() {
 	defer scheduler.wg.Done()
 	for {
 		select {
-		case <-scheduler.stopActivateTaskLoopChan:
+		case <-scheduler.ctx.Done():
 			log.Debug("processActivateTaskLoop, ctx done")
 			return
-
 		case t := <-scheduler.activateTaskChan:
 			if t == nil {
 				log.Error("processActivateTaskLoop: pop a nil active task", zap.Int64("taskID", t.getTaskID()))
