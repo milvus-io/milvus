@@ -173,6 +173,7 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 	return q
 }
 
+// newDmInputNode returns a new inputNode
 func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory) *flowgraph.InputNode {
 	insertStream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
