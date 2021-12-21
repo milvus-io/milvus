@@ -250,7 +250,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	return resp, nil
 }
 
-// GetPartitionStatistics return statistics for parition
+// GetPartitionStatistics returns statistics for parition
 // for now only row count is returned
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	resp := &datapb.GetPartitionStatisticsResponse{
@@ -303,7 +303,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return resp, nil
 }
 
-// SaveBinlogPaths update segment related binlog path
+// SaveBinlogPaths updates segment related binlog path
 // works for Checkpoints and Flush
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	resp := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
