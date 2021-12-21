@@ -440,6 +440,7 @@ func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb
 	return s.proxy.GetPersistentSegmentInfo(ctx, request)
 }
 
+//GetQuerySegmentInfo notifies Proxy to get query segment info.
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	return s.proxy.GetQuerySegmentInfo(ctx, request)
 
