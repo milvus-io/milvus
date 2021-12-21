@@ -56,7 +56,6 @@ lib/
 .DS_Store
 *.sw[po]
 cwrapper_build
-cwrapper_dablooms_build
 **/cwrapper_rocksdb_build/
 **/.clangd/*
 **/compile_commands.json
