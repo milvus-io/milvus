@@ -102,7 +102,8 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		t.Req.ShardsNum = common.DefaultShardsNum
 	}
 	log.Debug("CreateCollectionReqTask Execute", zap.Any("CollectionName", t.Req.CollectionName),
-		zap.Any("ShardsNum", t.Req.ShardsNum))
+		zap.Int32("ShardsNum", t.Req.ShardsNum),
+		zap.String("ConsistencyLevel", t.Req.ConsistencyLevel.String()))
 
 	for idx, field := range schema.Fields {
 		field.FieldID = int64(idx + StartOfUserFieldID)
@@ -161,6 +162,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		PhysicalChannelNames:       chanNames,
 		ShardsNum:                  t.Req.ShardsNum,
 		PartitionCreatedTimestamps: []uint64{0},
+		ConsistencyLevel:           t.Req.ConsistencyLevel,
 	}
 
 	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
@@ -430,6 +432,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 		collInfo.ShardsNum = int32(len(collInfo.VirtualChannelNames))
 	}
 	t.Rsp.ShardsNum = collInfo.ShardsNum
+	t.Rsp.ConsistencyLevel = collInfo.ConsistencyLevel
 
 	t.Rsp.CreatedTimestamp = collInfo.CreateTime
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)

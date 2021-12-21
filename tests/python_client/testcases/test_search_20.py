@@ -502,6 +502,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "partition has been released"})
 
+    @pytest.mark.skip("enable this later using session/strong consistency")
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_collection(self):
         """
@@ -535,6 +536,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 4. search with data inserted but not load again
         data = cf.gen_default_dataframe_data(nb=2000)
         insert_res = collection_w.insert(data)[0]
+        # Using bounded staleness, maybe we cannot search the "inserted" requests,
+        # since the search requests arrived query nodes earlier than query nodes consume the insert requests.
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                             default_limit, default_search_exp,
                             guarantee_timestamp=insert_res.timestamp,
@@ -1223,6 +1226,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
+    @pytest.mark.skip("enable this later using session/strong consistency")
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_new_data(self, nq, dim, auto_id, _async):
         """
@@ -1258,6 +1262,8 @@ class TestCollectionSearch(TestcaseBase):
                                                              insert_offset=nb_old)
         insert_ids.extend(insert_ids_new)
         # 4. search for new data without load
+        # Using bounded staleness, maybe we could not search the "inserted" entities,
+        # since the search requests arrived query nodes earlier than query nodes consume the insert requests.
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp, _async=_async,

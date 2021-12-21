@@ -183,3 +183,11 @@ enum CompactionState {
   Executing = 1;
   Completed = 2;
 }
+
+enum ConsistencyLevel {
+    Strong = 0;
+    Session = 1; // default in PyMilvus
+    Bounded = 2;
+    Eventually = 3;
+    Customized = 4; // Users pass their own `guarantee_timestamp`.
+}

@@ -93,6 +93,8 @@ message CreateCollectionRequest {
   // Once set, no modification is allowed (Optional)
   // https://github.com/milvus-io/milvus/issues/6690
   int32 shards_num = 5;
+  // The consistency level that the collection used, modification is not supported now.
+  common.ConsistencyLevel consistency_level = 6;
 }
 
 /**
@@ -172,6 +174,8 @@ message DescribeCollectionResponse {
   repeated string aliases = 9;
   // The message ID/posititon when collection is created
   repeated common.KeyDataPair start_positions = 10;
+  // The consistency level that the collection used, modification is not supported now.
+  common.ConsistencyLevel consistency_level = 11;
 }
 
 /**
