@@ -45,7 +45,7 @@ The processing flow after QueryNode reads the Get request from `search` channel:
 4. Convert the statistics into an inverted index from Range to SegmentID for each `Sealed` segment;
 5. Check whether the requested primary key exists in any inverted index of `Sealed` segment, return empty if not found;
 6. [optional] Use the bloomfilter to filter out segments where the primary key does not exist;
-7. Use binary search to find specified entity in each segment where the primary key may exist;
+7. Use binary search to find the specified entity in each segment where the primary key may exist;
 
 ### APIs
 
