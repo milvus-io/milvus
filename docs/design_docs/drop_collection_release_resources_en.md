@@ -40,7 +40,7 @@ DataCoord
 
 Pros:
     1. The easiest approach in both DataNode and DataCoord.
-    2. DN can reuse the current flush manager procedure.
+    2. DataNode can reuse the current flush manager procedure.
 Cons:
     1. The No. rpc call is equal to the No. segments in a collection, expensive.
 
