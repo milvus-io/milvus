@@ -12,7 +12,7 @@ See design details `${milvus_root}/internal/core/src/segcore/SegmentInterface.h`
 
 ## Basic Concepts：
 
-1. Segment: Data is sharded into segment based on written timestamp, and the sharding logic is controlled by data coordinator.
+1. Segment: Data is sharded into segments based on written timestamp, and the sharding logic is controlled by data coordinator.
 2. Chunk: Further division of segment data, chunk is continuous data for each column
    - There will be only one chunk in each sealed segment.
    - In growing segment, chunks are currently divided by a fixed number of rows. With data ingestion, the number of chunks will increase
