@@ -27,7 +27,6 @@ pipeline {
     environment {
         PROJECT_NAME = 'milvus'
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
-        IMAGE_REPO = 'dockerhub-mirror-sh.zilliz.cc/milvusdb'
         DOCKER_BUILDKIT = 1
         ARTIFACTS = "${env.WORKSPACE}/_artifacts"
         DOCKER_CREDENTIALS_ID = "f0aacc8e-33f2-458a-ba9e-2c44f431b4d2"
