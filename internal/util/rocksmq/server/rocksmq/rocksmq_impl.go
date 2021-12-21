@@ -506,7 +506,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		log.Error("RocksMQ: alloc id failed.", zap.Error(err))
 		return []UniqueID{}, err
 	}
-
+	allocTime := time.Since(start).Milliseconds()
 	if UniqueID(msgLen) != idEnd-idStart {
 		return []UniqueID{}, errors.New("Obtained id length is not equal that of message")
 	}
@@ -531,7 +531,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		log.Debug("RocksMQ: write batch failed")
 		return []UniqueID{}, err
 	}
-
+	writeTime := time.Since(start).Milliseconds()
 	if vals, ok := rmq.consumers.Load(topicName); ok {
 		for _, v := range vals.([]*Consumer) {
 			select {
@@ -558,12 +558,16 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	if err != nil {
 		return []UniqueID{}, err
 	}
+	updatePageTime := time.Since(start).Milliseconds()
 
 	// TODO add this to monitor metrics
 	getProduceTime := time.Since(start).Milliseconds()
-	if getLockTime > 200 || getProduceTime > 200 {
+	if getProduceTime > 200 {
 		log.Warn("rocksmq produce too slowly", zap.String("topic", topicName),
-			zap.Int64("get lock elapse", getLockTime), zap.Int64("produce elapse", getProduceTime))
+			zap.Int64("get lock elapse", getLockTime),
+			zap.Int64("alloc elapse", allocTime),
+			zap.Int64("write elapse", writeTime),
+			zap.Int64("updatePage elapse", updatePageTime))
 	}
 	return msgIDs, nil
 }
@@ -632,14 +636,13 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
-	readOpts.SetPrefixSameAsStart(true)
-	readOpts.SetIterateUpperBound([]byte(typeutil.AddOne(topicName + "/")))
+	prefix := topicName + "/"
 	iter := rmq.store.NewIterator(readOpts)
 	defer iter.Close()
 
 	var dataKey string
 	if currentID == DefaultMessageID {
-		dataKey = topicName + "/"
+		dataKey = prefix
 	} else {
 		dataKey = path.Join(topicName, strconv.FormatInt(currentID.(int64), 10))
 	}
@@ -647,7 +650,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 
 	consumerMessage := make([]ConsumerMessage, 0, n)
 	offset := 0
-	for ; iter.Valid() && offset < n; iter.Next() {
+	for ; iter.ValidForPrefix([]byte(prefix)) && offset < n; iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
 		strKey := string(key.Data())
@@ -690,7 +693,6 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	}
 	newID := consumedIDs[len(consumedIDs)-1]
 	rmq.moveConsumePos(topicName, groupName, newID+1)
-
 	rmq.updateAckedInfo(topicName, groupName, consumedIDs)
 	// TODO add this to monitor metrics
 	getConsumeTime := time.Since(start).Milliseconds()
@@ -777,8 +779,8 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	iter := rmq.store.NewIterator(readOpts)
 	defer iter.Close()
 
-	// 0 is the ASC value of "/" + 1
-	iter.SeekForPrev([]byte(topicName + "0"))
+	// seek to the last message of thie topic
+	iter.SeekForPrev([]byte(typeutil.AddOne(topicName + "/")))
 
 	// if iterate fail
 	if err := iter.Err(); err != nil {
@@ -794,7 +796,9 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 
 	iKey := iter.Key()
 	seekMsgID := string(iKey.Data())
-	iKey.Free()
+	if iKey != nil {
+		iKey.Free()
+	}
 	// if find message is not belong to current channel, start from 0
 	if !strings.Contains(seekMsgID, fixTopicName) {
 		return nil
@@ -834,19 +838,16 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 	lastID := ids[len(ids)-1]
 
 	// 1. Try to get the page id between first ID and last ID of ids
-	pageMsgPrefix := constructKey(PageMsgSizeTitle, topicName)
+	pageMsgPrefix := constructKey(PageMsgSizeTitle, topicName) + "/"
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
-	pageMsgFirstKey := pageMsgPrefix + "/" + strconv.FormatInt(firstID, 10)
-	// set last key by lastID
-	pageMsgLastKey := pageMsgPrefix + "/" + strconv.FormatInt(lastID+1, 10)
+	pageMsgFirstKey := pageMsgPrefix + strconv.FormatInt(firstID, 10)
 
-	readOpts.SetIterateUpperBound([]byte(pageMsgLastKey))
 	iter := rmq.kv.(*rocksdbkv.RocksdbKV).DB.NewIterator(readOpts)
 	defer iter.Close()
 	var pageIDs []UniqueID
 
-	for iter.Seek([]byte(pageMsgFirstKey)); iter.Valid(); iter.Next() {
+	for iter.Seek([]byte(pageMsgFirstKey)); iter.ValidForPrefix([]byte(pageMsgPrefix)); iter.Next() {
 		key := iter.Key()
 		pageID, err := parsePageID(string(key.Data()))
 		if key != nil {
@@ -936,6 +937,7 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	reader := &rocksmqReader{
 		store:              rmq.store,
 		topic:              topicName,
+		prefix:             []byte(topicName + "/"),
 		readerName:         readerName,
 		readOpts:           readOpts,
 		iter:               iter,

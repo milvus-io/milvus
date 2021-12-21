@@ -25,6 +25,7 @@ import (
 type rocksmqReader struct {
 	store      *gorocksdb.DB
 	topic      string
+	prefix     []byte
 	readerName string
 
 	readOpts *gorocksdb.ReadOptions
@@ -38,8 +39,7 @@ type rocksmqReader struct {
 //Seek seek the rocksmq reader to the pointed position
 func (rr *rocksmqReader) Seek(msgID UniqueID) { //nolint:govet
 	rr.currentID = msgID
-	fixTopicName := rr.topic + "/"
-	dataKey := path.Join(fixTopicName, strconv.FormatInt(msgID, 10))
+	dataKey := path.Join(rr.topic, strconv.FormatInt(msgID, 10))
 	rr.iter.Seek([]byte(dataKey))
 	if !rr.messageIDInclusive {
 		rr.currentID++
@@ -56,6 +56,10 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 		key := iter.Key()
 		val := iter.Value()
 		tmpKey := string(key.Data())
+		if key != nil {
+			key.Free()
+		}
+
 		var msgID UniqueID
 		msgID, err = strconv.ParseInt(tmpKey[len(rr.topic)+1:], 10, 64)
 		msg = &ConsumerMessage{
@@ -67,15 +71,17 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 			msg.Payload = make([]byte, dataLen)
 			copy(msg.Payload, origData)
 		}
-		val.Free()
+		if val != nil {
+			val.Free()
+		}
 		iter.Next()
 		rr.currentID = msgID
 	}
-	if iter.Valid() {
+	if iter.ValidForPrefix(rr.prefix) {
 		getMsg()
 		return msg, err
 	}
-
+	// TODO this is the same logic as pulsar reader, but do we really need to read till the end of the stream
 	select {
 	case <-ctx.Done():
 		log.Debug("Stop get next reader message!")
@@ -87,11 +93,10 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 		}
 		rr.iter.Close()
 		rr.iter = rr.store.NewIterator(rr.readOpts)
-		fixTopicName := rr.topic + "/"
-		dataKey := path.Join(fixTopicName, strconv.FormatInt(rr.currentID+1, 10))
+		dataKey := path.Join(rr.topic, strconv.FormatInt(rr.currentID+1, 10))
 		iter = rr.iter
 		iter.Seek([]byte(dataKey))
-		if !iter.Valid() {
+		if !iter.ValidForPrefix(rr.prefix) {
 			return nil, errors.New("reader iterater is still invalid after receive mutex")
 		}
 		getMsg()
@@ -100,7 +105,7 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 }
 
 func (rr *rocksmqReader) HasNext() bool {
-	if rr.iter.Valid() {
+	if rr.iter.ValidForPrefix(rr.prefix) {
 		return true
 	}
 
@@ -111,10 +116,9 @@ func (rr *rocksmqReader) HasNext() bool {
 		}
 		rr.iter.Close()
 		rr.iter = rr.store.NewIterator(rr.readOpts)
-		fixTopicName := rr.topic + "/"
-		dataKey := path.Join(fixTopicName, strconv.FormatInt(rr.currentID+1, 10))
+		dataKey := path.Join(rr.topic, strconv.FormatInt(rr.currentID+1, 10))
 		rr.iter.Seek([]byte(dataKey))
-		return rr.iter.Valid()
+		return rr.iter.ValidForPrefix(rr.prefix)
 	default:
 		return false
 	}
