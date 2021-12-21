@@ -52,6 +52,7 @@ type channelsMgr interface {
 // getChannelsFuncType returns the channel information according to the collection id.
 type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
 
+// repackFuncType repacks message into message pack.
 type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
 
 // getDmlChannelsFunc returns a function about how to get dml channels of a collection.
