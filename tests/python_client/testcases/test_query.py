@@ -792,7 +792,7 @@ class TestQueryParams(TestcaseBase):
     def test_query_empty_partition(self):
         """
         target: test query on empty partition
-        method: query on a empty collection
+        method: query on an empty collection
         expected: empty query result
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
