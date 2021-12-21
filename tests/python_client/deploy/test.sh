@@ -8,7 +8,7 @@ func() {
     echo "Description"
     echo "Task, the task type of test. reinstall or upgrade"
     echo "Mode, the mode of milvus deploy. standalone or cluster"
-    echo "Release, the release of milvus. e.g. 2.0.0-rc5"
+    echo "Release, the release of milvus. e.g. 2.0.0-rc8"
     echo "Password, the password of root"
     exit -1
 }
