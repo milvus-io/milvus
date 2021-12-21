@@ -142,7 +142,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	infos.BaseComponentInfos.Name = metrics.GetComponentName()
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("invalid metrics of data node was found",
+		log.Warn("invalid metrics of DataNode was found",
 			zap.Any("error_code", metrics.Status.ErrorCode),
 			zap.Any("error_reason", metrics.Status.Reason))
 		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
