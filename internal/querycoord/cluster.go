@@ -163,7 +163,7 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		log.Debug("reloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
 		err := c.registerNode(c.ctx, session, nodeID, disConnect)
 		if err != nil {
-			log.Error("query node failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Error("QueryNode failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
 		toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
