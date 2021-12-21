@@ -259,7 +259,7 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in
 		return nil
 	}
 
-	return fmt.Errorf("releaseSegments: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releaseSegments: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error {
