@@ -125,6 +125,7 @@ func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datap
 	log.Debug("success to flush", zap.Int64("node", nodeID), zap.Any("segments", req))
 }
 
+// Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.
 func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) {
 	go c.execCompaction(nodeID, plan)
 }
