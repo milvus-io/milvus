@@ -36,10 +36,11 @@ class TestQueryNodeScale:
         expected: Verify milvus remains healthy and search successfully during scale
         """
         release_name = "scale-query"
+        image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,
-            'spec.components.image': 'harbor.zilliz.cc/milvus/milvus:master-20211202-ed546d0',
+            'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.queryNode.replicas': 1,
             'spec.config.dataCoord.enableCompaction': True,
