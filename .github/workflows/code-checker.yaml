@@ -23,7 +23,7 @@ on:
 jobs:
   ubuntu:
     name: Code Checker AMD64 Ubuntu ${{ matrix.ubuntu }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
