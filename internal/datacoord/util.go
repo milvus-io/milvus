@@ -78,7 +78,7 @@ type LongTermChecker struct {
 	name string
 }
 
-// NewLongTermChecker create a long term checker specified name, checking interval and warning string to print
+// NewLongTermChecker creates a long term checker specified name, checking interval and warning string to print
 func NewLongTermChecker(ctx context.Context, name string, d time.Duration, warn string) *LongTermChecker {
 	c := &LongTermChecker{
 		name: name,
@@ -105,12 +105,12 @@ func (c *LongTermChecker) Start() {
 	}()
 }
 
-// Check reset the time ticker
+// Check resets the time ticker
 func (c *LongTermChecker) Check() {
 	c.t.Reset(c.d)
 }
 
-// Stop stop the checker
+// Stop stops the checker
 func (c *LongTermChecker) Stop() {
 	c.t.Stop()
 	close(c.ch)
