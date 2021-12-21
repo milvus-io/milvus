@@ -234,6 +234,10 @@ func TestRocksmq_Dummy(t *testing.T) {
 	_, err = rmq.Produce(string(channelName2), nil)
 	assert.Error(t, err)
 
+	channelName3 := "channel/dummy"
+	err = rmq.CreateTopic(channelName3)
+	assert.Error(t, err)
+
 	msgA := "a_message"
 	pMsgs := make([]ProducerMessage, 1)
 	pMsgA := ProducerMessage{Payload: []byte(msgA)}

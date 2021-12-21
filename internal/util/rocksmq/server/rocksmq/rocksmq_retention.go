@@ -290,7 +290,6 @@ func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 		}
 		ackedSize += size
 	}
-	log.Debug("aaaaa", zap.Any("topic", topic), zap.Any("size", ackedSize))
 	if err := pageIter.Err(); err != nil {
 		return -1, err
 	}
