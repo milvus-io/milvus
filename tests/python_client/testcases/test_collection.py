@@ -1088,7 +1088,7 @@ class TestCollectionOperation(TestcaseBase):
         collection_w.load()
         error = {ct.err_code: 1, ct.err_msg: f'load the partition after load collection is not supported'}
         partition_w1.load(check_task=CheckTasks.err_res,
-                             check_items=error)
+                          check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_partition(self):
