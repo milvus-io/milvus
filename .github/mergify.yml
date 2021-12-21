@@ -79,7 +79,7 @@ pull_request_rules:
       - base=master
       - title~=\[skip e2e\]
       - label=kind/improvement
-      - files~=^(?!.*\.(go|cpp)).*$
+      - files~=^(?!.*\.(go|h|cpp)).*$
     actions:
       label:
         add:
@@ -147,7 +147,7 @@ pull_request_rules:
       - title~=\[skip e2e\]
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
-      - -files~=^(?!.*\.(go|cpp)).*$
+      - -files~=^(?!.*\.(go|h|cpp)).*$
     actions:
       label:
         add:
@@ -158,7 +158,7 @@ pull_request_rules:
   - name: Remove ci-passed label when rerun code checker
     conditions:
       - base=master
-      - -files~=^(?!.*\.(go|cpp)).*$
+      - -files~=^(?!.*\.(go|h|cpp)).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 18.04"
         - "status-success!=Build and test AMD64 Ubuntu 18.04"     
@@ -170,7 +170,7 @@ pull_request_rules:
   - name: Remove ci-passed label when rerun jenkins test
     conditions:
       - base=master
-      - -files~=^(?!.*\.(go|cpp)).*$
+      - -files~=^(?!.*\.(go|h|cpp)).*$
       - files~=^(?!internal\/.*_test\.go).*$
       - -title~=\[skip e2e\]
       - "status-success!=continuous-integration/jenkins/pr-merge"        
