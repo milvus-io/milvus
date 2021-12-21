@@ -27,6 +27,8 @@ func PeekClientV0(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 	return pq.items[0].key
 }
 
+// PeekClientV1 choose the one with the smallest amount of tasks among all IndexNodes
+// whose memory size meets the requirements for building the index.
 func PeekClientV1(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 	typeParams []*commonpb.KeyValuePair, pq *PriorityQueue) UniqueID {
 	for i := range pq.items {
