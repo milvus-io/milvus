@@ -22,6 +22,7 @@ import "github.com/milvus-io/milvus/internal/proto/commonpb"
 type PeekClientPolicy func(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 	typeParams []*commonpb.KeyValuePair, pq *PriorityQueue) UniqueID
 
+// PeekClientV0 choose the IndexNode with the smallest amount of tasks.
 func PeekClientV0(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 	typeParams []*commonpb.KeyValuePair, pq *PriorityQueue) UniqueID {
 	return pq.items[0].key
