@@ -364,17 +364,6 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", req.GetField2BinlogPaths()))
 
-	// Drop logic handler in DropVirtualChannel
-	/*
-		if req.GetDropped() && s.handler.CheckShouldDropChannel(channel) {
-			log.Debug("remove channel", zap.String("channel", channel))
-			err = s.channelManager.RemoveChannel(channel)
-			if err != nil {
-				log.Warn("failed to remove channel", zap.String("channel", channel), zap.Error(err))
-			}
-			s.segmentManager.DropSegmentsOfChannel(ctx, channel)
-		}*/
-
 	if req.GetFlushed() {
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
