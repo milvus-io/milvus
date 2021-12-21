@@ -16,6 +16,7 @@ spec:
       labelSelectors:
         app.kubernetes.io/instance: milvus-chaos
         app.kubernetes.io/name: etcd
-    mode: one
+    mode: fixed
+    value: "1"
     action: pod-kill
     gracePeriod: 0

@@ -17,6 +17,7 @@ spec:
         app.kubernetes.io/instance: milvus-chaos
         app.kubernetes.io/name: milvus
         component: datacoord
-    mode: one
+    mode: fixed
+    value: "1"
     action: pod-kill
     gracePeriod: 0
