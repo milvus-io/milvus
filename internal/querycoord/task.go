@@ -2061,11 +2061,7 @@ func assignInternalTask(ctx context.Context,
 
 	for nodeID, collectionIDs := range watchQueryChannelInfo {
 		for _, collectionID := range collectionIDs {
-			queryChannelInfo, err := meta.getQueryChannelInfoByID(collectionID)
-			if err != nil {
-				return nil, err
-			}
-
+			queryChannelInfo := meta.getQueryChannelInfoByID(collectionID)
 			msgBase := proto.Clone(parentTask.msgBase()).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
 			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
@@ -2075,7 +2071,6 @@ func assignInternalTask(ctx context.Context,
 				QueryChannel:         queryChannelInfo.QueryChannel,
 				QueryResultChannel:   queryChannelInfo.QueryResultChannel,
 				GlobalSealedSegments: queryChannelInfo.GlobalSealedSegments,
-				SeekPosition:         queryChannelInfo.SeekPosition,
 			}
 			baseTask := newBaseTask(ctx, parentTask.getTriggerCondition())
 			baseTask.setParentTask(parentTask)

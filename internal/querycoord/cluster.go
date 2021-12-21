@@ -340,9 +340,22 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 	c.RUnlock()
 
 	if targetNode != nil {
-		err := targetNode.addQueryChannel(ctx, in)
+		emptyChangeInfo := &querypb.SealedSegmentsChangeInfo{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SealedSegmentsChangeInfo,
+			},
+		}
+		msgPosition, err := c.clusterMeta.sendSealedSegmentChangeInfos(in.CollectionID, in.QueryChannel, emptyChangeInfo)
 		if err != nil {
-			log.Debug("addQueryChannel: queryNode add query channel error", zap.String("error", err.Error()))
+			log.Error("addQueryChannel: get latest messageID of query channel error", zap.String("queryChannel", in.QueryChannel), zap.Error(err))
+			return err
+		}
+
+		// update watch position to latest
+		in.SeekPosition = msgPosition
+		err = targetNode.addQueryChannel(ctx, in)
+		if err != nil {
+			log.Error("addQueryChannel: queryNode add query channel error", zap.String("queryChannel", in.QueryChannel), zap.Error(err))
 			return err
 		}
 		return nil

@@ -701,19 +701,7 @@ func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.Creat
 	}
 
 	collectionID := req.CollectionID
-	info, err := qc.meta.getQueryChannelInfoByID(collectionID)
-	if err != nil {
-		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		status.Reason = err.Error()
-		log.Error("createQueryChannel end with error",
-			zap.String("role", typeutil.QueryCoordRole),
-			zap.Int64("collectionID", collectionID),
-			zap.Error(err))
-		return &querypb.CreateQueryChannelResponse{
-			Status: status,
-		}, nil
-	}
-
+	info := qc.meta.getQueryChannelInfoByID(collectionID)
 	log.Debug("createQueryChannelRequest completed",
 		zap.String("role", typeutil.QueryCoordRole),
 		zap.Int64("collectionID", collectionID),
