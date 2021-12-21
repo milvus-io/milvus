@@ -105,6 +105,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	return q
 }
 
+// newQueryNodeDeltaFlowGraph returns a new queryNodeFlowGraph
 func newQueryNodeDeltaFlowGraph(ctx context.Context,
 	collectionID UniqueID,
 	historicalReplica ReplicaInterface,
