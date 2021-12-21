@@ -56,7 +56,7 @@ The following steps are executed when insert,
 
 ### ConcurrentVector
 
-This is a column data storage that can be inserted concurrently. It is composed of multi data chunks.
+This is a column data storage that can be inserted concurrently. It is composed of multi-data chunks.
 
 1. After`grow_to_at_least(size)` called, reserve space no less than `size`
 2. `set_data_raw(element_offset, source, element_count)` point source to continuous piece of data
