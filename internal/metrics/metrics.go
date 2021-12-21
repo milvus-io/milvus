@@ -19,6 +19,9 @@ package metrics
 import (
 	"net/http"
 
+	// nolint:gosec
+	_ "net/http/pprof"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 

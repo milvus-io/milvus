@@ -452,7 +452,6 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	}
 
 	metrics.ServeHTTP()
-
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
