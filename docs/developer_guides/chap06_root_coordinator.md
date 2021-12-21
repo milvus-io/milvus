@@ -333,7 +333,7 @@ type ChannelTimeTickMsg struct {
 
 #### 6.2 Dd (Data definitions) Message
 
-`RC` would put `Dd Message` into the `DML MsgSteams`
+`RootCoord` would put `Dd Message` into the `DML MsgSteams`
 
 - _BaseMsg_
 
