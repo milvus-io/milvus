@@ -346,7 +346,7 @@ func (w *sessionWatcher) start() {
 // typeutil.type.go.
 // revision is a etcd reversion to prevent missing key events and can be obtained
 // in GetSessions.
-// If a server up, a event will be add to channel with eventType SessionAddType.
+// If a server up, an event will be add to channel with eventType SessionAddType.
 // If a server down, a event will be add to channel with eventType SessionDelType.
 func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
 	w := &sessionWatcher{
