@@ -39,6 +39,7 @@ type queryNodeFlowGraph struct {
 	dmlStream    msgstream.MsgStream
 }
 
+// newQueryNodeFlowGraph returns a new queryNodeFlowGraph
 func newQueryNodeFlowGraph(ctx context.Context,
 	collectionID UniqueID,
 	streamingReplica ReplicaInterface,
