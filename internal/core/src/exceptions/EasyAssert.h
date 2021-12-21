@@ -18,7 +18,7 @@
 #include <string>
 #include "pb/common.pb.h"
 
-/* Paste this on the file you want to debug. */
+/* Paste this on the file if you want to debug. */
 namespace milvus {
 using ErrorCodeEnum = proto::common::ErrorCode;
 namespace impl {
