@@ -131,7 +131,7 @@ func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
 	ms.AsConsumerWithPosition(channels, subName, mqclient.SubscriptionPositionEarliest)
 }
 
-// Create consumer to receive message from channels, with initial position
+// AsConsumerWithPosition Create consumer to receive message from channels, with initial position
 // if initial position is set to latest, last message in the channel is exclusive
 func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
 	for _, channel := range channels {
