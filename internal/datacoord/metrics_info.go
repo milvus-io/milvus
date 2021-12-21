@@ -133,7 +133,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 	metrics, err := cli.GetMetrics(ctx, req)
 	if err != nil {
-		log.Warn("invalid metrics of data node was found",
+		log.Warn("invalid metrics of DataNode was found",
 			zap.Error(err))
 		infos.BaseComponentInfos.ErrorReason = err.Error()
 		// err handled, returns nil
