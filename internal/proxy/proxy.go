@@ -148,7 +148,7 @@ func (node *Proxy) Init() error {
 		log.Debug("Proxy wait for dataCoord ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("Proxy wait for dataCoord ready failed", zap.Error(err))
+			log.Debug("Proxy wait for DataCoord ready failed", zap.Error(err))
 			return err
 		}
 		log.Debug("Proxy dataCoord is ready")
@@ -156,13 +156,13 @@ func (node *Proxy) Init() error {
 
 	// wait for queryCoord state changed to Healthy
 	if node.queryCoord != nil {
-		log.Debug("Proxy wait for queryCoord ready")
+		log.Debug("Proxy wait for QueryCoord ready")
 		err := funcutil.WaitForComponentHealthy(node.ctx, node.queryCoord, "QueryCoord", 1000000, time.Millisecond*200)
 		if err != nil {
-			log.Debug("Proxy wait for queryCoord ready failed", zap.Error(err))
+			log.Debug("Proxy wait for QueryCoord ready failed", zap.Error(err))
 			return err
 		}
-		log.Debug("Proxy queryCoord is ready")
+		log.Debug("Proxy QueryCoord is ready")
 	}
 
 	// wait for indexcoord state changed to Healthy
