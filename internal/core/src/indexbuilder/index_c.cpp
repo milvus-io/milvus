@@ -106,7 +106,7 @@ GetCBinarySize(CBinary c_binary) {
     return cBinary->data.size();
 }
 
-// Note: the memory of data is allocated outside
+// Note: the memory of data has been allocated outside
 void
 GetCBinaryData(CBinary c_binary, void* data) {
     auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
