@@ -38,6 +38,7 @@ type channelsTimeTicker interface {
 	getMinTick() Timestamp
 }
 
+// channelsTimeTickerImpl implements channelsTimeTicker.
 type channelsTimeTickerImpl struct {
 	interval          time.Duration       // interval to synchronize
 	minTsStatistics   map[pChan]Timestamp // pchan -> min Timestamp
