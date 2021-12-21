@@ -240,7 +240,7 @@ func (kv *MinIOKV) Remove(key string) error {
 	return err
 }
 
-// MultiRemove deletes a objects with @keys.
+// MultiRemove deletes an objects with @keys.
 func (kv *MinIOKV) MultiRemove(keys []string) error {
 	var resultErr error
 	for _, key := range keys {
