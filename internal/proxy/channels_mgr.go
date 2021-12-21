@@ -127,6 +127,7 @@ func getDqlChannelsFunc(ctx context.Context, proxyID int64, qc createQueryChanne
 	}
 }
 
+// streamType indicates which type of message stream should be created.
 type streamType int
 
 const (
