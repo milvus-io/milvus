@@ -21,7 +21,6 @@
 #include "pb/segcore.pb.h"
 
 namespace milvus::query {
-// NOTE: APIs for C wrapper
 
 // Incomplete Definition, shouldn't be instantiated
 struct Plan;
