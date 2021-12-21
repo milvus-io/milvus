@@ -974,7 +974,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 //	err = node.historical.loadService.segLoader.loadSegmentFieldsData(segment, fieldsMap)
 //	assert.NoError(t, err)
 //
-//	indexPaths, err := generateIndex(segmentID)
+//	indexPaths, err := genIndex(segmentID)
 //	assert.NoError(t, err)
 //
 //	indexInfo := &indexInfo{

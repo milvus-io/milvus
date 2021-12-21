@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -222,7 +223,7 @@ func genIndexBinarySet() ([][]byte, error) {
 	return bytesSet, nil
 }
 
-func generateIndex(segmentID UniqueID) ([]string, error) {
+func genIndex(segmentID UniqueID) ([]string, error) {
 	indexParams := genSimpleIndexParams()
 
 	var indexParamsKV []*commonpb.KeyValuePair
@@ -301,6 +302,22 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	}
 
 	return indexPaths, nil
+}
+
+func genSimpleIndexFilePaths() ([]*indexpb.IndexFilePathInfo, error) {
+	paths, err := genIndex(defaultSegmentID)
+	if err != nil {
+		return nil, err
+	}
+	return []*indexpb.IndexFilePathInfo{
+		{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IndexBuildID:   buildID,
+			IndexFilePaths: paths,
+		},
+	}, nil
 }
 
 func genSimpleSegCoreSchema() *schemapb.CollectionSchema {

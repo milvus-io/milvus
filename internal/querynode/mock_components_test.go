@@ -188,7 +188,7 @@ type mockIndexCoord struct {
 }
 
 func newMockIndexCoord() *mockIndexCoord {
-	paths, _ := generateIndex(defaultSegmentID)
+	paths, _ := genIndex(defaultSegmentID)
 	return &mockIndexCoord{
 		idxFileInfo: &indexpb.IndexFilePathInfo{
 			Status: &commonpb.Status{

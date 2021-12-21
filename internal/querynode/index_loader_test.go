@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
 func TestIndexLoader_setIndexInfo(t *testing.T) {
@@ -41,9 +42,10 @@ func TestIndexLoader_setIndexInfo(t *testing.T) {
 		loader.indexLoader.rootCoord = newMockRootCoord()
 		loader.indexLoader.indexCoord = newMockIndexCoord()
 
-		info, err := loader.indexLoader.getIndexInfo(defaultCollectionID, segment)
+		paths, err := genSimpleIndexFilePaths()
 		assert.NoError(t, err)
-		loader.indexLoader.setIndexInfo(segment, info)
+		err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment, rowIDFieldID, true, paths)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test nil root and index", func(t *testing.T) {
@@ -55,9 +57,43 @@ func TestIndexLoader_setIndexInfo(t *testing.T) {
 		segment, err := genSimpleSealedSegment()
 		assert.NoError(t, err)
 
-		info, err := loader.indexLoader.getIndexInfo(defaultCollectionID, segment)
+		paths, err := genSimpleIndexFilePaths()
 		assert.NoError(t, err)
-		loader.indexLoader.setIndexInfo(segment, info)
+		err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment, rowIDFieldID, true, paths)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test getIndexInfo not enable index", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
+
+		segment, err := genSimpleSealedSegment()
+		assert.NoError(t, err)
+
+		loader.indexLoader.rootCoord = newMockRootCoord()
+		loader.indexLoader.indexCoord = newMockIndexCoord()
+
+		paths, err := genSimpleIndexFilePaths()
+		assert.NoError(t, err)
+		err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment, rowIDFieldID, false, paths)
+		assert.Error(t, err)
+	})
+
+	t.Run("test getIndexInfo unexpected index file paths", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
+
+		segment, err := genSimpleSealedSegment()
+		assert.NoError(t, err)
+
+		paths := []*indexpb.IndexFilePathInfo{{}, {}}
+
+		err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment, rowIDFieldID, true, paths)
+		assert.Error(t, err)
 	})
 }
 
@@ -71,7 +107,7 @@ func TestIndexLoader_getIndexBinlog(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		paths, err := generateIndex(defaultSegmentID)
+		paths, err := genIndex(defaultSegmentID)
 		assert.NoError(t, err)
 
 		_, _, _, err = loader.indexLoader.getIndexBinlog(paths)
@@ -123,9 +159,10 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 		loader.indexLoader.rootCoord = newMockRootCoord()
 		loader.indexLoader.indexCoord = newMockIndexCoord()
 
-		info, err := loader.indexLoader.getIndexInfo(defaultCollectionID, segment)
+		paths, err := genSimpleIndexFilePaths()
 		assert.NoError(t, err)
-		loader.indexLoader.setIndexInfo(segment, info)
+		err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment, simpleVecField.id, true, paths)
+		assert.NoError(t, err)
 
 		err = loader.indexLoader.loadIndex(segment, simpleVecField.id)
 		assert.NoError(t, err)
@@ -146,7 +183,10 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 
 		loader.indexLoader.indexCoord = ic
 
-		_, err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment)
+		paths, err := genSimpleIndexFilePaths()
+		assert.NoError(t, err)
+		paths[0].IndexFilePaths = nil
+		err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment, simpleVecField.id, true, paths)
 		assert.Error(t, err)
 	})
 
@@ -176,15 +216,14 @@ func TestIndexLoader_loadIndex(t *testing.T) {
 		loader.indexLoader.rootCoord = newMockRootCoord()
 		loader.indexLoader.indexCoord = newMockIndexCoord()
 
-		info, err := loader.indexLoader.getIndexInfo(defaultCollectionID, segment)
+		paths, err := genSimpleIndexFilePaths()
+		assert.NoError(t, err)
+		err = loader.indexLoader.getIndexInfo(defaultCollectionID, segment, rowIDFieldID, true, paths)
 		assert.NoError(t, err)
 
-		vecFieldID := UniqueID(101)
-		info.setFieldID(vecFieldID)
-		loader.indexLoader.setIndexInfo(segment, info)
+		segment.indexInfos[rowIDFieldID].setReadyLoad(false)
 
-		segment.indexInfos[vecFieldID].setReadyLoad(false)
-		err = loader.indexLoader.loadIndex(segment, vecFieldID)
+		err = loader.indexLoader.loadIndex(segment, rowIDFieldID)
 		assert.Error(t, err)
 	})
 }

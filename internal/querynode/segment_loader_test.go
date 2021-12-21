@@ -339,7 +339,7 @@ func TestSegmentLoader_estimateSegmentSize(t *testing.T) {
 	_, err = loader.estimateSegmentSize(seg, binlog, nil)
 	assert.NoError(t, err)
 
-	indexPath, err := generateIndex(defaultSegmentID)
+	indexPath, err := genIndex(defaultSegmentID)
 	assert.NoError(t, err)
 
 	seg.setIndexInfo(simpleVecField.id, &indexInfo{})
