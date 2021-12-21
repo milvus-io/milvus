@@ -90,7 +90,7 @@ func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask 
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	plans            map[int64]*compactionTask // planid -> task
+	plans            map[int64]*compactionTask // planID -> task
 	sessions         *SessionManager
 	meta             *meta
 	chManager        *ChannelManager
