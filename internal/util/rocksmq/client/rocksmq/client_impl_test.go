@@ -19,6 +19,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var rmqPath = "/tmp/rocksmq_client"
+
+func TestMain(m *testing.M) {
+	os.MkdirAll(rmqPath, os.ModePerm)
+	defer os.RemoveAll(rmqPath)
+	os.Exit(m.Run())
+}
+
 func TestClient(t *testing.T) {
 	client, err := NewClient(ClientOptions{})
 	assert.NotNil(t, client)
@@ -44,8 +52,7 @@ func TestClient_CreateProducer(t *testing.T) {
 	assert.Nil(t, producer)
 
 	/////////////////////////////////////////////////
-	rmqPath := "/tmp/milvus/test_client1"
-	os.MkdirAll(rmqPath, os.ModePerm)
+	rmqPath := rmqPath + "/test_client1"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client1, err := NewClient(ClientOptions{
@@ -84,7 +91,7 @@ func TestClient_Subscribe(t *testing.T) {
 	assert.Nil(t, consumer)
 
 	/////////////////////////////////////////////////
-	rmqPath := "/tmp/milvus/test_client2"
+	rmqPath := rmqPath + "/test_client2"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client1, err := NewClient(ClientOptions{
@@ -124,7 +131,7 @@ func TestClient_Subscribe(t *testing.T) {
 }
 
 func TestClient_SeekLatest(t *testing.T) {
-	rmqPath := "/tmp/milvus/seekLatest"
+	rmqPath := rmqPath + "/seekLatest"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client, err := NewClient(ClientOptions{
@@ -194,7 +201,7 @@ func TestClient_SeekLatest(t *testing.T) {
 }
 
 func TestClient_consume(t *testing.T) {
-	rmqPath := "/tmp/milvus/test_client3"
+	rmqPath := rmqPath + "/test_client3"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client, err := NewClient(ClientOptions{
