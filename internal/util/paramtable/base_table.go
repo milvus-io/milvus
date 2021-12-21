@@ -397,6 +397,7 @@ func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
 
 // package methods
 
+// ConvertRangeToIntRange converts a range of strings to a range of ints.
 func ConvertRangeToIntRange(rangeStr, sep string) []int {
 	items := strings.Split(rangeStr, sep)
 	if len(items) != 2 {
