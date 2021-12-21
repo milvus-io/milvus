@@ -276,3 +276,23 @@ def get_token(url):
         token = ''
         print("Can not get token.")
     return token
+
+
+def get_tags(url, token):
+    headers = {'Content-type': "application/json",
+               "charset": "UTF-8",
+               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+               "Authorization": "Bearer %s" % token}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+
+        tags = []
+        if 'tags' in data:
+            tags = data["tags"]
+        else:
+            print("Can not get the tag list")
+        return tags
+    except:
+        print("Can not get the tag list")
+        return []
