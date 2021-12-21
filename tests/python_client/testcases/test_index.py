@@ -768,8 +768,10 @@ class TestIndexBase:
     @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert_ip(self, connect, collection):
         """
-        target: test create index interface when there is no vectors in collection, and does not affect the subsequent process
-        method: create collection and add no vectors in it, and then create index, add entities in it
+        target: test create index interface when there is no vectors in collection,
+                and does not affect the subsequent process
+        method: create collection and add no vectors in it, and then create index,
+                add entities in it
         expected: return code equals to 0
         """
         default_index["metric_type"] = "IP"
