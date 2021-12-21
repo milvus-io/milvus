@@ -16,7 +16,7 @@ Rows per segment are controlled by parameters `size_per_Chunk ` config
 
 When inserting, first allocate enough space to ensure `total_size <= num_chunk * size_per_chunk`, and then convert data from row format to column format.
 
-During search, each 'chunk' will be searched, and the search results will be saved as 'subquery result', then reduced into TopK.
+During a search, each 'chunk' will be searched, and the search results will be saved as 'subquery result', then reduced into TopK.
 
 Growing Segment also implements small batch index for vectors. The parameters of small batch index are preset in `segcore config`
 
