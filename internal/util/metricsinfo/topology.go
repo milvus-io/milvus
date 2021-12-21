@@ -112,6 +112,7 @@ type RootCoordTopology struct {
 	Connections ConnTopology   `json:"connections"`
 }
 
+// ConnectionEdge contains connection's id, type and target type
 type ConnectionEdge struct {
 	ConnectedIdentifier int                  `json:"connected_identifier"`
 	Type                ConnectionType       `json:"type"`
