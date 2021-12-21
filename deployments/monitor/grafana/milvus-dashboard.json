@@ -863,7 +863,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_partition requests",
+      "description": "per-minute increasing rate of drop_partition requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
