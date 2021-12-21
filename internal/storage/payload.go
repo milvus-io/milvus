@@ -620,6 +620,7 @@ func (r *PayloadReader) GetPayloadLengthFromReader() (int, error) {
 	return int(length), nil
 }
 
+// Close closes the payload reader
 func (r *PayloadReader) Close() {
 	r.ReleasePayloadReader()
 }
