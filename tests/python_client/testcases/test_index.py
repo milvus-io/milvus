@@ -278,7 +278,6 @@ class TestIndexOperation(TestcaseBase):
         pass
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.tags(CaseLabel.L1)
     def test_index_drop_index(self):
         """
         target: test index.drop
