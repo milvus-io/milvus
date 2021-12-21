@@ -167,6 +167,19 @@ func (pq *PriorityQueue) PeekAll() []UniqueID {
 	return ret
 }
 
+// GetMemory get the memory info for the speicied key.
+func (pq *PriorityQueue) GetMemory(key UniqueID) uint64 {
+	pq.lock.RLock()
+	defer pq.lock.RUnlock()
+
+	for i := range pq.items {
+		if pq.items[i].key == key {
+			return pq.items[i].totalMem
+		}
+	}
+	return 0
+}
+
 // SetMemory sets the memory info for IndexNode.
 func (pq *PriorityQueue) SetMemory(key UniqueID, memorySize uint64) {
 	pq.lock.Lock()

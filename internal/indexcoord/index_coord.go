@@ -176,7 +176,7 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 		log.Debug("IndexCoord try to connect etcd success")
-		i.nodeManager = NewNodeManager()
+		i.nodeManager = NewNodeManager(i.loopCtx)
 
 		sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
 		log.Debug("IndexCoord", zap.Int("session number", len(sessions)), zap.Int64("revision", revision))
