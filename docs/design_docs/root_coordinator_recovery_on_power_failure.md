@@ -32,15 +32,15 @@
 
 ### 2.3 `create index` requests from grpc
 
-1. In the processing of `create index`, `RC` calls `metaTable`'s `GetNotIndexedSegments` to get all segment ids that are not indexed.
-2. After getting the segment ids, `RC` calls `IC` to create index on these segment ids.
+1. In the processing of `create index`, `RootCoord` calls `metaTable`'s `GetNotIndexedSegments` to get all segment ids that are not indexed.
+2. After getting the segment ids, `RootCoord` calls `IndexCoord` to create index on these segment ids.
 3. In the current implementation, the `create index` requests will return after the segment ids are put into a go channel.
-4. The `RC` starts a background task that keeps reading the segment ids from the go channel, and then calls the `IC` to create the index.
-5. There is a fault here, the segment ids have been put into the go channel in the processing function of the grpc request, and then the grpc returns, but the `RC`'s background task has not yet read them from the go channel, then `RC` crashes. At this time, the client thinks that the index is created, but the `RC` does not call `IC` to create the index.
+4. The `RC` starts a background task that keeps reading the segment ids from the go channel, and then calls the `IndexCoord` to create the index.
+5. There is a fault here, the segment ids have been put into the go channel in the processing function of the grpc request, and then the grpc returns, but the `RootCoord`'s background task has not yet read them from the go channel, then `RootCoord` crashes. At this time, the client thinks that the index is created, but the `RootCoord` does not call `IndexCoord` to create the index.
 6. The solution for the fault mentioned in item 5:
-   - Remove the go channel and `RC`'s background task.
-   - In the request processing function of `create index`, the call will return only when all segment ids have been sent `IC`.
-   - Some segment ids may be sent to `IC` repeatedly, and `IC` needs to handle such requests.
+   - Remove the go channel and `RootCoord`'s background task.
+   - In the request processing function of `create index`, the call will return only when all segment ids have been sent `IndexCoord`.
+   - Some segment ids may be sent to `IndexCoord` repeatedly, and `IndexCoord` needs to handle such requests.
 
 ### 2.4 New segment from `DC`
 
