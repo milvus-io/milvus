@@ -404,6 +404,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, request *milvuspb.Ge
 	return s.proxy.GetIndexBuildProgress(ctx, request)
 }
 
+// GetIndexStates gets the index states from proxy.
 func (s *Server) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	return s.proxy.GetIndexState(ctx, request)
 }
