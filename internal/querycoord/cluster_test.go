@@ -33,6 +33,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -463,8 +464,19 @@ func TestGrpcRequest(t *testing.T) {
 	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
 	clusterSession.Register()
-	meta, err := newMeta(baseCtx, kv, nil, nil)
+	factory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = factory.SetParams(m)
 	assert.Nil(t, err)
+	idAllocator := func() (UniqueID, error) {
+		return 0, nil
+	}
+	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
+	assert.Nil(t, err)
+
 	cluster := &queryNodeCluster{
 		ctx:              baseCtx,
 		cancel:           cancel,
@@ -532,8 +544,7 @@ func TestGrpcRequest(t *testing.T) {
 	})
 
 	t.Run("Test AddQueryChannel", func(t *testing.T) {
-		info, err := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.Nil(t, err)
+		info := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
 		addQueryChannelReq := &querypb.AddQueryChannelRequest{
 			NodeID:             nodeID,
 			CollectionID:       defaultCollectionID,
@@ -545,8 +556,7 @@ func TestGrpcRequest(t *testing.T) {
 	})
 
 	t.Run("Test RemoveQueryChannel", func(t *testing.T) {
-		info, err := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.Nil(t, err)
+		info := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
 		removeQueryChannelReq := &querypb.RemoveQueryChannelRequest{
 			NodeID:             nodeID,
 			CollectionID:       defaultCollectionID,

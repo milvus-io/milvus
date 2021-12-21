@@ -150,9 +150,8 @@ message AddQueryChannelRequest {
   int64 collectionID = 3;
   string query_channel = 4;
   string query_result_channel = 5;
-  repeated int64 global_sealed_segmentID = 6;
-  internal.MsgPosition seek_position = 7;
-  repeated SegmentInfo global_sealed_segments = 8;
+  internal.MsgPosition seek_position = 6;
+  repeated SegmentInfo global_sealed_segments = 7;
 }
 
 message RemoveQueryChannelRequest {

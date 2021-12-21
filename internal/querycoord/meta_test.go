@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
 )
@@ -106,12 +105,11 @@ func TestMetaFunc(t *testing.T) {
 		NodeID:       nodeID,
 	}
 	meta := &MetaReplica{
-		client:             kv,
-		collectionInfos:    map[UniqueID]*querypb.CollectionInfo{},
-		segmentInfos:       segmentInfos,
-		queryChannelInfos:  map[UniqueID]*querypb.QueryChannelInfo{},
-		dmChannelInfos:     map[string]*querypb.DmChannelWatchInfo{},
-		globalSeekPosition: &internalpb.MsgPosition{},
+		client:            kv,
+		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
+		segmentInfos:      segmentInfos,
+		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
+		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 	}
 
 	dmChannels := []string{"testDm1", "testDm2"}
@@ -149,9 +147,8 @@ func TestMetaFunc(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	t.Run("Test GetQueryChannelInfoByIDFail", func(t *testing.T) {
-		res, err := meta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.Nil(t, err)
+	t.Run("Test GetQueryChannelInfoByIDFirst", func(t *testing.T) {
+		res := meta.getQueryChannelInfoByID(defaultCollectionID)
 		assert.NotNil(t, res)
 	})
 
@@ -245,11 +242,10 @@ func TestMetaFunc(t *testing.T) {
 		assert.Equal(t, defaultSegmentID, infos[0].SegmentID)
 	})
 
-	t.Run("Test getQueryChannel", func(t *testing.T) {
-		info, err := meta.getQueryChannelInfoByID(defaultCollectionID)
+	t.Run("Test getQueryChannelSecond", func(t *testing.T) {
+		info := meta.getQueryChannelInfoByID(defaultCollectionID)
 		assert.NotNil(t, info.QueryChannel)
 		assert.NotNil(t, info.QueryResultChannel)
-		assert.Nil(t, err)
 	})
 
 	t.Run("Test GetSegmentInfoByID", func(t *testing.T) {
@@ -317,14 +313,6 @@ func TestReloadMetaFromKV(t *testing.T) {
 	segmentKey := fmt.Sprintf("%s/%d", util.SegmentMetaPrefix, defaultSegmentID)
 	kvs[segmentKey] = string(segmentBlobs)
 
-	queryChannelInfo := &querypb.QueryChannelInfo{
-		CollectionID: defaultCollectionID,
-	}
-	queryChannelBlobs, err := proto.Marshal(queryChannelInfo)
-	assert.Nil(t, err)
-	queryChannelKey := fmt.Sprintf("%s/%d", queryChannelMetaPrefix, defaultCollectionID)
-	kvs[queryChannelKey] = string(queryChannelBlobs)
-
 	deltaChannel1 := &datapb.VchannelInfo{CollectionID: defaultCollectionID, ChannelName: "delta-channel1"}
 	deltaChannel2 := &datapb.VchannelInfo{CollectionID: defaultCollectionID, ChannelName: "delta-channel2"}
 
@@ -354,27 +342,8 @@ func TestReloadMetaFromKV(t *testing.T) {
 
 	assert.Equal(t, 1, len(meta.collectionInfos))
 	assert.Equal(t, 1, len(meta.segmentInfos))
-	assert.Equal(t, 1, len(meta.queryChannelInfos))
 	_, ok := meta.collectionInfos[defaultCollectionID]
 	assert.Equal(t, true, ok)
 	_, ok = meta.segmentInfos[defaultSegmentID]
 	assert.Equal(t, true, ok)
-	_, ok = meta.queryChannelInfos[defaultCollectionID]
-	assert.Equal(t, true, ok)
-
-	t.Run("test no global query seek position", func(t *testing.T) {
-		err = kv.Remove(globalQuerySeekPositionPrefix)
-		assert.NoError(t, err)
-
-		err = meta.reloadFromKV()
-		assert.NoError(t, err)
-	})
-
-	t.Run("test wrong global query seek position", func(t *testing.T) {
-		err = kv.Save(globalQuerySeekPositionPrefix, "&%*&^*^(&%*&%&^%")
-		assert.NoError(t, err)
-
-		err = meta.reloadFromKV()
-		assert.Error(t, err)
-	})
 }
