@@ -294,7 +294,7 @@ void bitvecs2fvecs (
 }
 
 
-/* Reverse bit (NOT a optimized function, only used for print purpose) */
+/* Reverse bit (NOT an optimized function, only used for print purpose) */
 static uint64_t uint64_reverse_bits (uint64_t b)
 {
     int i;
