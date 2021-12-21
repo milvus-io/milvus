@@ -322,7 +322,7 @@ In either case, the physical part will be updated, and the logical part will be 
 
 Keeping the physical part close to local wall time may face non-monotonic problems such as updates to POSIX time that could turn time backward. HLC avoids such problems, since if 'local wall time < HLC's physical part' holds, only case B is satisfied, thus monotonicity is guaranteed.
 
-Milvus does not support transaction, but it should guarantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
+Milvus does not support the transaction, but it should guarantee the deterministic execution of the multi-way WAL. The timestamp attached to each request should
 
 - have its physical part close to wall time (has an acceptable bounded error, a.k.a. uncertainty interval in transaction scenarios),
 - and be globally unique.
