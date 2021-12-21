@@ -123,7 +123,7 @@ func (t *Ticker) Chan() <-chan time.Time {
 	return t.ticker.C
 }
 
-// Allocator allocates from a global allocator by its given member funcs
+// Allocator allocates from a global allocator by its given member functions
 type Allocator struct {
 	Ctx        context.Context
 	CancelFunc context.CancelFunc
