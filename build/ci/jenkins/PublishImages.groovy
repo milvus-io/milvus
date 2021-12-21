@@ -20,7 +20,6 @@ pipeline {
     }
 
     environment {
-        IMAGE_REPO = "dockerhub-mirror-sh.zilliz.cc/milvusdb"
         DOCKER_CREDENTIALS_ID = "f0aacc8e-33f2-458a-ba9e-2c44f431b4d2"
         TARGET_REPO = "milvusdb"
         HARBOR_CREDENTIAL_ID = "harbor-zilliz-cc-registry"
