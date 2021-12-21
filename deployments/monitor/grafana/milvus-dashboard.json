@@ -760,7 +760,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of create_partition requests",
+      "description": "per-minute increasing rate of create_partition requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
