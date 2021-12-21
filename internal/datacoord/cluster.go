@@ -112,7 +112,7 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 		req := &datapb.FlushSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Flush,
-				SourceID: Params.NodeID,
+				SourceID: Params.DataCoordCfg.NodeID,
 			},
 			SegmentIDs:     segments,
 			MarkSegmentIDs: marks,

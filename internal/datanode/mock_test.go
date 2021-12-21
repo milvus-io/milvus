@@ -106,7 +106,7 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func clearEtcd(rootPath string) error {
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, rootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.DataNodeCfg.EtcdEndpoints, rootPath)
 	if err != nil {
 		return err
 	}

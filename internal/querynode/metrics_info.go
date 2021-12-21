@@ -30,7 +30,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	totalMem := metricsinfo.GetMemoryCount()
 	nodeInfos := metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           node.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
@@ -41,20 +41,20 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.CreatedTime.String(),
-			UpdatedTime: Params.UpdatedTime.String(),
+			CreatedTime: Params.QueryNodeCfg.CreatedTime.String(),
+			UpdatedTime: Params.QueryNodeCfg.UpdatedTime.String(),
 			Type:        typeutil.QueryNodeRole,
 			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.QueryNodeConfiguration{
-			SearchReceiveBufSize:         Params.SearchReceiveBufSize,
-			SearchPulsarBufSize:          Params.SearchPulsarBufSize,
-			SearchResultReceiveBufSize:   Params.SearchResultReceiveBufSize,
-			RetrieveReceiveBufSize:       Params.RetrieveReceiveBufSize,
-			RetrievePulsarBufSize:        Params.RetrievePulsarBufSize,
-			RetrieveResultReceiveBufSize: Params.RetrieveResultReceiveBufSize,
+			SearchReceiveBufSize:         Params.QueryNodeCfg.SearchReceiveBufSize,
+			SearchPulsarBufSize:          Params.QueryNodeCfg.SearchPulsarBufSize,
+			SearchResultReceiveBufSize:   Params.QueryNodeCfg.SearchResultReceiveBufSize,
+			RetrieveReceiveBufSize:       Params.QueryNodeCfg.RetrieveReceiveBufSize,
+			RetrievePulsarBufSize:        Params.QueryNodeCfg.RetrievePulsarBufSize,
+			RetrieveResultReceiveBufSize: Params.QueryNodeCfg.RetrieveResultReceiveBufSize,
 
-			SimdType: Params.SimdType,
+			SimdType: Params.QueryNodeCfg.SimdType,
 		},
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
@@ -67,7 +67,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeID),
 		}, nil
 	}
 
@@ -77,6 +77,6 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeID),
 	}, nil
 }

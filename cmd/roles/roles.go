@@ -94,7 +94,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 		rootcoord.Params.InitOnce()
 
 		f := setLoggerFunc()
-		rootcoord.Params.SetLogConfig(f)
+		rootcoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
@@ -119,11 +119,11 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 
 	wg.Add(1)
 	go func() {
-		proxy.Params.InitAlias(alias)
+		proxy.Params.ProxyCfg.InitAlias(alias)
 		proxy.Params.InitOnce()
 
 		f := setLoggerFunc()
-		proxy.Params.SetLogConfig(f)
+		proxy.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
@@ -151,7 +151,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 		querycoord.Params.InitOnce()
 
 		f := setLoggerFunc()
-		querycoord.Params.SetLogConfig(f)
+		querycoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
@@ -176,11 +176,11 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 
 	wg.Add(1)
 	go func() {
-		querynode.Params.InitAlias(alias)
+		querynode.Params.QueryNodeCfg.InitAlias(alias)
 		querynode.Params.InitOnce()
 
 		f := setLoggerFunc()
-		querynode.Params.SetLogConfig(f)
+		querynode.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
@@ -208,7 +208,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 		datacoord.Params.InitOnce()
 
 		f := setLoggerFunc()
-		datacoord.Params.SetLogConfig(f)
+		datacoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		ds, err = components.NewDataCoord(ctx, factory)
@@ -233,10 +233,10 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 
 	wg.Add(1)
 	go func() {
-		datanode.Params.InitAlias(alias)
+		datanode.Params.DataNodeCfg.InitAlias(alias)
 		datanode.Params.InitOnce()
 		f := setLoggerFunc()
-		datanode.Params.SetLogConfig(f)
+		datanode.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
@@ -264,7 +264,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 		indexcoord.Params.InitOnce()
 
 		f := setLoggerFunc()
-		indexcoord.Params.SetLogConfig(f)
+		indexcoord.Params.BaseParams.SetLogConfig(f)
 		var err error
 		is, err = components.NewIndexCoord(ctx)
 		if err != nil {
@@ -288,11 +288,11 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 
 	wg.Add(1)
 	go func() {
-		indexnode.Params.InitAlias(alias)
+		indexnode.Params.IndexNodeCfg.InitAlias(alias)
 		indexnode.Params.InitOnce()
 
 		f := setLoggerFunc()
-		indexnode.Params.SetLogConfig(f)
+		indexnode.Params.BaseParams.SetLogConfig(f)
 		var err error
 		in, err = components.NewIndexNode(ctx)
 		if err != nil {

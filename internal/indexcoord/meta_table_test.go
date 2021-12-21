@@ -31,7 +31,7 @@ import (
 
 func TestMetaTable(t *testing.T) {
 	Params.Init()
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.IndexCoordCfg.EtcdEndpoints, Params.IndexCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 
 	req := &indexpb.BuildIndexRequest{
@@ -311,7 +311,7 @@ func TestMetaTable(t *testing.T) {
 
 func TestMetaTable_Error(t *testing.T) {
 	Params.Init()
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.IndexCoordCfg.EtcdEndpoints, Params.IndexCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 
 	t.Run("reloadFromKV error", func(t *testing.T) {

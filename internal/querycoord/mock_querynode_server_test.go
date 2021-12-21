@@ -100,8 +100,8 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 }
 
 func (qs *queryNodeServerMock) Register() error {
-	log.Debug("query node session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints))
-	qs.session = sessionutil.NewSession(qs.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	log.Debug("query node session info", zap.String("metaPath", Params.QueryCoordCfg.MetaRootPath), zap.Strings("etcdEndPoints", Params.QueryCoordCfg.EtcdEndpoints))
+	qs.session = sessionutil.NewSession(qs.ctx, Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
 	qs.session.Init(typeutil.QueryNodeRole, qs.queryNodeIP+":"+strconv.FormatInt(qs.queryNodePort, 10), false)
 	qs.queryNodeID = qs.session.ServerID
 	log.Debug("query nodeID", zap.Int64("nodeID", qs.queryNodeID))
@@ -113,7 +113,7 @@ func (qs *queryNodeServerMock) Register() error {
 
 func (qs *queryNodeServerMock) init() error {
 	qs.queryNodeIP = funcutil.GetLocalIP()
-	grpcPort := Params.Port
+	grpcPort := Params.QueryCoordCfg.Port
 
 	go func() {
 		var lis net.Listener

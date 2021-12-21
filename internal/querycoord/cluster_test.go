@@ -335,11 +335,11 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		BucketName:        Params.MinioBucketName,
+		Address:           Params.QueryCoordCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
+		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 		CreateBucket:      true,
 	}
 
@@ -393,10 +393,10 @@ func TestReloadClusterFromKV(t *testing.T) {
 	t.Run("Test LoadOnlineNodes", func(t *testing.T) {
 		refreshParams()
 		baseCtx := context.Background()
-		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 		assert.Nil(t, err)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-		clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+		clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
+		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
 			ctx:              baseCtx,
@@ -422,10 +422,10 @@ func TestReloadClusterFromKV(t *testing.T) {
 
 	t.Run("Test LoadOfflineNodes", func(t *testing.T) {
 		refreshParams()
-		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 		assert.Nil(t, err)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-		clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+		clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
+		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
 			client:           kv,
@@ -459,14 +459,14 @@ func TestReloadClusterFromKV(t *testing.T) {
 func TestGrpcRequest(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
-	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true)
 	clusterSession.Register()
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
+		"PulsarAddress":  Params.QueryCoordCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err = factory.SetParams(m)
@@ -650,12 +650,12 @@ func TestEstimateSegmentSize(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryCoordCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 	}
 
 	dataKV, err := minioKV.NewMinIOKV(baseCtx, option)

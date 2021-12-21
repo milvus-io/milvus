@@ -32,7 +32,7 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 
 	core, err := NewCore(context.Background(), nil)
 	assert.Nil(t, err)
-	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	core.etcdCli = cli
 
@@ -58,7 +58,7 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 
 	core, err := NewCore(context.Background(), nil)
 	assert.Nil(t, err)
-	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	core.etcdCli = cli
 
@@ -84,7 +84,7 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 
 	core, err := NewCore(ctx, nil)
 	assert.Nil(t, err)
-	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	core.etcdCli = cli
 
@@ -114,7 +114,7 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 
 	core, err := NewCore(ctx, nil)
 	assert.Nil(t, err)
-	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	core.etcdCli = cli
 

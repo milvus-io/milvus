@@ -156,10 +156,10 @@ func (s *Server) init() error {
 	log.Debug("init params done ...")
 
 	// NetworkPort & IP don't matter here, NetworkAddress matters
-	proxy.Params.NetworkPort = Params.Port
-	proxy.Params.IP = Params.IP
+	proxy.Params.ProxyCfg.NetworkPort = Params.Port
+	proxy.Params.ProxyCfg.IP = Params.IP
 
-	proxy.Params.NetworkAddress = Params.GetAddress()
+	proxy.Params.ProxyCfg.NetworkAddress = Params.GetAddress()
 
 	closer := trace.InitTracing(fmt.Sprintf("proxy ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
@@ -178,7 +178,7 @@ func (s *Server) init() error {
 	}
 
 	if s.rootCoordClient == nil {
-		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
+		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("Proxy new rootCoordClient failed ", zap.Error(err))
 			return err
@@ -198,7 +198,7 @@ func (s *Server) init() error {
 	log.Debug("set rootcoord client ...")
 
 	if s.dataCoordClient == nil {
-		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
+		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("Proxy new dataCoordClient failed ", zap.Error(err))
 			return err
@@ -214,7 +214,7 @@ func (s *Server) init() error {
 	log.Debug("set data coordinator address ...")
 
 	if s.indexCoordClient == nil {
-		s.indexCoordClient, err = icc.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
+		s.indexCoordClient, err = icc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("Proxy new indexCoordClient failed ", zap.Error(err))
 			return err
@@ -230,7 +230,7 @@ func (s *Server) init() error {
 	log.Debug("set index coordinator client ...")
 
 	if s.queryCooedClient == nil {
-		s.queryCooedClient, err = qcc.NewClient(s.ctx, proxy.Params.MetaRootPath, proxy.Params.EtcdEndpoints)
+		s.queryCooedClient, err = qcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
 		if err != nil {
 			return err
 		}

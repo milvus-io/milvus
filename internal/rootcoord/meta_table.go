@@ -573,8 +573,8 @@ func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	}
 
 	// number of partition tags (except _default) should be limited to 4096 by default
-	if int64(len(coll.PartitionIDs)) >= Params.MaxPartitionNum {
-		return fmt.Errorf("maximum partition's number should be limit to %d", Params.MaxPartitionNum)
+	if int64(len(coll.PartitionIDs)) >= Params.RootCoordCfg.MaxPartitionNum {
+		return fmt.Errorf("maximum partition's number should be limit to %d", Params.RootCoordCfg.MaxPartitionNum)
 	}
 
 	if len(coll.PartitionIDs) != len(coll.PartitionNames) {
@@ -715,7 +715,7 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if partitionName == Params.DefaultPartitionName {
+	if partitionName == Params.RootCoordCfg.DefaultPartitionName {
 		return 0, fmt.Errorf("default partition cannot be deleted")
 	}
 
@@ -954,7 +954,7 @@ func (mt *MetaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, fieldID in
 	if fieldID == -1 && idxName == "" { // return default index
 		for _, seg := range segIdxMap {
 			info, ok := mt.indexID2Meta[seg.IndexID]
-			if ok && info.IndexName == Params.DefaultIndexName {
+			if ok && info.IndexName == Params.RootCoordCfg.DefaultIndexName {
 				return seg, nil
 			}
 		}

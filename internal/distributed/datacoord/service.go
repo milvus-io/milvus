@@ -84,9 +84,9 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	datacoord.Params.InitOnce()
-	datacoord.Params.IP = Params.IP
-	datacoord.Params.Port = Params.Port
-	datacoord.Params.Address = Params.GetAddress()
+	datacoord.Params.DataCoordCfg.IP = Params.IP
+	datacoord.Params.DataCoordCfg.Port = Params.Port
+	datacoord.Params.DataCoordCfg.Address = Params.GetAddress()
 
 	err := s.startGrpc()
 	if err != nil {

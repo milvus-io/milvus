@@ -194,8 +194,8 @@ func (s *Server) init() error {
 	Params.InitOnce(typeutil.DataNodeRole)
 
 	dn.Params.InitOnce()
-	dn.Params.Port = Params.Port
-	dn.Params.IP = Params.IP
+	dn.Params.DataNodeCfg.Port = Params.Port
+	dn.Params.DataNodeCfg.IP = Params.IP
 
 	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
@@ -210,7 +210,7 @@ func (s *Server) init() error {
 	// --- RootCoord Client ---
 	if s.newRootCoordClient != nil {
 		log.Debug("Init root coord client ...")
-		rootCoordClient, err := s.newRootCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints)
+		rootCoordClient, err := s.newRootCoordClient(dn.Params.DataNodeCfg.MetaRootPath, dn.Params.DataNodeCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("DataNode newRootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -237,7 +237,7 @@ func (s *Server) init() error {
 	// --- Data Server Client ---
 	if s.newDataCoordClient != nil {
 		log.Debug("DataNode Init data service client ...")
-		dataCoordClient, err := s.newDataCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints)
+		dataCoordClient, err := s.newDataCoordClient(dn.Params.DataNodeCfg.MetaRootPath, dn.Params.DataNodeCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("DataNode newDataCoordClient failed", zap.Error(err))
 			panic(err)
@@ -261,7 +261,7 @@ func (s *Server) init() error {
 		}
 	}
 
-	s.datanode.SetNodeID(dn.Params.NodeID)
+	s.datanode.SetNodeID(dn.Params.DataNodeCfg.NodeID)
 	s.datanode.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.datanode.Init(); err != nil {

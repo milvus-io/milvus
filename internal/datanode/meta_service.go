@@ -53,7 +53,7 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 			MsgType:   commonpb.MsgType_DescribeCollection,
 			MsgID:     0, //GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
+			SourceID:  Params.DataNodeCfg.NodeID,
 		},
 		DbName:       "default", // GOOSE TODO
 		CollectionID: collID,

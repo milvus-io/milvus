@@ -208,7 +208,7 @@ func TestTask_AddQueryChannel(t *testing.T) {
 
 		task.req.SeekPosition = position
 
-		Params.skipQueryChannelRecovery = true
+		Params.QueryNodeCfg.SkipQueryChannelRecovery = true
 
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
@@ -600,7 +600,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		totalRAM := Params.CacheSize * 1024 * 1024 * 1024
+		totalRAM := Params.QueryNodeCfg.CacheSize * 1024 * 1024 * 1024
 
 		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)

@@ -48,7 +48,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Value: Params.TimeTickChannelName,
+		Value: Params.DataCoordCfg.TimeTickChannelName,
 	}, nil
 }
 
@@ -272,7 +272,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Value: Params.SegmentInfoChannelName,
+		Value: Params.DataCoordCfg.SegmentInfoChannelName,
 	}, nil
 }
 
@@ -366,7 +366,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
 
-		if Params.EnableCompaction {
+		if Params.DataCoordCfg.EnableCompaction {
 			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 			defer cancel()
 
@@ -573,7 +573,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	dresp, err := s.rootCoordClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
-			SourceID: Params.NodeID,
+			SourceID: Params.DataCoordCfg.NodeID,
 		},
 		CollectionID: collectionID,
 	})
@@ -644,19 +644,19 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("received get metrics request",
-		zap.Int64("nodeID", Params.NodeID),
+		zap.Int64("nodeID", Params.DataCoordCfg.NodeID),
 		zap.String("request", req.Request))
 
 	if s.isClosed() {
 		log.Warn("DataCoord.GetMetrics failed",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 			zap.String("req", req.Request),
-			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataCoordIsUnhealthy(Params.NodeID),
+				Reason:    msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID),
 			},
 			Response: "",
 		}, nil
@@ -665,7 +665,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataCoord.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -692,7 +692,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		metrics, err := s.getSystemInfoMetrics(ctx, req)
 
 		log.Debug("DataCoord.GetMetrics",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
@@ -704,7 +704,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}
 
 	log.Debug("DataCoord.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 
@@ -727,13 +727,13 @@ func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 
 	if s.isClosed() {
 		log.Warn("failed to complete compaction", zap.Int64("planID", req.PlanID),
-			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
+			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)))
 
-		resp.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		resp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}
 
-	if !Params.EnableCompaction {
+	if !Params.DataCoordCfg.EnableCompaction {
 		resp.Reason = "compaction disabled"
 		return resp, nil
 	}
@@ -761,12 +761,12 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	if s.isClosed() {
 		log.Warn("failed to execute manual compaction", zap.Int64("collectionID", req.GetCollectionID()),
-			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
-		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}
 
-	if !Params.EnableCompaction {
+	if !Params.DataCoordCfg.EnableCompaction {
 		resp.Status.Reason = "compaction disabled"
 		return resp, nil
 	}
@@ -802,12 +802,12 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 
 	if s.isClosed() {
 		log.Warn("failed to get compaction state", zap.Int64("compactionID", req.GetCompactionID()),
-			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
-		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}
 
-	if !Params.EnableCompaction {
+	if !Params.DataCoordCfg.EnableCompaction {
 		resp.Status.Reason = "compaction disabled"
 		return resp, nil
 	}
@@ -834,12 +834,12 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	}
 
 	if s.isClosed() {
-		log.Warn("failed to get compaction state with plans", zap.Int64("compactionID", req.GetCompactionID()), zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
-		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		log.Warn("failed to get compaction state with plans", zap.Int64("compactionID", req.GetCompactionID()), zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}
 
-	if !Params.EnableCompaction {
+	if !Params.DataCoordCfg.EnableCompaction {
 		resp.Status.Reason = "compaction disabled"
 		return resp, nil
 	}
@@ -905,8 +905,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 
 	if s.isClosed() {
 		log.Warn("failed to watch channels request", zap.Any("channels", req.GetChannelNames()),
-			zap.Error(errDataCoordIsUnhealthy(Params.NodeID)))
-		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)))
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
@@ -934,7 +934,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	if s.isClosed() {
 		log.Warn("failed to get flush state because of closed server",
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
-		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.NodeID)
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}
 

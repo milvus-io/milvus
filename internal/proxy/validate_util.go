@@ -51,9 +51,9 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 	}
 
 	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
-	if int64(len(entity)) > Params.MaxNameLength {
+	if int64(len(entity)) > Params.ProxyCfg.MaxNameLength {
 		msg := invalidMsg + fmt.Sprintf("The length of a collection %s must be less than ", entityType) +
-			strconv.FormatInt(Params.MaxNameLength, 10) + " characters."
+			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
 
@@ -91,9 +91,9 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		return errors.New(msg)
 	}
 
-	if int64(len(partitionTag)) > Params.MaxNameLength {
+	if int64(len(partitionTag)) > Params.ProxyCfg.MaxNameLength {
 		msg := invalidMsg + "The length of a partition tag must be less than " +
-			strconv.FormatInt(Params.MaxNameLength, 10) + " characters."
+			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
 
@@ -125,9 +125,9 @@ func validateFieldName(fieldName string) error {
 	}
 
 	invalidMsg := "Invalid field name: " + fieldName + ". "
-	if int64(len(fieldName)) > Params.MaxNameLength {
+	if int64(len(fieldName)) > Params.ProxyCfg.MaxNameLength {
 		msg := invalidMsg + "The length of a field name must be less than " +
-			strconv.FormatInt(Params.MaxNameLength, 10) + " characters."
+			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
 
@@ -149,8 +149,8 @@ func validateFieldName(fieldName string) error {
 }
 
 func validateDimension(dim int64, isBinary bool) error {
-	if dim <= 0 || dim > Params.MaxDimension {
-		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.MaxDimension)
+	if dim <= 0 || dim > Params.ProxyCfg.MaxDimension {
+		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.ProxyCfg.MaxDimension)
 	}
 	if isBinary && dim%8 != 0 {
 		return fmt.Errorf("invalid dimension: %d. should be multiple of 8. ", dim)

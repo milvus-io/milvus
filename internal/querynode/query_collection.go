@@ -292,7 +292,7 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 }
 
 func (q *queryCollection) getServiceableTime() Timestamp {
-	gracefulTimeInMilliSecond := Params.GracefulTime
+	gracefulTimeInMilliSecond := Params.QueryNodeCfg.GracefulTime
 	gracefulTime := typeutil.ZeroTimestamp
 	if gracefulTimeInMilliSecond > 0 {
 		gracefulTime = tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)

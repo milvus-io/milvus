@@ -112,7 +112,7 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	go func() {
 		rootcoord.Params.Init()
 		if !localMsg {
-			logutil.SetupLogger(&rootcoord.Params.Log)
+			logutil.SetupLogger(&rootcoord.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 
@@ -143,7 +143,7 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 		querycoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&querycoord.Params.Log)
+			logutil.SetupLogger(&querycoord.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 
@@ -171,11 +171,11 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 
 	wg.Add(1)
 	go func() {
-		querynode.Params.InitAlias(alias)
+		querynode.Params.QueryNodeCfg.InitAlias(alias)
 		querynode.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&querynode.Params.Log)
+			logutil.SetupLogger(&querynode.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 
@@ -206,7 +206,7 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 		datacoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&datacoord.Params.Log)
+			logutil.SetupLogger(&datacoord.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 
@@ -234,11 +234,11 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 
 	wg.Add(1)
 	go func() {
-		datanode.Params.InitAlias(alias)
+		datanode.Params.DataNodeCfg.InitAlias(alias)
 		datanode.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&datanode.Params.Log)
+			logutil.SetupLogger(&datanode.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 
@@ -269,7 +269,7 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 		indexcoord.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&indexcoord.Params.Log)
+			logutil.SetupLogger(&indexcoord.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 
@@ -296,11 +296,11 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 
 	wg.Add(1)
 	go func() {
-		indexnode.Params.InitAlias(alias)
+		indexnode.Params.IndexNodeCfg.InitAlias(alias)
 		indexnode.Params.Init()
 
 		if !localMsg {
-			logutil.SetupLogger(&indexnode.Params.Log)
+			logutil.SetupLogger(&indexnode.Params.BaseParams.Log)
 			defer log.Sync()
 		}
 
@@ -419,7 +419,7 @@ func TestProxy(t *testing.T) {
 	Params.Init()
 	log.Info("Initialize parameter table of proxy")
 
-	rootCoordClient, err := rcc.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	rootCoordClient, err := rcc.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = rootCoordClient.Init()
 	assert.NoError(t, err)
@@ -428,7 +428,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetRootCoordClient(rootCoordClient)
 	log.Info("Proxy set root coordinator client")
 
-	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = dataCoordClient.Init()
 	assert.NoError(t, err)
@@ -437,7 +437,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetDataCoordClient(dataCoordClient)
 	log.Info("Proxy set data coordinator client")
 
-	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = queryCoordClient.Init()
 	assert.NoError(t, err)
@@ -446,7 +446,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetQueryCoordClient(queryCoordClient)
 	log.Info("Proxy set query coordinator client")
 
-	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = indexCoordClient.Init()
 	assert.NoError(t, err)
@@ -477,7 +477,7 @@ func TestProxy(t *testing.T) {
 		states, err := proxy.GetComponentStates(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
-		assert.Equal(t, Params.ProxyID, states.State.NodeID)
+		assert.Equal(t, Params.ProxyCfg.ProxyID, states.State.NodeID)
 		assert.Equal(t, typeutil.ProxyRole, states.State.Role)
 		assert.Equal(t, proxy.stateCode.Load().(internalpb.StateCode), states.State.StateCode)
 	})

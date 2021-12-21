@@ -40,12 +40,6 @@ import (
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
@@ -54,10 +48,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // UniqueID is an alias of int64, is used as a unique identifier for the request.
@@ -65,6 +63,8 @@ type UniqueID = typeutil.UniqueID
 
 // make sure IndexNode implements types.IndexNode
 var _ types.IndexNode = (*IndexNode)(nil)
+
+var Params paramtable.GlobalParamTable
 
 // IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {
@@ -131,21 +131,21 @@ func (i *IndexNode) initKnowhere() {
 	C.IndexBuilderInit()
 
 	// override index builder SIMD type
-	cSimdType := C.CString(Params.SimdType)
+	cSimdType := C.CString(Params.IndexNodeCfg.SimdType)
 	cRealSimdType := C.IndexBuilderSetSimdType(cSimdType)
-	Params.SimdType = C.GoString(cRealSimdType)
+	Params.IndexNodeCfg.SimdType = C.GoString(cRealSimdType)
 	C.free(unsafe.Pointer(cRealSimdType))
 	C.free(unsafe.Pointer(cSimdType))
 }
 
 func (i *IndexNode) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexNodeCfg.MetaRootPath, Params.IndexNodeCfg.EtcdEndpoints)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	i.session.Init(typeutil.IndexNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
-	Params.NodeID = i.session.ServerID
-	Params.SetLogger(Params.NodeID)
+	i.session.Init(typeutil.IndexNodeRole, Params.IndexNodeCfg.IP+":"+strconv.Itoa(Params.IndexNodeCfg.Port), false)
+	Params.IndexNodeCfg.NodeID = i.session.ServerID
+	Params.BaseParams.SetLogger(Params.IndexNodeCfg.NodeID)
 	return nil
 }
 
@@ -166,7 +166,7 @@ func (i *IndexNode) Init() error {
 		log.Debug("IndexNode init session successful", zap.Int64("serverID", i.session.ServerID))
 
 		connectEtcdFn := func() error {
-			etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+			etcdKV, err := etcdkv.NewEtcdKV(Params.IndexNodeCfg.EtcdEndpoints, Params.IndexNodeCfg.MetaRootPath)
 			i.etcdKV = etcdKV
 			return err
 		}
@@ -179,11 +179,11 @@ func (i *IndexNode) Init() error {
 		log.Debug("IndexNode connected to etcd successfully")
 
 		option := &miniokv.Option{
-			Address:           Params.MinIOAddress,
-			AccessKeyID:       Params.MinIOAccessKeyID,
-			SecretAccessKeyID: Params.MinIOSecretAccessKey,
-			UseSSL:            Params.MinIOUseSSL,
-			BucketName:        Params.MinioBucketName,
+			Address:           Params.IndexNodeCfg.MinIOAddress,
+			AccessKeyID:       Params.IndexNodeCfg.MinIOAccessKeyID,
+			SecretAccessKeyID: Params.IndexNodeCfg.MinIOSecretAccessKey,
+			UseSSL:            Params.IndexNodeCfg.MinIOUseSSL,
+			BucketName:        Params.IndexNodeCfg.MinioBucketName,
 			CreateBucket:      true,
 		}
 		kv, err := miniokv.NewMinIOKV(i.loopCtx, option)
@@ -212,8 +212,8 @@ func (i *IndexNode) Start() error {
 	i.once.Do(func() {
 		startErr = i.sched.Start()
 
-		Params.CreatedTime = time.Now()
-		Params.UpdatedTime = time.Now()
+		Params.IndexNodeCfg.CreatedTime = time.Now()
+		Params.IndexNodeCfg.UpdatedTime = time.Now()
 
 		i.UpdateStateCode(internalpb.StateCode_Healthy)
 		log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
@@ -286,7 +286,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		req:            request,
 		kv:             i.kv,
 		etcdKV:         i.etcdKV,
-		nodeID:         Params.NodeID,
+		nodeID:         Params.IndexNodeCfg.NodeID,
 		serializedSize: 0,
 	}
 
@@ -360,19 +360,19 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("IndexNode.GetMetrics",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 		zap.String("req", req.Request))
 
 	if !i.isHealthy() {
 		log.Warn("IndexNode.GetMetrics failed",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
-			zap.Error(errIndexNodeIsUnhealthy(Params.NodeID)))
+			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.NodeID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(Params.NodeID),
+				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.NodeID),
 			},
 			Response: "",
 		}, nil
@@ -381,7 +381,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("IndexNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -398,7 +398,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
 		log.Debug("IndexNode.GetMetrics",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
@@ -408,7 +408,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	}
 
 	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

@@ -31,13 +31,13 @@ import (
 
 func TestProxyManager(t *testing.T) {
 	Params.Init()
-	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	cli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	defer cli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	s1 := sessionutil.Session{
@@ -65,7 +65,7 @@ func TestProxyManager(t *testing.T) {
 		t.Log("get sessions", sess[0], sess[1])
 	}
 
-	pm, err := newProxyManager(ctx, Params.EtcdEndpoints, f1)
+	pm, err := newProxyManager(ctx, Params.RootCoordCfg.EtcdEndpoints, f1)
 	assert.Nil(t, err)
 	fa := func(sess *sessionutil.Session) {
 		assert.Equal(t, int64(101), sess.ServerID)

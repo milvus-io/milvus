@@ -464,7 +464,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
-	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeID, collectionID))
+	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
 	stream.SeekReaders([]*internalpb.MsgPosition{position})
 
 	delData := &deleteData{
@@ -639,16 +639,16 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentSize
 			zap.Any("usedMem", usedMem),
 			zap.Any("segmentTotalSize", segmentTotalSize),
 			zap.Any("currentSegmentSize", size),
-			zap.Any("thresholdFactor", Params.OverloadedMemoryThresholdPercentage),
+			zap.Any("thresholdFactor", Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage),
 		)
-		if int64(usedMem)+segmentTotalSize+size > int64(float64(totalMem)*Params.OverloadedMemoryThresholdPercentage) {
+		if int64(usedMem)+segmentTotalSize+size > int64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
 			return errors.New(fmt.Sprintln("load segment failed, OOM if load, "+
 				"collectionID = ", collectionID, ", ",
 				"usedMem = ", usedMem, ", ",
 				"segmentTotalSize = ", segmentTotalSize, ", ",
 				"currentSegmentSize = ", size, ", ",
 				"totalMem = ", totalMem, ", ",
-				"thresholdFactor = ", Params.OverloadedMemoryThresholdPercentage,
+				"thresholdFactor = ", Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage,
 			))
 		}
 	}
@@ -664,12 +664,12 @@ func newSegmentLoader(ctx context.Context,
 	etcdKV *etcdkv.EtcdKV,
 	factory msgstream.Factory) *segmentLoader {
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryNodeCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 	}
 
 	client, err := minioKV.NewMinIOKV(ctx, option)

@@ -209,8 +209,8 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorIn
 		activeTasks:     make(map[UniqueID]task),
 		utLock:          sync.RWMutex{},
 		atLock:          sync.RWMutex{},
-		maxTaskNum:      Params.MaxTaskNum,
-		utBufChan:       make(chan int, Params.MaxTaskNum),
+		maxTaskNum:      Params.ProxyCfg.MaxTaskNum,
+		utBufChan:       make(chan int, Params.ProxyCfg.MaxTaskNum),
 		tsoAllocatorIns: tsoAllocatorIns,
 		idAllocatorIns:  idAllocatorIns,
 	}
@@ -631,17 +631,17 @@ func (sched *taskScheduler) collectResultLoop() {
 
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
 	// proxy didn't need to walk through all the search results in channel, because it no longer has client connections.
-	queryResultMsgStream.AsConsumerWithPosition(Params.SearchResultChannelNames, Params.ProxySubName, mqclient.SubscriptionPositionLatest)
-	log.Debug("Proxy", zap.Strings("SearchResultChannelNames", Params.SearchResultChannelNames),
-		zap.Any("ProxySubName", Params.ProxySubName))
+	queryResultMsgStream.AsConsumerWithPosition(Params.ProxyCfg.SearchResultChannelNames, Params.ProxyCfg.ProxySubName, mqclient.SubscriptionPositionLatest)
+	log.Debug("Proxy", zap.Strings("SearchResultChannelNames", Params.ProxyCfg.SearchResultChannelNames),
+		zap.Any("ProxySubName", Params.ProxyCfg.ProxySubName))
 
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()
 
 	searchResultBufs := make(map[UniqueID]*searchResultBuf)
-	searchResultBufFlags := newIDCache(Params.BufFlagExpireTime, Params.BufFlagCleanupInterval) // if value is true, we can ignore searchResult
+	searchResultBufFlags := newIDCache(Params.ProxyCfg.BufFlagExpireTime, Params.ProxyCfg.BufFlagCleanupInterval) // if value is true, we can ignore searchResult
 	queryResultBufs := make(map[UniqueID]*queryResultBuf)
-	queryResultBufFlags := newIDCache(Params.BufFlagExpireTime, Params.BufFlagCleanupInterval) // if value is true, we can ignore queryResult
+	queryResultBufFlags := newIDCache(Params.ProxyCfg.BufFlagExpireTime, Params.ProxyCfg.BufFlagCleanupInterval) // if value is true, we can ignore queryResult
 
 	for {
 		select {

@@ -220,7 +220,7 @@ func TestMetaTable(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
@@ -273,7 +273,7 @@ func TestMetaTable(t *testing.T) {
 		},
 		CreateTime:                 0,
 		PartitionIDs:               []typeutil.UniqueID{partIDDefault},
-		PartitionNames:             []string{Params.DefaultPartitionName},
+		PartitionNames:             []string{Params.RootCoordCfg.DefaultPartitionName},
 		PartitionCreatedTimestamps: []uint64{0},
 	}
 	idxInfo := []*pb.IndexInfo{
@@ -615,11 +615,11 @@ func TestMetaTable(t *testing.T) {
 		assert.EqualError(t, err, "can't find collection. id = 2")
 
 		coll := mt.collID2Meta[collInfo.ID]
-		coll.PartitionIDs = make([]int64, Params.MaxPartitionNum)
+		coll.PartitionIDs = make([]int64, Params.RootCoordCfg.MaxPartitionNum)
 		mt.collID2Meta[coll.ID] = coll
 		err = mt.AddPartition(coll.ID, "no-part", 22, ts, "")
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("maximum partition's number should be limit to %d", Params.MaxPartitionNum))
+		assert.EqualError(t, err, fmt.Sprintf("maximum partition's number should be limit to %d", Params.RootCoordCfg.MaxPartitionNum))
 
 		coll.PartitionIDs = []int64{partID}
 		coll.PartitionNames = []string{partName}
@@ -694,7 +694,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 
 		ts = ftso()
-		_, err = mt.DeletePartition(collInfo.ID, Params.DefaultPartitionName, ts, "")
+		_, err = mt.DeletePartition(collInfo.ID, Params.RootCoordCfg.DefaultPartitionName, ts, "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "default partition cannot be deleted")
 
@@ -1089,7 +1089,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -1246,7 +1246,7 @@ func TestFixIssue10540(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 

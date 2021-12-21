@@ -58,7 +58,7 @@ func TestGetSegmentInfoChannel(t *testing.T) {
 		resp, err := svr.GetSegmentInfoChannel(context.TODO())
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, Params.SegmentInfoChannelName, resp.Value)
+		assert.EqualValues(t, Params.DataCoordCfg.SegmentInfoChannelName, resp.Value)
 	})
 }
 
@@ -245,7 +245,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	resp, err := svr.GetTimeTickChannel(context.TODO())
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.EqualValues(t, Params.TimeTickChannelName, resp.Value)
+	assert.EqualValues(t, Params.DataCoordCfg.TimeTickChannelName, resp.Value)
 }
 
 func TestGetSegmentStates(t *testing.T) {
@@ -1064,7 +1064,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
@@ -1132,7 +1132,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		})
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
@@ -1214,7 +1214,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		node := &NodeInfo{
@@ -1736,7 +1736,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 }
 
 func TestGetCompactionState(t *testing.T) {
-	Params.EnableCompaction = true
+	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
 		svr := &Server{}
 		svr.isServing = ServerStateHealthy
@@ -1791,12 +1791,12 @@ func TestGetCompactionState(t *testing.T) {
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.GetStatus().GetReason())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.GetStatus().GetReason())
 	})
 }
 
 func TestCompleteCompaction(t *testing.T) {
-	Params.EnableCompaction = true
+	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test complete compaction successfully", func(t *testing.T) {
 		svr := &Server{}
 		svr.isServing = ServerStateHealthy
@@ -1835,12 +1835,12 @@ func TestCompleteCompaction(t *testing.T) {
 		resp, err := svr.CompleteCompaction(context.Background(), &datapb.CompactionResult{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.GetReason())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.GetReason())
 	})
 }
 
 func TestManualCompaction(t *testing.T) {
-	Params.EnableCompaction = true
+	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: &MockAllocator{}}
 		svr.isServing = ServerStateHealthy
@@ -1896,7 +1896,7 @@ func TestManualCompaction(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.Status.Reason)
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.Status.Reason)
 	})
 }
 
@@ -1946,7 +1946,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.Status.Reason)
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.Status.Reason)
 	})
 }
 
@@ -2235,20 +2235,20 @@ func TestGetFlushState(t *testing.T) {
 
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
 	Params.Init()
-	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())
+	Params.DataCoordCfg.TimeTickChannelName = Params.DataCoordCfg.TimeTickChannelName + strconv.Itoa(rand.Int())
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.DataCoordCfg.PulsarAddress,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024,
 	}
 	err = factory.SetParams(m)
 	assert.Nil(t, err)
 
-	etcdCli, err := initEtcd(Params.EtcdEndpoints)
+	etcdCli, err := initEtcd(Params.DataCoordCfg.EtcdEndpoints)
 	assert.Nil(t, err)
-	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.DataCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 

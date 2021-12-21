@@ -79,14 +79,14 @@ func (s *Server) init() error {
 	Params.InitOnce(typeutil.IndexCoordRole)
 
 	indexcoord.Params.InitOnce()
-	indexcoord.Params.Address = Params.GetAddress()
-	indexcoord.Params.Port = Params.Port
+	indexcoord.Params.IndexCoordCfg.Address = Params.GetAddress()
+	indexcoord.Params.IndexCoordCfg.Port = Params.Port
 
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
 
 	s.loopWg.Add(1)
-	go s.startGrpcLoop(indexcoord.Params.Port)
+	go s.startGrpcLoop(indexcoord.Params.IndexCoordCfg.Port)
 	// wait for grpc IndexCoord loop start
 	if err := <-s.grpcErrChan; err != nil {
 		log.Error("IndexCoord", zap.Any("init error", err))

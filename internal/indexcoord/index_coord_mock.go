@@ -67,10 +67,10 @@ func (icm *Mock) Register() error {
 	if icm.Failure {
 		return errors.New("IndexCoordinate register failed")
 	}
-	icm.etcdKV, _ = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	icm.etcdKV, _ = etcdkv.NewEtcdKV(Params.IndexCoordCfg.EtcdEndpoints, Params.IndexCoordCfg.MetaRootPath)
 	err := icm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
-	session := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-	session.Init(typeutil.IndexCoordRole, Params.Address, true)
+	session := sessionutil.NewSession(context.Background(), Params.IndexCoordCfg.MetaRootPath, Params.IndexCoordCfg.EtcdEndpoints)
+	session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true)
 	session.Register()
 	return err
 }

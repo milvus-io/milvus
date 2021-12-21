@@ -117,11 +117,11 @@ func (s *Server) init() error {
 	Params.InitOnce(typeutil.IndexNodeRole)
 
 	indexnode.Params.InitOnce()
-	indexnode.Params.Port = Params.Port
-	indexnode.Params.IP = Params.IP
-	indexnode.Params.Address = Params.GetAddress()
+	indexnode.Params.IndexNodeCfg.Port = Params.Port
+	indexnode.Params.IndexNodeCfg.IP = Params.IP
+	indexnode.Params.IndexNodeCfg.Address = Params.GetAddress()
 
-	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", indexnode.Params.NodeID))
+	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", indexnode.Params.IndexNodeCfg.NodeID))
 	s.closer = closer
 
 	defer func() {

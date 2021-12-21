@@ -63,7 +63,7 @@ func (tk *testKv) Load(key string) (string, error) {
 
 func TestReplica_Release(t *testing.T) {
 	refreshParams()
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 	meta, err := newMeta(context.Background(), etcdKV, nil, nil)
 	assert.Nil(t, err)
@@ -93,7 +93,7 @@ func TestReplica_Release(t *testing.T) {
 
 func TestMetaFunc(t *testing.T) {
 	refreshParams()
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 
 	nodeID := defaultQueryNodeID
@@ -285,7 +285,7 @@ func TestMetaFunc(t *testing.T) {
 
 func TestReloadMetaFromKV(t *testing.T) {
 	refreshParams()
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 	meta := &MetaReplica{
 		client:            kv,

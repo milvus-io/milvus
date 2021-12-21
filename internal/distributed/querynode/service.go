@@ -85,8 +85,8 @@ func (s *Server) init() error {
 	Params.InitOnce(typeutil.QueryNodeRole)
 
 	qn.Params.InitOnce()
-	qn.Params.QueryNodeIP = Params.IP
-	qn.Params.QueryNodePort = int64(Params.Port)
+	qn.Params.QueryNodeCfg.QueryNodeIP = Params.IP
+	qn.Params.QueryNodeCfg.QueryNodePort = int64(Params.Port)
 	//qn.Params.QueryNodeID = Params.QueryNodeID
 
 	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.IP, Params.Port))
@@ -103,7 +103,7 @@ func (s *Server) init() error {
 
 	// --- RootCoord Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints)
+		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, qn.Params.QueryNodeCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -133,7 +133,7 @@ func (s *Server) init() error {
 
 	// --- IndexCoord ---
 	if s.indexCoord == nil {
-		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.MetaRootPath, qn.Params.EtcdEndpoints)
+		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, qn.Params.QueryNodeCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("QueryNode new IndexCoordClient failed", zap.Error(err))
 			panic(err)
@@ -203,7 +203,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		addr := ":" + strconv.Itoa(grpcPort)
 		lis, err = net.Listen("tcp", addr)
 		if err == nil {
-			qn.Params.QueryNodePort = int64(lis.Addr().(*net.TCPAddr).Port)
+			qn.Params.QueryNodeCfg.QueryNodePort = int64(lis.Addr().(*net.TCPAddr).Port)
 		} else {
 			// set port=0 to get next available port
 			grpcPort = 0

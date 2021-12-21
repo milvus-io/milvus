@@ -42,13 +42,13 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
-				CreatedTime: Params.CreatedTime.String(),
-				UpdatedTime: Params.UpdatedTime.String(),
+				CreatedTime: Params.RootCoordCfg.CreatedTime.String(),
+				UpdatedTime: Params.RootCoordCfg.UpdatedTime.String(),
 				Type:        typeutil.RootCoordRole,
 				ID:          c.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.RootCoordConfiguration{
-				MinSegmentSizeToEnableIndex: Params.MinSegmentSizeToEnableIndex,
+				MinSegmentSizeToEnableIndex: Params.RootCoordCfg.MinSegmentSizeToEnableIndex,
 			},
 		},
 		Connections: metricsinfo.ConnTopology{
