@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"os"
+	"path"
 	"strings"
 	"sync"
 
@@ -99,7 +100,7 @@ func (p *BaseParamTable) initMetaRootPath() {
 	if err != nil {
 		panic(err)
 	}
-	p.MetaRootPath = rootPath + "/" + subPath
+	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
 func (p *BaseParamTable) initKvRootPath() {
@@ -111,5 +112,5 @@ func (p *BaseParamTable) initKvRootPath() {
 	if err != nil {
 		panic(err)
 	}
-	p.KvRootPath = rootPath + "/" + subPath
+	p.KvRootPath = path.Join(rootPath, subPath)
 }
