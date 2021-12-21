@@ -11,12 +11,13 @@
 
 #pragma once
 
-#include "common/Schema.h"
-#include "query/PlanNode.h"
-#include "pb/plan.pb.h"
-#include "query/Plan.h"
 #include <boost/dynamic_bitset.hpp>
 #include <memory>
+
+#include "Plan.h"
+#include "PlanNode.h"
+#include "common/Schema.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 
