@@ -664,7 +664,7 @@ func TestEstimateSegmentSize(t *testing.T) {
 	binlog := []*datapb.FieldBinlog{
 		{
 			FieldID: simpleConstField.id,
-			Binlogs: []*datapb.Binlog{{LogPath: "^&^%*&%&&(*^*&"}},
+			Binlogs: []*datapb.Binlog{{LogPath: "by-dev/rand/path", LogSize: 1024}},
 		},
 	}
 
@@ -683,8 +683,8 @@ func TestEstimateSegmentSize(t *testing.T) {
 	}
 
 	size, err := estimateSegmentsSize(loadReq, dataKV)
-	assert.Error(t, err)
-	assert.Equal(t, int64(0), size)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1024), size)
 
 	binlog, err = saveSimpleBinLog(baseCtx, schema, dataKV)
 	assert.NoError(t, err)
@@ -693,7 +693,7 @@ func TestEstimateSegmentSize(t *testing.T) {
 
 	size, err = estimateSegmentsSize(loadReq, dataKV)
 	assert.NoError(t, err)
-	assert.NotEqual(t, int64(0), size)
+	assert.NotEqual(t, int64(1024), size)
 
 	indexPath, err := generateIndex(defaultSegmentID)
 	assert.NoError(t, err)
