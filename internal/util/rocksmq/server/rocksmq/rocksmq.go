@@ -13,7 +13,7 @@ package rocksmq
 
 import "context"
 
-// ProducerMessage that will be write to rocksdb
+// ProducerMessage that will be written to rocksdb
 type ProducerMessage struct {
 	Payload []byte
 }
