@@ -16,6 +16,7 @@ spec:
       labelSelectors:
         release: milvus-chaos
         app: minio 
-    mode: one
+    mode: fixed
+    value: "1"
     action: pod-kill
     gracePeriod: 0

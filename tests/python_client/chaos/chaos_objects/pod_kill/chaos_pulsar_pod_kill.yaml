@@ -16,7 +16,8 @@ spec:
       labelSelectors:
         release: milvus-chaos
         app: pulsar
-    mode: one
+    mode: fixed
+    value: "1"
     action: pod-kill
     gracePeriod: 0
 
