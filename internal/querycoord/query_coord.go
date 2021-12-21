@@ -515,7 +515,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 				sourceNodeID := onlineNodeIDs[0]
 				dstNodeID := onlineNodeIDs[len(onlineNodeIDs)-1]
 				memUsageRateDiff := nodeID2MemUsageRate[sourceNodeID] - nodeID2MemUsageRate[dstNodeID]
-				// if memoryUsageRate of source node is greater then 90%, and the max memUsageDiff is greater than 30%
+				// if memoryUsageRate of source node is greater than 90%, and the max memUsageDiff is greater than 30%
 				// then migrate the segments on source node to other query nodes
 				if nodeID2MemUsageRate[sourceNodeID] > Params.OverloadedMemoryThresholdPercentage ||
 					memUsageRateDiff > Params.MemoryUsageMaxDifferencePercentage {
