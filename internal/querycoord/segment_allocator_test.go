@@ -122,6 +122,12 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 
 		assert.Equal(t, node2ID, firstReq.DstNodeID)
 		assert.Equal(t, node2ID, secondReq.DstNodeID)
+
+		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, true, nil, nil)
+		assert.Nil(t, err)
+
+		assert.Equal(t, node2ID, firstReq.DstNodeID)
+		assert.Equal(t, node2ID, secondReq.DstNodeID)
 	})
 
 	err = removeAllSession()
