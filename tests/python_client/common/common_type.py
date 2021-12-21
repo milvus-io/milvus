@@ -48,6 +48,7 @@ default_nlist = 128
 compact_segment_num_threshold = 10
 compact_delta_ratio_reciprocal = 5  # compact_delta_binlog_ratio is 0.2
 compact_retention_duration = 20  # compaction travel time retention range 20s
+max_compaction_interval = 60  # the max time interval (s) from the last compaction
 max_field_num = 256  # Maximum number of fields in a collection
 
 Not_Exist = "Not_Exist"
