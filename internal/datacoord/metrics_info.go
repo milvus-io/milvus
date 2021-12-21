@@ -49,7 +49,7 @@ func (s *Server) getSystemInfoMetrics(
 	for _, node := range nodes {
 		infos, err := s.getDataNodeMetrics(ctx, req, node)
 		if err != nil {
-			log.Warn("fails to get datanode metrics", zap.Error(err))
+			log.Warn("fails to get DataNode metrics", zap.Error(err))
 			continue
 		}
 		clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, infos)
