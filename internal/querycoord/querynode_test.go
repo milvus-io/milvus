@@ -59,10 +59,10 @@ func removeAllSession() error {
 	return nil
 }
 
-func waitAllQueryNodeOffline(cluster Cluster, nodes map[int64]Node) bool {
+func waitAllQueryNodeOffline(cluster Cluster, nodeIDs []int64) bool {
 	for {
 		allOffline := true
-		for nodeID := range nodes {
+		for _, nodeID := range nodeIDs {
 			nodeExist := cluster.hasNode(nodeID)
 			if nodeExist {
 				allOffline = false
@@ -123,13 +123,13 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	time.Sleep(100 * time.Millisecond)
-	nodes, err := queryCoord.cluster.onlineNodes()
-	assert.Nil(t, err)
+	onlineNodeIDs := queryCoord.cluster.onlineNodeIDs()
+	assert.NotEqual(t, 0, len(onlineNodeIDs))
 	queryNode2.stop()
 	err = removeNodeSession(queryNode2.queryNodeID)
 	assert.Nil(t, err)
 
-	waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+	waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs)
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
@@ -168,13 +168,13 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		CollectionID: defaultCollectionID,
 	})
 	assert.Nil(t, err)
-	nodes, err := queryCoord.cluster.onlineNodes()
-	assert.Nil(t, err)
+	onlineNodeIDs := queryCoord.cluster.onlineNodeIDs()
+	assert.NotEqual(t, 0, len(onlineNodeIDs))
 	queryNode3.stop()
 	err = removeNodeSession(queryNode3.queryNodeID)
 	assert.Nil(t, err)
 
-	waitAllQueryNodeOffline(queryCoord.cluster, nodes)
+	waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs)
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)

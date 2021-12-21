@@ -60,8 +60,7 @@ func TestReloadFromKV(t *testing.T) {
 	err = kv.Save(key, string(value))
 	assert.Nil(t, err)
 
-	meta.addCollection(defaultCollectionID, genCollectionSchema(defaultCollectionID, false))
-	meta.setLoadType(defaultCollectionID, querypb.LoadType_LoadPartition)
+	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadPartition, genCollectionSchema(defaultCollectionID, false))
 
 	t.Run("Test_PartitionNotExist", func(t *testing.T) {
 		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil, nil, nil)
@@ -129,8 +128,7 @@ func TestCheckIndexLoop(t *testing.T) {
 		childCancel()
 		indexChecker.wg.Wait()
 	})
-	meta.addCollection(defaultCollectionID, genCollectionSchema(defaultCollectionID, false))
-	meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
+	meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genCollectionSchema(defaultCollectionID, false))
 	t.Run("Test_GetIndexInfo", func(t *testing.T) {
 		childCtx, childCancel := context.WithCancel(context.Background())
 		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, rootCoord, indexCoord, nil)

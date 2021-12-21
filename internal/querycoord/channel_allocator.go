@@ -22,6 +22,8 @@ import (
 	"sort"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
@@ -31,51 +33,54 @@ func defaultChannelAllocatePolicy() ChannelAllocatePolicy {
 }
 
 // ChannelAllocatePolicy helper function definition to allocate dmChannel to queryNode
-type ChannelAllocatePolicy func(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error
+type ChannelAllocatePolicy func(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64) error
 
-func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, wait bool, excludeNodeIDs []int64) error {
+func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64) error {
+	if len(reqs) == 0 {
+		return nil
+	}
 	for {
-		availableNodes, err := cluster.onlineNodes()
-		if err != nil {
-			log.Debug(err.Error())
+		onlineNodeIDs := cluster.onlineNodeIDs()
+		if len(onlineNodeIDs) == 0 {
+			err := errors.New("no online QueryNode to allocate")
+			log.Error("shuffleChannelsToQueryNode failed", zap.Error(err))
 			if !wait {
 				return err
 			}
-			time.Sleep(1 * time.Second)
+			time.Sleep(shuffleWaitInterval)
 			continue
 		}
-		for _, id := range excludeNodeIDs {
-			delete(availableNodes, id)
-		}
 
+		var availableNodeIDs []int64
 		nodeID2NumChannels := make(map[int64]int)
-		for nodeID := range availableNodes {
-			numChannels, err := cluster.getNumDmChannels(nodeID)
-			if err != nil {
-				delete(availableNodes, nodeID)
+		for _, nodeID := range onlineNodeIDs {
+			// nodeID in excludeNodeIDs
+			if nodeIncluded(nodeID, excludeNodeIDs) {
 				continue
 			}
-			nodeID2NumChannels[nodeID] = numChannels
+			watchedChannelInfos := metaCache.getDmChannelInfosByNodeID(nodeID)
+			nodeID2NumChannels[nodeID] = len(watchedChannelInfos)
+			availableNodeIDs = append(availableNodeIDs, nodeID)
 		}
 
-		if len(availableNodes) > 0 {
-			nodeIDSlice := make([]int64, 0, len(availableNodes))
-			for nodeID := range availableNodes {
-				nodeIDSlice = append(nodeIDSlice, nodeID)
-			}
-
+		if len(availableNodeIDs) > 0 {
+			log.Debug("shuffleChannelsToQueryNode: shuffle channel to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
 			for _, req := range reqs {
-				sort.Slice(nodeIDSlice, func(i, j int) bool {
-					return nodeID2NumChannels[nodeIDSlice[i]] < nodeID2NumChannels[nodeIDSlice[j]]
+				sort.Slice(availableNodeIDs, func(i, j int) bool {
+					return nodeID2NumChannels[availableNodeIDs[i]] < nodeID2NumChannels[availableNodeIDs[j]]
 				})
-				req.NodeID = nodeIDSlice[0]
-				nodeID2NumChannels[nodeIDSlice[0]]++
+				selectedNodeID := availableNodeIDs[0]
+				req.NodeID = selectedNodeID
+				nodeID2NumChannels[selectedNodeID]++
 			}
 			return nil
 		}
 
 		if !wait {
-			return errors.New("no queryNode to allocate")
+			err := errors.New("no available queryNode to allocate")
+			log.Error("shuffleChannelsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Error(err))
+			return err
 		}
+		time.Sleep(shuffleWaitInterval)
 	}
 }

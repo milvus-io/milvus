@@ -497,8 +497,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
 		schema := genSimpleSegCoreSchema()
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
-			Schema: schema,
+			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			CollectionID: defaultCollectionID,
+			Schema:       schema,
 		}
 		return req
 	}

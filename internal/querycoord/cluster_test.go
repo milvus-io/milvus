@@ -25,7 +25,6 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -445,22 +444,11 @@ func TestReloadClusterFromKV(t *testing.T) {
 		sessionKey := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, 100)
 		kvs[sessionKey] = string(sessionBlob)
 
-		collectionInfo := &querypb.CollectionInfo{
-			CollectionID: defaultCollectionID,
-		}
-		collectionBlobs, err := proto.Marshal(collectionInfo)
-		assert.Nil(t, err)
-		nodeKey := fmt.Sprintf("%s/%d", queryNodeMetaPrefix, 100)
-		kvs[nodeKey] = string(collectionBlobs)
-
 		err = kv.MultiSave(kvs)
 		assert.Nil(t, err)
 
 		cluster.reloadFromKV()
-
 		assert.Equal(t, 1, len(cluster.nodes))
-		collection := cluster.getCollectionInfosByID(context.Background(), 100)
-		assert.Equal(t, defaultCollectionID, collection[0].CollectionID)
 
 		err = removeAllSession()
 		assert.Nil(t, err)
@@ -512,8 +500,8 @@ func TestGrpcRequest(t *testing.T) {
 	waitQueryNodeOnline(cluster, nodeID)
 
 	t.Run("Test GetComponentInfos", func(t *testing.T) {
-		_, err := cluster.getComponentInfos(baseCtx)
-		assert.Nil(t, err)
+		infos := cluster.getComponentInfos(baseCtx)
+		assert.Equal(t, 1, len(infos))
 	})
 
 	t.Run("Test LoadSegments", func(t *testing.T) {
@@ -523,9 +511,10 @@ func TestGrpcRequest(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		loadSegmentReq := &querypb.LoadSegmentsRequest{
-			DstNodeID: nodeID,
-			Infos:     []*querypb.SegmentLoadInfo{segmentLoadInfo},
-			Schema:    genCollectionSchema(defaultCollectionID, false),
+			DstNodeID:    nodeID,
+			Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+			Schema:       genCollectionSchema(defaultCollectionID, false),
+			CollectionID: defaultCollectionID,
 		}
 		err := cluster.loadSegments(baseCtx, nodeID, loadSegmentReq)
 		assert.Nil(t, err)
@@ -678,8 +667,9 @@ func TestEstimateSegmentSize(t *testing.T) {
 	}
 
 	loadReq := &querypb.LoadSegmentsRequest{
-		Schema: schema,
-		Infos:  []*querypb.SegmentLoadInfo{loadInfo},
+		Schema:       schema,
+		Infos:        []*querypb.SegmentLoadInfo{loadInfo},
+		CollectionID: defaultCollectionID,
 	}
 
 	size, err := estimateSegmentsSize(loadReq, dataKV)

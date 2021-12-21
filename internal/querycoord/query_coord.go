@@ -315,12 +315,8 @@ func (qc *QueryCoord) watchNodeLoop() {
 	defer qc.loopWg.Done()
 	log.Debug("QueryCoord start watch node loop")
 
-	offlineNodes, err := qc.cluster.offlineNodes()
-	if err == nil {
-		offlineNodeIDs := make([]int64, 0)
-		for id := range offlineNodes {
-			offlineNodeIDs = append(offlineNodeIDs, id)
-		}
+	offlineNodeIDs := qc.cluster.offlineNodeIDs()
+	if len(offlineNodeIDs) != 0 {
 		loadBalanceSegment := &querypb.LoadBalanceRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_LoadBalanceSegments,
@@ -456,9 +452,9 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			onlineNodes, err := qc.cluster.onlineNodes()
-			if err != nil {
-				log.Warn("loadBalanceSegmentLoop: there are no online QueryNode to balance")
+			onlineNodeIDs := qc.cluster.onlineNodeIDs()
+			if len(onlineNodeIDs) == 0 {
+				log.Error("loadBalanceSegmentLoop: there are no online QueryNode to balance")
 				continue
 			}
 			// get mem info of online nodes from cluster
@@ -466,12 +462,11 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 			nodeID2MemUsage := make(map[int64]uint64)
 			nodeID2TotalMem := make(map[int64]uint64)
 			nodeID2SegmentInfos := make(map[int64]map[UniqueID]*querypb.SegmentInfo)
-			onlineNodeIDs := make([]int64, 0)
-			for nodeID := range onlineNodes {
+			var availableNodeIDs []int64
+			for _, nodeID := range onlineNodeIDs {
 				nodeInfo, err := qc.cluster.getNodeInfoByID(nodeID)
 				if err != nil {
 					log.Warn("loadBalanceSegmentLoop: get node info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-					delete(onlineNodes, nodeID)
 					continue
 				}
 
@@ -482,7 +477,6 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					leastInfo, err := qc.cluster.getSegmentInfoByID(ctx, segmentInfo.SegmentID)
 					if err != nil {
 						log.Warn("loadBalanceSegmentLoop: get segment info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-						delete(onlineNodes, nodeID)
 						updateSegmentInfoDone = false
 						break
 					}
@@ -492,13 +486,13 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					nodeID2MemUsageRate[nodeID] = nodeInfo.(*queryNode).memUsageRate
 					nodeID2MemUsage[nodeID] = nodeInfo.(*queryNode).memUsage
 					nodeID2TotalMem[nodeID] = nodeInfo.(*queryNode).totalMem
-					onlineNodeIDs = append(onlineNodeIDs, nodeID)
+					availableNodeIDs = append(availableNodeIDs, nodeID)
 					nodeID2SegmentInfos[nodeID] = leastSegmentInfos
 				}
 			}
 			log.Debug("loadBalanceSegmentLoop: memory usage rate of all online QueryNode", zap.Any("mem rate", nodeID2MemUsageRate))
-			if len(onlineNodeIDs) <= 1 {
-				log.Warn("loadBalanceSegmentLoop: there are too few online query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs))
+			if len(availableNodeIDs) <= 1 {
+				log.Warn("loadBalanceSegmentLoop: there are too few available query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs), zap.Int64s("availableNodeIDs", availableNodeIDs))
 				continue
 			}
 
@@ -506,14 +500,13 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 			memoryInsufficient := false
 			loadBalanceTasks := make([]*loadBalanceTask, 0)
 			for {
-				var selectedSegmentInfo *querypb.SegmentInfo
-				sort.Slice(onlineNodeIDs, func(i, j int) bool {
-					return nodeID2MemUsageRate[onlineNodeIDs[i]] > nodeID2MemUsageRate[onlineNodeIDs[j]]
+				sort.Slice(availableNodeIDs, func(i, j int) bool {
+					return nodeID2MemUsageRate[availableNodeIDs[i]] > nodeID2MemUsageRate[availableNodeIDs[j]]
 				})
 
 				// the memoryUsageRate of the sourceNode is higher than other query node
-				sourceNodeID := onlineNodeIDs[0]
-				dstNodeID := onlineNodeIDs[len(onlineNodeIDs)-1]
+				sourceNodeID := availableNodeIDs[0]
+				dstNodeID := availableNodeIDs[len(availableNodeIDs)-1]
 				memUsageRateDiff := nodeID2MemUsageRate[sourceNodeID] - nodeID2MemUsageRate[dstNodeID]
 				// if memoryUsageRate of source node is greater then 90%, and the max memUsageDiff is greater than 30%
 				// then migrate the segments on source node to other query nodes
@@ -521,8 +514,14 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					memUsageRateDiff > Params.MemoryUsageMaxDifferencePercentage {
 					segmentInfos := nodeID2SegmentInfos[sourceNodeID]
 					// select the segment that needs balance on the source node
-					selectedSegmentInfo, err = chooseSegmentToBalance(sourceNodeID, dstNodeID, segmentInfos, nodeID2MemUsage, nodeID2TotalMem, nodeID2MemUsageRate)
-					if err == nil && selectedSegmentInfo != nil {
+					selectedSegmentInfo, err := chooseSegmentToBalance(sourceNodeID, dstNodeID, segmentInfos, nodeID2MemUsage, nodeID2TotalMem, nodeID2MemUsageRate)
+					if err != nil {
+						// no enough memory on query nodes to balance, then notify proxy to stop insert
+						memoryInsufficient = true
+						break
+					}
+					// select a segment to balance successfully, then recursive traversal whether there are other segments that can balance
+					if selectedSegmentInfo != nil {
 						req := &querypb.LoadBalanceRequest{
 							Base: &commonpb.MsgBase{
 								MsgType: commonpb.MsgType_LoadBalanceSegments,
@@ -550,22 +549,20 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 						delete(nodeID2SegmentInfos[sourceNodeID], selectedSegmentInfo.SegmentID)
 						nodeID2SegmentInfos[dstNodeID][selectedSegmentInfo.SegmentID] = selectedSegmentInfo
 						continue
+					} else {
+						// moving any segment will not improve the balance status
+						break
 					}
+				} else {
+					// all query node's memoryUsageRate is less than 90%, and the max memUsageDiff is less than 30%
+					break
 				}
-				if err != nil {
-					// no enough memory on query nodes to balance, then notify proxy to stop insert
-					memoryInsufficient = true
-				}
-				// if memoryInsufficient == false
-				// all query node's memoryUsageRate is less than 90%, and the max memUsageDiff is less than 30%
-				// this balance loop is done
-				break
 			}
 			if !memoryInsufficient {
 				for _, t := range loadBalanceTasks {
 					qc.scheduler.Enqueue(t)
 					log.Debug("loadBalanceSegmentLoop: enqueue a loadBalance task", zap.Any("task", t))
-					err = t.waitToFinish()
+					err := t.waitToFinish()
 					if err != nil {
 						// if failed, wait for next balance loop
 						// it may be that the collection/partition of the balanced segment has been released
