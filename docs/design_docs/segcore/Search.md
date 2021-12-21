@@ -18,7 +18,7 @@ See details of expression usage at [expr_grammar.md](https://milvus.io/docs/v2.0
 
 ## Segcore Search Process
 
-After obtaining the AST, execution engine uses the visitor mode to explain and executes the whole AST tree:
+After obtaining the AST, the execution engine uses the visitor mode to explain and executes the whole AST tree:
 
 1. Each node includes two steps, a mandatory vector search and an optional predicate.
 
