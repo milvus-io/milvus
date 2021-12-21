@@ -61,7 +61,6 @@ struct Plan {
 };
 
 struct Placeholder {
-    // milvus::proto::service::PlaceholderGroup group_;
     std::string tag_;
     int64_t num_of_queries_;
     int64_t line_sizeof_;
