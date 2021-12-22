@@ -89,6 +89,7 @@ func NewPayloadWriter(colType schemapb.DataType) (*PayloadWriter, error) {
 	return &PayloadWriter{payloadWriterPtr: w, colType: colType}, nil
 }
 
+// AddDataToPayload adds @msgs into payload, if @msgs is vector, dimension should be specified by @dim
 func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 	switch len(dim) {
 	case 0:
