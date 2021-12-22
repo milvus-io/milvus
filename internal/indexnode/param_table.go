@@ -91,6 +91,7 @@ func (pt *ParamTable) initParams() {
 	pt.initKnowhereSimdType()
 }
 
+// initMinIOAddress load minio address from BaseTable.
 func (pt *ParamTable) initMinIOAddress() {
 	ret, err := pt.Load("_MinioAddress")
 	if err != nil {
