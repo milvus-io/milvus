@@ -123,7 +123,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 		},
 	}
 	if node == nil {
-		return infos, errors.New("datanode is nil")
+		return infos, errors.New("DataNode is nil")
 	}
 
 	cli, err := node.GetOrCreateClient(ctx)
