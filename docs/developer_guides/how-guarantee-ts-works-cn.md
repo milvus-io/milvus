@@ -53,7 +53,8 @@ syncTs1 为例，当下游消费者（比如QueryNodes）看到 syncTs1，那么
 
 - 强一致性：GuaranteeTs 设为系统最新时间戳，QueryNodes 需要等待 ServiceTime 推进到
 当前最新时间戳才能执行该 Search 请求；
-- 最终一致性：GuaranteeTs 设为 0，跳过一致性检查，立刻在当前已有数据上执行 Search 查询；
+- 最终一致性：GuaranteeTs 设为一个特别小的值（比如说设为 1），跳过一致性检查，立刻在当
+前已有数据上执行 Search 查询；
 - 有界一致性：GuaranteeTs 是一个比系统最新时间稍旧的时间，在可容忍范围内可以立刻执行查询；
 - 客户端一致性：客户端使用上一次写入的时间戳作为 GuaranteeTs，那么每个客户端至少能看到
 自己插入的全部数据。
