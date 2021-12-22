@@ -316,6 +316,7 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
 	ret.IndexFilePaths = meta.indexMeta.IndexFilePaths
+	ret.SerializedSize = meta.indexMeta.GetSerializeSize()
 	return ret, nil
 }
 

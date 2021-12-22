@@ -95,6 +95,7 @@ message IndexFilePathInfo {
   common.Status status = 1;
   int64 indexBuildID = 2;
   repeated string index_file_paths = 3;
+  uint64 serialized_size = 4;
 }
 
 message GetIndexFilePathsResponse {

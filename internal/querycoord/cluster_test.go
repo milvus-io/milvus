@@ -700,17 +700,19 @@ func TestEstimateSegmentSize(t *testing.T) {
 
 	indexInfo := &indexpb.IndexFilePathInfo{
 		IndexFilePaths: indexPath,
+		SerializedSize: 1024,
 	}
 	loadInfo.IndexPathInfos = []*indexpb.IndexFilePathInfo{indexInfo}
 	loadInfo.EnableIndex = true
 
 	size, err = estimateSegmentsSize(loadReq, dataKV)
 	assert.NoError(t, err)
-	assert.NotEqual(t, int64(0), size)
+	assert.Equal(t, int64(1024), size)
 
 	indexInfo.IndexFilePaths = []string{"&*^*(^*(&*%^&*^(&"}
+	indexInfo.SerializedSize = 0
 	size, err = estimateSegmentsSize(loadReq, dataKV)
-	assert.Error(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(0), size)
 
 	cancel()

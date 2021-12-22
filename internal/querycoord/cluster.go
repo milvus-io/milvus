@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -721,20 +720,7 @@ func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.Dat
 		// get index size
 		if loadInfo.EnableIndex {
 			for _, pathInfo := range loadInfo.IndexPathInfos {
-				for _, path := range pathInfo.IndexFilePaths {
-					indexSize, err := storage.EstimateMemorySize(kvClient, path)
-					if err != nil {
-						indexSize, err = storage.GetBinlogSize(kvClient, path)
-						if err != nil {
-							log.Warn("estimate index size wrong",
-								zap.Int64("segmentID", loadInfo.GetSegmentID()),
-								zap.String("path", path),
-								zap.Error(err))
-							return 0, err
-						}
-					}
-					segmentSize += indexSize
-				}
+				segmentSize += int64(pathInfo.GetSerializedSize())
 			}
 			continue
 		}
