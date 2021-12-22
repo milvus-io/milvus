@@ -115,7 +115,7 @@ and the corresponding results of query requests will be written to DqResultChann
 As the number of tables increases, the number of DmChannels increases on demand, and the number of physical channels
 also increases on demand. In the future, the number of physical channels in the system can also be limited to a fixed
 number, such as 1024. In this case, the same physical channel will be mapped to virtual channels of different
-collections. Shown as the figure below.
+collections. Shown in the figure below.
 
 ![collection_dm_channels](./graphs/collection_dm_channels.png)
 
