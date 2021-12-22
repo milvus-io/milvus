@@ -1,5 +1,5 @@
 import pytest
-from utils.utils import *
+from utils.util_pymilvus import *
 from common.constants import default_entities
 from common.common_type import CaseLabel
 from utils.util_log import test_log as log

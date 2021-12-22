@@ -9,7 +9,7 @@ from common.common_type import CaseLabel, CheckTasks
 from common.code_mapping import CollectionErrorMessage as clem
 from common.code_mapping import IndexErrorMessage as iem
 
-from utils.utils import *
+from utils.util_pymilvus import *
 from common.constants import *
 
 prefix = "index"

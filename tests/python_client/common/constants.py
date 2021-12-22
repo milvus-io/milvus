@@ -1,6 +1,6 @@
 # constants for old pymilvus API test
 
-import utils.utils as utils
+import utils.util_pymilvus as utils
 
 default_fields = utils.gen_default_fields()
 default_binary_fields = utils.gen_binary_default_fields()
