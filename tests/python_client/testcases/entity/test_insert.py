@@ -3,7 +3,7 @@ import threading
 
 import pytest
 from pymilvus import DataType, ParamError, BaseException
-from utils import utils as ut
+from utils import util_pymilvus as ut
 from common.constants import default_entity, default_entities, default_binary_entity, default_binary_entities, \
     default_fields
 from common.common_type import CaseLabel

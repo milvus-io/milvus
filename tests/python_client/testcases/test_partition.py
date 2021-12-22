@@ -2,7 +2,7 @@ import threading
 import time
 from multiprocessing import Pool, Process
 import pytest
-from utils import utils as ut
+from utils import util_pymilvus as ut
 from common.constants import default_entities, default_fields
 from common.common_type import CaseLabel
 from utils.util_log import test_log as log
