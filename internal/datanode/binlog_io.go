@@ -233,11 +233,15 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		k := JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
 		key := path.Join(Params.InsertBinlogRootPath, k)
 
-		kvs[key] = bytes.NewBuffer(blob.GetValue()).String()
+		value := bytes.NewBuffer(blob.GetValue()).String()
+		fileLen := len(value)
+
+		kvs[key] = value
 		inpaths = append(inpaths, &datapb.FieldBinlog{
 			FieldID: fID,
 			Binlogs: []*datapb.Binlog{
 				{
+					LogSize: int64(fileLen),
 					LogPath: key,
 				},
 			},
@@ -251,11 +255,16 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		k := JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
 		key := path.Join(Params.StatsBinlogRootPath, k)
 
-		kvs[key] = bytes.NewBuffer(blob.GetValue()).String()
+		value := bytes.NewBuffer(blob.GetValue()).String()
+		fileLen := len(value)
+
+		kvs[key] = value
 		statspaths = append(statspaths, &datapb.FieldBinlog{
+
 			FieldID: fID,
 			Binlogs: []*datapb.Binlog{
 				{
+					LogSize: int64(fileLen),
 					LogPath: key,
 				},
 			},
