@@ -440,7 +440,7 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) *SegmentInfo {
 // ** the last batch must contains at least one segment
 // 1. when failure occurs between batches, failover mechanism will continue with the earlist  checkpoint of this channel
 //   since the flag is not marked so data node can re-consume the drop collection msg
-// 2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode  watch this channel
+// 2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let DataNode  watch this channel
 func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*SegmentInfo) error {
 
 	// the limitation of etcd operations number per transaction is 128, since segment number might be enormous so we shall split
