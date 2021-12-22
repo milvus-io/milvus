@@ -4,7 +4,7 @@ on:
     types: [created]
 jobs:
   rerun-checks:
-    if:  "github.event_name == 'issue_comment'&& startsWith(github.event.comment.body, 'rerun failure checks')"
+    if:  "github.event_name == 'issue_comment'&& startsWith(github.event.comment.body, 'rerun ut')"
     runs-on: ubuntu-latest
     steps:
       - name: Is Organization Member
@@ -41,7 +41,7 @@ jobs:
         with:
           repo_owner: milvus-io  # replace here to your repo owner
           repo_name: milvus     # replace here to your repo name
-          rerun_cmd: rerun failure checks
+          rerun_cmd: rerun ut
           comment: ${{ github.event.comment.body }}
 
  
