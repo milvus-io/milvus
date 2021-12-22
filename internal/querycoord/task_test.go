@@ -1036,6 +1036,42 @@ func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func TestLoadBalancePartitionAfterNodeDown(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	loadPartitionTask := genLoadPartitionTask(ctx, queryCoord)
+
+	err = queryCoord.scheduler.Enqueue(loadPartitionTask)
+	assert.Nil(t, err)
+	waitTaskFinalState(loadPartitionTask, taskExpired)
+
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+
+	indexCoord := newIndexCoordMock()
+	indexCoord.returnIndexFile = true
+	queryCoord.indexCoordClient = indexCoord
+	removeNodeSession(node1.queryNodeID)
+	for {
+		if len(queryCoord.meta.getSegmentInfosByNode(node1.queryNodeID)) == 0 {
+			break
+		}
+	}
+
+	node2.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
 func TestMergeWatchDeltaChannelInfo(t *testing.T) {
 	infos := []*datapb.VchannelInfo{
 		{

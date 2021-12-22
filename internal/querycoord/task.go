@@ -1735,29 +1735,23 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 			}
 
 			mergedDmChannel := mergeDmChannelInfo(dmChannelInfos)
-			for channelName := range dmChannel2WatchInfo {
-				vChannelInfo, ok := mergedDmChannel[channelName]
-				if !ok {
-					err = fmt.Errorf("loadBalanceTask: can't get recovery info from data coord, channel name = %s", channelName)
-					log.Error(err.Error())
-					lbt.setResultInfo(err)
-					return err
-				}
+			for channelName, vChannelInfo := range mergedDmChannel {
+				if _, ok := dmChannel2WatchInfo[channelName]; ok {
+					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+					msgBase.MsgType = commonpb.MsgType_WatchDmChannels
+					watchRequest := &querypb.WatchDmChannelsRequest{
+						Base:         msgBase,
+						CollectionID: collectionID,
+						Infos:        []*datapb.VchannelInfo{vChannelInfo},
+						Schema:       schema,
+					}
 
-				msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
-				msgBase.MsgType = commonpb.MsgType_WatchDmChannels
-				watchRequest := &querypb.WatchDmChannelsRequest{
-					Base:         msgBase,
-					CollectionID: collectionID,
-					Infos:        []*datapb.VchannelInfo{vChannelInfo},
-					Schema:       schema,
-				}
+					if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
+						watchRequest.PartitionIDs = toRecoverPartitionIDs
+					}
 
-				if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
-					watchRequest.PartitionIDs = toRecoverPartitionIDs
+					watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 				}
-
-				watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 			}
 		}
 		internalTasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs)
