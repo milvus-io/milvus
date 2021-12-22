@@ -181,7 +181,7 @@ class TestChaos(TestChaosBase):
         chaos_res.create(chaos_config)
         log.info("chaos injected")
         log.info(f"chaos information: {chaos_res.get(meta_name)}")
-        sleep(constants.WAIT_PER_OP * 2.1)
+        sleep(constants.WAIT_PER_OP * 2)
         # reset counting
         cc.reset_counting(self.health_checkers)
 
