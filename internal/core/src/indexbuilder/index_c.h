@@ -35,7 +35,7 @@ typedef void* CIndexQueryResult;
 typedef void* CBinary;
 
 // TODO: how could we pass map between go and c++ more efficiently?
-// Solution: using protobuf instead of json, this way significantly increase programming efficiency
+// Solution: using Protobuf instead of JSON, this way significantly increase programming efficiency
 
 CStatus
 CreateIndex(const char* serialized_type_params, const char* serialized_index_params, CIndex* res_index);
