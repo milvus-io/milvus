@@ -365,7 +365,7 @@ func (s *Server) initGarbageCollection() error {
 func (s *Server) initServiceDiscovery() error {
 	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("dataCoord initServiceDiscovery failed", zap.Error(err))
+		log.Debug("DataCoord failed to init service discovery", zap.Error(err))
 		return err
 	}
 	log.Debug("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
