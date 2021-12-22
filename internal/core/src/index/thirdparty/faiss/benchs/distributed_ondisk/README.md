@@ -137,7 +137,7 @@ bash run_on_cluster.bash make_index_vslices
 For a real dataset, the data would be read from a DBMS. 
 In that case, reading the data and indexing it in parallel is worthwhile because reading is very slow.
 
-## Splitting accross inverted lists
+## Splitting across inverted lists
 
 The 200 slices need to be merged together. 
 This is done with the script [merge_to_ondisk.py](merge_to_ondisk.py), that memory maps the 200 vertical slice indexes, extracts a subset of the inverted lists and writes them to a contiguous horizontal slice. 
