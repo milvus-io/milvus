@@ -143,6 +143,7 @@ class TestcaseBase(Base):
                 2. create partitions if specified
                 3. insert specified (binary/non-binary, default/all data type) data
                    into each partition if any
+                4. not load if specifying is_index as True
         expected: return collection and raw data, insert ids
         """
         log.info("Test case of search interface: initialize before test case")
