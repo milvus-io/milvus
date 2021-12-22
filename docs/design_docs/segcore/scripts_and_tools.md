@@ -1,6 +1,6 @@
 # Scripts and Tools
 
-The following scripts and commands may be used during segcore development
+The following scripts and commands may be used during segcore development.
 
 ## code format
 
