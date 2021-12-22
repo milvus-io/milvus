@@ -196,7 +196,7 @@ class TestcaseBase(Base):
         collection_w.insert(df_default)
         conn.flush([collection_w.name])
         collection_w.load(partition_names=[partition_w.name, "_default"])
-        return collection_w, partition_w,df_partition, df_default
+        return collection_w, partition_w, df_partition, df_default
    
 
     def insert_entities_into_two_partitions(self, half, prefix='query'):
