@@ -98,7 +98,9 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 	if key == "" {
 		return "", errors.New("rocksdb kv does not support load empty key")
 	}
-	value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
+	option := gorocksdb.NewDefaultReadOptions()
+	defer option.Destroy()
+	value, err := kv.DB.Get(option, []byte(key))
 	if err != nil {
 		return "", err
 	}
@@ -112,16 +114,14 @@ func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	if kv.DB == nil {
 		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)
 	}
-	kv.ReadOptions.SetPrefixSameAsStart(true)
-	if prefix != "" {
-		kv.ReadOptions.SetIterateUpperBound([]byte(typeutil.AddOne(prefix)))
-	}
-	iter := kv.DB.NewIterator(kv.ReadOptions)
+	option := gorocksdb.NewDefaultReadOptions()
+	defer option.Destroy()
+	iter := kv.DB.NewIterator(option)
 	defer iter.Close()
 	keys := make([]string, 0)
 	values := make([]string, 0)
 	iter.Seek([]byte(prefix))
-	for ; iter.Valid(); iter.Next() {
+	for ; iter.ValidForPrefix([]byte(prefix)); iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
 		keys = append(keys, string(key.Data()))
@@ -141,8 +141,10 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
 	}
 	values := make([]string, 0, len(keys))
+	option := gorocksdb.NewDefaultReadOptions()
+	defer option.Destroy()
 	for _, key := range keys {
-		value, err := kv.DB.Get(kv.ReadOptions, []byte(key))
+		value, err := kv.DB.Get(option, []byte(key))
 		if err != nil {
 			return []string{}, err
 		}
