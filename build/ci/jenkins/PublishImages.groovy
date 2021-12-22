@@ -22,8 +22,8 @@ pipeline {
     environment {
         DOCKER_CREDENTIALS_ID = "f0aacc8e-33f2-458a-ba9e-2c44f431b4d2"
         TARGET_REPO = "milvusdb"
-        HARBOR_CREDENTIAL_ID = "harbor-zilliz-cc-registry"
-        HARBOR_REPO = "harbor.zilliz.cc"
+        CI_DOCKER_CREDENTIAL_ID = "ci-docker-registry"
+        HARBOR_REPO = "registry.milvus.io"
     }
 
     stages {
@@ -52,8 +52,8 @@ pipeline {
                             """
                         }
 
-                        withCredentials([usernamePassword(credentialsId: "${env.HARBOR_CREDENTIAL_ID}", usernameVariable: 'HARBOR_USERNAME', passwordVariable: 'HARBOR_PASSWORD')]) {
-                            sh 'docker login harbor.zilliz.cc -u ${HARBOR_USERNAME} -p ${HARBOR_PASSWORD}'
+                        withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
+                            sh "docker login ${env.HARBOR_REPO} -u '${CI_REGISTRY_USERNAME}' -p '${CI_REGISTRY_PASSWORD}'"
                             sh """
                                 export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
                                 export MILVUS_IMAGE_TAG="${env.BRANCH_NAME}-${date}-${gitShortCommit}"
