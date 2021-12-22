@@ -42,20 +42,20 @@
    - In the request processing function of `create index`, the call will return only when all segment ids have been sent `IndexCoord`.
    - Some segment ids may be sent to `IndexCoord` repeatedly, and `IndexCoord` needs to handle such requests.
 
-### 2.4 New segment from `DC`
+### 2.4 New segment from `DataCoord`
 
-1. Each time a new segment is created, the `DC` sends the segment id to the `RC` via msgstream.
-2. `RC` needs to update the segment id to the collection meta and record the position of the msgstream in etcd.
+1. Each time a new segment is created, the `DataCoord` sends the segment id to the `RootCoord` via msgstream.
+2. `RootCoord` needs to update the segment id to the collection meta and record the position of the msgstream in etcd.
 3. Step 2 is transactional and the operation will be successful only if the collection meta in etcd is updated.
-4. So the `RC` only needs to restore the msgstream to the position when recovering from a power failure.
+4. So the `RootCoord` only needs to restore the msgstream to the position when recovering from a power failure.
 
 ### 2.5 Flushed segment from `data node`
 
 1. Each time the `data node` finishes flushing a segment, it sends the segment id to the `RC` via msgstream.
-2. `RC` needs to fetch binlog from `DC` by id and send a request to `IC` to create an index on this segment.
-3. When the `IC` is called successfully, it will return a build id, and then `RC` will update the build id to the `collection meta` and record the position of the msgstream in etcd.
+2. `RootCoord` needs to fetch binlog from `DataCoord` by id and send a request to `IndexCoord` to create an index on this segment.
+3. When the `IndexCoord` is called successfully, it will return a build id, and then `RootCoord` will update the build id to the `collection meta` and record the position of the msgstream in etcd.
 4. Step 3 is transactional and the operation will be successful only if the `collection meta` in etcd is updated.
-5. So the `RC` only needs to restore the msgstream to the position when recovering from a power failure.
+5. So the `RootCoord` only needs to restore the msgstream to the position when recovering from a power failure.
 
 ### 2.6 Failed to call external grpc service
 
