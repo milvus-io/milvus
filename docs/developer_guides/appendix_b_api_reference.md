@@ -101,7 +101,7 @@ message FieldSchema {
 
 **type_params** contains the detailed information of data_type. For example, vector data type should include dimension information. You can give a pair of <dim, 8> to let the field store an 8-dimension vector.
 
-**index_params**：For fast search, you build index for field. You specify detailed index information for a field. Detailed information about index can be seen in chapter 2.2.3
+**index_params**：For fast search, you build an index for the field. You specify detailed index information for a field. Detailed information about index can be seen in chapter 2.2.3
 
 **Returns:**
 
