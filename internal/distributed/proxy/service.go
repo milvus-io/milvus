@@ -486,6 +486,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	return s.proxy.ManualCompaction(ctx, req)
 }
 
+// GetCompactionStateWithPlans gets the state of a compaction by plan
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	return s.proxy.GetCompactionStateWithPlans(ctx, req)
 }
