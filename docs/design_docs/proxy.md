@@ -135,11 +135,11 @@ The result is then returned to the client.
 The allocation logic of DqRequestChannel and DqResultChannel of a collection is allocated by the Query Coordinator. Proxy needs to ask the Query Coordinator for the names of DqRequestChannel and DqResultChannel of a collection.
 DqRequestChannel and DqResultChannel do not need to be persisted and can be freely allocated by Query Coordinator. In
 the actual implementation, the DqRequestChannel of each collection can be exclusive, and the DqResultChannel can be
-exclusive or shared by all collections on the proxy. When Proxy applies for the DqRequestChannel and DqResultChannel
+exclusive or shared by all collections on Proxy. When Proxy applies for the DqRequestChannel and DqResultChannel
 information of the collection from the Query Coordinator, it can attach Proxy's own ID: ProxyID.
 
 With DqRequestChannel of the collection, the proxy will create a msgstream object to generate data into
-DqRequestChannel. With the DqResultChannel of the collection, the proxy will create a msgstream object, and Proxy will
+DqRequestChannel. With the DqResultChannel of the collection, Proxy will create a msgstream object, and Proxy will
 consume the data in the DqResultChannel. When these msgstream objects are closed, messages cannot be written to or
 consumed from them.
 
