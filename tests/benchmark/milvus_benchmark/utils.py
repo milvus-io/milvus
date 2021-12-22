@@ -296,3 +296,17 @@ def get_tags(url, token):
     except:
         print("Can not get the tag list")
         return []
+
+
+def get_master_tags(tags_list):
+    _list = []
+    tag_name = "master"
+
+    if not isinstance(tags_list, list):
+        print("tags_list is not a list.")
+        return _list
+
+    for tag in tags_list:
+        if tag_name in tag and tag != tag_name + "-latest":
+            _list.append(tag)
+    return _list
