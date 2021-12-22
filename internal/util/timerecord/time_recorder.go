@@ -25,7 +25,7 @@ type TimeRecorder struct {
 	last   time.Time
 }
 
-// NewTimeRecorder create a new TimeRecorder
+// NewTimeRecorder creates a new TimeRecorder
 func NewTimeRecorder(header string) *TimeRecorder {
 	return &TimeRecorder{
 		header: header,
@@ -34,7 +34,7 @@ func NewTimeRecorder(header string) *TimeRecorder {
 	}
 }
 
-// RecordSpan return the duration from last record
+// RecordSpan returns the duration from last record
 func (tr *TimeRecorder) RecordSpan() time.Duration {
 	curr := time.Now()
 	span := curr.Sub(tr.last)
@@ -42,7 +42,7 @@ func (tr *TimeRecorder) RecordSpan() time.Duration {
 	return span
 }
 
-// ElapseSpan return the duration from the beginning
+// ElapseSpan returns the duration from the beginning
 func (tr *TimeRecorder) ElapseSpan() time.Duration {
 	curr := time.Now()
 	span := curr.Sub(tr.start)
