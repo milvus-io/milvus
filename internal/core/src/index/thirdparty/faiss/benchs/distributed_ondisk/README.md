@@ -173,7 +173,7 @@ ie. searching is a lot slower than from RAM.
 
 ## Distributed query
 
-To reduce the bandwidth required from the machine that does the queries, it is possible to split the search accross several search servers. 
+To reduce the bandwidth required from the machine that does the queries, it is possible to split the search across several search servers. 
 This way, only the effective results are returned to the main machine.
 
 The search client and server are implemented in [`search_server.py`](search_server.py). 
