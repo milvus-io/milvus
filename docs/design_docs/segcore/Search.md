@@ -33,4 +33,4 @@ After obtaining the AST, the execution engine uses the visitor mode to explain a
    3. TermExpr: in expression `A in [1, 2, 3]`
    4. CompareExpr: compare expression `A > 1` `B <= 1`
 
-3. TermExpr and CompareExpr are leaf nodes of execution
+3. TermExpr and CompareExpr are leaf nodes of execution.
