@@ -1798,7 +1798,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "List of data nodes which has register with etcd",
+      "description": "List of data nodes which has register with etcd.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
