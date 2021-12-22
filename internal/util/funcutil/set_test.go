@@ -38,3 +38,21 @@ func Test_SetContain(t *testing.T) {
 	m1[key2] = struct{}{}
 	assert.True(t, SetContain(m1, m2))
 }
+
+func TestSetToSlice(t *testing.T) {
+	m := map[interface{}]struct{}{
+		1:        {},
+		2.1:      {},
+		"string": {},
+	}
+
+	histogram := make(map[interface{}]struct{})
+	s := SetToSlice(m)
+	for _, k := range s {
+		_, exist := m[k]
+		assert.True(t, exist)
+		_, twice := histogram[k]
+		assert.False(t, twice)
+		histogram[k] = struct{}{}
+	}
+}
