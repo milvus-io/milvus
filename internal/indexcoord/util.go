@@ -44,7 +44,7 @@ func getDimension(req *indexpb.BuildIndexRequest) (int64, error) {
 	return 0, errors.New(errMsg)
 }
 
-// estimateIndexSize estimate how much memory will be occupied by IndexNode when building an index.
+// estimateIndexSize estimates how much memory will be occupied by IndexNode when building an index.
 func estimateIndexSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
 	if dataType == schemapb.DataType_FloatVector {
 		return uint64(dim) * uint64(numRows) * 4, nil
