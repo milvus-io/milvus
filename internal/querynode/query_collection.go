@@ -1095,9 +1095,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	numSegment := int64(len(searchResults))
 	var marshaledHits *MarshaledHits
+	log.Debug("QueryNode reduce data", zap.Int64("msgID", searchMsg.ID()), zap.Int64("numSegment", numSegment))
 	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
+	log.Debug("QueryNode reduce data finished", zap.Int64("msgID", searchMsg.ID()))
 	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
 	if err != nil {
+		log.Error("QueryNode reduce data failed", zap.Int64("msgID", searchMsg.ID()), zap.Error(err))
 		return err
 	}
 	marshaledHits, err = reorganizeSearchResults(searchResults, numSegment)
