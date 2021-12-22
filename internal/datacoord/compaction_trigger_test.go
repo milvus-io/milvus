@@ -1103,3 +1103,14 @@ func Test_newCompactionTrigger(t *testing.T) {
 		})
 	}
 }
+
+func Test_handleSignal(t *testing.T) {
+
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator())
+	signal := &compactionSignal{
+		segmentID: 1,
+	}
+	assert.NotPanics(t, func() {
+		got.handleSignal(signal)
+	})
+}
