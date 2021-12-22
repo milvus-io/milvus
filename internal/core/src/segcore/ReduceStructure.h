@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <cmath>
+#include <limits>
 
 #include "common/Consts.h"
 #include "common/Types.h"
@@ -56,11 +56,11 @@ struct SearchResultPair {
                 distance_ = search_result_->distances_.at(offset_);
             } else {
                 primary_key_ = INVALID_ID;
-                distance_ = MAXFLOAT;
+                distance_ = std::numeric_limits<float>::max();
             }
         } else {
             primary_key_ = INVALID_ID;
-            distance_ = MAXFLOAT;
+            distance_ = std::numeric_limits<float>::max();
         }
     }
 };
