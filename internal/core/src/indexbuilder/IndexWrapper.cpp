@@ -243,7 +243,7 @@ IndexWrapper::Serialize() {
         binarySet.Append(RAW_DATA, raw_data, raw_data_.size());
         auto slice_size = get_index_file_slice_size();
         // https://github.com/milvus-io/milvus/issues/6421
-        // Disassemble will only divide the raw vectors, other keys was already divided
+        // Disassemble will only divide the raw vectors, other keys were already divided
         knowhere::Disassemble(slice_size * 1024 * 1024, binarySet);
     }
 
