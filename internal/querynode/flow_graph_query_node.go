@@ -202,6 +202,7 @@ func (q *queryNodeFlowGraph) consumerFlowGraph(channel Channel, subName ConsumeS
 	return nil
 }
 
+// consumerFlowGraphLatest would consume from latest by channel and subName
 func (q *queryNodeFlowGraph) consumerFlowGraphLatest(channel Channel, subName ConsumeSubName) error {
 	if q.dmlStream == nil {
 		return errors.New("null dml message stream in flow graph")
