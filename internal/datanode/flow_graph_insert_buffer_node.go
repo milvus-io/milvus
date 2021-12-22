@@ -66,6 +66,8 @@ type insertBufferNode struct {
 	timeTickStream msgstream.MsgStream
 	ttLogger       timeTickLogger
 	ttMerger       *mergedTimeTickerSender
+
+	lastTimestamp Timestamp
 }
 
 type timeTickLogger struct {
@@ -189,6 +191,17 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		pos.ChannelName = ibNode.channelName
 		endPositions = append(endPositions, pos)
 	}
+
+	if startPositions[0].Timestamp < ibNode.lastTimestamp {
+		log.Error("insert buffer node consumed old messages",
+			zap.String("channel", ibNode.channelName),
+			zap.Any("timestamp", startPositions[0].Timestamp),
+			zap.Any("lastTimestamp", ibNode.lastTimestamp),
+		)
+		return []Msg{}
+	}
+
+	ibNode.lastTimestamp = endPositions[0].Timestamp
 
 	// Updating segment statistics in replica
 	seg2Upload, err := ibNode.updateSegStatesInReplica(fgMsg.insertMessages, startPositions[0], endPositions[0])
