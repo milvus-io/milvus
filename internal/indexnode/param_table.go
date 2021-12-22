@@ -100,6 +100,7 @@ func (pt *ParamTable) initMinIOAddress() {
 	pt.MinIOAddress = ret
 }
 
+// initMinIOAccessKeyID load access key for minio from BaseTable.
 func (pt *ParamTable) initMinIOAccessKeyID() {
 	ret, err := pt.Load("_MinioAccessKeyID")
 	if err != nil {
