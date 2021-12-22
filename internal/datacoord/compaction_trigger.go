@@ -269,6 +269,10 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 
 	segment := t.meta.GetSegment(signal.segmentID)
+	if segment == nil {
+		log.Warn("segment in compaction signal not found in meta", zap.Int64("segmentID", signal.segmentID))
+		return
+	}
 	singleCompactionPlan, err := t.singleCompaction(segment, signal.isForce, signal)
 	if err != nil {
 		log.Warn("failed to do single compaction", zap.Int64("segmentID", segment.ID), zap.Error(err))
