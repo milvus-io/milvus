@@ -187,6 +187,7 @@ func (data *BoolFieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
+// GetMemorySize implements FieldData.GetMemorySize
 func (data *Int8FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
