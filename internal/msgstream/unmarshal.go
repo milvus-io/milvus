@@ -52,7 +52,7 @@ func (p *ProtoUnmarshalDispatcher) Unmarshal(input interface{}, msgType commonpb
 // ProtoUDFactory is a factory to generate ProtoUnmarshalDispatcher object
 type ProtoUDFactory struct{}
 
-// NewUnmarshalDispatcher returns an new UnmarshalDispatcher
+// NewUnmarshalDispatcher returns a new UnmarshalDispatcher
 func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	insertMsg := InsertMsg{}
 	deleteMsg := DeleteMsg{}
