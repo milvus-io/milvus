@@ -55,7 +55,7 @@ func Int64ToBytes(v int64) []byte {
 // BigEndianBytesToUint64 converts a byte slice (big endian) to uint64.
 func BigEndianBytesToUint64(b []byte) (uint64, error) {
 	if len(b) != 8 {
-		return 0, fmt.Errorf("Failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
+		return 0, fmt.Errorf("failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
 	// do not use little or common endian for compatibility issues(the msgid used in rocksmq is using this)
