@@ -16,6 +16,7 @@
 
 package proxy
 
+// vChan shortcuts for virtual channel.
 type vChan = string
 type pChan = string
 
