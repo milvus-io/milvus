@@ -360,6 +360,7 @@ func (s *Server) DropPartition(ctx context.Context, request *milvuspb.DropPartit
 	return s.proxy.DropPartition(ctx, request)
 }
 
+// HasPartition notifies Proxy to check a partition's existence
 func (s *Server) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	return s.proxy.HasPartition(ctx, request)
 }
