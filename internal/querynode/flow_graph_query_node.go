@@ -217,6 +217,7 @@ func (q *queryNodeFlowGraph) consumerFlowGraphLatest(channel Channel, subName Co
 	return nil
 }
 
+// seekQueryNodeFlowGraph would seek by position
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
 	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup)
 	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
