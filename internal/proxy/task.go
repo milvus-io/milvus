@@ -135,6 +135,7 @@ type insertTask struct {
 	schema         *schemapb.CollectionSchema
 }
 
+// TraceCtx returns insertTask context
 func (it *insertTask) TraceCtx() context.Context {
 	return it.ctx
 }
