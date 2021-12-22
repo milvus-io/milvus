@@ -381,7 +381,7 @@ func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64,
 		return nil
 	}
 
-	return fmt.Errorf("removeQueryChannel: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("removeQueryChannel: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error {
