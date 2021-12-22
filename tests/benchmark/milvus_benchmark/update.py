@@ -173,7 +173,6 @@ def update_values(src_values_file, deploy_params_file):
     print(server_tag)
     # TODO: update milvus config
     # # update values.yaml with the given host
-    # node_config = None
     perf_tolerations = [{
             "key": "node-role.kubernetes.io/benchmark",
             "operator": "Exists",
