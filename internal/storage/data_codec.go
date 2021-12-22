@@ -686,7 +686,7 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 		return nil, err
 	}
 	if len(data.Pks) != len(data.Tss) {
-		return nil, fmt.Errorf("The length of pks, and TimeStamps is not equal")
+		return nil, fmt.Errorf("the length of pks, and TimeStamps is not equal")
 	}
 	length := len(data.Pks)
 	sizeTotal := 0
