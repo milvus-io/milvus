@@ -1004,7 +1004,7 @@ func (mt *MetaTable) unlockGetFieldSchema(collName string, fieldName string) (sc
 	return schemapb.FieldSchema{}, fmt.Errorf("collection %s doesn't have filed %s", collName, fieldName)
 }
 
-// IsSegmentIndexed check if segment has index
+// IsSegmentIndexed check if segment has indexed
 func (mt *MetaTable) IsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *schemapb.FieldSchema, indexParams []*commonpb.KeyValuePair) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
