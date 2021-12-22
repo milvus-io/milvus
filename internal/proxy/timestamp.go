@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
+// timestampAllocator implements tsoAllocator.
 type timestampAllocator struct {
 	ctx    context.Context
 	tso    timestampAllocatorInterface
