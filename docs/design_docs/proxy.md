@@ -107,7 +107,7 @@ complexity by moving core functions such as data persistence and flashback down 
 make the system even more flexible and better positioned for future scaling.
 
 So, we should configure a group of Virtual Channels for every collection. Now every virtual channel has a unique related
-physical channel. Take pulsar as example, the physical channel mentioned here means the topic of pulsar.
+physical channel. Take pulsar as an example, the physical channel mentioned here means the topic of pulsar.
 
 For DmRequest, data will be written to DmChannels, while for DqRequest, requests will be written to DqRequestChannel,
 and the corresponding results of query requests will be written to DqResultChannel.
