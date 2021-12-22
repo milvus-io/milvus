@@ -490,6 +490,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	return s.proxy.GetCompactionStateWithPlans(ctx, req)
 }
 
+// GetFlushState notifies Proxy to get flush state.
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.proxy.GetFlushState(ctx, req)
 }
