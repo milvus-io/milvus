@@ -38,7 +38,7 @@ struct ProductQuantizer {
     enum train_type_t {
         Train_default,
         Train_hot_start,   ///< the centroids are already initialized
-        Train_shared,      ///< share dictionary accross PQ segments
+        Train_shared,      ///< share dictionary across PQ segments
         Train_hypercube,   ///< intialize centroids with nbits-D hypercube
         Train_hypercube_pca,   ///< intialize centroids with nbits-D hypercube
     };
