@@ -287,7 +287,7 @@ func TestSchema_invalid(t *testing.T) {
 
 		_, err = helper.GetFieldFromName("none")
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, "Failed to get field schema by name: fieldName(none) not found")
+		assert.EqualError(t, err, "failed to get field schema by name: fieldName(none) not found")
 
 		_, err = helper.GetFieldFromID(101)
 		assert.NotNil(t, err)
