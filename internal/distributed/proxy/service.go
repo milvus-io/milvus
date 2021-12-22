@@ -478,6 +478,7 @@ func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasReq
 	return s.proxy.AlterAlias(ctx, request)
 }
 
+//  GetCompactionState notifies Proxy to get compaction state.
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	return s.proxy.GetCompactionState(ctx, req)
 }
