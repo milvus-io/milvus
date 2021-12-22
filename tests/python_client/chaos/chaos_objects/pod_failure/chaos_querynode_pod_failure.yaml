@@ -10,7 +10,8 @@ spec:
     labelSelectors:
       app.kubernetes.io/instance: milvus-chaos
       component: querynode
-  mode: one
+  mode: fixed
+  value: "1"
   action: pod-failure
   duration: 2m
   gracePeriod: 0
