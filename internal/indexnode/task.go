@@ -134,7 +134,7 @@ func (bt *BaseTask) Name() string {
 // OnEnqueue enqueues indexing tasks.
 func (it *IndexBuildTask) OnEnqueue() error {
 	it.SetID(it.req.IndexBuildID)
-	log.Debug("IndexNode IndexBuilderTask Enqueue", zap.Int64("TaskID", it.ID()))
+	log.Debug("IndexNode IndexBuilderTask Enqueue", zap.Int64("taskID", it.ID()), zap.Int64("index buildID", it.req.IndexBuildID))
 	return nil
 }
 
@@ -357,6 +357,12 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	if len(insertData.Data) != 1 {
 		return errors.New("we expect only one field in deserialized insert data")
 	}
+	log.Debug("IndexNode deserialize data success",
+		zap.Int64("taskID", it.ID()),
+		zap.Int64("index buildID", it.req.IndexBuildID),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64("segmentID", segmentID))
 	tr.Record("deserialize storage blobs done")
 
 	for fieldID, value := range insertData.Data {
