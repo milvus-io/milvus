@@ -119,6 +119,11 @@ func (s *Segment) updatePKRange(pks []int64) {
 			s.minPK = pk
 		}
 	}
+
+	log.Info("update pk range",
+		zap.Int64("collectionID", s.collectionID), zap.Int64("partitionID", s.partitionID), zap.Int64("segmentID", s.segmentID),
+		zap.String("channel", s.channelName),
+		zap.Int64("num_rows", s.numRows), zap.Int64("minPK", s.minPK), zap.Int64("maxPK", s.maxPK))
 }
 
 var _ Replica = &SegmentReplica{}
