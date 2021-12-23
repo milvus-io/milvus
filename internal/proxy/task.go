@@ -2472,13 +2472,16 @@ func (hct *hasCollectionTask) PreExecute(ctx context.Context) error {
 func (hct *hasCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	hct.result, err = hct.rootCoord.HasCollection(ctx, hct.HasCollectionRequest)
+	if err != nil {
+		return err
+	}
 	if hct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
 	if hct.result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(hct.result.Status.Reason)
 	}
-	return err
+	return nil
 }
 
 func (hct *hasCollectionTask) PostExecute(ctx context.Context) error {
