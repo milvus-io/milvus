@@ -228,6 +228,7 @@ func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosi
 	return err
 }
 
+// close would close queryNodeFlowGraph
 func (q *queryNodeFlowGraph) close() {
 	q.cancel()
 	q.flowGraph.Close()
