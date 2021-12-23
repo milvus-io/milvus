@@ -6,8 +6,8 @@ All PRs are checked in automatically by the sre-robot, with the following condit
 2. All test passed and code coverage check passed, with a `ci-passed` label
    - Notes: If there is a `[skip e2e]` tag in the commit message, it skips running e2e tests automatically,
      but it still runs UT tests and code checkers.
-3. Reviewer passed, with a `lgtm` label
-4. Approver passed, with a `approved` label
+3. Reviewer passed, with a `/lgtm` label
+4. Approver passed, with a `/approve` label
 
 Generally speaking, reviewer is volunteered and can be anyone in the community who is familiar with the packages the PR modifies.
 Reviewers are responsible for the logic correctness, error handling, unit test coverage and code readability.
