@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <limits>
 #include <unordered_set>
 #include <vector>
 
@@ -142,7 +143,8 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
         for (int j = 0; j < search_records[i].size(); j++) {
             auto& offset = search_records[i][j];
             primary_keys.push_back(offset != INVALID_OFFSET ? search_result->primary_keys_[offset] : INVALID_ID);
-            distances.push_back(offset != INVALID_OFFSET ? search_result->distances_[offset] : MAXFLOAT);
+            distances.push_back(offset != INVALID_OFFSET ? search_result->distances_[offset]
+                                                         : std::numeric_limits<float>::max());
             ids.push_back(offset != INVALID_OFFSET ? search_result->ids_[offset] : INVALID_ID);
         }
 
