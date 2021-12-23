@@ -77,7 +77,7 @@ Size();
 ## Data Format
 
 The vector data used for index and query is stored as a one-dimensional array.
-The first `dim * sizeof(data_type)` bytes of the array is the first vector; then `row_num -1` vectors followed.
+The first `dim * sizeof(data_type)` bytes of the array is the first vector; then `row_num -1` vectors are followed.
 
 ## Sequence
 
