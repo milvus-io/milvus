@@ -133,6 +133,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 	return h.s.meta.GetCollection(collectionID)
 }
 
+// CheckShouldDropChannel returns whether specified channel is marked to be removed
 func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 	/*
 		segments := h.s.meta.GetSegmentsByChannel(channel)
@@ -152,6 +153,8 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 	return h.s.meta.ChannelHasRemoveFlag(channel)
 }
 
+// FinishDropChannel cleans up the remove flag for channels
+// this function is a wrapper of server.meta.FinishDropChannel
 func (h *ServerHandler) FinishDropChannel(channel string) {
 	h.s.meta.FinishRemoveChannel(channel)
 }
