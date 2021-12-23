@@ -323,7 +323,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	for _, segment := range modSegments {
 		segBytes, err := proto.Marshal(segment.SegmentInfo)
 		if err != nil {
-			return fmt.Errorf("dataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
+			return fmt.Errorf("DataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
 		}
 		key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 		kv[key] = string(segBytes)
