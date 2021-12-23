@@ -401,7 +401,7 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 		return nil
 	}
 
-	return fmt.Errorf("releaseCollection: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releaseCollection: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error {
