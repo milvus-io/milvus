@@ -11,7 +11,7 @@ Hopefully, changing to another type of scheduler should be quite straightforward
 
 ## Distributed k-means
 
-To cluster 500M vectors to 10M centroids, it is useful to have a distriubuted k-means implementation. 
+To cluster 500M vectors to 10M centroids, it is useful to have a distributed k-means implementation. 
 The distribution simply consists in splitting the training vectors across machines (servers) and have them do the assignment. 
 The master/client then synthesizes the results and updates the centroids.
 
@@ -137,7 +137,7 @@ bash run_on_cluster.bash make_index_vslices
 For a real dataset, the data would be read from a DBMS. 
 In that case, reading the data and indexing it in parallel is worthwhile because reading is very slow.
 
-## Splitting across inverted lists
+## Splitting accross inverted lists
 
 The 200 slices need to be merged together. 
 This is done with the script [merge_to_ondisk.py](merge_to_ondisk.py), that memory maps the 200 vertical slice indexes, extracts a subset of the inverted lists and writes them to a contiguous horizontal slice. 
@@ -173,7 +173,7 @@ ie. searching is a lot slower than from RAM.
 
 ## Distributed query
 
-To reduce the bandwidth required from the machine that does the queries, it is possible to split the search across several search servers. 
+To reduce the bandwidth required from the machine that does the queries, it is possible to split the search accross several search servers. 
 This way, only the effective results are returned to the main machine.
 
 The search client and server are implemented in [`search_server.py`](search_server.py). 
