@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 )
 
-// allocator is the interface for allocating `UniqueID` or `Timestamp`
+// allocator is the interface that allocating `UniqueID` or `Timestamp`
 type allocator interface {
 	allocTimestamp(context.Context) (Timestamp, error)
 	allocID(context.Context) (UniqueID, error)
