@@ -328,8 +328,10 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	delete(mt.indexBuildID2Meta, indexBuildID)
 	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
 
-	err := mt.client.Remove(key)
-	log.Debug("IndexCoord metaTable DeleteIndex", zap.Error(err))
+	if err := mt.client.Remove(key); err != nil {
+		log.Error("IndexCoord delete index meta from etcd failed", zap.Error(err))
+	}
+	log.Debug("IndexCoord delete index meta successfully", zap.Int64("indexBuildID", indexBuildID))
 }
 
 // UpdateRecycleState update the recycle state corresponding the indexBuildID,
