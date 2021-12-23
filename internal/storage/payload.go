@@ -283,7 +283,7 @@ func (w *PayloadWriter) AddOneStringToPayload(msg string) error {
 	return HandleCStatus(&status, "AddOneStringToPayload failed")
 }
 
-// dimension > 0 && (%8 == 0)
+// AddBinaryVectorToPayload dimension > 0 && (%8 == 0)
 func (w *PayloadWriter) AddBinaryVectorToPayload(binVec []byte, dim int) error {
 	length := len(binVec)
 	if length <= 0 {
