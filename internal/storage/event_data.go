@@ -39,7 +39,7 @@ type descriptorEventData struct {
 	PostHeaderLengths []uint8
 }
 
-// DescriptorEventDataFixPart is a memorty struct saves events' DescriptorEventData.
+// DescriptorEventDataFixPart is a memory struct saves events' DescriptorEventData.
 type DescriptorEventDataFixPart struct {
 	CollectionID    int64
 	PartitionID     int64
