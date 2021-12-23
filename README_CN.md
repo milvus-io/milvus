@@ -154,7 +154,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-209-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-208-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -308,7 +308,6 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/qbzenker"><img src="https://avatars.githubusercontent.com/u/51972064?v=4" width="30px" /></a>
 <a href="https://github.com/rahulmistri1997"><img src="https://avatars.githubusercontent.com/u/58909377?v=4" width="30px" /></a>
 <a href="https://github.com/ronnie-llamado"><img src="https://avatars.githubusercontent.com/u/35092029?v=4" width="30px" /></a>
-<a href="https://github.com/sahuang"><img src="https://avatars.githubusercontent.com/u/26035292?v=4" width="30px" /></a>
 <a href="https://github.com/sapora1"><img src="https://avatars.githubusercontent.com/u/59124772?v=4" width="30px" /></a>
 <a href="https://github.com/scipe"><img src="https://avatars.githubusercontent.com/u/3996622?v=4" width="30px" /></a>
 <a href="https://github.com/scsven"><img src="https://avatars.githubusercontent.com/u/12595343?v=4" width="30px" /></a>
