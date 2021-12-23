@@ -310,3 +310,23 @@ def get_master_tags(tags_list):
         if tag_name in tag and tag != tag_name + "-latest":
             _list.append(tag)
     return _list
+
+
+def get_config_digest(url, token):
+    headers = {'Content-type': "application/json",
+               "charset": "UTF-8",
+               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+               "Authorization": "Bearer %s" % token}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+
+        digest = ''
+        if 'config' in data and 'digest' in data["config"]:
+            digest = data["config"]["digest"]
+        else:
+            print("Can not get the digest")
+        return digest
+    except:
+        print("Can not get the digest")
+        return ""
