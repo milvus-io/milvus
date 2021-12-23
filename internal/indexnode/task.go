@@ -149,7 +149,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 			return err
 		}
 		if len(values) == 0 {
-			return fmt.Errorf("indexNode checkIndexMeta the indexMeta is empty")
+			return fmt.Errorf("IndexNode checkIndexMeta the indexMeta is empty")
 		}
 		log.Debug("IndexNode checkIndexMeta load meta success", zap.Any("path", it.req.MetaPath), zap.Any("pre", pre))
 		err = proto.Unmarshal([]byte(values[0]), &indexMeta)
