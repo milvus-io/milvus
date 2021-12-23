@@ -35,6 +35,7 @@ type serviceTimeNode struct {
 	timeTickMsgStream msgstream.MsgStream
 }
 
+// Name returns the name of serviceTimeNode
 func (stNode *serviceTimeNode) Name() string {
 	return "stNode"
 }
