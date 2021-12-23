@@ -226,7 +226,7 @@ There are three main functions in taskScheduler:
 
     - Schedule task
     - Maintain the snapshot of timestamp statistics
-    - Receive the search results from stream and then distribute them to related task
+    - Receive the search results from all streams and then distribute them to related task
 
 taskScheduler maintains three queues: ddQueue, dmQueue and dqQueue correspond to DdRequest, DmRequest, and DqRequest
 respectively. The interface of taskQueue is defined as follows:
