@@ -1,3 +1,4 @@
+import threading
 from time import time, sleep
 
 import pytest
@@ -923,3 +924,58 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.load()
         segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         assert segments_info[0].partitionID != segments_info[-1].partitionID
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_during_insert(self):
+        """
+        target: test compact during insert and flush
+        method: 1.insert entities into multi segments
+                2.start a thread to load and search
+                3.compact collection
+        expected: Search and compact both successfully
+        """
+        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
+                                                                       is_dup=False)
+        df = cf.gen_default_dataframe_data()
+
+        def do_flush():
+            collection_w.insert(df)
+            log.debug(collection_w.num_entities)
+
+        # compact during insert
+        t = threading.Thread(target=do_flush, args=())
+        t.start()
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed()
+        collection_w.get_compaction_plans()
+
+        t.join()
+        collection_w.load()
+        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        assert len(seg_info) == 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_during_index(self):
+        """
+        target: test compact during index
+        method: while compact collection start a thread to creat index
+        expected: No exception
+        """
+        collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
+                                                                       is_dup=False)
+
+        def do_index():
+            collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+            assert collection_w.index()[0].params == ct.default_index
+
+        # compact during index
+        t = threading.Thread(target=do_index, args=())
+        t.start()
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed()
+        collection_w.get_compaction_plans()
+
+        t.join()
+        collection_w.load()
+        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        assert len(seg_info) == 1
