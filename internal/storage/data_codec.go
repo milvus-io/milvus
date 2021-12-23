@@ -1003,10 +1003,12 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 type IndexFileBinlogCodec struct {
 }
 
+// NewIndexFileBinlogCodec is constructor for IndexFileBinlogCodec
 func NewIndexFileBinlogCodec() *IndexFileBinlogCodec {
 	return &IndexFileBinlogCodec{}
 }
 
+// Serialize serilizes data as blobs.
 func (codec *IndexFileBinlogCodec) Serialize(
 	indexBuildID UniqueID,
 	version int64,
