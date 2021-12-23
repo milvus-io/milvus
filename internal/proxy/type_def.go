@@ -18,6 +18,8 @@ package proxy
 
 // vChan shortcuts for virtual channel.
 type vChan = string
+
+// pChan shortcuts for physical channel.
 type pChan = string
 
 type pChanStatistics struct {
