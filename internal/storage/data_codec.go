@@ -261,7 +261,7 @@ func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 }
 
 // Serialize transfer insert data to blob. It will sort insert data by timestamp.
-// From schema, it get all fields.
+// From schema, it gets all fields.
 // For each field, it will create a binlog writer, and write an event to the binlog.
 // It returns binlog buffer in the end.
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
