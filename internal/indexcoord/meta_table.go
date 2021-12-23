@@ -306,6 +306,7 @@ func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexIn
 func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.IndexFilePathInfo, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
+	log.Debug("IndexCoord get index file path from meta table", zap.Int64("indexBuildID", indexBuildID))
 	ret := &indexpb.IndexFilePathInfo{
 		IndexBuildID: indexBuildID,
 	}
@@ -318,6 +319,9 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	}
 	ret.IndexFilePaths = meta.indexMeta.IndexFilePaths
 	ret.SerializedSize = meta.indexMeta.GetSerializeSize()
+
+	log.Debug("IndexCoord get index file path successfully", zap.Int64("indexBuildID", indexBuildID),
+		zap.Strings("index file path", ret.IndexFilePaths))
 	return ret, nil
 }
 
