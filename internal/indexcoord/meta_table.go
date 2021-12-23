@@ -280,6 +280,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexInfo {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
+	log.Debug("IndexCoord get index states from meta table", zap.Int64s("indexBuildIDs", indexBuildIDs))
 	var indexStates []*indexpb.IndexInfo
 	for _, id := range indexBuildIDs {
 		state := &indexpb.IndexInfo{
