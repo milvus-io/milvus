@@ -71,6 +71,7 @@ type MetaCache struct {
 
 var globalMetaCache Cache
 
+// InitMetaCache initializes globalMetaCache
 func InitMetaCache(client types.RootCoord) error {
 	var err error
 	globalMetaCache, err = NewMetaCache(client)
