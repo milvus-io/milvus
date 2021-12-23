@@ -166,7 +166,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 	}
 }
 
-// AsProducer create producer to send message to channels
+// AsReader create producer to send message to channels
 func (ms *mqMsgStream) AsReader(channels []string, subName string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
