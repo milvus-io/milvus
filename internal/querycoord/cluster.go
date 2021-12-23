@@ -582,7 +582,7 @@ func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {
 	node, ok := c.nodes[nodeID]
 	c.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("getNodeInfoByID: query node %d not exist", nodeID)
+		return nil, fmt.Errorf("getNodeInfoByID: QueryNode %d not exist", nodeID)
 	}
 
 	nodeInfo, err := node.getNodeInfo()
