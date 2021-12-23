@@ -146,6 +146,12 @@ def update_values(src_values_file, deploy_params_file):
     return: no return
     """
 
+    perf_tolerations = [{
+        "key": "node-role.kubernetes.io/benchmark",
+        "operator": "Exists",
+        "effect": "NoSchedule"
+    }]
+
     # deploy_mode, hostname, server_tag, milvus_config, server_config=None
     try:
         with open(src_values_file) as f:
@@ -172,12 +178,7 @@ def update_values(src_values_file, deploy_params_file):
     server_tag = utils.get_server_tag(deploy_params)
     print(server_tag)
     # TODO: update milvus config
-    # # update values.yaml with the given host
-    perf_tolerations = [{
-            "key": "node-role.kubernetes.io/benchmark",
-            "operator": "Exists",
-            "effect": "NoSchedule"
-        }]  
+    # update values.yaml with the given host
     # if server_name:
     #     node_config = {'kubernetes.io/hostname': server_name}
     # elif server_tag:
