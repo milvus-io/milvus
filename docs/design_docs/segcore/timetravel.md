@@ -15,7 +15,7 @@ Currently，There are two paths to implement time travel:
 1. During load, data is placed in a continuous memory area named chunk, with following properties:
    1. Data is divided into multiple segments
    2. Data in one segment is ordered by primary key
-   3. Data between Segments is in timestamp order. That is, the timestamp of every entity in the previous segment must be less than the timestamp of the first entity in next segment
+   3. Data between Segments is in timestamp order. That is, the timestamp of every entity in the previous segment must be less than the timestamp of the first entity in the next segment
 
 2. The Algorithm for time travel is 
    1. Use get_active_count interface, find the last segment containing a legal ts, and return the last element position of this segment as vec_count
