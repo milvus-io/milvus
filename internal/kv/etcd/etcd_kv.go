@@ -171,7 +171,7 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 	return result, nil
 }
 
-// LoadWithRevision returns keys, values and revision by given key prefix.
+// LoadWithRevision returns keys, values and revision with given key prefix.
 func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
