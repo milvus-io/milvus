@@ -22,7 +22,7 @@ It exposes the methods of an object on the server side so that they can be calle
 
 - [`distributed_kmeans.py`](distributed_kmeans.py) contains the k-means implementation. 
 The main loop of k-means is re-implemented in python but follows closely the Faiss C++ implementation, and should not be significantly less efficient. 
-It relies on a `DatasetAssign` object that does the assignement to centrtoids, which is the bulk of the computation. 
+It relies on a `DatasetAssign` object that does the assignment to centrtoids, which is the bulk of the computation. 
 The object can be a Faiss CPU index, a GPU index or a set of remote GPU or CPU indexes.
 
 - [`run_on_cluster.bash`](run_on_cluster.bash) contains the shell code to run the distributed k-means on a cluster. 
