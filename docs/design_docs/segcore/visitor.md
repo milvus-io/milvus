@@ -15,6 +15,6 @@ Currently, under `${core/query/visitors}` directory, there are following visitor
 1. `ShowPlanNodeVisitor` prints PlanNode in json
 2. `ShowExprVisitor` Expr -> json
 3. `Verify...Visitor` validates ...
-4. `ExtractInfo...Visitor` extracts info from... ，including involved_fields and else
+4. `ExtractInfo...Visitor` extracts info from..., including involved_fields and else
 5. `ExecExprVisitor` generates bitmask according to expression
 6. `ExecPlanNodeVistor` physical plan executor only supports ANNS node for now
