@@ -340,15 +340,27 @@ func (s *Server) initGarbageCollection() error {
 		if err != nil {
 			return err
 		}
-		has, err := cli.BucketExists(context.TODO(), Params.DataCoordCfg.MinioBucketName)
-		if err != nil {
-			return err
-		}
-		if !has {
-			err = cli.MakeBucket(context.TODO(), Params.DataCoordCfg.MinioBucketName, minio.MakeBucketOptions{})
+
+		checkBucketFn := func() error {
+			has, err := cli.BucketExists(context.TODO(), Params.DataCoordCfg.MinioBucketName)
 			if err != nil {
 				return err
 			}
+			if !has {
+				err = cli.MakeBucket(context.TODO(), Params.DataCoordCfg.MinioBucketName, minio.MakeBucketOptions{})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		// retry times shall be two, just to prevent
+		// 1. bucket not exists
+		// 2. bucket is created by other componnent
+		// 3. datacoord try to create but failed with bucket already exists error
+		err = retry.Do(s.ctx, checkBucketFn, retry.Attempts(2))
+		if err != nil {
+			return err
 		}
 	}
 
