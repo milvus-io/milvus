@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// Cache is the interface for system meta data cache
 type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
@@ -62,6 +63,7 @@ type partitionInfo struct {
 	createdUtcTimestamp uint64
 }
 
+// MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
 	client types.RootCoord
 
