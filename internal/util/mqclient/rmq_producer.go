@@ -19,6 +19,7 @@ import (
 
 var _ Producer = (*rmqProducer)(nil)
 
+// rmqProducer contains a rocksmq producer
 type rmqProducer struct {
 	p rocksmq.Producer
 }
