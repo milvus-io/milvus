@@ -94,6 +94,7 @@ func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops the client
 func (c *Client) Stop() error {
 	return c.grpcClient.Close()
 }
