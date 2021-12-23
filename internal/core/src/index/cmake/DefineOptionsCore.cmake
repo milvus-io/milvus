@@ -82,7 +82,7 @@ define_option(KNOWHERE_WITH_OPENBLAS "Build with OpenBLAS library" ON)
 
 define_option(KNOWHERE_WITH_FAISS "Build with FAISS library" ON)
 
-define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" ON)
+define_option(KNOWHERE_WITH_FAISS_GPU_VERSION "Build with FAISS GPU version" OFF)
 
 define_option(FAISS_WITH_MKL "Build FAISS with MKL" OFF)
 
