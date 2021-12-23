@@ -1895,7 +1895,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Pulsar Client Consumer Processing Time",
+      "description": "Pulsar Client Consumer Processing Time.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
