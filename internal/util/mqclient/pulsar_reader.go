@@ -10,6 +10,7 @@ type pulsarReader struct {
 	r pulsar.Reader
 }
 
+// Topic returns the topic of pulsar reader
 func (pr *pulsarReader) Topic() string {
 	return pr.r.Topic()
 }
