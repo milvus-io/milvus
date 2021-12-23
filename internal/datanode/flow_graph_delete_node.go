@@ -89,7 +89,7 @@ func (dn *deleteNode) Close() {
 }
 
 func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) error {
-	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys))
+	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
 	segIDToPkMap := make(map[UniqueID][]int64)
 	segIDToTsMap := make(map[UniqueID][]uint64)

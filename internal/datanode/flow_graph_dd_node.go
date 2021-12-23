@@ -147,8 +147,10 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.String("vChannelName", ddn.vchannelName))
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
 		case commonpb.MsgType_Delete:
-			log.Debug("DDNode receive delete messages")
 			dmsg := msg.(*msgstream.DeleteMsg)
+			log.Debug("DDNode receive delete messages",
+				zap.Int("num", len(dmsg.GetPrimaryKeys())),
+				zap.String("vChannelName", ddn.vchannelName))
 			for i := 0; i < len(dmsg.PrimaryKeys); i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
 			}
@@ -165,7 +167,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	err := ddn.forwardDeleteMsg(forwardMsgs, msMsg.TimestampMin(), msMsg.TimestampMax())
 	if err != nil {
 		// TODO: proper deal with error
-		log.Warn("DDNode forward delete msg failed", zap.Error(err))
+		log.Warn("DDNode forward delete msg failed",
+			zap.String("vChannelName", ddn.vchannelName),
+			zap.Error(err))
 	}
 
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
