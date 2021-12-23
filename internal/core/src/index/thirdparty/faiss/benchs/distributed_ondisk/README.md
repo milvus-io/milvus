@@ -11,7 +11,7 @@ Hopefully, changing to another type of scheduler should be quite straightforward
 
 ## Distributed k-means
 
-To cluster 500M vectors to 10M centroids, it is useful to have a distriubuted k-means implementation. 
+To cluster 500M vectors to 10M centroids, it is useful to have a distributed k-means implementation. 
 The distribution simply consists in splitting the training vectors across machines (servers) and have them do the assignment. 
 The master/client then synthesizes the results and updates the centroids.
 
