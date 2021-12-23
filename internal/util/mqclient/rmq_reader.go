@@ -8,6 +8,7 @@ import (
 
 var _ Reader = (*rmqReader)(nil)
 
+// rmqReader contains a rocksmq reader
 type rmqReader struct {
 	r rocksmq.Reader
 }
