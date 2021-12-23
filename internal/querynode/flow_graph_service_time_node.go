@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
+// serviceTimeNode is one of the nodes in delta flow graph
 type serviceTimeNode struct {
 	baseNode
 	collectionID      UniqueID
