@@ -475,6 +475,7 @@ func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasReque
 	return s.proxy.DropAlias(ctx, request)
 }
 
+// AlterAlias alters the alias for the specified collection.
 func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	return s.proxy.AlterAlias(ctx, request)
 }
