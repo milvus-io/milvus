@@ -395,6 +395,7 @@ func (s *Server) DropIndex(ctx context.Context, request *milvuspb.DropIndexReque
 	return s.proxy.DropIndex(ctx, request)
 }
 
+// DescribeIndex notifies Proxy to get index describe
 func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	return s.proxy.DescribeIndex(ctx, request)
 }
