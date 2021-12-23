@@ -438,6 +438,7 @@ func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChan
 	return s.proxy.GetDdChannel(ctx, request)
 }
 
+//GetPersistentSegmentInfo notifies Proxy to get persistent segment info.
 func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
 	return s.proxy.GetPersistentSegmentInfo(ctx, request)
 }
