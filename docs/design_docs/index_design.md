@@ -32,7 +32,7 @@ is not completed yet. IndexCoord starts a background process to find all the ind
 allocated periodically and then allocates them to IndexNode for actual execution.
 
 When IndexCoord receives a request to delete an index from RootCoord, IndexCoord traverses the MetaTable,
-marks the corresponding index task as deleted, and returns. It is not really deleted from the MetaTable at this time.
+marks the corresponding index task as deleted, and returns. It is not deleted from the MetaTable at this time.
 IndexCoord has another background process that periodically queries the index tasks that need to be deleted.
 When the index task is marked as deleted, and the index status is complete, the corresponding index task is actually
 deleted from the MetaTable.
