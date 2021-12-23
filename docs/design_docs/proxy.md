@@ -138,7 +138,7 @@ the actual implementation, the DqRequestChannel of each collection can be exclus
 exclusive or shared by all collections on Proxy. When Proxy applies for the DqRequestChannel and DqResultChannel
 information of the collection from the Query Coordinator, it can attach Proxy's own ID: ProxyID.
 
-With DqRequestChannel of the collection, the proxy will create a msgstream object to generate data into
+With DqRequestChannel of the collection, Proxy will create a msgstream object to generate data into
 DqRequestChannel. With the DqResultChannel of the collection, Proxy will create a msgstream object, and Proxy will
 consume the data in the DqResultChannel. When these msgstream objects are closed, messages cannot be written to or
 consumed from them.
