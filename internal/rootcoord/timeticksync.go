@@ -78,9 +78,9 @@ func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
 
 func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
 	// initialize dml channels used for insert
-	dmlChannels := newDmlChannels(ctx, factory, Params.DmlChannelName, Params.DmlChannelNum)
+	dmlChannels := newDmlChannels(ctx, factory, Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DmlChannelNum)
 	// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels
-	deltaChannels := newDmlChannels(ctx, factory, Params.DeltaChannelName, Params.DmlChannelNum)
+	deltaChannels := newDmlChannels(ctx, factory, Params.RootCoordCfg.DeltaChannelName, Params.RootCoordCfg.DmlChannelNum)
 
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
@@ -90,7 +90,7 @@ func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory 
 		var err error
 		deltaChanNames := make([]string, len(chanNames))
 		for i, chanName := range chanNames {
-			deltaChanNames[i], err = ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName)
+			deltaChanNames[i], err = ConvertChannelName(chanName, Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DeltaChannelName)
 			if err != nil {
 				log.Error("failed to convert dml channel name to delta channel name", zap.String("chanName", chanName))
 				panic("invalid dml channel name " + chanName)
@@ -141,7 +141,7 @@ func (t *timetickSync) sendToChannel() {
 		// give warning every 2 second if not get ttMsg from proxy nodes
 		if maxCnt%10 == 0 {
 			log.Warn("proxy idle for long time", zap.Any("proxy list", idleProxyList),
-				zap.Int64("idle time", int64(Params.TimeTickInterval)*maxCnt))
+				zap.Int64("idle time", int64(Params.RootCoordCfg.TimeTickInterval)*maxCnt))
 		}
 		return
 	}
@@ -314,7 +314,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			wg.Wait()
 			span := tr.ElapseSpan()
 			// rootcoord send tt msg to all channels every 200ms by default
-			if span.Milliseconds() > int64(Params.TimeTickInterval) {
+			if span.Milliseconds() > int64(Params.RootCoordCfg.TimeTickInterval) {
 				log.Warn("rootcoord send tt to all channels too slowly",
 					zap.Int("chanNum", len(local.chanTs)), zap.Int64("span", span.Milliseconds()))
 			}

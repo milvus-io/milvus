@@ -2113,7 +2113,7 @@ func getSizeOfLoadSegmentReq(req *querypb.LoadSegmentsRequest) int {
 }
 
 func generateWatchDeltaChannelInfo(info *datapb.VchannelInfo) (*datapb.VchannelInfo, error) {
-	deltaChannelName, err := rootcoord.ConvertChannelName(info.ChannelName, Params.DmlChannelPrefix, Params.DeltaChannelPrefix)
+	deltaChannelName, err := rootcoord.ConvertChannelName(info.ChannelName, Params.QueryCoordCfg.DmlChannelPrefix, Params.QueryCoordCfg.DeltaChannelPrefix)
 	if err != nil {
 		return nil, err
 	}

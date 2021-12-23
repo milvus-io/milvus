@@ -45,11 +45,11 @@ func setup() {
 func refreshParams() {
 	rand.Seed(time.Now().UnixNano())
 	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
-	Params.StatsChannelName = Params.StatsChannelName + suffix
-	Params.TimeTickChannelName = Params.TimeTickChannelName + suffix
-	Params.MetaRootPath = Params.MetaRootPath + suffix
-	Params.DmlChannelPrefix = "Dml"
-	Params.DeltaChannelPrefix = "delta"
+	Params.QueryCoordCfg.StatsChannelName = Params.QueryCoordCfg.StatsChannelName + suffix
+	Params.QueryCoordCfg.TimeTickChannelName = Params.QueryCoordCfg.TimeTickChannelName + suffix
+	Params.QueryCoordCfg.MetaRootPath = Params.QueryCoordCfg.MetaRootPath + suffix
+	Params.QueryCoordCfg.DmlChannelPrefix = "Dml"
+	Params.QueryCoordCfg.DeltaChannelPrefix = "delta"
 	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
 }
 
@@ -150,7 +150,7 @@ func TestWatchNodeLoop(t *testing.T) {
 
 	t.Run("Test OfflineNodes", func(t *testing.T) {
 		refreshParams()
-		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 		assert.Nil(t, err)
 
 		kvs := make(map[string]string)
@@ -514,7 +514,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 
 func TestLoadBalanceSegmentLoop(t *testing.T) {
 	refreshParams()
-	Params.BalanceIntervalSeconds = 10
+	Params.QueryCoordCfg.BalanceIntervalSeconds = 10
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -555,7 +555,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		waitTaskFinalState(loadPartitionTask, taskExpired)
 		nodeInfo, err := queryCoord.cluster.getNodeInfoByID(queryNode1.queryNodeID)
 		assert.Nil(t, err)
-		if nodeInfo.(*queryNode).memUsageRate >= Params.OverloadedMemoryThresholdPercentage {
+		if nodeInfo.(*queryNode).memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
 			break
 		}
 		partitionID++

@@ -146,7 +146,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 
 		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
-		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.DmlChannelName, Params.DeltaChannelName)
+		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DeltaChannelName)
 		if err1 != nil || deltaChanName != deltaChanNames[i] {
 			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
 		}
@@ -156,7 +156,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		ID:                         collID,
 		Schema:                     &schema,
 		PartitionIDs:               []typeutil.UniqueID{partID},
-		PartitionNames:             []string{Params.DefaultPartitionName},
+		PartitionNames:             []string{Params.RootCoordCfg.DefaultPartitionName},
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
@@ -178,7 +178,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		Base:                 t.Req.Base,
 		DbName:               t.Req.DbName,
 		CollectionName:       t.Req.CollectionName,
-		PartitionName:        Params.DefaultPartitionName,
+		PartitionName:        Params.RootCoordCfg.DefaultPartitionName,
 		DbID:                 0, //TODO,not used
 		CollectionID:         collID,
 		PartitionID:          partID,
@@ -341,7 +341,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// remove delta channels
 		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
 		for i, chanName := range collMeta.PhysicalChannelNames {
-			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.DmlChannelName, Params.DeltaChannelName); err != nil {
+			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DeltaChannelName); err != nil {
 				return err
 			}
 		}
@@ -821,7 +821,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateIndex {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	indexName := Params.DefaultIndexName //TODO, get name from request
+	indexName := Params.RootCoordCfg.DefaultIndexName //TODO, get name from request
 	indexID, _, err := t.core.IDAllocator(1)
 	log.Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {

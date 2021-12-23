@@ -34,7 +34,7 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.MetaRootPath, Params.EtcdEndpoints)
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.QueryNodeCfg.MetaRootPath, Params.QueryNodeCfg.EtcdEndpoints)
 
 	req := &milvuspb.GetMetricsRequest{
 		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),

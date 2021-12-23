@@ -143,8 +143,8 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 
 // newDeleteNode returns a new deleteNode
 func newDeleteNode(historicalReplica ReplicaInterface) *deleteNode {
-	maxQueueLength := Params.FlowGraphMaxQueueLength
-	maxParallelism := Params.FlowGraphMaxParallelism
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
 	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

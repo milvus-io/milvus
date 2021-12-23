@@ -44,7 +44,7 @@ type queryCoordMock struct {
 func setup() {
 	os.Setenv("QUERY_NODE_ID", "1")
 	Params.Init()
-	Params.MetaRootPath = "/etcd/test/root/querynode"
+	Params.QueryNodeCfg.MetaRootPath = "/etcd/test/root/querynode"
 }
 
 func genTestCollectionSchema(collectionID UniqueID, isBinary bool, dim int) *schemapb.CollectionSchema {
@@ -187,7 +187,7 @@ func newQueryNodeMock() *QueryNode {
 		}()
 	}
 
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 	if err != nil {
 		panic(err)
 	}
@@ -221,7 +221,7 @@ func makeNewChannelNames(names []string, suffix string) []string {
 func newMessageStreamFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
-	pulsarURL := Params.PulsarAddress
+	pulsarURL := Params.QueryNodeCfg.PulsarAddress
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
@@ -233,7 +233,7 @@ func newMessageStreamFactory() (msgstream.Factory, error) {
 
 func TestMain(m *testing.M) {
 	setup()
-	Params.StatsChannelName = Params.StatsChannelName + strconv.Itoa(rand.Int())
+	Params.QueryNodeCfg.StatsChannelName = Params.QueryNodeCfg.StatsChannelName + strconv.Itoa(rand.Int())
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -339,7 +339,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 
 		segmentChangeInfos := genSimpleChangeInfo()
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
-		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeID
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.QueryNodeID
 
 		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
 		assert.NoError(t, err)
@@ -402,7 +402,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 
 		segmentChangeInfos := genSimpleChangeInfo()
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
-		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeID
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.QueryNodeID
 
 		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
 		assert.NoError(t, err)

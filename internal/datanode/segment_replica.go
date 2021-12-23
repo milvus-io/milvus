@@ -131,12 +131,12 @@ var _ Replica = &SegmentReplica{}
 func newReplica(ctx context.Context, rc types.RootCoord, collID UniqueID) (*SegmentReplica, error) {
 	// MinIO
 	option := &miniokv.Option{
-		Address:           Params.MinioAddress,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSL,
+		Address:           Params.DataNodeCfg.MinioAddress,
+		AccessKeyID:       Params.DataNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.DataNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.DataNodeCfg.MinioUseSSL,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.DataNodeCfg.MinioBucketName,
 	}
 
 	minIOKV, err := miniokv.NewMinIOKV(ctx, option)

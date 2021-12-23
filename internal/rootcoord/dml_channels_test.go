@@ -41,7 +41,7 @@ func TestDmlChannels(t *testing.T) {
 	Params.Init()
 
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err := factory.SetParams(m)

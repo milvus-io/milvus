@@ -253,11 +253,11 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		BucketName:        Params.MinioBucketName,
+		Address:           Params.QueryNodeCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
+		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 		CreateBucket:      true,
 	}
 
@@ -356,12 +356,12 @@ func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
 // ---------- unittest util functions ----------
 // functions of third-party
 func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
-	bucketName := Params.MinioBucketName
+	bucketName := Params.QueryNodeCfg.MinioBucketName
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryNodeCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
 		BucketName:        bucketName,
 		CreateBucket:      true,
 	}
@@ -370,14 +370,14 @@ func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
 }
 
 func genEtcdKV() (*etcdkv.EtcdKV, error) {
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 	return etcdKV, err
 }
 
 func genFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
-	pulsarURL := Params.PulsarAddress
+	pulsarURL := Params.QueryNodeCfg.PulsarAddress
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
@@ -403,7 +403,7 @@ func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 }
 
 func genLocalChunkManager() (storage.ChunkManager, error) {
-	p, err := Params.Load("storage.path")
+	p, err := Params.BaseParams.Load("storage.path")
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +423,7 @@ func genRemoteChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 }
 
 func genVectorChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	p, err := Params.Load("storage.path")
+	p, err := Params.BaseParams.Load("storage.path")
 	if err != nil {
 		return nil, err
 	}
@@ -1257,11 +1257,11 @@ func consumeSimpleRetrieveResult(stream msgstream.MsgStream) (*msgstream.Retriev
 
 func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	changeInfo := &querypb.SegmentChangeInfo{
-		OnlineNodeID: Params.QueryNodeID,
+		OnlineNodeID: Params.QueryNodeCfg.QueryNodeID,
 		OnlineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
 		},
-		OfflineNodeID: Params.QueryNodeID + 1,
+		OfflineNodeID: Params.QueryNodeCfg.QueryNodeID + 1,
 		OfflineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
 		},

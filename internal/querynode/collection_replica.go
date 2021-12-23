@@ -710,7 +710,7 @@ func getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
 		SegmentID:    segment.ID(),
 		CollectionID: segment.collectionID,
 		PartitionID:  segment.partitionID,
-		NodeID:       Params.QueryNodeID,
+		NodeID:       Params.QueryNodeCfg.QueryNodeID,
 		MemSize:      segment.getMemSize(),
 		NumRows:      segment.getRowCount(),
 		IndexName:    indexName,

@@ -57,22 +57,22 @@ func newQueryService(ctx context.Context,
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
 
 	//TODO godchen: change this to configuration
-	path, err := Params.Load("localStorage.Path")
+	path, err := Params.BaseParams.Load("localStorage.Path")
 	if err != nil {
 		path = "/tmp/milvus/data"
 	}
-	enabled, _ := Params.Load("localStorage.enabled")
+	enabled, _ := Params.BaseParams.Load("localStorage.enabled")
 	localCacheEnabled, _ := strconv.ParseBool(enabled)
 
 	localChunkManager := storage.NewLocalChunkManager(path)
 
 	option := &miniokv.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryNodeCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 	}
 
 	client, err := miniokv.NewMinIOKV(ctx, option)

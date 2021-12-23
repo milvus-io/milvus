@@ -147,8 +147,8 @@ func (s *Server) init() error {
 	Params.InitOnce(typeutil.RootCoordRole)
 
 	rootcoord.Params.InitOnce()
-	rootcoord.Params.Address = Params.GetAddress()
-	rootcoord.Params.Port = Params.Port
+	rootcoord.Params.RootCoordCfg.Address = Params.GetAddress()
+	rootcoord.Params.RootCoordCfg.Port = Params.Port
 	log.Debug("grpc init done ...")
 
 	closer := trace.InitTracing("root_coord")
@@ -181,7 +181,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
+		dataCoord := s.newDataCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, rootcoord.Params.RootCoordCfg.EtcdEndpoints)
 		if err := s.rootCoord.SetDataCoord(s.ctx, dataCoord); err != nil {
 			panic(err)
 		}
@@ -189,7 +189,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexCoordClient != nil {
 		log.Debug("RootCoord start to create IndexCoord client")
-		indexCoord := s.newIndexCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
+		indexCoord := s.newIndexCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, rootcoord.Params.RootCoordCfg.EtcdEndpoints)
 		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
 			panic(err)
 		}
@@ -197,7 +197,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient(rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
+		queryCoord := s.newQueryCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, rootcoord.Params.RootCoordCfg.EtcdEndpoints)
 		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
 		}

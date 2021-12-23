@@ -127,7 +127,7 @@ func (ic *IndexChecker) reloadFromKV() error {
 			log.Error("reloadFromKV: unmarshal failed", zap.Any("error", err.Error()))
 			return err
 		}
-		if ic.verifyHandoffReqValid(segmentInfo) && Params.AutoHandoff {
+		if ic.verifyHandoffReqValid(segmentInfo) && Params.QueryCoordCfg.AutoHandoff {
 			// push the req to handoffReqChan and then wait to load after index created
 			// in case handoffReqChan is full, and block start process
 			go ic.enqueueHandoffReq(segmentInfo)
@@ -196,7 +196,7 @@ func (ic *IndexChecker) checkIndexLoop() {
 			// TODO:: check whether the index exists in parallel, in case indexCoord cannot create the index normally, and then block the loop
 			log.Debug("checkIndexLoop: start check index for handoff segment", zap.Int64("segmentID", segmentInfo.SegmentID))
 			for {
-				if ic.verifyHandoffReqValid(segmentInfo) && Params.AutoHandoff {
+				if ic.verifyHandoffReqValid(segmentInfo) && Params.QueryCoordCfg.AutoHandoff {
 					indexInfo, err := getIndexInfo(ic.ctx, segmentInfo, ic.rootCoord, ic.indexCoord)
 					if err != nil {
 						continue

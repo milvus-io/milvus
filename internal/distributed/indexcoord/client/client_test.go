@@ -42,7 +42,7 @@ func TestIndexCoordClient(t *testing.T) {
 	err = server.Run()
 	assert.Nil(t, err)
 
-	icc, err := NewClient(ctx, indexcoord.Params.MetaRootPath, indexcoord.Params.EtcdEndpoints)
+	icc, err := NewClient(ctx, indexcoord.Params.IndexCoordCfg.MetaRootPath, indexcoord.Params.IndexCoordCfg.EtcdEndpoints)
 	assert.Nil(t, err)
 	assert.NotNil(t, icc)
 

@@ -59,7 +59,7 @@ func (s *Server) getSystemInfoMetrics(
 	coordTopology := metricsinfo.DataCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
 			// TODO(dragondriver): fill ConnectedComponents if necessary
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
@@ -70,7 +70,7 @@ func (s *Server) getSystemInfoMetrics(
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 		Response:      "",
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
 	}
 	var err error
 	resp.Response, err = metricsinfo.MarshalTopology(coordTopology)
@@ -87,7 +87,7 @@ func (s *Server) getSystemInfoMetrics(
 func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 	ret := metricsinfo.DataCoordInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           s.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
@@ -98,13 +98,13 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.CreatedTime.String(),
-			UpdatedTime: Params.UpdatedTime.String(),
+			CreatedTime: Params.DataCoordCfg.CreatedTime.String(),
+			UpdatedTime: Params.DataCoordCfg.UpdatedTime.String(),
 			Type:        typeutil.DataCoordRole,
 			ID:          s.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
-			SegmentMaxSize: Params.SegmentMaxSize,
+			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize,
 		},
 	}
 

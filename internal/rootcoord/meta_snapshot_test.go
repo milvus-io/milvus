@@ -38,7 +38,7 @@ func TestMetaSnapshot(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -178,7 +178,7 @@ func TestGetRevOnEtcd(t *testing.T) {
 	tsKey := "timestamp"
 	key := path.Join(rootPath, tsKey)
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -222,7 +222,7 @@ func TestLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -270,7 +270,7 @@ func TestMultiSave(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -334,7 +334,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 
 	var vtso typeutil.Timestamp
@@ -411,7 +411,7 @@ func TestTsBackward(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -438,7 +438,7 @@ func TestFix7150(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints})
+	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 

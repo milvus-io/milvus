@@ -32,10 +32,10 @@ import (
 func TestShuffleChannelsToQueryNode(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
-	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true)
 	clusterSession.Register()
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)

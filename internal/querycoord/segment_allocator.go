@@ -160,7 +160,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			}
 			queryNodeInfo := nodeInfo.(*queryNode)
 			// avoid allocate segment to node which memUsageRate is high
-			if queryNodeInfo.memUsageRate >= Params.OverloadedMemoryThresholdPercentage {
+			if queryNodeInfo.memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
 				log.Debug("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode", zap.Int64("nodeID", nodeID), zap.Float64("current rate", queryNodeInfo.memUsageRate))
 				continue
 			}
@@ -182,7 +182,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 				for _, nodeID := range availableNodeIDs {
 					memUsageAfterLoad := memUsage[nodeID] + uint64(sizeOfReq)
 					memUsageRateAfterLoad := float64(memUsageAfterLoad) / float64(totalMem[nodeID])
-					if memUsageRateAfterLoad > Params.OverloadedMemoryThresholdPercentage {
+					if memUsageRateAfterLoad > Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
 						continue
 					}
 					reqs[offset].DstNodeID = nodeID

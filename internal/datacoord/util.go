@@ -123,7 +123,7 @@ func getTimetravelReverseTime(ctx context.Context, allocator allocator) (*timetr
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
-	ttpts := pts.Add(-time.Duration(Params.CompactionRetentionDuration) * time.Second)
+	ttpts := pts.Add(-time.Duration(Params.DataCoordCfg.CompactionRetentionDuration) * time.Second)
 	tt := tsoutil.ComposeTS(ttpts.UnixNano()/int64(time.Millisecond), 0)
 	return &timetravel{tt}, nil
 }

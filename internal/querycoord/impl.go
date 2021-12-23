@@ -71,7 +71,7 @@ func (qc *QueryCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.TimeTickChannelName,
+		Value: Params.QueryCoordCfg.TimeTickChannelName,
 	}, nil
 }
 
@@ -83,7 +83,7 @@ func (qc *QueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.StatsChannelName,
+		Value: Params.QueryCoordCfg.StatsChannelName,
 	}, nil
 }
 
@@ -896,7 +896,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordCfg.QueryCoordID),
 	}
 
 	if qc.stateCode.Load() != internalpb.StateCode_Healthy {

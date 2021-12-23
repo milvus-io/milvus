@@ -157,9 +157,9 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 		return err
 	}
 	consumeChannels := []string{r.req.QueryChannel}
-	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+	consumeSubName := Params.QueryNodeCfg.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 
-	if Params.skipQueryChannelRecovery {
+	if Params.QueryNodeCfg.SkipQueryChannelRecovery {
 		log.Debug("Skip query channel seek back ", zap.Strings("channels", consumeChannels),
 			zap.String("seek position", string(r.req.SeekPosition.MsgID)),
 			zap.Uint64("ts", r.req.SeekPosition.Timestamp))
@@ -312,7 +312,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// get subscription name
 	getUniqueSubName := func() string {
-		prefixName := Params.MsgChannelSubName
+		prefixName := Params.QueryNodeCfg.MsgChannelSubName
 		return prefixName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 	}
 	consumeSubName := getUniqueSubName()
@@ -571,7 +571,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 
 	// get subscription name
 	getUniqueSubName := func() string {
-		prefixName := Params.MsgChannelSubName
+		prefixName := Params.QueryNodeCfg.MsgChannelSubName
 		return prefixName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 	}
 	consumeSubName := getUniqueSubName()

@@ -32,10 +32,10 @@ import (
 func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
-	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true)
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 	cluster := &queryNodeCluster{
@@ -50,12 +50,12 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryCoordCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 	}
 
 	cluster.dataKV, err = minioKV.NewMinIOKV(baseCtx, option)

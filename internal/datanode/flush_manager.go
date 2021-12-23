@@ -351,7 +351,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		// no error raise if alloc=false
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
-		key := path.Join(Params.InsertBinlogRootPath, k)
+		key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
 		kvs[key] = string(blob.Value[:])
 		field2Insert[fieldID] = &datapb.Binlog{
 			EntriesNum:    data.size,
@@ -377,7 +377,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		// no error raise if alloc=false
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
-		key := path.Join(Params.StatsBinlogRootPath, k)
+		key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
 		kvs[key] = string(blob.Value)
 		field2Stats[fieldID] = &datapb.Binlog{
 			EntriesNum:    0,
@@ -425,7 +425,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 	}
 
 	blobKey := JoinIDPath(collID, partID, segmentID, logID)
-	blobPath := path.Join(Params.DeleteBinlogRootPath, blobKey)
+	blobPath := path.Join(Params.DataNodeCfg.DeleteBinlogRootPath, blobKey)
 	kvs := map[string]string{blobPath: string(blob.Value[:])}
 	data.LogSize = int64(len(blob.Value))
 	data.LogPath = blobPath
@@ -583,7 +583,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 				MsgType:   0, //TODO msg type
 				MsgID:     0, //TODO msg id
 				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.NodeID,
+				SourceID:  Params.DataNodeCfg.NodeID,
 			},
 			ChannelName: dsService.vchannelName,
 		}
@@ -715,7 +715,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 				MsgType:   0, //TODO msg type
 				MsgID:     0, //TODO msg id
 				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.NodeID,
+				SourceID:  Params.DataNodeCfg.NodeID,
 			},
 			SegmentID:           pack.segmentID,
 			CollectionID:        dsService.collectionID,

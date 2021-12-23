@@ -240,7 +240,7 @@ func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: ts,
-			SourceID:  Params.NodeID,
+			SourceID:  Params.DataNodeCfg.NodeID,
 		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
@@ -264,8 +264,8 @@ func (ddn *ddNode) Close() {
 func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelInfo,
 	msFactory msgstream.Factory, compactor *compactionExecutor) *ddNode {
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(Params.FlowGraphMaxQueueLength)
-	baseNode.SetMaxParallelism(Params.FlowGraphMaxParallelism)
+	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength)
+	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism)
 
 	fs := make([]*datapb.SegmentInfo, 0, len(vchanInfo.GetFlushedSegments()))
 	fs = append(fs, vchanInfo.GetFlushedSegments()...)
@@ -280,7 +280,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		return nil
 	}
 	pChannelName := rootcoord.ToPhysicalChannel(vchanInfo.ChannelName)
-	deltaChannelName, err := rootcoord.ConvertChannelName(pChannelName, Params.DmlChannelName, Params.DeltaChannelName)
+	deltaChannelName, err := rootcoord.ConvertChannelName(pChannelName, Params.DataNodeCfg.DmlChannelName, Params.DataNodeCfg.DeltaChannelName)
 	if err != nil {
 		log.Error(err.Error())
 		return nil

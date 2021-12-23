@@ -127,7 +127,7 @@ func newBufferData(dimension int64) (*BufferData, error) {
 		return nil, errors.New("Invalid dimension")
 	}
 
-	limit := Params.FlushInsertBufferSize / (dimension * 4)
+	limit := Params.DataNodeCfg.FlushInsertBufferSize / (dimension * 4)
 
 	return &BufferData{&InsertData{Data: make(map[UniqueID]storage.FieldData)}, 0, limit}, nil
 }
@@ -721,8 +721,8 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 	if err != nil {
 		return nil, err
 	}
-	wTt.AsProducer([]string{Params.TimeTickChannelName})
-	log.Debug("datanode AsProducer", zap.String("TimeTickChannelName", Params.TimeTickChannelName))
+	wTt.AsProducer([]string{Params.DataNodeCfg.TimeTickChannelName})
+	log.Debug("datanode AsProducer", zap.String("TimeTickChannelName", Params.DataNodeCfg.TimeTickChannelName))
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 

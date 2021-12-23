@@ -33,14 +33,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/common"
-
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
-	clientv3 "go.etcd.io/etcd/client/v3"
-
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
@@ -48,17 +42,20 @@ import (
 	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 const (
@@ -79,6 +76,8 @@ const illegalRequestErrStr = "Illegal request"
 
 // makes sure DataNode implements types.DataNode
 var _ types.DataNode = (*DataNode)(nil)
+
+var Params paramtable.GlobalParamTable
 
 // DataNode communicates with outside services and unioun all
 // services in datanode package.
@@ -190,32 +189,33 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	node.session = sessionutil.NewSession(node.ctx, Params.DataNodeCfg.MetaRootPath, Params.DataNodeCfg.EtcdEndpoints)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
-	Params.NodeID = node.session.ServerID
+	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false)
+	Params.DataNodeCfg.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
-	Params.SetLogger(Params.NodeID)
+	Params.BaseParams.SetLogger(Params.DataNodeCfg.NodeID)
 	return nil
 }
 
 // Init function does nothing now.
 func (node *DataNode) Init() error {
 	log.Debug("DataNode Init",
-		zap.String("TimeTickChannelName", Params.TimeTickChannelName),
+		zap.String("TimeTickChannelName", Params.DataNodeCfg.TimeTickChannelName),
 	)
 	if err := node.initSession(); err != nil {
 		log.Error("DataNode init session failed", zap.Error(err))
 		return err
 	}
 
-	Params.initMsgChannelSubName()
+	// TODO: caiyd need check
+	//Params.initMsgChannelSubName()
 	//TODO reset
 	//Params.initLogCfg()
 	log.Debug("DataNode Init",
-		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
+		zap.String("MsgChannelSubName", Params.DataNodeCfg.MsgChannelSubName),
 	)
 
 	return nil
@@ -225,7 +225,7 @@ func (node *DataNode) Init() error {
 func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer logutil.LogPanic()
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	watchPrefix := path.Join(Params.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID))
+	watchPrefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID))
 	evtChan := node.watchKv.WatchWithPrefix(watchPrefix)
 	// after watch, first check all exists nodes first
 	err := node.checkWatchedList()
@@ -265,7 +265,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 // serves the corner case for etcd connection lost and missing some events
 func (node *DataNode) checkWatchedList() error {
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	prefix := path.Join(Params.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID))
+	prefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID))
 	keys, values, err := node.watchKv.LoadWithPrefix(prefix)
 	if err != nil {
 		return err
@@ -285,7 +285,7 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 		// guaranteed there is no "/" in channel name
 		parts := strings.Split(string(evt.Kv.Key), "/")
 		vchanName := parts[len(parts)-1]
-		log.Warn("handle channel delete event", zap.Int64("node id", Params.NodeID), zap.String("vchannel", vchanName))
+		log.Warn("handle channel delete event", zap.Int64("node id", Params.DataNodeCfg.NodeID), zap.String("vchannel", vchanName))
 		node.ReleaseDataSyncService(vchanName)
 	}
 }
@@ -315,7 +315,7 @@ func (node *DataNode) handleWatchInfo(key string, data []byte) {
 		log.Warn("fail to Marshal watchInfo", zap.String("key", key), zap.Error(err))
 		return
 	}
-	k := path.Join(Params.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), watchInfo.GetVchan().GetChannelName())
+	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), watchInfo.GetVchan().GetChannelName())
 	err = node.watchKv.Save(k, string(v))
 	if err != nil {
 		log.Warn("fail to change WatchState to complete", zap.String("key", key), zap.Error(err))
@@ -414,7 +414,7 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.DataNodeCfg.EtcdEndpoints, Params.DataNodeCfg.MetaRootPath)
 		if err != nil {
 			return err
 		}
@@ -427,12 +427,12 @@ func (node *DataNode) Start() error {
 	}
 
 	option := &miniokv.Option{
-		Address:           Params.MinioAddress,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSL,
+		Address:           Params.DataNodeCfg.MinioAddress,
+		AccessKeyID:       Params.DataNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.DataNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.DataNodeCfg.MinioUseSSL,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.DataNodeCfg.MinioBucketName,
 	}
 
 	kv, err := miniokv.NewMinIOKV(node.ctx, option)
@@ -455,8 +455,8 @@ func (node *DataNode) Start() error {
 	// Start node watch node
 	go node.StartWatchChannels(node.ctx)
 
-	Params.CreatedTime = time.Now()
-	Params.UpdatedTime = time.Now()
+	Params.DataNodeCfg.CreatedTime = time.Now()
+	Params.DataNodeCfg.UpdatedTime = time.Now()
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
@@ -691,19 +691,19 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("DataNode.GetMetrics",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 		zap.String("req", req.Request))
 
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
-			zap.Error(errDataNodeIsUnhealthy(Params.NodeID)))
+			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataNodeIsUnhealthy(Params.NodeID),
+				Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID),
 			},
 			Response: "",
 		}, nil
@@ -712,7 +712,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -732,7 +732,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
 
 		log.Debug("DataNode.GetMetrics",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
@@ -742,7 +742,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	}
 
 	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

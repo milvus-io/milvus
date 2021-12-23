@@ -227,7 +227,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 
 	// calculate numRows from rowID field, fieldID 0
 	numRows := int64(len(fID2Content[0]))
-	num = int(Params.FlushInsertBufferSize / (int64(dim) * 4))
+	num = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
 	n = int(numRows)/num + 1
 
 	for i := 0; i < n; i++ {

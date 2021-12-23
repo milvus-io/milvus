@@ -92,9 +92,9 @@ func genSimpleSegmentInfo() *querypb.SegmentInfo {
 
 func genSimpleSealedSegmentsChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	changeInfo := &querypb.SegmentChangeInfo{
-		OnlineNodeID:    Params.QueryNodeID,
+		OnlineNodeID:    Params.QueryNodeCfg.QueryNodeID,
 		OnlineSegments:  []*querypb.SegmentInfo{},
-		OfflineNodeID:   Params.QueryNodeID,
+		OfflineNodeID:   Params.QueryNodeCfg.QueryNodeID,
 		OfflineSegments: []*querypb.SegmentInfo{},
 	}
 	return &querypb.SealedSegmentsChangeInfo{
@@ -125,13 +125,13 @@ func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 func TestQueryCollection_withoutVChannel(t *testing.T) {
 	ctx := context.Background()
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
+		"PulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	factory := msgstream.NewPmsFactory()
 	err := factory.SetParams(m)
 	assert.Nil(t, err)
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 	assert.Nil(t, err)
 
 	schema := genTestCollectionSchema(0, false, 2)
@@ -475,7 +475,7 @@ func TestQueryCollection_serviceableTime(t *testing.T) {
 	st := Timestamp(1000)
 	queryCollection.setServiceableTime(st)
 
-	gracefulTimeInMilliSecond := Params.GracefulTime
+	gracefulTimeInMilliSecond := Params.QueryNodeCfg.GracefulTime
 	gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
 	resST := queryCollection.getServiceableTime()
 	assert.Equal(t, st+gracefulTime, resST)

@@ -177,7 +177,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	defer cancel()
 
 	// init data node
-	pulsarURL := Params.PulsarAddress
+	pulsarURL := Params.DataNodeCfg.PulsarAddress
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -199,7 +199,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	insertChannelName := "data_sync_service_test_dml"
 	ddlChannelName := "data_sync_service_test_ddl"
-	Params.FlushInsertBufferSize = 1
+	Params.DataNodeCfg.FlushInsertBufferSize = 1
 
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,

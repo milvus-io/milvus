@@ -71,7 +71,7 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.QueryTimeTickChannelName,
+		Value: Params.QueryNodeCfg.QueryTimeTickChannelName,
 	}, nil
 }
 
@@ -83,7 +83,7 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.StatsChannelName,
+		Value: Params.QueryNodeCfg.StatsChannelName,
 	}, nil
 }
 
@@ -91,7 +91,7 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -192,7 +192,7 @@ func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.Remov
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -242,7 +242,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -292,7 +292,7 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -346,7 +346,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -392,7 +392,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -438,7 +438,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -469,7 +469,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmentInfoRequest) (*queryPb.GetSegmentInfoResponse, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
 		res := &queryPb.GetSegmentInfoResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -528,19 +528,19 @@ func (node *QueryNode) isHealthy() bool {
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("QueryNode.GetMetrics",
-		zap.Int64("node_id", Params.QueryNodeID),
+		zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 		zap.String("req", req.Request))
 
 	if !node.isHealthy() {
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Int64("node_id", Params.QueryNodeID),
+			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 			zap.String("req", req.Request),
-			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeID)))
+			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeID),
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID),
 			},
 			Response: "",
 		}, nil
@@ -549,7 +549,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.QueryNodeID),
+			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -569,7 +569,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 
 		log.Debug("QueryNode.GetMetrics",
-			zap.Int64("node_id", Params.QueryNodeID),
+			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
@@ -579,7 +579,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 
 	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.QueryNodeID),
+		zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

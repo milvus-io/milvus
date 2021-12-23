@@ -34,7 +34,7 @@ import (
 func TestReloadFromKV(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
@@ -88,7 +88,7 @@ func TestReloadFromKV(t *testing.T) {
 func TestCheckIndexLoop(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
@@ -152,7 +152,7 @@ func TestCheckIndexLoop(t *testing.T) {
 func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
@@ -162,7 +162,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		client:           kv,
 		triggerTaskQueue: NewTaskQueue(),
 	}
-	idAllocatorKV, err := tsoutil.NewTSOKVBase(Params.EtcdEndpoints, Params.KvRootPath, "queryCoordTaskID")
+	idAllocatorKV, err := tsoutil.NewTSOKVBase(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.KvRootPath, "queryCoordTaskID")
 	assert.Nil(t, err)
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 	err = idAllocator.Initialize()

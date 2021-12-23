@@ -115,8 +115,8 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 // newFilteredDeleteNode returns a new filterDeleteNode
 func newFilteredDeleteNode(replica ReplicaInterface, collectionID UniqueID) *filterDeleteNode {
 
-	maxQueueLength := Params.FlowGraphMaxQueueLength
-	maxParallelism := Params.FlowGraphMaxParallelism
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
 	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
