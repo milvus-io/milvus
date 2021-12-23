@@ -95,11 +95,11 @@ class Base:
 class TestcaseBase(Base):
     """
     Additional methods;
-    Public methods that can be used to add cases.
+    Public methods that can be used for test cases.
     """
 
     def _connect(self):
-        """ Add an connection and create the connect """
+        """ Add a connection and create the connect """
         res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
                                                     port=param_info.param_port)
         return res
