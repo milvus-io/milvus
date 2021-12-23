@@ -59,7 +59,7 @@ import (
 
 // ------------------ struct -----------------------
 
-// DdOperation used to save ddMsg into ETCD
+// DdOperation used to save ddMsg into etcd
 type DdOperation struct {
 	Body []byte `json:"body"`
 	Type string `json:"type"`
