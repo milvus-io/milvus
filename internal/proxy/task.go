@@ -4820,14 +4820,17 @@ func (c *CreateAliasTask) Type() commonpb.MsgType {
 	return c.Base.MsgType
 }
 
+// BeginTs returns the ts
 func (c *CreateAliasTask) BeginTs() Timestamp {
 	return c.Base.Timestamp
 }
 
+// EndTs returns the ts
 func (c *CreateAliasTask) EndTs() Timestamp {
 	return c.Base.Timestamp
 }
 
+// SetTs sets the ts
 func (c *CreateAliasTask) SetTs(ts Timestamp) {
 	c.Base.Timestamp = ts
 }
