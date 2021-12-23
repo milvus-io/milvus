@@ -208,7 +208,7 @@ communication between components is mostly undertaken by grpc, and the message f
 Therefore, in the original design, Milvus 2.0 decoupled the core function of the component and the communication between
 components. Taking Proxy as an example, the core function of Proxy component is determined and has nothing to do
 with the deployment form. In the project's internal/proxy directory, it contains the functions of the core components of
-Proxy; and internal/distributed/proxy contains the core functions of Proxy in the deployment of cluster distributed
+Proxy; and internal/distributed/proxy contain the core functions of Proxy in the deployment of cluster distributed
 which contains the re-encapsulation and communication implementation of Proxy. The following article will mainly
 introduce the functions of Proxy core layer.
 
