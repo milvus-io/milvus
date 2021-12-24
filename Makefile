@@ -174,3 +174,22 @@ milvus-tools: print-build-info
 	@mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
+
+rpm-setup: 
+	@echo "Setuping rpm env ...;"
+	@ build/rpm/setup-env.sh
+
+rpm: install
+	@echo "Note: run 'make rpm-setup' to setup build env for rpm builder"
+	@echo "Building rpm ...;"
+	@yum -y install rpm-build rpmdevtools wget
+	@rm -rf ~/rpmbuild/BUILD/*
+	@rpmdev-setuptree
+	@wget https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz && tar -xf etcd-v3.5.0-linux-amd64.tar.gz
+	@cp etcd-v3.5.0-linux-amd64/etcd bin/etcd
+	@wget https://dl.min.io/server/minio/release/linux-amd64/archive/minio.RELEASE.2021-02-14T04-01-33Z -O bin/minio
+	@cp -r bin ~/rpmbuild/BUILD/
+	@cp -r lib ~/rpmbuild/BUILD/
+	@cp -r configs ~/rpmbuild/BUILD/
+	@cp -r build/rpm/services ~/rpmbuild/BUILD/
+	@QA_RPATHS="$[ 0x001|0x0002|0x0020 ]" rpmbuild -ba ./build/rpm/milvus.spec
