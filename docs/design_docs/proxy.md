@@ -273,7 +273,7 @@ type task interface {
 
 Each specific task object must implement the interface defined by the task.
 
-The key members of taskQueue are unissuedTasks of type List and activateTasks of type map. Among them, unissuedTasks
+The key members of taskQueue are unissuedTasks of type List and activateTasks of type maps. Among them, unissuedTasks
 contain all tasks that have not been scheduled, and activateTasks contain all tasks that are being scheduled.
 
 When the external caller of taskScheduler stuffs the task into the corresponding taskQueue, it will call the OnEnqueue
