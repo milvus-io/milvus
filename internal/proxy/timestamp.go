@@ -72,6 +72,7 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 	return ret, nil
 }
 
+// AllocOne allocates a timestamp.
 func (ta *timestampAllocator) AllocOne() (Timestamp, error) {
 	ret, err := ta.alloc(1)
 	if err != nil {
