@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// enableMultipleVectorFields indicates whether to enable multiple vector fields.
 const enableMultipleVectorFields = false
 
 func isAlpha(c uint8) bool {
