@@ -40,6 +40,7 @@ func (stNode *serviceTimeNode) Name() string {
 	return "stNode"
 }
 
+// Close would close serviceTimeNode
 func (stNode *serviceTimeNode) Close() {
 	// `Close` needs to be invoked to close producers
 	stNode.timeTickMsgStream.Close()
