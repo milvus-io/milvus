@@ -64,6 +64,8 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
+          echo "latest tag:"
+          bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q
           declare -A pod_map=( ["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
@@ -76,9 +78,9 @@ jobs:
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
           # check whether milvus server is healthy
-          python scripts/hello_milvus.py
+          pytest -s -v ../testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          python scripts/hello_milvus.py --host 127.0.0.1
 
-      
       - name: Chaos Test
         timeout-minutes: 15
         shell: bash
@@ -89,10 +91,10 @@ jobs:
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_failure.yaml\'/g" constants.py
           sed -i "s/CHAOS_DURATION =.*/CHAOS_DURATION = 80/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO
+          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
 
       - name: Milvus E2E Test
-        timeout-minutes: 5
+        timeout-minutes: 10
         if: ${{ always() }}
         shell: bash
         working-directory: tests/python_client
@@ -109,6 +111,16 @@ jobs:
 
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
+
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          #in this step, verify whether pod has been killed by pod's age
+          kubectl get po -n chaos-testing
+          # export k8s log for chaos mesh and milvus
+          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/chaos-test
 
       - name: Data Consist Test
         timeout-minutes: 5
@@ -145,7 +157,7 @@ jobs:
           #in this step, verify whether pod has been killed by pod's age
           kubectl get po -n chaos-testing
           # export k8s log for chaos mesh and milvus
-          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }}
+          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/data-consist-test
           bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon
       
       - name: Upload logs
