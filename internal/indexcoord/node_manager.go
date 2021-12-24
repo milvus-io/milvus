@@ -143,6 +143,7 @@ func (nm *NodeManager) ListNode() []UniqueID {
 	for _, id := range clientIDs {
 		memory := nm.pq.GetMemory(id)
 		if memory == 0 {
+			log.Debug("IndexCoord get IndexNode metrics info", zap.Int64("nodeID", id))
 			req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 			if err != nil {
 				log.Error("create metrics request failed", zap.Error(err))
