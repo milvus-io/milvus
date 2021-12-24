@@ -6,6 +6,7 @@ import (
 	"github.com/apache/pulsar-client-go/pulsar"
 )
 
+// pulsarReader contains a pulsar reader
 type pulsarReader struct {
 	r pulsar.Reader
 }
