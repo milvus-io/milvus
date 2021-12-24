@@ -8,7 +8,7 @@ Schema column records the DDL of the collection.
 
 ## Event format
 
-Binlog file consists of 4 bytes magic number and a series of events. The first event must be descriptor event.
+Binlog file consists of 4 bytes magic number and a series of events. The first event must be a descriptor event.
 
 ### 8.1 Event format
 
