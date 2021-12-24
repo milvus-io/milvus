@@ -213,7 +213,7 @@ func getSystemInfoMetrics(
 			})
 		}
 
-		// add query coord to system topology graph
+		// add QueryCoord to system topology graph
 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, queryCoordTopologyNode)
 	}
 
