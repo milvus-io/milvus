@@ -2925,4 +2925,4 @@ class TestSearchDSL(object):
         """
         query = {}
         with pytest.raises(Exception) as e:
-            res = connect.search(collection, query)
+            connect.search(collection, query)
