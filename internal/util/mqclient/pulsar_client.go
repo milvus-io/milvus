@@ -42,6 +42,7 @@ func GetPulsarClientInstance(opts pulsar.ClientOptions) (*pulsarClient, error) {
 	return sc, nil
 }
 
+// CreateProducer create a pulsar producer from options
 func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	opts := pulsar.ProducerOptions{Topic: options.Topic}
 	pp, err := pc.client.CreateProducer(opts)
