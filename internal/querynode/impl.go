@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// GetComponentStates return information about whether the node is healthy
+// GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("Get QueryNode component states")
 	stats := &internalpb.ComponentStates{
@@ -75,7 +75,7 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 	}, nil
 }
 
-// GetStatisticsChannel return the statistics channel
+// GetStatisticsChannel returns the statistics channel
 // Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
