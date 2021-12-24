@@ -391,7 +391,7 @@ type channelsMgr interface {
 - getChannels and getVChannels
 
   getVChannels returns a list that represents all virtual DmChannels of collection, getChannels returns a list that
-  represents all physical DmChannels of collection. The two lists correspond one-to-one according to position.
+  represents all physical DmChannels of collection. The two lists correspond one-to-one according to a position.
 
 - createDMLStream and getDMLStream
 
