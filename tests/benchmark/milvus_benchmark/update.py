@@ -219,7 +219,6 @@ def update_values(src_values_file, deploy_params_file):
     # use external minio/s3
     
     # TODO: disable temp
-    # values_dict['minio']['enabled'] = False
     values_dict['minio']['enabled'] = True
     # values_dict["externalS3"]["enabled"] = True
     values_dict["externalS3"]["enabled"] = False
