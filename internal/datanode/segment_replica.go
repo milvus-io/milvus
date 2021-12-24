@@ -60,10 +60,10 @@ type Replica interface {
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
 	updateSegmentCheckPoint(segID UniqueID)
 	updateSegmentPKRange(segID UniqueID, rowIDs []int64)
-	refreshFlushedSegmentPKRange(segID UniqueID, rowIDs []int64)
-	addFlushedSegmentWithPKs(segID, collID, partID UniqueID, channelName string, numOfRow int64, rowIDs []int64)
+	mergeFlushedSegments(segID, collID, partID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64)
 	hasSegment(segID UniqueID, countFlushed bool) bool
-	removeSegment(segID UniqueID)
+	removeSegments(segID ...UniqueID)
+	listCompactedSegmentIDs() map[UniqueID][]UniqueID
 
 	updateStatistics(segID UniqueID, numRows int64)
 	refreshFlushedSegStatistics(segID UniqueID, numRows int64)
@@ -81,6 +81,7 @@ type Segment struct {
 	isNew        atomic.Value // bool
 	isFlushed    atomic.Value // bool
 	channelName  string
+	compactedTo  UniqueID
 
 	checkPoint segmentCheckPoint
 	startPos   *internalpb.MsgPosition // TODO readonly
@@ -98,10 +99,11 @@ type SegmentReplica struct {
 	collectionID UniqueID
 	collSchema   *schemapb.CollectionSchema
 
-	segMu           sync.RWMutex
-	newSegments     map[UniqueID]*Segment
-	normalSegments  map[UniqueID]*Segment
-	flushedSegments map[UniqueID]*Segment
+	segMu             sync.RWMutex
+	newSegments       map[UniqueID]*Segment
+	normalSegments    map[UniqueID]*Segment
+	flushedSegments   map[UniqueID]*Segment
+	compactedSegments map[UniqueID]*Segment
 
 	metaService *metaService
 	minIOKV     kv.BaseKV
@@ -149,9 +151,10 @@ func newReplica(ctx context.Context, rc types.RootCoord, collID UniqueID) (*Segm
 	replica := &SegmentReplica{
 		collectionID: collID,
 
-		newSegments:     make(map[UniqueID]*Segment),
-		normalSegments:  make(map[UniqueID]*Segment),
-		flushedSegments: make(map[UniqueID]*Segment),
+		newSegments:       make(map[UniqueID]*Segment),
+		normalSegments:    make(map[UniqueID]*Segment),
+		flushedSegments:   make(map[UniqueID]*Segment),
+		compactedSegments: make(map[UniqueID]*Segment),
 
 		metaService: metaService,
 		minIOKV:     minIOKV,
@@ -267,7 +270,28 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	return nil
 }
 
+func (replica *SegmentReplica) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
+
+	compactedTo2From := make(map[UniqueID][]UniqueID)
+
+	for segID, seg := range replica.compactedSegments {
+		var from []UniqueID
+		from, ok := compactedTo2From[seg.compactedTo]
+		if !ok {
+			from = []UniqueID{}
+		}
+
+		from = append(from, segID)
+		compactedTo2From[seg.compactedTo] = from
+	}
+
+	return compactedTo2From
+}
+
 // filterSegments return segments with same channelName and partition ID
+// get all segments
 func (replica *SegmentReplica) filterSegments(channelName string, partitionID UniqueID) []*Segment {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
@@ -528,13 +552,18 @@ func (replica *SegmentReplica) updateSegmentPKRange(segID UniqueID, pks []int64)
 	log.Warn("No match segment to update PK range", zap.Int64("ID", segID))
 }
 
-func (replica *SegmentReplica) removeSegment(segID UniqueID) {
+func (replica *SegmentReplica) removeSegments(segIDs ...UniqueID) {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 
-	delete(replica.newSegments, segID)
-	delete(replica.normalSegments, segID)
-	delete(replica.flushedSegments, segID)
+	log.Debug("remove segments if exist", zap.Int64s("segmentIDs", segIDs))
+
+	for _, segID := range segIDs {
+		delete(replica.newSegments, segID)
+		delete(replica.normalSegments, segID)
+		delete(replica.flushedSegments, segID)
+		delete(replica.compactedSegments, segID)
+	}
 }
 
 // hasSegment checks whether this replica has a segment according to segment ID.
@@ -660,22 +689,60 @@ func (replica *SegmentReplica) updateSegmentCheckPoint(segID UniqueID) {
 	log.Warn("There's no segment", zap.Int64("ID", segID))
 }
 
-// please call hasSegment first
-func (replica *SegmentReplica) refreshFlushedSegmentPKRange(segID UniqueID, rowIDs []int64) {
-	replica.segMu.Lock()
-	defer replica.segMu.Unlock()
-
-	seg, ok := replica.flushedSegments[segID]
-	if ok {
-		seg.pkFilter.ClearAll()
-		seg.updatePKRange(rowIDs)
+func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64) {
+	if collID != replica.collectionID {
+		log.Warn("Mismatch collection",
+			zap.Int64("input ID", collID),
+			zap.Int64("expected ID", replica.collectionID))
 		return
 	}
 
-	log.Warn("No match segment to update PK range", zap.Int64("ID", segID))
+	log.Debug("merge flushed segments",
+		zap.Int64("compacted To segmentID", segID),
+		zap.Int64s("compacted From segmentIDs", compactedFrom),
+		zap.Int64("partition ID", partID),
+		zap.String("channel name", channelName),
+	)
+
+	seg := &Segment{
+		collectionID: collID,
+		partitionID:  partID,
+		segmentID:    segID,
+		channelName:  channelName,
+		numRows:      numOfRows,
+
+		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		minPK:    math.MaxInt64, // use max value, represents no value
+		maxPK:    math.MinInt64, // use min value represents no value
+	}
+
+	replica.segMu.Lock()
+	for _, ID := range compactedFrom {
+		s, ok := replica.flushedSegments[ID]
+
+		if !ok {
+			log.Warn("no match flushed segment to merge from", zap.Int64("segmentID", ID))
+			continue
+		}
+
+		s.compactedTo = segID
+		replica.compactedSegments[ID] = s
+		delete(replica.flushedSegments, ID)
+
+		seg.pkFilter.Merge(s.pkFilter)
+	}
+	replica.segMu.Unlock()
+
+	seg.isNew.Store(false)
+	seg.isFlushed.Store(true)
+
+	replica.segMu.Lock()
+	replica.flushedSegments[segID] = seg
+	replica.segMu.Unlock()
 }
 
-func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, channelName string, numOfRows int64, rowIDs []int64) {
+// for tests only
+func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, channelName string, numOfRows int64, pks []UniqueID) {
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
@@ -702,7 +769,7 @@ func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID Un
 		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
-	seg.updatePKRange(rowIDs)
+	seg.updatePKRange(pks)
 
 	seg.isNew.Store(false)
 	seg.isFlushed.Store(true)
