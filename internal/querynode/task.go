@@ -427,7 +427,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 		pos.MsgGroup = consumeSubName
 		// use pChannel to seek
-		pos.ChannelName = VPChannels[fg.channel]
+		pChannel, ok := VPChannels[fg.channel]
+		if pChannel == "" || !ok {
+			log.Error("watch dm channel task found unmatched channel name", zap.Any("position", pos), zap.String("fg channel", fg.channel), zap.String("pchannel", pChannel))
+			return errors.New("empty pchannel found")
+		}
+		pos.ChannelName = pChannel
 		err = fg.seekQueryNodeFlowGraph(pos)
 		if err != nil {
 			return errors.New("msgStream seek error :" + err.Error())
