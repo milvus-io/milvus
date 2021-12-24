@@ -184,7 +184,7 @@ func TestWatchNodeLoop(t *testing.T) {
 				break
 			}
 			// if session id not exist, means querycoord already handled it and remove
-			_, err = kv.Load(nodeKey)
+			_, err = kv.Load(sessionKey)
 			if err != nil {
 				log.Warn("already handled by querycoord", zap.Error(err))
 				break
