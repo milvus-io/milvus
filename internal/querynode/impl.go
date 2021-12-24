@@ -524,7 +524,7 @@ func (node *QueryNode) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
-// GetMetrics return system infos of the query node, such as total memory, memory uasge, cpu usage ...
+// GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("QueryNode.GetMetrics",
