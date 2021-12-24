@@ -46,6 +46,7 @@ func (stNode *serviceTimeNode) Close() {
 	stNode.timeTickMsgStream.Close()
 }
 
+// Operate handles input messages, to execute insert operations
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do serviceTimeNode operation")
 
