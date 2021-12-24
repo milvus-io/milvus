@@ -17,7 +17,7 @@ Currently，There are two paths to implement time travel:
    2. Data in one segment is ordered by primary key
    3. Data between Segments is in timestamp order. That is, the timestamp of every entity in the previous segment must be less than the timestamp of the first entity in the next segment
 
-2. The Algorithm for time travel is 
+2. The Algorithm for time travel is:
    1. Use get_active_count interface, find the last segment containing a legal ts, and return the last element position of this segment as vec_count
    2. Calculate the bitset mask with timestamp. Due to the above properties, all the entities of the previous segment meet the conditions, and all the subsequent segments do not meet the conditions. Only the "last segment" needs to be calculated.
    3. the calculated results of Bitset and DSL are combined and sent to vector search interface
