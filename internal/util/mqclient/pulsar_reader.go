@@ -26,6 +26,7 @@ func (pr *pulsarReader) Next(ctx context.Context) (Message, error) {
 	return &pulsarMessage{msg: pm}, nil
 }
 
+// HasNext check if there is any message available to read from the current position
 func (pr *pulsarReader) HasNext() bool {
 	return pr.r.HasNext()
 }
