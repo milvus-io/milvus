@@ -110,6 +110,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 //	return stNode.timeTickMsgStream.Produce(&msgPack)
 //}
 
+// newServiceTimeNode returns a new serviceTimeNode
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
 	collectionID UniqueID,
