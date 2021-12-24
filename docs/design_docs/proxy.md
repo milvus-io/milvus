@@ -283,7 +283,7 @@ for the task. It can be seen that the timestamp of entering the queue must be gr
 exists in the queue, and it will also be greater than the timestamp of the task that exists in activateTask. At the end
 of the task's OnEnqueue, call the taskQueue's addUnissuedTask to add the task to the unissuedTasks. When OnEnqueue is
 executed, the external caller of taskScheduler calls WaitToFinish of the task to synchronously block and wait for the
-execution of task to be done.
+execution of the task to be done.
 
 When taskScheduler's background scheduling coroutine decides to schedule a task, it will call the taskQueue's
 PopUnissuedTask to remove a task from unissuedTasks, and then call the taskQueue's AddActivateTask to put the task in
