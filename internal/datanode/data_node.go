@@ -209,11 +209,8 @@ func (node *DataNode) Init() error {
 		log.Error("DataNode init session failed", zap.Error(err))
 		return err
 	}
+	Params.DataNodeCfg.Refresh()
 
-	// TODO: caiyd need check
-	//Params.initMsgChannelSubName()
-	//TODO reset
-	//Params.initLogCfg()
 	log.Debug("DataNode Init",
 		zap.String("MsgChannelSubName", Params.DataNodeCfg.MsgChannelSubName),
 	)
