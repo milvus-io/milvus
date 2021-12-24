@@ -4,7 +4,7 @@ MONGO_SERVER = 'mongodb://192.168.1.234:27017/'
 SCHEDULER_DB = "scheduler"
 JOB_COLLECTION = "jobs"
 
-REGISTRY_URL = "registry.zilliz.com/milvus/milvus"
+REGISTRY_URL = "registry.milvus.io/milvus/milvus"
 IDC_NAS_URL = "//172.16.70.249/test"
 DEFAULT_IMAGE = "milvusdb/milvus:latest"
 

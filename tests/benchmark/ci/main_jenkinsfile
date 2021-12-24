@@ -37,7 +37,7 @@ pipeline {
                         spec:
                           containers:
                           - name: milvus-test-env
-                            image: registry.zilliz.com/milvus/milvus-test-env:v0.3
+                            image: registry.milvus.io/milvus/milvus-test-env:v0.3
                             command:
                             - cat
                             tty: true
@@ -86,7 +86,7 @@ pipeline {
                                 boolean isNightlyTest = isTimeTriggeredBuild()
                                 if (isNightlyTest) {
                                     // build job: 'milvus-publish-daily-docker', parameters: [[$class: 'StringParameterValue', name: 'BRANCH', value: "${params.IMAGE_VERSION}"]], wait: false
-                                    build job: 'milvus-publish-daily-docker', parameters: [string(name: 'LOCAL_DOKCER_REGISTRY_URL', value: 'registry.zilliz.com'), string(name: 'REMOTE_DOKCER_REGISTRY_URL', value: 'registry-1.docker.io'), string(name: 'REMOTE_DOCKER_CREDENTIALS_ID', value: 'milvus-docker-access-token'), string(name: 'BRANCH', value: String.valueOf(IMAGE_VERSION))], wait: false
+                                    build job: 'milvus-publish-daily-docker', parameters: [string(name: 'LOCAL_DOKCER_REGISTRY_URL', value: 'registry.milvus.io'), string(name: 'REMOTE_DOKCER_REGISTRY_URL', value: 'registry-1.docker.io'), string(name: 'REMOTE_DOCKER_CREDENTIALS_ID', value: 'milvus-docker-access-token'), string(name: 'BRANCH', value: String.valueOf(IMAGE_VERSION))], wait: false
                                 } else {
                                     echo "Skip publish daily docker images ..."
                                 }
