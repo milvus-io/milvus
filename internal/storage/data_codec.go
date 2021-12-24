@@ -1235,6 +1235,7 @@ func NewIndexCodec() *IndexCodec {
 	return &IndexCodec{}
 }
 
+// Serialize serializes index
 func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string, indexName string, indexID UniqueID) ([]*Blob, error) {
 	paramsBytes, err := json.Marshal(struct {
 		Params    map[string]string
@@ -1252,6 +1253,7 @@ func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string,
 	return blobs, nil
 }
 
+// Deserialize deserializes index
 func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]string, string, UniqueID, error) {
 	var file *Blob
 	for i := 0; i < len(blobs); i++ {
