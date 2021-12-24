@@ -242,7 +242,7 @@ type BlobInfo struct {
 	Length int
 }
 
-// example row_schema: {float_field, int_field, float_vector_field, string_field}
+// InsertData example row_schema: {float_field, int_field, float_vector_field, string_field}
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 type InsertData struct {
 	Data  map[FieldID]FieldData // field id to field data
