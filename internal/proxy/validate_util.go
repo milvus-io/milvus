@@ -28,6 +28,7 @@ import (
 
 const enableMultipleVectorFields = false
 
+// isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
 	if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
 		return false
