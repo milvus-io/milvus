@@ -665,7 +665,7 @@ func (c *queryNodeCluster) isOnline(nodeID int64) (bool, error) {
 		return node.isOnline(), nil
 	}
 
-	return false, fmt.Errorf("isOnline: query node %d not exist", nodeID)
+	return false, fmt.Errorf("isOnline: QueryNode %d not exist", nodeID)
 }
 
 //func (c *queryNodeCluster) printMeta() {
