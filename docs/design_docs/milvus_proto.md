@@ -443,7 +443,7 @@ message DropPartitionRequest {
 ```
 
 ## HasPartition
-To test existence of a partition by name. Return [BoolResponse](#boolresponse) to tell client whether the partition is exist.
+To test existence of a partition by name. Return [BoolResponse](#boolresponse) to tell client whether the partition exists
 ```
 rpc HasPartition(HasPartitionRequest) returns (BoolResponse) {}
 ```
