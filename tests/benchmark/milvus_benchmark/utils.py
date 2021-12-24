@@ -330,3 +330,31 @@ def get_config_digest(url, token):
     except:
         print("Can not get the digest")
         return ""
+
+
+def get_latest_tag(limit=200):
+    """ get the latest tag of master """
+
+    auth_url = ""
+    tags_url = ""
+    tag_url = ""
+    master_latest = "master-latest"
+
+    master_latest_digest = get_config_digest(tag_url + master_latest, get_token(auth_url))
+    tags = get_tags(tags_url, get_token(auth_url))
+    tag_list = get_master_tags(tags)
+
+    latest_tag = ""
+    for i in range(1, len(tag_list) + 1):
+        tag_name = str(tag_list[-i])
+        tag_digest = get_config_digest(tag_url + tag_name, get_token(auth_url))
+        if tag_digest == master_latest_digest:
+            latest_tag = tag_name
+            break
+        if i > limit:
+            break
+
+    if latest_tag == "":
+        raise print("Can't find the latest image name")
+    print("The image name used is %s" % str(latest_tag))
+    return latest_tag
