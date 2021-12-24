@@ -29,25 +29,19 @@ release="test"-${pod}-${chaos_type/_/-} # replace pod_kill to pod-kill
 pushd ./scripts
 echo "uninstall milvus if exist"
 bash uninstall_milvus.sh ${release} ${ns}|| true
+
+declare -A pod_map=(["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
 echo "install milvus"
 if [ ${pod} != "standalone" ];
 then
     echo "insatll cluster"
-    bash install_milvus.sh ${release} ${ns}
+    helm install --wait --timeout 360s ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
 fi
 
 if [ ${pod} == "standalone" ];
 then
     echo "install standalone"
-    helm install --wait --timeout 360s ${release} milvus/milvus --set service.type=NodePort -f ../standalone-values.yaml -n=${ns}
-fi
-
-declare -A pod_map=(["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
-
-if [ "$node_num" -gt "1" ];
-then
-    echo "install cluster n node"
-    helm upgrade ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=$node_num --reuse-values
+    helm install --wait --timeout 360s ${release} milvus/milvus -f ../standalone-values.yaml -n=${ns}
 fi
 
 # wait all pod ready
