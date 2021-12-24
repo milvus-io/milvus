@@ -4936,6 +4936,7 @@ func (d *DropAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// AlterAliasTask is the task to alter alias
 type AlterAliasTask struct {
 	Condition
 	*milvuspb.AlterAliasRequest
