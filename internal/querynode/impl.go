@@ -342,7 +342,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	return waitFunc()
 }
 
-// ReleaseCollection clears all data related to this collecion on the querynode
+// ReleaseCollection clears all data related to this collection on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
