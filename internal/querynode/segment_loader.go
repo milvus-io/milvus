@@ -472,11 +472,12 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 		deleteOffset:     make(map[UniqueID]int64),
 	}
-	log.Debug("start read msg from stream reader")
+	log.Debug("start read msg from stream reader", zap.Any("msg id", position.GetMsgID()))
 	for stream.HasNext(pChannelName) {
 		ctx, cancel := context.WithTimeout(ctx, timeoutForEachRead)
 		tsMsg, err := stream.Next(ctx, pChannelName)
 		if err != nil {
+			log.Warn("fail to load delete", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
 			cancel()
 			return err
 		}
@@ -491,12 +492,16 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 				cancel()
 				continue
 			}
-			log.Debug("delete pk", zap.Any("pk", dmsg.PrimaryKeys))
+			log.Debug("delete pk",
+				zap.Any("pk", dmsg.PrimaryKeys),
+				zap.String("vChannelName", position.GetChannelName()),
+				zap.Any("msg id", position.GetMsgID()),
+			)
 			processDeleteMessages(loader.historicalReplica, dmsg, delData)
 		}
 		cancel()
 	}
-	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName))
+	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
 		if err != nil {
@@ -514,7 +519,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 	wg.Wait()
 	stream.Close()
-	log.Debug("from dml check point load done")
+	log.Debug("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
 }
 
