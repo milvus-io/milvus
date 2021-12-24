@@ -861,3 +861,26 @@ func TestRocksmq_Close(t *testing.T) {
 	rmq.HasNext("", "")
 	rmq.CloseReader("", "")
 }
+
+func TestRocksmq_SeekWithNoConsumerError(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdKV, err := etcdkv.NewEtcdKV(ep, "/etcd/test/root")
+	assert.Nil(t, err)
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_seekerror"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	rmq.CreateTopic("test")
+	err = rmq.Seek("test", "", 0)
+	fmt.Println(err)
+	assert.Error(t, err)
+}
