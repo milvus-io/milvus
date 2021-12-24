@@ -16,6 +16,7 @@ func (pr *pulsarReader) Topic() string {
 	return pr.r.Topic()
 }
 
+// Next read the next message in the topic, blocking until a message is available
 func (pr *pulsarReader) Next(ctx context.Context) (Message, error) {
 	pm, err := pr.r.Next(ctx)
 	if err != nil {
