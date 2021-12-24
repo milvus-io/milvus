@@ -1,8 +1,6 @@
-import asyncio
 import sys
 
 from pymilvus import Collection
-from pymilvus.client.types import State
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
