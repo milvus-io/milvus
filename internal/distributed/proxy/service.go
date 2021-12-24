@@ -487,6 +487,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	return s.proxy.GetCompactionState(ctx, req)
 }
 
+// ManualCompaction triggers a compaction for a collection
 func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	return s.proxy.ManualCompaction(ctx, req)
 }
