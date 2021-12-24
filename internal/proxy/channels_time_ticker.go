@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
-// ticker can update ts only when the minTs greater than the ts of ticker, we can use maxTs to update current later
+// ticker can update ts only when the minTs are greater than the ts of ticker, we can use maxTs to update current later
 type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 
 // channelsTimeTicker manages the timestamp statistics
