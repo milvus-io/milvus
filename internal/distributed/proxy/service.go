@@ -346,6 +346,7 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, request *milvuspb.
 	return s.proxy.GetCollectionStatistics(ctx, request)
 }
 
+// ShowCollections gets all collections
 func (s *Server) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.proxy.ShowCollections(ctx, request)
 }
