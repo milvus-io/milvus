@@ -350,7 +350,6 @@ class TestInsertBase:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
 
-    # TODO
     @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_partition_with_ids(self, connect, id_collection):
@@ -534,7 +533,6 @@ class TestInsertBase:
         with pytest.raises(Exception):
             connect.insert(collection, tmp_entity)
 
-    # todo fix timeout
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.timeout(30)
     def test_collection_insert_rows_count_multi_threading(self, args, collection):
