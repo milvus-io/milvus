@@ -84,7 +84,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.Componen
 	return stats, nil
 }
 
-// GetStatisticsChannel get statistics channel of Proxy.
+// GetStatisticsChannel gets statistics channel of Proxy.
 func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
