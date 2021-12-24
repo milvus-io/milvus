@@ -167,6 +167,7 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 	}
 }
 
+// AddBoolToPayload adds @msgs into payload
 func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 	length := len(msgs)
 	if length <= 0 {
