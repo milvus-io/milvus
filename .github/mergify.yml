@@ -161,3 +161,24 @@ pull_request_rules:
       label:
         remove:
           - ci-passed
+
+
+  - name: Add comment when jenkins job failed
+    conditions:
+      - base=master
+      - "check-failure=continuous-integration/jenkins/pr-merge"        
+    actions:
+      comment:
+        message: |
+          @{{author}} E2e jenkins job failed, comment `/run-checks` can trigger the job again.
+
+  - name: Add comment when code checker or ut failed
+    conditions:
+      - base=master
+      - or:
+        - "check-failure=Code Checker AMD64 Ubuntu 18.04"
+        - "check-failure=Build and test AMD64 Ubuntu 18.04"       
+    actions:
+      comment:
+        message: |
+          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
