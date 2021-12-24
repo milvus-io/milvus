@@ -1061,8 +1061,11 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 	}
 	lst.excludeNodeIDs = append(lst.excludeNodeIDs, lst.DstNodeID)
 
-	//TODO:: wait or not according msgType
-	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, false, lst.excludeNodeIDs, nil)
+	wait2AssignTaskSuccess := false
+	if lst.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
+		wait2AssignTaskSuccess = true
+	}
+	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, wait2AssignTaskSuccess, lst.excludeNodeIDs, nil)
 	if err != nil {
 		log.Error("loadSegment reschedule failed", zap.Int64s("excludeNodes", lst.excludeNodeIDs), zap.Int64("taskID", lst.getTaskID()), zap.Error(err))
 		return nil, err
@@ -1236,7 +1239,11 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 		wdt.excludeNodeIDs = []int64{}
 	}
 	wdt.excludeNodeIDs = append(wdt.excludeNodeIDs, wdt.NodeID)
-	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, false, wdt.excludeNodeIDs, nil)
+	wait2AssignTaskSuccess := false
+	if wdt.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
+		wait2AssignTaskSuccess = true
+	}
+	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, wait2AssignTaskSuccess, wdt.excludeNodeIDs, nil)
 	if err != nil {
 		log.Error("watchDmChannel reschedule failed", zap.Int64("taskID", wdt.getTaskID()), zap.Int64s("excludeNodes", wdt.excludeNodeIDs), zap.Error(err))
 		return nil, err
