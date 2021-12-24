@@ -541,6 +541,11 @@ func (p *proxyConfig) init(bp *BaseParamTable) {
 	//p.initRoleName()
 }
 
+// Refresh is called after session init
+func (p *proxyConfig) Refresh() {
+	p.initProxySubName()
+}
+
 // InitAlias initialize Alias member.
 func (p *proxyConfig) InitAlias(alias string) {
 	p.Alias = alias
@@ -1099,6 +1104,11 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 // InitAlias initializes an alias for the QueryNode role.
 func (p *queryNodeConfig) InitAlias(alias string) {
 	p.Alias = alias
+}
+
+// Refresh is called after session init
+func (p *queryNodeConfig) Refresh() {
+	p.initMsgChannelSubName()
 }
 
 func (p *queryNodeConfig) initCacheSize() {
@@ -1723,6 +1733,11 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.initDeltaChannelName()
 
 	//p.initRoleName()
+}
+
+// Refresh is called after session init
+func (p *dataNodeConfig) Refresh() {
+	p.initMsgChannelSubName()
 }
 
 // InitAlias init this DataNode alias

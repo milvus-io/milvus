@@ -186,6 +186,7 @@ func (node *QueryNode) Init() error {
 			initError = err
 			return
 		}
+		Params.QueryNodeCfg.Refresh()
 		connectEtcdFn := func() error {
 			etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 			if err != nil {
@@ -253,9 +254,6 @@ func (node *QueryNode) Init() error {
 			zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
 			zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
 		)
-		// This param needs valid QueryNodeID
-		//Params.initMsgChannelSubName()
-		// TODO: caiyd need check
 	})
 
 	return initError

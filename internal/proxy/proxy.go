@@ -142,8 +142,7 @@ func (node *Proxy) Init() error {
 		log.Error("Proxy init session failed", zap.Error(err))
 		return err
 	}
-	// TODO: caiyd need check
-	//Params.initProxySubName()
+	Params.ProxyCfg.Refresh()
 	// wait for datacoord state changed to Healthy
 	if node.dataCoord != nil {
 		log.Debug("Proxy wait for DataCoord ready")
