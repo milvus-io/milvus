@@ -295,7 +295,7 @@ func (qn *queryNode) removeQueryChannel(ctx context.Context, in *querypb.RemoveQ
 
 func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error {
 	if !qn.isOnline() {
-		log.Debug("ReleaseCollection: the query node has been offline, the release request is no longer needed", zap.Int64("nodeID", qn.id))
+		log.Debug("ReleaseCollection: the QueryNode has been offline, the release request is no longer needed", zap.Int64("nodeID", qn.id))
 		return nil
 	}
 
