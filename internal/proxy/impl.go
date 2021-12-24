@@ -3572,6 +3572,10 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 	}
 
 	resp, err = node.dataCoord.GetFlushState(ctx, req)
+	if err != nil {
+		log.Info("failed to get flush state response", zap.Error(err))
+		return nil, err
+	}
 	log.Info("received get flush state response", zap.Any("response", resp))
 	return resp, err
 }
