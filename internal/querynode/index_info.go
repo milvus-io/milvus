@@ -65,7 +65,7 @@ func (info *indexInfo) setIndexParams(params map[string]string) {
 	info.indexParams = params
 }
 
-// setReadyLoad the the flag to check if the index is ready to load
+// setReadyLoad the flag to check if the index is ready to load
 func (info *indexInfo) setReadyLoad(load bool) {
 	info.readyLoad = load
 }
