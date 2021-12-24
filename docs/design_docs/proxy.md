@@ -360,7 +360,7 @@ members minTs and maxTs, which respectively represent the minimum and maximum ti
 completed on pChan. The channelsTimeTicker collects timestamp information mainly depends on this method. The awakened
 coroutine reduces the timestamp result and sends the final timestamp result back to the RootCoord.
 
-taskScheduler is also responsible for collecting the results of search requests. For each search request, when the proxy
+taskScheduler is also responsible for collecting the results of search requests. For each search request, when Proxy
 writes the request to the DqRequestChannel, it will attach the ReqID, and the query nodes will also bring the ReqID back
 when writing the search result back to the DqResultChannel. taskScheduler will start a background coroutine to consume
 search result from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
