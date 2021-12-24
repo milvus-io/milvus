@@ -15,7 +15,6 @@
 #include <cmath>
 
 #include <omp.h>
-#include <faiss/BuilderSuspend.h>
 #include <faiss/FaissHook.h>
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
@@ -1087,8 +1086,6 @@ void elkan_L2_sse (
     float *data = (float *) malloc((bs_y * (bs_y - 1) / 2) * sizeof (float));
 
     for (size_t j0 = 0; j0 < ny; j0 += bs_y) {
-        BuilderSuspend::check_wait();
-
         size_t j1 = j0 + bs_y;
         if (j1 > ny) j1 = ny;
 

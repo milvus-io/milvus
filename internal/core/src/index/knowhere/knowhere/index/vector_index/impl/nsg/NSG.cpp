@@ -19,7 +19,6 @@
 #include <string>
 #include <utility>
 
-#include "faiss/BuilderSuspend.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/common/Timer.h"
@@ -456,7 +455,6 @@ NsgIndex::Link(float* data) {
         boost::dynamic_bitset<> flags{ntotal, 0};
 #pragma omp for schedule(dynamic, 100)
         for (size_t n = 0; n < ntotal; ++n) {
-            faiss::BuilderSuspend::check_wait();
             fullset.clear();
             temp.clear();
             flags.reset();
@@ -486,7 +484,6 @@ NsgIndex::Link(float* data) {
     std::vector<std::mutex> mutex_vec(ntotal);
 #pragma omp for schedule(dynamic, 100)
     for (unsigned n = 0; n < ntotal; ++n) {
-        faiss::BuilderSuspend::check_wait();
         InterInsert(data, n, mutex_vec, cut_graph_dist);
     }
     delete[] cut_graph_dist;
@@ -645,7 +642,6 @@ NsgIndex::CheckConnectivity(float* data) {
     int64_t linked_count = 0;
 
     while (linked_count < static_cast<int64_t>(ntotal)) {
-        faiss::BuilderSuspend::check_wait();
         DFS(root, has_linked, linked_count);
         if (linked_count >= static_cast<int64_t>(ntotal)) {
             break;
