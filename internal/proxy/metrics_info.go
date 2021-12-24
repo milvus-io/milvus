@@ -152,7 +152,7 @@ func getSystemInfoMetrics(
 			TargetType:          typeutil.QueryCoordRole,
 		})
 
-		// query coord in system topology graph
+		// QueryCoord in system topology graph
 		queryCoordTopologyNode := metricsinfo.SystemTopologyNode{
 			Identifier: identifierMap[queryCoordRoleName],
 			Connected:  make([]metricsinfo.ConnectionEdge, 0),
