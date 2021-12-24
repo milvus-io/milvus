@@ -2836,7 +2836,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	assert.Error(t, task.PreExecute(ctx))
 	task.query.PartitionNames = nil
 
-	// mock show collections of query coord
+	// mock show collections of QueryCoord
 	qc.SetShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 		return nil, errors.New("mock")
 	})
