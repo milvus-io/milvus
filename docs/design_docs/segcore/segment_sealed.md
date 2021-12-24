@@ -1,7 +1,7 @@
 # SegmentSealed
 SegmentSealed has an extra interface rather than SegmentInterface:
 
-1. `LoadIndex(loadIndexInfo)`: load the index. indexInfo contains
+1. `LoadIndex(loadIndexInfo)`: load the index. indexInfo contains:
     1. `FieldId`
     2. `IndexParams`: index parameters in KV structure KV
     3. `VecIndex`: vector index
