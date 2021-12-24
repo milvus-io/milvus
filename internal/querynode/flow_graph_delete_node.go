@@ -19,11 +19,12 @@ package querynode
 import (
 	"sync"
 
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
 )
 
 // deleteNode is the one of nodes in delta flow graph
