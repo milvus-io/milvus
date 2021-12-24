@@ -68,7 +68,7 @@ The following scripts are found in the [`build/`](.) directory. Note that all sc
 
 You can specify different OS for builder by setting `OS_NAME` which defaults to `ubuntu18.04`. Valid OS are `ubuntu18.04`, `centos7`.
 
-To specify `centos7` builder, use these command:
+To specify `centos7` builder, use these commands:
 
 ```shell
 export OS_NAME=centos7
