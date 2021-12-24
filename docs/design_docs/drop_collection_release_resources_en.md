@@ -75,7 +75,7 @@ message SegmentBinlogPaths {
 
 ---
 
-## Object2: DataCoord GC for not in used binlogs
+## Object2: DataCoord Garbage Collection (GC) for not in used binlogs
 
 ### How to clear unknown binlogs?
 DataCoord runs a background GC goroutine, triggers every 1 day:
