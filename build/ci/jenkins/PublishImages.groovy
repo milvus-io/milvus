@@ -27,7 +27,7 @@ pipeline {
     }
 
     stages {
-        stage ('Publish Milvus Images') {
+        stage('Publish Milvus Images') {
             steps {
                 container('main') {
                     script {
@@ -75,7 +75,7 @@ pipeline {
                     body: '$DEFAULT_CONTENT',
                     recipientProviders: [developers(), culprits()],
                     replyTo: '$DEFAULT_REPLYTO',
-                    to: "${authorEmail},qa@zilliz.com"
+                    to: "${authorEmail},qa@zilliz.com,devops@zilliz.com"
                 }
             }
         }
