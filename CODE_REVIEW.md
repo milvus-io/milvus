@@ -58,7 +58,7 @@ all Approvers are listed under OWNERS_ALIASES file.
 
 - Remember to praise when the code quality exceeds your expectation.
 
-- It isn't necessarily wrong if the coder's solution is different than yours.
+- It isn't necessarily wrong if the coder's solution is different with yours.
 
 - Community is not only about the product, it is about person. Help others to improve whenever possible.
 
