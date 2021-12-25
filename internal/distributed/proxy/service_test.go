@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -250,7 +252,16 @@ func (m *MockQueryCoord) SetDataCoord(types.DataCoord) error {
 }
 
 func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return nil, nil
+	return &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
+			NodeID:    int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+			Role:      "MockQueryCoord",
+			StateCode: internalpb.StateCode_Healthy,
+			ExtraInfo: nil,
+		},
+		SubcomponentStates: nil,
+		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil
 }
 
 func (m *MockQueryCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -631,7 +642,7 @@ func Test_NewServer(t *testing.T) {
 	server.proxy = &MockProxy{}
 	server.rootCoordClient = &MockRootCoord{}
 	server.indexCoordClient = &MockIndexCoord{}
-	server.queryCooedClient = &MockQueryCoord{}
+	server.queryCoordClient = &MockQueryCoord{}
 	server.dataCoordClient = &MockDataCoord{}
 
 	t.Run("Run", func(t *testing.T) {
