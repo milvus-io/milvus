@@ -226,7 +226,7 @@ MemTable::ApplyDeletes() {
         segment::UidsPtr uids_ptr = nullptr;
         segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
 
-        std::vector<segment::doc_id_t> ids_to_check;
+        std::set<segment::doc_id_t> ids_to_check;
 
         TimeRecorder rec("handle segment " + file.segment_id_);
 
@@ -284,7 +284,7 @@ MemTable::ApplyDeletes() {
         // check ids by bloom filter
         for (auto& id : doc_ids_to_delete_) {
             if (id_bloom_filter_ptr->Check(id)) {
-                ids_to_check.emplace_back(id);
+                ids_to_check.emplace(id);
             }
         }
 
@@ -307,28 +307,21 @@ MemTable::ApplyDeletes() {
 
         rec.RecordSection("load uids and deleted docs");
 
-        // sort ids_to_check
-        bool ids_sorted = false;
-        if (ids_to_check.size() >= 64) {
-            std::sort(ids_to_check.begin(), ids_to_check.end());
-            ids_sorted = true;
-            rec.RecordSection("Sorting " + std::to_string(ids_to_check.size()) + " ids");
+        // insert deleted docs to bitset
+        auto deleted_bitset_ptr = std::make_shared<faiss::ConcurrentBitset>(uids_ptr->size());
+        for (auto& offset : deleted_docs) {
+            deleted_bitset_ptr->set(offset);
         }
 
         // for each id
         int64_t segment_deleted_count = 0;
         for (size_t i = 0; i < uids_ptr->size(); ++i) {
-            if (std::find(deleted_docs.begin(), deleted_docs.end(), i) != deleted_docs.end()) {
+            if (deleted_bitset_ptr->test(i)) {
                 continue;
             }
-            if (ids_sorted) {
-                if (!std::binary_search(ids_to_check.begin(), ids_to_check.end(), (*uids_ptr)[i])) {
-                    continue;
-                }
-            } else {
-                if (std::find(ids_to_check.begin(), ids_to_check.end(), (*uids_ptr)[i]) == ids_to_check.end()) {
-                    continue;
-                }
+
+            if (ids_to_check.find((*uids_ptr)[i]) == ids_to_check.end()) {
+                continue;
             }
 
             // delete
