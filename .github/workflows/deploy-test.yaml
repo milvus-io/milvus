@@ -129,11 +129,11 @@ jobs:
           # if the task is upgrade, install milvus with latest rc image in repo milvusdb/milvus
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "cluster" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus -f cluster-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20211225-6177d46 -f cluster-values.yaml;
           fi
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "standalone" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus -f standalone-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20211225-6177d46 -f standalone-values.yaml;
           fi
 
           kubectl get pods
@@ -151,15 +151,20 @@ jobs:
 
           # uninstall milvus
           if [[ $(date +%w) -eq 0 || $(data +%w) -eq 6 ]]; then sleep 1800s; fi
-          helm uninstall deploy-testing
-      
+          if [ ${{ matrix.mode }} == "standalone" ]; 
+          then
+            kubectl delete pod -l app.kubernetes.io/instance=deploy-testing --grace-period=0 --force;
+            kubectl delete pod -l release=deploy-testing --grace-period=0 --force;
+          else
+            helm uninstall deploy-testing
+          fi
       - name: Seconde Milvus Deployment
         timeout-minutes: 60
         shell: bash
         working-directory: tests/python_client/deploy     
         run: |
           if [ ${{ matrix.mode }} == "cluster" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml; fi
-          if [ ${{ matrix.mode }} == "standalone" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f standalone-values.yaml; fi
+          if [ ${{ matrix.mode }} == "standalone" ]; then helm upgrade --wait --timeout 720s deploy-testing milvus/milvus -f standalone-values.yaml; fi
           kubectl get pods
           sleep 20s
           kubectl get pods

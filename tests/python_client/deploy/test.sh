@@ -141,7 +141,7 @@ fi
 if [ "$Task" == "upgrade" ];
 then
     printf "start to deploy previous rc tag milvus\n"
-    replace_image_tag "master-20211216-7e56f08"
+    replace_image_tag "master-20211225-6177d46" # replace previous rc tag with master-20211225-6177d46
 
 fi
 cat docker-compose.yml|grep milvusdb
