@@ -18,7 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "faiss/BuilderSuspend.h"
 #include "knowhere/common/Exception.h"
 #include "knowhere/common/Log.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
