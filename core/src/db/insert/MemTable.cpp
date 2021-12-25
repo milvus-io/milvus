@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <unordered_set>
 
 #include "cache/CpuCacheMgr.h"
 #include "codecs/default/DefaultCodec.h"
@@ -226,7 +227,7 @@ MemTable::ApplyDeletes() {
         segment::UidsPtr uids_ptr = nullptr;
         segment::DeletedDocsPtr deleted_docs_ptr = nullptr;
 
-        std::set<segment::doc_id_t> ids_to_check;
+        std::unordered_set<segment::doc_id_t> ids_to_check;
 
         TimeRecorder rec("handle segment " + file.segment_id_);
 
