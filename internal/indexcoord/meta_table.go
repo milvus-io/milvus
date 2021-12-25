@@ -402,6 +402,7 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
 
+	log.Debug("IndexCoord get unassigned tasks", zap.Int64s("online nodes", onlineNodeIDs))
 	var metas []Meta
 
 	for _, meta := range mt.indexBuildID2Meta {
@@ -424,6 +425,8 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
 		}
 	}
+
+	log.Debug("IndexCoord get unassigned tasks finished", zap.Int("tasks num", len(metas)))
 
 	return metas
 }
