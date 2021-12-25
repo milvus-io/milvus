@@ -644,7 +644,13 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
 					processInternalTaskFn(lowPriorityTasks, triggerTask)
 				}
-				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+
+				//TODO::xige-16, judging the triggerCondition is ugly, the taskScheduler will be refactored soon
+				// if query node down, the loaded segment and watched dmChannel by the node should be balance to new querynode
+				// if triggerCondition == NodeDown, loadSegment and watchDmchannel request will keep reschedule until the success
+				// the node info has been deleted after assgining child task to triggerTask
+				// so it is necessary to update the meta of segment and dmchannel, or some data may be lost in meta
+				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
 					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
 					if err != nil {
 						triggerTask.setResultInfo(err)
