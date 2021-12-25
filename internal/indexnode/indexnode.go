@@ -153,13 +153,9 @@ func (i *IndexNode) initSession() error {
 func (i *IndexNode) Init() error {
 	var initErr error = nil
 	i.initOnce.Do(func() {
-		Params.Init()
-
-		i.UpdateStateCode(internalpb.StateCode_Initializing)
-		log.Debug("IndexNode init", zap.Any("State", i.stateCode.Load().(internalpb.StateCode)))
 		err := i.initSession()
 		if err != nil {
-			log.Error(err.Error())
+			log.Error("IndexNode init session failed", zap.Error(err))
 			initErr = err
 			return
 		}
@@ -192,18 +188,20 @@ func (i *IndexNode) Init() error {
 			initErr = err
 			return
 		}
-
 		i.kv = kv
-
 		log.Debug("IndexNode NewMinIOKV succeeded")
+
 		i.closer = trace.InitTracing("index_node")
 
 		i.initKnowhere()
 	})
 
-	log.Debug("Init IndexNode finished", zap.Error(initErr))
-
-	return initErr
+	if initErr != nil {
+		log.Error("IndexNode failed to initialize", zap.Error(initErr))
+		return initErr
+	}
+	log.Debug("IndexNode initialize successfully")
+	return nil
 }
 
 // Start starts the IndexNode component.
@@ -218,13 +216,18 @@ func (i *IndexNode) Start() error {
 		i.UpdateStateCode(internalpb.StateCode_Healthy)
 		log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
 	})
+
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
 
-	log.Debug("IndexNode start finished", zap.Error(startErr))
-	return startErr
+	if startErr != nil {
+		log.Error("IndexNode start failed", zap.Error(startErr))
+		return startErr
+	}
+	log.Debug("IndexNode start successfully")
+	return nil
 }
 
 // Stop closes the server.

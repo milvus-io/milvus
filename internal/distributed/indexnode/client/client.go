@@ -78,6 +78,9 @@ func (c *Client) Register() error {
 	return nil
 }
 
+func (c *Client) UpdateStateCode(stateCode internalpb.StateCode) {
+}
+
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return indexpb.NewIndexNodeClient(cc)
 }

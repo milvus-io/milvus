@@ -192,6 +192,9 @@ func (inm *Mock) Register() error {
 	return nil
 }
 
+func (inm *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
+}
+
 // GetComponentStates gets the component states of the mocked IndexNode, if the internal member `Err` is true, it will return an error,
 // and the state is `StateCode_Abnormal`. Under normal circumstances the state is `StateCode_Healthy`.
 func (inm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {

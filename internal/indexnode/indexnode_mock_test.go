@@ -45,6 +45,8 @@ func TestIndexNodeMock(t *testing.T) {
 	assert.Nil(t, err)
 	ctx := context.Background()
 
+	inm.UpdateStateCode(internalpb.StateCode_Healthy)
+
 	t.Run("GetComponentStates", func(t *testing.T) {
 		states, err := inm.GetComponentStates(ctx)
 		assert.Nil(t, err)

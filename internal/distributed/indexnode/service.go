@@ -64,6 +64,7 @@ func (s *Server) Run() error {
 		return err
 	}
 	log.Debug("IndexNode init done ...")
+
 	if err := s.start(); err != nil {
 		return err
 	}
@@ -128,7 +129,7 @@ func (s *Server) init() error {
 		if err != nil {
 			err = s.Stop()
 			if err != nil {
-				log.Error("IndexNode Init failed, and Stop failed")
+				log.Error("IndexNode init failed, and stop failed")
 			}
 		}
 	}()
@@ -138,13 +139,13 @@ func (s *Server) init() error {
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
-		log.Error("IndexNode", zap.Any("grpc error", err))
+		log.Error("IndexNode start grpc loop failed", zap.Error(err))
 		return err
 	}
 
 	err = s.indexnode.Init()
 	if err != nil {
-		log.Error("IndexNode Init failed", zap.Error(err))
+		log.Error("IndexNode init failed", zap.Error(err))
 		return err
 	}
 
@@ -157,12 +158,14 @@ func (s *Server) start() error {
 	if err != nil {
 		return err
 	}
+	log.Debug("IndexNode start successfully")
+
 	err = s.indexnode.Register()
 	if err != nil {
-		log.Error("IndexNode Register etcd failed", zap.Error(err))
+		log.Error("IndexNode register etcd failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexNode Register etcd success")
+	log.Debug("IndexNode register service from etcd successfully")
 	return nil
 }
 

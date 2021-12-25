@@ -259,6 +259,10 @@ type IndexNode interface {
 
 	// GetMetrics gets the metrics about IndexNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	// UpdateStateCode updates state code for IndexNode.
+	//  `stateCode` is current statement of this IndexNode, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
 // IndexCoord is the interface `indexcoord` package implements
