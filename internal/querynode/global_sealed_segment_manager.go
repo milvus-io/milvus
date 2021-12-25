@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+// globalSealedSegmentManager manages the globalSealedSegments
 type globalSealedSegmentManager struct {
 	collectionID         UniqueID
 	mu                   sync.Mutex                        // guards globalSealedSegments
