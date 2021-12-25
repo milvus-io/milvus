@@ -502,12 +502,12 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable LoadMetaFromETCD", zap.Any("indexBuildID", indexBuildID),
-		zap.Any("revision", revision), zap.Any("ok", ok))
+	log.Debug("IndexCoord metaTable LoadMetaFromETCD", zap.Int64("indexBuildID", indexBuildID),
+		zap.Int64("revision", revision), zap.Bool("ok", ok))
 	if ok {
 		log.Debug("IndexCoord metaTable LoadMetaFromETCD",
-			zap.Any("meta.revision", meta.revision),
-			zap.Any("revision", revision))
+			zap.Int64("meta.revision", meta.revision),
+			zap.Int64("revision", revision))
 
 		if meta.revision >= revision {
 			return false
