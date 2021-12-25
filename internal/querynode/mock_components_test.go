@@ -201,6 +201,10 @@ func newMockIndexCoord() *mockIndexCoord {
 
 }
 
+func (m *mockIndexCoord) UpdateStateCode(stateCode internalpb.StateCode) {
+
+}
+
 func (m *mockIndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	panic("not implemented") // TODO: Implement
 }

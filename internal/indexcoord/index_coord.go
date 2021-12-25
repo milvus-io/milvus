@@ -123,7 +123,7 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 func (i *IndexCoord) Register() error {
 	i.session.Register()
 	go i.session.LivenessCheck(i.loopCtx, func() {
-		log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
+		log.Error("IndexCoord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		if err := i.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
@@ -148,16 +148,15 @@ func (i *IndexCoord) Init() error {
 	var initErr error
 	Params.InitOnce()
 	i.initOnce.Do(func() {
-		i.UpdateStateCode(internalpb.StateCode_Initializing)
-		log.Debug("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(internalpb.StateCode)))
-
+		// init session, get serverID
 		err := i.initSession()
 		if err != nil {
-			log.Error(err.Error())
+			log.Error("IndexCoord init session failed", zap.Error(err))
 			initErr = err
 			return
 		}
 
+		// connect ETCD
 		connectEtcdFn := func() error {
 			etcdKV, err := etcdkv.NewEtcdKV(Params.IndexCoordCfg.EtcdEndpoints, Params.IndexCoordCfg.MetaRootPath)
 			if err != nil {
@@ -178,8 +177,10 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 		log.Debug("IndexCoord try to connect etcd success")
-		i.nodeManager = NewNodeManager(i.loopCtx)
 
+		// init IndexNode manager
+		i.nodeManager = NewNodeManager(i.loopCtx)
+		// get online IndexNode
 		sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
 		log.Debug("IndexCoord", zap.Int("session number", len(sessions)), zap.Int64("revision", revision))
 		if err != nil {
@@ -198,7 +199,9 @@ func (i *IndexCoord) Init() error {
 
 		}
 		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
+		// Initialize the channel that watches to IndexNode
 		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
+		// get tasks of each IndexNode
 		nodeTasks := i.metaTable.GetNodeTaskStats()
 		for nodeID, taskNum := range nodeTasks {
 			i.nodeManager.pq.UpdatePriority(nodeID, taskNum)
@@ -212,13 +215,13 @@ func (i *IndexCoord) Init() error {
 			initErr = err
 			return
 		}
-
 		i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
 		if err := i.idAllocator.Initialize(); err != nil {
 			log.Error("IndexCoord idAllocator initialize failed", zap.Error(err))
 			return
 		}
 
+		// connect minIO
 		option := &miniokv.Option{
 			Address:           Params.IndexCoordCfg.MinIOAddress,
 			AccessKeyID:       Params.IndexCoordCfg.MinIOAccessKeyID,
@@ -227,7 +230,6 @@ func (i *IndexCoord) Init() error {
 			BucketName:        Params.IndexCoordCfg.MinioBucketName,
 			CreateBucket:      true,
 		}
-
 		i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
 		if err != nil {
 			log.Error("IndexCoord new minio kv failed", zap.Error(err))
@@ -236,6 +238,7 @@ func (i *IndexCoord) Init() error {
 		}
 		log.Debug("IndexCoord new minio kv success")
 
+		// init tasks scheduler
 		i.sched, err = NewTaskScheduler(i.loopCtx, i.idAllocator, i.kv, i.metaTable)
 		if err != nil {
 			log.Error("IndexCoord new task scheduler failed", zap.Error(err))
@@ -247,9 +250,12 @@ func (i *IndexCoord) Init() error {
 		i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	})
 
-	log.Debug("IndexCoord init finished", zap.Error(initErr))
+	if initErr != nil {
+		log.Error("IndexCoord init failed", zap.Error(initErr))
+		return initErr
+	}
 
-	return initErr
+	return nil
 }
 
 // Start starts the IndexCoord component.

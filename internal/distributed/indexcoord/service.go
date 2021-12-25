@@ -67,6 +67,7 @@ func (s *Server) Run() error {
 		return err
 	}
 	log.Debug("IndexCoord init done ...")
+
 	if err := s.start(); err != nil {
 		return err
 	}
@@ -82,9 +83,10 @@ func (s *Server) init() error {
 	indexcoord.Params.IndexCoordCfg.Address = Params.GetAddress()
 	indexcoord.Params.IndexCoordCfg.Port = Params.Port
 
-	closer := trace.InitTracing("IndexCoord")
-	s.closer = closer
+	s.indexcoord.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("IndexCoord init", zap.Any("stateCode", internalpb.StateCode_Initializing))
 
+	// start grpc loop
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(indexcoord.Params.IndexCoordCfg.Port)
 	// wait for grpc IndexCoord loop start
@@ -92,10 +94,16 @@ func (s *Server) init() error {
 		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
+
+	// init IndexCoord component
 	if err := s.indexcoord.Init(); err != nil {
 		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
+
+	// init trace, but what does it do?
+	closer := trace.InitTracing("IndexCoord")
+	s.closer = closer
 
 	return nil
 }
@@ -103,11 +111,13 @@ func (s *Server) init() error {
 // start starts IndexCoord's grpc service.
 func (s *Server) start() error {
 	if err := s.indexcoord.Start(); err != nil {
+		log.Error("IndexCoord start component service failed", zap.Error(err))
 		return err
 	}
-	log.Debug("indexCoord started")
+	log.Debug("IndexCoord start component service successfully")
+
 	if err := s.indexcoord.Register(); err != nil {
-		log.Error("IndexCoord", zap.Any("register session error", err))
+		log.Error("IndexCoord register service from ETCD failed", zap.Error(err))
 		return err
 	}
 	log.Debug("IndexCoord registers service successfully")

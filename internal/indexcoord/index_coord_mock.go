@@ -75,6 +75,11 @@ func (icm *Mock) Register() error {
 	return err
 }
 
+// UpdateStateCode updates the component state of mocked IndexCoord.
+func (icm *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
+
+}
+
 // GetComponentStates gets the component states of the mocked IndexCoord, if Param `Failure` is true, it will return an error,
 // and the state is `StateCode_Abnormal`. Under normal circumstances the state is `StateCode_Healthy`.
 func (icm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {

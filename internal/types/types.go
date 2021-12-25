@@ -285,6 +285,10 @@ type IndexCoord interface {
 
 	// GetMetrics gets the metrics about IndexCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	// UpdateStateCode updates state code for IndexCoord
+	//  `stateCode` is current statement of this IndexCoord, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
 // RootCoord is the interface `rootcoord` package implements

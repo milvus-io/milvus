@@ -195,6 +195,10 @@ func (m *MockIndexCoord) Register() error {
 	return m.regErr
 }
 
+func (m *MockIndexCoord) UpdateStateCode(stateCode internalpb.StateCode) {
+
+}
+
 func (m *MockIndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	return nil, nil
 }

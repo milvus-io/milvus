@@ -73,6 +73,10 @@ func (coord *IndexCoordMock) Stop() error {
 	return nil
 }
 
+func (coord *IndexCoordMock) UpdateStateCode(stateCode internalpb.StateCode) {
+
+}
+
 func (coord *IndexCoordMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{

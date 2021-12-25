@@ -85,6 +85,10 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// UpdateStateCode updates the component state of IndexCoord.
+func (c *Client) UpdateStateCode(stateCode internalpb.StateCode) {
+}
+
 func (c *Client) getIndexCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
