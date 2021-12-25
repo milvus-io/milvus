@@ -17,7 +17,7 @@ add_library(milvus_config
         ${CONFIG_SRC}
         )
 target_link_libraries(milvus_config
+        knowhere
         milvus_proto
         milvus_utils
-        knowhere
         )

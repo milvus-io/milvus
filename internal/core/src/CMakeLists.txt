@@ -19,11 +19,11 @@ include_directories(${MILVUS_THIRDPARTY_SRC})
 
 
 set(FOUND_OPENBLAS "unknown")
-add_subdirectory(index)
-set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
-foreach (DIR ${INDEX_INCLUDE_DIRS})
-    include_directories(${DIR})
-endforeach ()
+add_subdirectory(knowhere)
+#set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
+#foreach (DIR ${INDEX_INCLUDE_DIRS})
+#    include_directories(${DIR})
+#endforeach ()
 
 
 add_subdirectory( exceptions )
