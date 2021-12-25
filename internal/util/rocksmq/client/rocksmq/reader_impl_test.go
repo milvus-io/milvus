@@ -40,7 +40,7 @@ func Test_NewReader(t *testing.T) {
 }
 
 func TestReader_Next(t *testing.T) {
-	rmqPath := "/tmp/milvus/test_reader"
+	rmqPath := rmqPath + "/test_reader"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client, err := newClient(ClientOptions{

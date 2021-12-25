@@ -47,7 +47,7 @@ func TestConsumer_newConsumer(t *testing.T) {
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
 	/////////////////////////////////////////////////
-	rmqPath := "/tmp/milvus/test_consumer1"
+	rmqPath := rmqPath + "/test_consumer1"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client, err := newClient(ClientOptions{
@@ -117,7 +117,7 @@ func TestConsumer_Subscription(t *testing.T) {
 }
 
 func TestConsumer_Seek(t *testing.T) {
-	rmqPath := "/tmp/milvus/test_consumer2"
+	rmqPath := rmqPath + "/test_consumer2"
 	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client, err := newClient(ClientOptions{
