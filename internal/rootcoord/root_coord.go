@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -169,7 +168,6 @@ type Core struct {
 // NewCore creates a new rootcoord core
 func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
-	rand.Seed(time.Now().UnixNano())
 	core := &Core{
 		ctx:       ctx,
 		cancel:    cancel,

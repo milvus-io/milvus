@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -97,7 +96,6 @@ type Proxy struct {
 
 // NewProxy returns a Proxy struct.
 func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
-	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &Proxy{
 		ctx:       ctx1,

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
 	"sort"
 	"strconv"
 	"sync"
@@ -253,7 +252,6 @@ func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 
 // NewQueryCoord creates a QueryCoord object.
 func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
-	rand.Seed(time.Now().UnixNano())
 	queryChannels := make([]*queryChannelInfo, 0)
 	channelID := len(queryChannels)
 	searchPrefix := Params.QueryCoordCfg.SearchChannelPrefix

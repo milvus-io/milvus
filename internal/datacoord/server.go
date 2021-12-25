@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -182,7 +181,6 @@ func SetSegmentManager(manager Manager) Option {
 
 // CreateServer creates a `Server` instance
 func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) *Server {
-	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:                    ctx,
 		quitCh:                 make(chan struct{}),

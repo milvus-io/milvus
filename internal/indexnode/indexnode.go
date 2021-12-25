@@ -31,7 +31,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"math/rand"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -99,7 +98,6 @@ type IndexNode struct {
 // NewIndexNode creates a new IndexNode component.
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
 	log.Debug("New IndexNode ...")
-	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{
 		loopCtx:    ctx1,

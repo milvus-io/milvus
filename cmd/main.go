@@ -21,10 +21,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path"
 	"strings"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -231,7 +233,7 @@ func main() {
 	if err := flags.Parse(os.Args[3:]); err != nil {
 		os.Exit(-1)
 	}
-
+	rand.Seed(time.Now().UnixNano())
 	var local = false
 	role := roles.MilvusRoles{}
 	switch serverType {

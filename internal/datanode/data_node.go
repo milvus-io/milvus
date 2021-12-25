@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"path"
 	"strconv"
 	"strings"
@@ -125,7 +124,6 @@ type DataNode struct {
 
 // NewDataNode will return a DataNode with abnormal state.
 func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
-	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
 		ctx:    ctx2,

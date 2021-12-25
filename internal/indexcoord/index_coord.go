@@ -19,7 +19,6 @@ package indexcoord
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"sort"
 	"strconv"
 	"sync"
@@ -108,7 +107,6 @@ type UniqueID = typeutil.UniqueID
 
 // NewIndexCoord creates a new IndexCoord component.
 func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
-	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	i := &IndexCoord{
 		loopCtx:            ctx1,

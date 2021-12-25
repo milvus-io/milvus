@@ -51,7 +51,7 @@ import (
 )
 
 func TestMain(t *testing.M) {
-	rand.Seed(time.Now().Unix())
+	rand.Seed(time.Now().UnixNano())
 	Params.DataNodeCfg.InitAlias("datanode-alias-1")
 	Params.Init()
 	// change to specific channel for test

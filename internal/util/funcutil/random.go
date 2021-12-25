@@ -17,10 +17,9 @@ import (
 	"time"
 )
 
-var r *rand.Rand
-
+// init is called when this package is imported
 func init() {
-	r = rand.New(rand.NewSource(time.Now().UnixNano()))
+	rand.Seed(time.Now().UnixNano())
 }
 
 var letterRunes = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -29,7 +28,7 @@ var letterRunes = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 func RandomBytes(n int) []byte {
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = letterRunes[r.Intn(len(letterRunes))]
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
 	}
 	return b
 }
