@@ -18,7 +18,6 @@
 #include <faiss/FaissHook.h>
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
-#include <faiss/utils/ConcurrentBitset.h>
 
 
 #ifndef FINTEGER
@@ -865,7 +864,7 @@ static void range_search_blas (
 
                 for (size_t j = j0; j < j1; j++) {
                     float ip = *ip_line++;
-                    if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(j))) {
+                    if (bitset.empty() || !bitset.test((int64_t)j)) {
                         if (compute_l2) {
                             float dis =  x_norms[i] + y_norms[j] - 2 * ip;
                             if (dis < radius) {
@@ -912,7 +911,7 @@ static void range_search_sse (const float * x,
             RangeQueryResult & qres = pres->new_result (i);
 
             for (j = 0; j < ny; j++) {
-                if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(j))) {
+                if (bitset.empty() || !bitset.test((int64_t)j)) {
                     if (compute_l2) {
                         float disij = fvec_L2sqr (x_, y_, d);
                         if (disij < radius) {
@@ -962,7 +961,7 @@ static void range_search_sse_sq (const float * x,
 #pragma omp for
         for (j = 0; j < ny; j++) {
             const float * y_ = y + j * d;
-            if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(j))) {
+            if (bitset.empty() || !bitset.test((int64_t)j)) {
                 if (compute_l2) {
                     float disij = fvec_L2sqr (x_, y_, d);
                     if (disij < radius) {

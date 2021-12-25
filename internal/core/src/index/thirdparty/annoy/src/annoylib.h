@@ -120,7 +120,6 @@ inline void set_error_from_string(char **error, const char* msg) {
 #include <intrin.h>
 #elif defined(__GNUC__)
 #include <x86intrin.h>
-#include "faiss/utils/ConcurrentBitset.h"
 #include "faiss/utils/BitsetView.h"
 
 #endif
@@ -1356,12 +1355,12 @@ protected:
       Node* nd = _get(i);
       q.pop();
       if (nd->n_descendants == 1 && i < _n_items) { // raw data
-        if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)i))
+        if (bitset.empty() || !bitset.test((int64_t)i))
           nns.push_back(i);
       } else if (nd->n_descendants <= _K) {
         const S* dst = nd->children;
         for (auto ii = 0; ii < nd->n_descendants; ++ ii) {
-          if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)dst[ii]))
+          if (bitset.empty() || !bitset.test((int64_t)dst[ii]))
             nns.push_back(dst[ii]);
 //            nns.insert(nns.end(), dst, &dst[nd->n_descendants]);
         }

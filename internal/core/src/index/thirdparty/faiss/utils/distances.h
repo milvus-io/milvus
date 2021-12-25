@@ -15,7 +15,6 @@
 #include <stdint.h>
 
 #include <faiss/utils/Heap.h>
-#include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/utils/BitsetView.h>
 #include <faiss/impl/AuxIndexStructures.h>
 

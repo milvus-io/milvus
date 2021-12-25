@@ -12,7 +12,6 @@
 #pragma once
 
 #include <faiss/utils/BitsetView.h>
-#include <faiss/utils/ConcurrentBitset.h>
 #include <memory>
 #include <utility>
 #include <vector>

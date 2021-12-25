@@ -243,7 +243,7 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
   std::priority_queue<Node, std::vector<Node>, CompareByFirst> candidate_set;
 
   float lb;
-  if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(nearest))) {
+  if (bitset.empty() || !bitset.test((int64_t)nearest)) {
     lb = d_nearest;
     top_candidates.emplace(d_nearest, nearest);
     candidate_set.emplace(-d_nearest, nearest);
@@ -268,7 +268,7 @@ RHNSW::search_base_layer(DistanceComputer& ptdis,
         float dcand = ptdis(candidate_id);
         if (top_candidates.size() < ef || lb > dcand) {
           candidate_set.emplace(-dcand, candidate_id);
-          if (bitset.empty() || !bitset.test((faiss::ConcurrentBitset::id_type_t)(candidate_id)))
+          if (bitset.empty() || !bitset.test((int64_t)candidate_id))
             top_candidates.emplace(dcand, candidate_id);
           if (top_candidates.size() > ef)
             top_candidates.pop();

@@ -408,7 +408,7 @@ void hamming_range_search_template (
 
 #pragma omp for
         for (size_t j = 0; j < nb; j++) {
-            if (bitset.empty() || !bitset.test((ConcurrentBitset::id_type_t)j)) {
+            if (bitset.empty() || !bitset.test((int64_t)j)) {
                 int dis = hc.compute (yi + j * code_size);
                 if (dis < radius) {
                     qres.add(dis, j);

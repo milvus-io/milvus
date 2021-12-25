@@ -23,7 +23,6 @@
 #include	"NGT/Common.h"
 #include	"NGT/ObjectSpaceRepository.h"
 
-#include "faiss/utils/ConcurrentBitset.h"
 #include "faiss/utils/BitsetView.h"
 
 #include	"NGT/HashBasedBooleanSet.h"
