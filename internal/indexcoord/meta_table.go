@@ -383,6 +383,7 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
+	log.Debug("IndexCoord get the meta which need to recycle")
 	var metas []Meta
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.State == commonpb.IndexState_Finished && (meta.indexMeta.MarkDeleted || !meta.indexMeta.Recycled) {
