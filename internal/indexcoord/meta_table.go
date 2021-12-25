@@ -433,6 +433,9 @@ func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID)
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
+	log.Debug("IndexCoord judges whether the same task exists in meta table", zap.Int64("indexBuildID", req.IndexBuildID),
+		zap.Int64("indexID", req.IndexID), zap.Any("index params", req.IndexParams),
+		zap.Any("type params", req.TypeParams))
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID != req.IndexID {
 			continue
