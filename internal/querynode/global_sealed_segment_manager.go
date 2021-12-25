@@ -32,6 +32,7 @@ type globalSealedSegmentManager struct {
 	globalSealedSegments map[UniqueID]*querypb.SegmentInfo // map[segmentID]SegmentInfo
 }
 
+// newGlobalSealedSegmentManager returns a new globalSealedSegmentManager
 func newGlobalSealedSegmentManager(collectionID UniqueID) *globalSealedSegmentManager {
 	return &globalSealedSegmentManager{
 		collectionID:         collectionID,
