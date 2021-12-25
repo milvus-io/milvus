@@ -64,7 +64,7 @@ def get_collections(prefix):
     return col_list
 
 
-def create_collections_and_insert_data(prefix, count):
+def create_collections_and_insert_data(prefix, count=3000):
     import random
     dim = 128
     nb = count // 10
