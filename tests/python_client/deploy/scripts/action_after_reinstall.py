@@ -12,7 +12,8 @@ def task_1(data_size):
     connections.connect(host="127.0.0.1", port=19530, timeout=60)
     get_collections(prefix)
     load_and_search(prefix)
-    create_collections_and_insert_data(prefix, data_size)
+    create_index(prefix)
+    load_and_search(prefix)
 
 
 def task_2(data_zise):
