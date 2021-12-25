@@ -40,6 +40,7 @@ func newGlobalSealedSegmentManager(collectionID UniqueID) *globalSealedSegmentMa
 	}
 }
 
+// addGlobalSegmentInfo adds a new segmentInfo
 func (g *globalSealedSegmentManager) addGlobalSegmentInfo(segmentInfo *querypb.SegmentInfo) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
