@@ -55,6 +55,7 @@ func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error
 	return producer, nil
 }
 
+// CreateReader creates a pulsar reader instance
 func (pc *pulsarClient) CreateReader(options ReaderOptions) (Reader, error) {
 	opts := pulsar.ReaderOptions{
 		Topic:                   options.Topic,
