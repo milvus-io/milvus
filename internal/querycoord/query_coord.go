@@ -241,11 +241,20 @@ func (qc *QueryCoord) Start() error {
 func (qc *QueryCoord) Stop() error {
 	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
-	qc.scheduler.Close()
-	log.Debug("close scheduler ...")
-	qc.indexChecker.close()
-	log.Debug("close index checker ...")
-	qc.loopCancel()
+	if qc.scheduler != nil {
+		qc.scheduler.Close()
+		log.Debug("close scheduler ...")
+	}
+
+	if qc.indexChecker != nil {
+		qc.indexChecker.close()
+		log.Debug("close index checker ...")
+	}
+
+	if qc.loopCancel != nil {
+		qc.loopCancel()
+		log.Info("cancel the loop of QueryCoord")
+	}
 
 	qc.loopWg.Wait()
 	qc.session.Revoke(time.Second)
