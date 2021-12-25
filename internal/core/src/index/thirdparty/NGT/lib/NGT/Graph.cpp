@@ -710,7 +710,7 @@ NeighborhoodGraph::setupSeeds(NGT::SearchContainer &sc, ObjectDistances &seeds, 
               distanceChecked.insert(neighbor.id);
 
               // judge if id in blacklist
-              if (!bitset.empty() && bitset.test((faiss::ConcurrentBitset::id_type_t)neighbor.id - 1)) {
+              if (!bitset.empty() && bitset.test((int64_t)neighbor.id - 1)) {
                   continue;
               }
 

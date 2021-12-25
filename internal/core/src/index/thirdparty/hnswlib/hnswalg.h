@@ -242,7 +242,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
         dist_t lowerBound;
 //        if (!has_deletions || !isMarkedDeleted(ep_id)) {
-          if (!has_deletions || !bitset.test((faiss::ConcurrentBitset::id_type_t)(ep_id))) {
+          if (!has_deletions || !bitset.test((int64_t)ep_id)) {
             dist_t dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             lowerBound = dist;
             top_candidates.emplace(dist, ep_id);
@@ -299,7 +299,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 #endif
 
 //                        if (!has_deletions || !isMarkedDeleted(candidate_id))
-                        if (!has_deletions || (!bitset.test((faiss::ConcurrentBitset::id_type_t)(candidate_id)))) {
+                        if (!has_deletions || (!bitset.test((int64_t)candidate_id))) {
                             top_candidates.emplace(dist, candidate_id);
                         }
 

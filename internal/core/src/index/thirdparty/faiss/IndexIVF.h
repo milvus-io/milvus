@@ -23,7 +23,6 @@
 #include <faiss/DirectMap.h>
 #include <faiss/Clustering.h>
 #include <faiss/utils/Heap.h>
-#include <faiss/utils/ConcurrentBitset.h>
 #include <faiss/common.h>
 
 namespace faiss {

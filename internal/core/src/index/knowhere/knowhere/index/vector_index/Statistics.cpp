@@ -11,17 +11,12 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <functional>
-#include <memory>
 #include <string>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 
 #include "IndexIVF.h"
-#include "faiss/utils/ConcurrentBitset.h"
 #include "knowhere/common/Log.h"
-#include "knowhere/index/IndexType.h"
 #include "knowhere/index/vector_index/Statistics.h"
 
 namespace milvus {

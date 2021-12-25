@@ -804,7 +804,7 @@ struct KnnSearchResults {
     inline void add (idx_t j, float dis, const BitsetView bitset = nullptr) {
         if (C::cmp (heap_sim[0], dis)) {
             idx_t id = ids ? ids[j] : lo_build (key, j);
-            if (!bitset.empty() && bitset.test((faiss::ConcurrentBitset::id_type_t)id))
+            if (!bitset.empty() && bitset.test((int64_t)id))
                 return;
             heap_swap_top<C> (k, heap_sim, heap_ids, dis, id);
             nup++;

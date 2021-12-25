@@ -9,7 +9,6 @@
 #pragma once
 
 #include <faiss/gpu/GpuIndexIVF.h>
-#include <faiss/utils/ConcurrentBitset.h>
 
 namespace faiss { struct IndexIVFFlat; }
 
