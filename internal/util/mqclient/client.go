@@ -13,7 +13,7 @@ package mqclient
 
 // Client is the interface that provides operations of message queues
 type Client interface {
-	// CreateReader creates a producer instance
+	// CreateReader creates a reader instance
 	CreateReader(options ReaderOptions) (Reader, error)
 
 	// CreateProducer creates a producer instance
