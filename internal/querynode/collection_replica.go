@@ -665,8 +665,10 @@ func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) 
 
 // freeAll will free all meta info from collectionReplica
 func (colReplica *collectionReplica) freeAll() {
+	colReplica.queryMu.Lock() // wait for current search/query finish
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
+	defer colReplica.queryMu.Unlock()
 
 	for id := range colReplica.collections {
 		_ = colReplica.removeCollectionPrivate(id)
