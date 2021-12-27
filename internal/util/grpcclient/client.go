@@ -122,7 +122,7 @@ func (c *ClientBase) connect(ctx context.Context) error {
 	retryPolicy := `{
 		"methodConfig": [{
 		  "name": [{}],
-		  "waitForReady": true,
+		  "waitForReady": false,
 		  "retryPolicy": {
 			  "MaxAttempts": 4,
 			  "InitialBackoff": ".1s",
