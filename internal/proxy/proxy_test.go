@@ -417,7 +417,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
 	Params.Init()
-	log.Info("Initialize parameter table of proxy")
+	log.Info("Initialize parameter table of Proxy")
 
 	rootCoordClient, err := rcc.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
