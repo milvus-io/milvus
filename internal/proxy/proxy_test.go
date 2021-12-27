@@ -368,7 +368,7 @@ func TestProxy(t *testing.T) {
 	}
 
 	qc := runQueryCoord(ctx, localMsg)
-	log.Info("running query coordinator ...")
+	log.Info("running QueryCoord ...")
 
 	if qc != nil {
 		defer func() {
