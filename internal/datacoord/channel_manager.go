@@ -21,11 +21,12 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+	"stathat.com/c/consistent"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"go.uber.org/zap"
-	"stathat.com/c/consistent"
 )
 
 const (
@@ -148,7 +149,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 			c.mu.Lock()
 
 			channels := c.store.GetNodesChannels()
-			reallocs, err := c.bgChecker(channels, time.Now())
+			reallocates, err := c.bgChecker(channels, time.Now())
 			if err != nil {
 				log.Warn("channel manager bg check failed", zap.Error(err))
 
@@ -156,7 +157,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 				continue
 			}
 
-			updates := c.reassignPolicy(c.store, reallocs)
+			updates := c.reassignPolicy(c.store, reallocates)
 			log.Debug("channel manager bg check reassign", zap.Array("updates", updates))
 			for _, update := range updates {
 				if update.Type == Add {
