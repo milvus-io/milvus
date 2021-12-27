@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1639710092805,
+  "iteration": 1640586952681,
   "links": [],
   "panels": [
     {
@@ -39,7 +39,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of has_collection requests",
+      "description": "per-minute increasing rate of has_collection requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -230,7 +230,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": "0",
+          "min": null,
           "show": true
         }
       ],
@@ -436,7 +436,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": "0",
+          "min": null,
           "show": true
         }
       ],
@@ -554,7 +554,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of show_partitions requests.",
+      "description": "per-minute increasing rate of show_partitions requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -760,7 +760,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of create_partition requests.",
+      "description": "per-minute increasing rate of create_partition requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -863,7 +863,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_partition requests.",
+      "description": "per-minute increasing rate of drop_partition requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -966,7 +966,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of show_segments requests.",
+      "description": "per-minute increasing rate of show_segments requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1069,7 +1069,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_index requests.",
+      "description": "per-minute increasing rate of drop_index requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1695,7 +1695,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of watch_dm_channels requests.",
+      "description": "per-minute increasing rate of watch_dm_channels requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1798,7 +1798,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "List of data nodes which has register with etcd.",
+      "description": "List of data nodes which has register with etcd",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1895,7 +1895,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Pulsar Client Consumer Processing Time.",
+      "description": "Pulsar Client Consumer Processing Time",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1991,7 +1991,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "0.95 quantile of Pulsar client producer latency.",
+      "description": "0.95 quantile of Pulsar client producer latency",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2087,7 +2087,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "0.95 quantile of Pulsar client producer rpc latency.",
+      "description": "0.95 quantile of Pulsar client producer rpc latency",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2183,7 +2183,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Pulsar client received bytes by topic.",
+      "description": "Pulsar client received bytes by topic",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2293,7 +2293,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Total cpu usage of all milvus components.",
+      "description": "Total cpu usage of all milvus components",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2584,7 +2584,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "process cpu usage.",
+      "description": "process cpu usage",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2681,7 +2681,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "prometheus",
-      "description": "Process memory of milvus pods.",
+      "description": "Process memory of milvus pod",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2983,7 +2983,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "GC Max duration seconds.",
+      "description": "GC Max duration seconds",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -4267,5 +4267,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 210
+  "version": 211
 }
