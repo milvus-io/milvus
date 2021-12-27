@@ -3204,7 +3204,7 @@ class NestingState(object):
 
       token = matched.group(1)
       if token == '{':
-        # If namespace or class hasn't seen a opening brace yet, mark
+        # If namespace or class hasn't seen an opening brace yet, mark
         # namespace/class head as complete.  Push a new block onto the
         # stack otherwise.
         if not self.SeenOpenBrace():
