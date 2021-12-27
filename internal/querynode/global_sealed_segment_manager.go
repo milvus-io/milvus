@@ -77,6 +77,7 @@ func (g *globalSealedSegmentManager) getGlobalSegmentIDsByPartitionIds(partition
 	return resIDs
 }
 
+// hasGlobalSealedSegment checks if globalSealedSegmentManager has globalSealedSegment by segmentID
 func (g *globalSealedSegmentManager) hasGlobalSealedSegment(segmentID UniqueID) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
