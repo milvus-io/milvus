@@ -407,7 +407,7 @@ type channelsMgr interface {
 
   getDQLStream returns the dql message stream of a collection;
 
-  Proxy uses these dql message stream to send search requests.
+  Proxy uses these dql message streams to send search requests.
 
 The Remove related operation is to delete the corresponding message stream object, but the stream is not immediately
 closed because maybe there are some data needs to be written into stream currently.
