@@ -34,18 +34,28 @@ import (
 type mockReplica struct {
 	Replica
 
-	newSegments     map[UniqueID]*Segment
-	normalSegments  map[UniqueID]*Segment
-	flushedSegments map[UniqueID]*Segment
+	newSegments       map[UniqueID]*Segment
+	normalSegments    map[UniqueID]*Segment
+	flushedSegments   map[UniqueID]*Segment
+	compactedSegments map[UniqueID]*Segment
 }
+
+var _ Replica = (*mockReplica)(nil)
 
 func newMockReplica() *mockReplica {
 	return &mockReplica{
-		newSegments:     make(map[int64]*Segment),
-		normalSegments:  make(map[int64]*Segment),
-		flushedSegments: make(map[int64]*Segment),
+		newSegments:       make(map[int64]*Segment),
+		normalSegments:    make(map[int64]*Segment),
+		flushedSegments:   make(map[int64]*Segment),
+		compactedSegments: make(map[int64]*Segment),
 	}
 }
+
+func (replica *mockReplica) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
+	return make(map[UniqueID][]UniqueID)
+}
+
+func (replica *mockReplica) removeSegments(segIDs ...UniqueID) {}
 
 func (replica *mockReplica) filterSegments(channelName string, partitionID UniqueID) []*Segment {
 	results := make([]*Segment, 0)
