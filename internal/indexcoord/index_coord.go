@@ -27,6 +27,9 @@ import (
 	"syscall"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.uber.org/zap"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
@@ -47,8 +50,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	"go.uber.org/zap"
 )
 
 // make sure IndexCoord implements types.IndexCoord
