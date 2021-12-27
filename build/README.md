@@ -130,7 +130,7 @@ Stop Dev Container
 
 ## E2E Tests
 
-Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
+Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before running E2E tests, you need a running Milvus:
 
 ```shell
 cd deployments/docker/dev
