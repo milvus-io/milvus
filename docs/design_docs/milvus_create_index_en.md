@@ -222,7 +222,7 @@ message SegmentInfo {
 
 17. If an user has called `CreateIndex` on this `Collection`, then when `RootCoord` receives `SegmentFlushCompleted` request, it would extract the `SegmentID` from the request, and send a `GetInsertBinlogPaths` request to `DataCoord` to get the `Binlog` paths, finally `RootCoord` would send a `BuildIndex` request to `IndexCoord` to notify `IndexCoord` to build index on this segment.
 
-18. The `Grpc` call of `SegmentFlushCompleted` might failed due to network problem or some others, so how to create index if the `Grpc` failed ? The following figure show the solution.
+18. The `Grpc` call of `SegmentFlushCompleted` might be failed due to network problem or some others, so how to create an index if the `Grpc` failed ? The following figure shows the solution.
 
 ![data_coord_flushed](./graphs/milvus_create_index_root_coord_check.png)
 
