@@ -160,7 +160,7 @@ def load_and_search(prefix):
         t0 = time.time()
         expr = "count in [2,4,6,8]"
         output_fields = ["count", "random_value"]
-        res = c.query(expr, output_fields)
+        res = c.query(expr, output_fields, timeout=20)
         sorted_res = sorted(res, key=lambda k: k['count'])
         for r in sorted_res:
             print(r)
