@@ -89,11 +89,13 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) Run() error {
 
 	if err := s.init(); err != nil {
+		log.Error("QueryCoord init failed", zap.Error(err))
 		return err
 	}
 	log.Debug("QueryCoord init done ...")
 
 	if err := s.start(); err != nil {
+		log.Error("QueryCoord start failed", zap.Error(err))
 		return err
 	}
 	log.Debug("QueryCoord start done ...")
@@ -103,39 +105,32 @@ func (s *Server) Run() error {
 // init initializes QueryCoord's grpc service.
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.QueryCoordRole)
-
 	qc.Params.InitOnce()
 	qc.Params.QueryCoordCfg.Address = Params.GetAddress()
 	qc.Params.QueryCoordCfg.Port = Params.Port
 
-	closer := trace.InitTracing("querycoord")
+	closer := trace.InitTracing("QueryCoord")
 	s.closer = closer
+
+	s.queryCoord.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("QueryCoord", zap.Any("State", internalpb.StateCode_Initializing))
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	if err != nil {
+		log.Error("QueryCoord start grpc loop failed", zap.Error(err))
 		return err
 	}
 
-	// --- Master Server Client ---
+	// --- RootCoord Server Client ---
 	if s.rootCoord == nil {
 		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.QueryCoordCfg.MetaRootPath, qc.Params.QueryCoordCfg.EtcdEndpoints)
 		if err != nil {
 			log.Debug("QueryCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
 		}
-	}
-
-	if err = s.rootCoord.Init(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err = s.rootCoord.Start(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Start failed", zap.Error(err))
-		panic(err)
 	}
 	// wait for master init or healthy
 	log.Debug("QueryCoord try to wait for RootCoord ready")
@@ -144,7 +139,6 @@ func (s *Server) init() error {
 		log.Debug("QueryCoord wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-
 	if err := s.SetRootCoord(s.rootCoord); err != nil {
 		panic(err)
 	}
@@ -158,25 +152,9 @@ func (s *Server) init() error {
 			panic(err)
 		}
 	}
-
-	if err = s.dataCoord.Init(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-	if err = s.dataCoord.Start(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryCoord try to wait for DataCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryCoord wait for DataCoord ready failed", zap.Error(err))
-		panic(err)
-	}
 	if err := s.SetDataCoord(s.dataCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryCoord report DataCoord ready")
 
 	// --- IndexCoord ---
 	if s.indexCoord == nil {
@@ -186,31 +164,10 @@ func (s *Server) init() error {
 			panic(err)
 		}
 	}
-
-	if err := s.indexCoord.Init(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err := s.indexCoord.Start(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	// wait IndexCoord healthy
-	log.Debug("QueryCoord try to wait for IndexCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryCoord wait for IndexCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryCoord report IndexCoord is ready")
-
 	if err := s.SetIndexCoord(s.indexCoord); err != nil {
 		panic(err)
 	}
 
-	s.queryCoord.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("QueryCoord", zap.Any("State", internalpb.StateCode_Initializing))
 	if err := s.queryCoord.Init(); err != nil {
 		return err
 	}

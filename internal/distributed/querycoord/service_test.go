@@ -402,6 +402,8 @@ func TestServer_Run1(t *testing.T) {
 }
 
 func TestServer_Run2(t *testing.T) {
+	// QueryNode will no longer initialize RootCoord and IndexCoord and DataNode
+	t.Skip()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
@@ -418,6 +420,8 @@ func TestServer_Run2(t *testing.T) {
 }
 
 func TestServer_Run3(t *testing.T) {
+	// QueryNode will no longer initialize RootCoord and IndexCoord and DataNode
+	t.Skip()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
@@ -435,6 +439,8 @@ func TestServer_Run3(t *testing.T) {
 }
 
 func TestServer_Run4(t *testing.T) {
+	// QueryNode will no longer initialize RootCoord and IndexCoord and DataNode
+	t.Skip()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
@@ -452,6 +458,8 @@ func TestServer_Run4(t *testing.T) {
 }
 
 func TestServer_Run5(t *testing.T) {
+	// QueryNode will no longer initialize RootCoord and IndexCoord and DataNode
+	t.Skip()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)

@@ -126,15 +126,8 @@ func (qc *QueryCoord) initSession() error {
 func (qc *QueryCoord) Init() error {
 	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.QueryCoordCfg.MetaRootPath),
 		zap.Strings("etcdEndPoints", Params.QueryCoordCfg.EtcdEndpoints), zap.String("address", Params.QueryCoordCfg.Address))
-	//connect etcd
-	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
-		if err != nil {
-			return err
-		}
-		qc.kvClient = etcdKV
-		return nil
-	}
+
+	log.Debug("QueryCoord start init")
 	var initError error
 	qc.initOnce.Do(func() {
 		err := qc.initSession()
@@ -143,13 +136,23 @@ func (qc *QueryCoord) Init() error {
 			initError = err
 			return
 		}
-		log.Debug("queryCoord try to connect etcd")
+
+		//connect etcd
+		log.Debug("QuerCoord try to connect etcd")
+		connectEtcdFn := func() error {
+			etcdKV, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
+			if err != nil {
+				return err
+			}
+			qc.kvClient = etcdKV
+			return nil
+		}
 		initError = retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
 		if initError != nil {
-			log.Debug("query coordinator try to connect etcd failed", zap.Error(initError))
+			log.Debug("QuerCoord try to connect etcd failed", zap.Error(initError))
 			return
 		}
-		log.Debug("query coordinator try to connect etcd success")
+		log.Debug("QuerCoord try to connect etcd success")
 
 		// init id allocator
 		var idAllocatorKV *etcdkv.EtcdKV
@@ -161,7 +164,7 @@ func (qc *QueryCoord) Init() error {
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 		initError = idAllocator.Initialize()
 		if initError != nil {
-			log.Debug("query coordinator idAllocator initialize failed", zap.Error(initError))
+			log.Debug("QuerCoord idAllocator initialize failed", zap.Error(initError))
 			return
 		}
 		qc.idAllocator = func() (UniqueID, error) {
@@ -171,34 +174,34 @@ func (qc *QueryCoord) Init() error {
 		// init meta
 		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.msFactory, qc.idAllocator)
 		if initError != nil {
-			log.Error("query coordinator init meta failed", zap.Error(initError))
+			log.Error("QueryCoord init meta failed", zap.Error(initError))
 			return
 		}
 
 		// init cluster
 		qc.cluster, initError = newQueryNodeCluster(qc.loopCtx, qc.meta, qc.kvClient, qc.newNodeFn, qc.session)
 		if initError != nil {
-			log.Error("query coordinator init cluster failed", zap.Error(initError))
+			log.Error("QueryCoord init cluster failed", zap.Error(initError))
 			return
 		}
 
 		// init task scheduler
 		qc.scheduler, initError = NewTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.rootCoordClient, qc.dataCoordClient, qc.indexCoordClient, qc.idAllocator)
 		if initError != nil {
-			log.Error("query coordinator init task scheduler failed", zap.Error(initError))
+			log.Error("QueryCoord init task scheduler failed", zap.Error(initError))
 			return
 		}
 
 		// init index checker
 		qc.indexChecker, initError = newIndexChecker(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.rootCoordClient, qc.indexCoordClient, qc.dataCoordClient)
 		if initError != nil {
-			log.Error("query coordinator init index checker failed", zap.Error(initError))
+			log.Error("QueryCoord init index checker failed", zap.Error(initError))
 			return
 		}
 
 		qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	})
-	log.Debug("query coordinator init success")
+	log.Debug("QueryCoord init success")
 	return initError
 }
 
