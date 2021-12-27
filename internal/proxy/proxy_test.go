@@ -363,7 +363,7 @@ func TestProxy(t *testing.T) {
 		defer func() {
 			err := dn.Stop()
 			assert.NoError(t, err)
-			log.Info("stop data node")
+			log.Info("stop DataNode")
 		}()
 	}
 
