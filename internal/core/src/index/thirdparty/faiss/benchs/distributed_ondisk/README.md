@@ -71,7 +71,7 @@ The output should look like [this gist](https://gist.github.com/mdouze/5b2dc69b7
 ### Distributed run
 
 The way the script can be distributed depends on the cluster's scheduling system. 
-Here we use Slurm, but it should be relatively easy to adapt to any scheduler that can allocate a set of matchines and start the same exectuable on all of them. 
+Here we use Slurm, but it should be relatively easy to adapt to any scheduler that can allocate a set of matchines and start the same executable on all of them. 
 
 The command 
 ```
