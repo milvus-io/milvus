@@ -374,7 +374,7 @@ func TestProxy(t *testing.T) {
 		defer func() {
 			err := qc.Stop()
 			assert.NoError(t, err)
-			log.Info("stop query coordinator")
+			log.Info("stop QueryCoord")
 		}()
 	}
 
