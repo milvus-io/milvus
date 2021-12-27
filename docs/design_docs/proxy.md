@@ -410,7 +410,7 @@ type channelsMgr interface {
   Proxy uses these dql message streams to send search requests.
 
 The Remove related operation is to delete the corresponding message stream object, but the stream is not immediately
-closed because maybe there are some data needs to be written into stream currently.
+closed because maybe there are some data that needs to be written into stream currently.
 
 ##### 6.6.3 channelsTimeTicker
 
