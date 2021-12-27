@@ -11,16 +11,9 @@
 
 #pragma once
 
-#include <deque>
-#include <optional>
-#include <boost/dynamic_bitset.hpp>
-
 #include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {
-
-using BitsetChunk = boost::dynamic_bitset<>;
-using BitsetSimple = std::deque<BitsetChunk>;
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,

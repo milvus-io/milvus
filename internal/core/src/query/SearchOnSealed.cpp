@@ -9,18 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-//
-// Created by mike on 12/26/20.
-//
+#include <boost_ext/dynamic_bitset_ext.hpp>
+#include <cmath>
 
-#include "query/SearchOnSealed.h"
-#include <knowhere/index/vector_index/VecIndex.h>
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include <boost_ext/dynamic_bitset_ext.hpp>
-#include <cmath>
+#include "query/SearchOnSealed.h"
+#include "utils/Utils.h"
 
 namespace milvus::query {
 
