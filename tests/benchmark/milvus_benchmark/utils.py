@@ -358,3 +358,17 @@ def get_latest_tag(limit=200):
         raise print("Can't find the latest image name")
     print("The image name used is %s" % str(latest_tag))
     return latest_tag
+
+
+def get_image_tag():
+    url = ""
+    headers = {"accept": "application/json"}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+        tag_name = data[0]["tags"][0]["name"]
+        print("[benchmark update] The image name used is %s" % str(tag_name))
+        return tag_name
+    except:
+        print("Can not get the tag list")
+        return "master-latest"
