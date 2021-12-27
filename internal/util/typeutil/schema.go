@@ -16,10 +16,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"go.uber.org/zap"
 )
 
 // EstimateSizePerRecord returns the estimate size of a record in a collection
