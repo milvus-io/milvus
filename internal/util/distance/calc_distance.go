@@ -164,6 +164,7 @@ func VectorCount(dim int64, length int) int64 {
 	return int64(length*8) / singleBitLen
 }
 
+// ValidateBinaryArrayLength validates a binary array of @dim & @length
 func ValidateBinaryArrayLength(dim int64, length int) error {
 	singleBitLen := SingleBitLen(dim)
 	totalBitLen := int64(length * 8)
