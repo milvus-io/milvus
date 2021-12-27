@@ -272,7 +272,7 @@ func saveBinLog(ctx context.Context,
 			Binlogs: []*datapb.Binlog{{LogPath: key}},
 		})
 	}
-	log.Debug("[query coord unittest] save binlog file to MinIO/S3")
+	log.Debug("[QueryCoord unittest] save binlog file to MinIO/S3")
 
 	err = dataKV.MultiSave(kvs)
 	return fieldBinlog, err
