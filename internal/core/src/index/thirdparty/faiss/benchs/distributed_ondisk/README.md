@@ -125,7 +125,7 @@ This is performed by the script [`make_trained_index.py`](make_trained_index.py)
 
 ## Building the index by slices
 
-We call the slices "vslisces" as they are vertical slices of the big matrix, see explanation in the wiki section [Split across datanbase partitions](https://github.com/facebookresearch/faiss/wiki/Indexing-1T-vectors#split-across-database-partitions).
+We call the slices "vslisces" as they are vertical slices of the big matrix, see explanation in the wiki section [Split across database partitions](https://github.com/facebookresearch/faiss/wiki/Indexing-1T-vectors#split-across-database-partitions).
 
 The script [make_index_vslice.py](make_index_vslice.py) makes an index for a subset of the vectors of the input data and stores it as an independent index. 
 There are 200 slices of 5M vectors each for Deep1B.
