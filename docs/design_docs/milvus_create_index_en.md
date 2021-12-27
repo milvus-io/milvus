@@ -228,7 +228,7 @@ message SegmentInfo {
 
 19. There is a background service, `checkFlushedSegmentLoop`, in `RootCoord`. `checkFlushedSegmentLoop` would periodically check whether there is a segment that needs to be created index but has not been created, the default interval is `10 minutes`, and call `DataCoord` and `IndexCoord`'s service to create index on these segments.
 
-20. In `Milvus 2.0`, `Create Index` is an asynchronous operation, so the `SDK` needs to send `GetIndexStates` request to `IndexCoord` periodically to check if the index has been created, the `proto` is defined as follow.
+20. In `Milvus 2.0`, `Create Index` is an asynchronous operation, so the `SDK` needs to send `GetIndexStates` request to `IndexCoord` periodically to check if the index has been created, the `proto` is defined as follows.
 
 ```proto
 service IndexCoord {
