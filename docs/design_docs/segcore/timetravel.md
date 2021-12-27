@@ -1,5 +1,5 @@
 # Time Travel Implementation (Segment Level)
-Currently，There are two paths to implement time travel:
+Currently，there are two paths to implement time travel:
 
 1. Restrict with vec_count, used in growing segment
 2. Generate bitmask and combine it with DSL calculation results. It is mainly used in sealed segment
