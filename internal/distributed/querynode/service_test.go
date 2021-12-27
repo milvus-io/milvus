@@ -21,12 +21,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/types"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -305,6 +304,8 @@ func Test_NewServer(t *testing.T) {
 }
 
 func Test_Run(t *testing.T) {
+	// QueryNode will no longer initialize RootCoord and IndexCoord
+	t.Skip()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)

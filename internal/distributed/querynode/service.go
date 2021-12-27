@@ -25,6 +25,10 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
@@ -41,9 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -89,10 +90,12 @@ func (s *Server) init() error {
 	qn.Params.QueryNodeCfg.QueryNodePort = int64(Params.Port)
 	//qn.Params.QueryNodeID = Params.QueryNodeID
 
-	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.IP, Params.Port))
+	s.querynode.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("QueryNode", zap.Any("State", internalpb.StateCode_Initializing))
+
+	closer := trace.InitTracing(fmt.Sprintf("QueryNode ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
-	log.Debug("QueryNode", zap.Int("port", Params.Port))
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -105,27 +108,10 @@ func (s *Server) init() error {
 	if s.rootCoord == nil {
 		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, qn.Params.QueryNodeCfg.EtcdEndpoints)
 		if err != nil {
-			log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
+			log.Debug("QueryNode new RootCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
-
-	if err = s.rootCoord.Init(); err != nil {
-		log.Debug("QueryNode RootCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err = s.rootCoord.Start(); err != nil {
-		log.Debug("QueryNode RootCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode start to wait for RootCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryNode wait for RootCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode report RootCoord is ready")
 
 	if err := s.SetRootCoord(s.rootCoord); err != nil {
 		panic(err)
@@ -139,33 +125,12 @@ func (s *Server) init() error {
 			panic(err)
 		}
 	}
-
-	if err := s.indexCoord.Init(); err != nil {
-		log.Debug("QueryNode IndexCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err := s.indexCoord.Start(); err != nil {
-		log.Debug("QueryNode IndexCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	// wait IndexCoord healthy
-	log.Debug("QueryNode start to wait for IndexCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, s.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryNode wait for IndexCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode report IndexCoord is ready")
-
 	if err := s.SetIndexCoord(s.indexCoord); err != nil {
 		panic(err)
 	}
 
-	s.querynode.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("QueryNode", zap.Any("State", internalpb.StateCode_Initializing))
 	if err := s.querynode.Init(); err != nil {
-		log.Error("QueryNode init error: ", zap.Error(err))
+		log.Error("QueryNode init error", zap.Error(err))
 		return err
 	}
 

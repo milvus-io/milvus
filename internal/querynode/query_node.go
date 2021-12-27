@@ -201,7 +201,7 @@ func (node *QueryNode) Init() error {
 		)
 		err = retry.Do(node.queryNodeLoopCtx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
-			log.Debug("queryNode try to connect etcd failed", zap.Error(err))
+			log.Debug("QueryNode try to connect etcd failed", zap.Error(err))
 			initError = err
 			return
 		}
