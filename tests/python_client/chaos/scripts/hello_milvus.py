@@ -17,7 +17,7 @@ from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection
 )
-
+TIMEOUT = 120
 
 def hello_milvus(host="127.0.0.1"):
     import time
@@ -83,7 +83,7 @@ def hello_milvus(host="127.0.0.1"):
     # define output_fields of search result
     res = collection.search(
         vectors[-2:], "float_vector", search_params, topK,
-        "count > 100", output_fields=["count", "random_value"]
+        "count > 100", output_fields=["count", "random_value"], timeout=TIMEOUT
     )
     end_time = time.time()
 
@@ -97,7 +97,7 @@ def hello_milvus(host="127.0.0.1"):
     # query
     expr = "count in [2,4,6,8]"
     output_fields = ["count", "random_value"]
-    res = collection.query(expr, output_fields)
+    res = collection.query(expr, output_fields, timeout=TIMEOUT)
     sorted_res = sorted(res, key=lambda k: k['count'])
     for r in sorted_res:
         print(r)
