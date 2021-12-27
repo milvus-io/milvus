@@ -71,11 +71,11 @@
 ### Add processing of time synchronization signals from Proxy node
 
 1. A virtual channel can be inserted by multiple proxies, so the timestamp in the virtual channel does not increase monotonically.
-2. All proxies report the timestamp of all the virtual channels to the `RC` periodically.
-3. The `RC` collects the timestamps from the proxies on each virtual channel and gets the minimum one as the timestamp of that virtual channel, and then inserts the timestamp into the virtual channel.
-4. Proxy reports the timestamp to the `RC` via grpc.
-5. Proxy needs to register itself in etcd when it starts, `RC` will listen to the corresponding key to determine how many active proxies there are, and thus determine if all of them have sent timestamps to `RC`.
-6. If a proxy is not registered in etcd but sends a timestamp or any other grpc request to `RC`, `RC` will ignore the grpc request.
+2. All proxies report the timestamp of all the virtual channels to the `RootCoord` periodically.
+3. The `RootCoord` collects the timestamps from the proxies on each virtual channel and gets the minimum one as the timestamp of that virtual channel, and then inserts the timestamp into the virtual channel.
+4. Proxy reports the timestamp to the `RootCoord` via grpc.
+5. Proxy needs to register itself in etcd when it starts, `RootCoord` will listen to the corresponding key to determine how many active proxies there are, and thus determine if all of them have sent timestamps to `RootCoord`.
+6. If a proxy is not registered in etcd but sends a timestamp or any other grpc request to `RootCoord`, `RootCoord` will ignore the grpc request.
 
 ### 2.9 Register service in etcd
 
