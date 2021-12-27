@@ -79,9 +79,6 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.NotZero(t, Params.Timeout)
 		t.Logf("master timeout = %d", Params.Timeout)
 
-		assert.NotZero(t, Params.TimeTickInterval)
-		t.Logf("master timetickerInterval = %d", Params.TimeTickInterval)
-
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
 		t.Logf("created time: %v", Params.CreatedTime)

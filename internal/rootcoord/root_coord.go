@@ -272,7 +272,7 @@ func (c *Core) checkInit() error {
 
 func (c *Core) startTimeTickLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.TimeTickInterval) * time.Millisecond)
+	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
 	for {
 		select {
 		case <-c.ctx.Done():
