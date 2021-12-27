@@ -87,6 +87,6 @@ fi
 
 exitcode=$?
 # List pod list & pvc list before exit after helm install
-kubectl get pods -n ${MILVUS_HELM_NAMESPACE} | grep ${MILVUS_HELM_RELEASE_NAME}
+kubectl get pods -n ${MILVUS_HELM_NAMESPACE} -o wide | grep ${MILVUS_HELM_RELEASE_NAME}
 kubectl get pvc -n ${MILVUS_HELM_NAMESPACE} |  grep ${MILVUS_HELM_RELEASE_NAME} | awk '{$3=null;print $0}'
 exit ${exitcode}
