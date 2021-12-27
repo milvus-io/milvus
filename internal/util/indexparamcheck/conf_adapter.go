@@ -163,6 +163,7 @@ type IVFPQConfAdapter struct {
 	IVFConfAdapter
 }
 
+// CheckTrain checks if ivf-pq index can be built with the specific index parameters.
 func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !adapter.IVFConfAdapter.CheckTrain(params) {
 		return false
