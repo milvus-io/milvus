@@ -10,16 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnGrowing.h"
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include "segcore/Reduce.h"
-
-#include <faiss/utils/distances.h>
-#include "utils/Utils.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
 
 namespace milvus::query {
+
 Status
 FloatSearch(const segcore::SegmentGrowingImpl& segment,
             const query::SearchInfo& info,
