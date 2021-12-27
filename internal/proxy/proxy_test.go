@@ -352,7 +352,7 @@ func TestProxy(t *testing.T) {
 		defer func() {
 			err := dc.Stop()
 			assert.NoError(t, err)
-			log.Info("stop data coordinator")
+			log.Info("stop DataCoord")
 		}()
 	}
 
