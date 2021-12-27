@@ -98,7 +98,7 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 		olds = append(olds, c.NodeID)
 	}
 
-	newOnLines := c.getNewOnlines(nodes, olds)
+	newOnLines := c.getNewOnLines(nodes, olds)
 	for _, n := range newOnLines {
 		if err := c.AddNode(n); err != nil {
 			return err
@@ -174,7 +174,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 	}
 }
 
-func (c *ChannelManager) getNewOnlines(curr []int64, old []int64) []int64 {
+func (c *ChannelManager) getNewOnLines(curr []int64, old []int64) []int64 {
 	mold := make(map[int64]struct{})
 	ret := make([]int64, 0, len(curr))
 	for _, n := range old {
