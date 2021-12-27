@@ -2052,6 +2052,7 @@ func (qt *queryTask) getVChannels() ([]vChan, error) {
 	return channels, nil
 }
 
+// IDs2Expr converts ids slices to bool expresion with specified field name
 func IDs2Expr(fieldName string, ids []int64) string {
 	idsStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids)), ", "), "[]")
 	return fieldName + " in [ " + idsStr + " ]"
