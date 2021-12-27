@@ -407,7 +407,7 @@ func TestProxy(t *testing.T) {
 		defer func() {
 			err := in.Stop()
 			assert.NoError(t, err)
-			log.Info("stop index node")
+			log.Info("stop IndexNode")
 		}()
 	}
 
