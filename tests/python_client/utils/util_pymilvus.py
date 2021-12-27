@@ -1,6 +1,5 @@
 import random
 import string
-import logging
 import threading
 import traceback
 import time
@@ -8,6 +7,7 @@ import copy
 import numpy as np
 from sklearn import preprocessing
 from pymilvus import Milvus, DataType
+from utils.util_log import test_log as log
 
 port = 19530
 epsilon = 0.000001
@@ -897,7 +897,7 @@ def get_search_param(index_type, metric_type="L2"):
         search_k = {"search_k": 1000}
         search_params.update({"params": search_k})
     else:
-        logging.getLogger().error("Invalid index_type.")
+        log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
     return search_params
 
@@ -913,7 +913,7 @@ def restart_server(helm_release_name):
     res = True
     timeout = 120
     from kubernetes import client, config
-    client.rest.logger.setLevel(logging.WARNING)
+    client.rest.logger.setLevel(log.WARNING)
 
     # service_name = "%s.%s.svc.cluster.local" % (helm_release_name, namespace)
     config.load_kube_config()
@@ -928,43 +928,43 @@ def restart_server(helm_release_name):
             break
             # v1.patch_namespaced_config_map(config_map_name, namespace, body, pretty='true')
     # status_res = v1.read_namespaced_service_status(helm_release_name, namespace, pretty='true')
-    logging.getLogger().debug("Pod name: %s" % pod_name)
+    log.debug("Pod name: %s" % pod_name)
     if pod_name is not None:
         try:
             v1.delete_namespaced_pod(pod_name, namespace)
         except Exception as e:
-            logging.error(str(e))
-            logging.error("Exception when calling CoreV1Api->delete_namespaced_pod")
+            log.error(str(e))
+            log.error("Exception when calling CoreV1Api->delete_namespaced_pod")
             res = False
             return res
-        logging.error("Sleep 10s after pod deleted")
+        log.error("Sleep 10s after pod deleted")
         time.sleep(10)
         # check if restart successfully
         pods = v1.list_namespaced_pod(namespace)
         for i in pods.items:
             pod_name_tmp = i.metadata.name
-            logging.error(pod_name_tmp)
+            log.error(pod_name_tmp)
             if pod_name_tmp == pod_name:
                 continue
             elif pod_name_tmp.find(helm_release_name) == -1 or pod_name_tmp.find("mysql") != -1:
                 continue
             else:
                 status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
-                logging.error(status_res.status.phase)
+                log.error(status_res.status.phase)
                 start_time = time.time()
                 ready_break = False
                 while time.time() - start_time <= timeout:
-                    logging.error(time.time())
+                    log.error(time.time())
                     status_res = v1.read_namespaced_pod_status(pod_name_tmp, namespace, pretty='true')
                     if status_res.status.phase == "Running":
-                        logging.error("Already running")
+                        log.error("Already running")
                         ready_break = True
                         time.sleep(10)
                         break
                     else:
                         time.sleep(1)
                 if time.time() - start_time > timeout:
-                    logging.error("Restart pod: %s timeout" % pod_name_tmp)
+                    log.error("Restart pod: %s timeout" % pod_name_tmp)
                     res = False
                     return res
                 if ready_break:
@@ -983,16 +983,16 @@ def restart_server(helm_release_name):
     #         api_response = v1.read_namespaced_pod_log(pod_name_tmp, namespace, container=container, follow=follow,
     #                                                 pretty=pretty, previous=previous, since_seconds=since_seconds,
     #                                                 timestamps=timestamps)
-    #         logging.error(api_response)
+    #         log.error(api_response)
     #         return res
     #     except Exception as e:
-    #         logging.error("Exception when calling CoreV1Api->read_namespaced_pod_log: %s\n" % e)
+    #         log.error("Exception when calling CoreV1Api->read_namespaced_pod_log: %s\n" % e)
     #         # waiting for server start
     #         time.sleep(5)
     #         # res = False
     #         # return res
     # if time.time() - start_time > timeout:
-    #     logging.error("Restart pod: %s timeout" % pod_name_tmp)
+    #     log.error("Restart pod: %s timeout" % pod_name_tmp)
     #     res = False
     return res
 
@@ -1018,7 +1018,7 @@ class MyThread(threading.Thread):
             super(MyThread, self).run()
         except BaseException as e:
             self.exc = e
-            logging.error(traceback.format_exc())
+            log.error(traceback.format_exc())
 
     def join(self):
         super(MyThread, self).join()
