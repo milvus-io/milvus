@@ -457,85 +457,182 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 }
 
 func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
-	log.Debug("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
+	log.Debug("segmentLoader FromDmlCPLoadDelete",
+		zap.Any("collectionID", collectionID),
+	)
 	stream, err := loader.factory.NewMsgStream(ctx)
 	if err != nil {
+		log.Debug("segmentLoader FromDmlCPLoadDelete NewMsgStream failed",
+			zap.Any("collectionID", collectionID),
+			zap.Error(err),
+		)
 		return err
 	}
 	defer stream.Close()
 	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
-	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
+
+	consumeSubName := fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID)
+	stream.AsReader([]string{pChannelName}, consumeSubName)
 	err = stream.SeekReaders([]*internalpb.MsgPosition{position})
 	if err != nil {
+		log.Error("segmentLoader FromDmlCPLoadDelete stream reader AsReader failed",
+			zap.Any("collectionID", collectionID),
+			zap.String("channelName", pChannelName),
+			zap.String("subName", consumeSubName),
+			zap.Any("position", position),
+			zap.Any("position msgID", position.MsgID),
+			zap.Error(err),
+		)
 		return err
 	}
+	log.Debug("segmentLoader FromDmlCPLoadDelete stream reader",
+		zap.Any("collectionID", collectionID),
+		zap.String("channelName", pChannelName),
+		zap.String("subName", consumeSubName),
+		zap.Any("position", position),
+		zap.Any("position msgID", position.MsgID),
+	)
 
 	delData := &deleteData{
 		deleteIDs:        make(map[UniqueID][]int64),
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 		deleteOffset:     make(map[UniqueID]int64),
 	}
-	log.Debug("start read msg from stream reader", zap.Any("msg id", position.GetMsgID()))
 	for stream.HasNext(pChannelName) {
 		ctx, cancel := context.WithTimeout(ctx, timeoutForEachRead)
 		tsMsg, err := stream.Next(ctx, pChannelName)
 		if err != nil {
-			log.Warn("fail to load delete", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
+			log.Debug("segmentLoader FromDmlCPLoadDelete stream reader Next failed",
+				zap.Any("collectionID", collectionID),
+				zap.String("channelName", pChannelName),
+				zap.String("subName", consumeSubName),
+				zap.Any("position msgID", position.MsgID),
+				zap.Error(err),
+			)
 			cancel()
 			return err
 		}
 		if tsMsg == nil {
+			log.Debug("segmentLoader FromDmlCPLoadDelete stream reader Next msg == nil",
+				zap.Any("collectionID", collectionID),
+				zap.String("channelName", pChannelName),
+				zap.String("subName", consumeSubName),
+				zap.Any("position msgID", position.MsgID),
+			)
 			cancel()
 			continue
 		}
 
 		if tsMsg.Type() == commonpb.MsgType_Delete {
 			dmsg := tsMsg.(*msgstream.DeleteMsg)
+			log.Debug("segmentLoader FromDmlCPLoadDelete stream reader Next get delete msg",
+				zap.Any("collectionID", collectionID),
+				zap.String("channelName", pChannelName),
+				zap.String("subName", consumeSubName),
+				zap.Any("position msgID", position.MsgID),
+				zap.Int64("dmsg.CollectionID", dmsg.CollectionID),
+			)
 			if dmsg.CollectionID != collectionID {
+				log.Debug("segmentLoader FromDmlCPLoadDelete stream reader Next get delete msg but not match",
+					zap.Any("collectionID", collectionID),
+					zap.String("channelName", pChannelName),
+					zap.String("subName", consumeSubName),
+					zap.Any("position msgID", position.MsgID),
+					zap.Int64("dmsg.CollectionID", dmsg.CollectionID),
+				)
 				cancel()
 				continue
 			}
-			log.Debug("delete pk",
+			log.Debug("segmentLoader FromDmlCPLoadDelete stream reader Next delete pk",
+				zap.Any("collectionID", collectionID),
+				zap.String("channelName", pChannelName),
+				zap.String("subName", consumeSubName),
+				zap.Any("position msgID", position.MsgID),
+				zap.Int64("dmsg.CollectionID", dmsg.CollectionID),
 				zap.Any("pk", dmsg.PrimaryKeys),
 				zap.String("vChannelName", position.GetChannelName()),
-				zap.Any("msg id", position.GetMsgID()),
 			)
 			processDeleteMessages(loader.historicalReplica, dmsg, delData)
 		}
 		cancel()
 	}
-	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
+
+	log.Debug("segmentLoader FromDmlCPLoadDelete all data has been read and after processDeleteMessages",
+		zap.Any("collectionID", collectionID),
+		zap.String("channelName", pChannelName),
+		zap.String("subName", consumeSubName),
+		zap.Any("position msgID", position.MsgID),
+		zap.Any("deleteIDs", delData.deleteIDs),
+		zap.Any("deleteOffset", delData.deleteOffset),
+		zap.Any("deleteTimstamps", delData.deleteTimestamps),
+	)
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Debug(err.Error())
+			log.Debug("segmentLoader FromDmlCPLoadDeletegetSegmentByID failed",
+				zap.Any("collectionID", collectionID),
+				zap.Int64("segmentID", segmentID),
+				zap.String("segmentType", segment.segmentType.String()),
+				zap.Error(err),
+			)
 			continue
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
 	}
-
+	log.Debug("segmentLoader FromDmlCPLoadDelete after segmentPreDelete",
+		zap.Any("collectionID", collectionID),
+		zap.String("channelName", pChannelName),
+		zap.String("subName", consumeSubName),
+		zap.Any("position msgID", position.MsgID),
+		zap.Any("deleteIDs", delData.deleteIDs),
+		zap.Any("deleteOffset", delData.deleteOffset),
+		zap.Any("deleteTimstamps", delData.deleteTimestamps),
+	)
 	wg := sync.WaitGroup{}
 	for segmentID := range delData.deleteOffset {
 		wg.Add(1)
-		go deletePk(loader.historicalReplica, delData, segmentID, &wg)
+		go deletePk(loader.historicalReplica, delData, segmentID, collectionID, &wg)
 	}
 	wg.Wait()
-	log.Debug("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
+	log.Debug("segmentLoader FromDmlCPLoadDelete all done",
+		zap.Any("collectionID", collectionID),
+		zap.String("channelName", pChannelName),
+		zap.String("subName", consumeSubName),
+		zap.Any("position msgID", position.MsgID),
+	)
 	return nil
 }
 
-func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
+func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID UniqueID, collectionID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
+	log.Debug("deletePk ",
+		zap.Int64("collectionID", collectionID),
+		zap.Any("SegmentID", segmentID))
 	targetSegment, err := replica.getSegmentByID(segmentID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error("deletePk getSegmentByID",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("SegmentID", segmentID),
+			zap.Error(err),
+		)
 		return
 	}
-
+	log.Debug("deletePk",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("SegmentID", segmentID),
+		zap.String("segmentType", targetSegment.segmentType.String()),
+		zap.Error(err),
+	)
 	if targetSegment.segmentType != segmentTypeSealed && targetSegment.segmentType != segmentTypeIndexing {
+		log.Error("deletePk targetSegment type not match",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("SegmentID", segmentID),
+			zap.String("need", segmentTypeIndexing.String()),
+			zap.String("actual", targetSegment.segmentType.String()),
+			zap.Error(err),
+		)
 		return
 	}
 
@@ -543,12 +640,36 @@ func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID Unique
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
+	log.Debug("deletePk targetSegment delete",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("SegmentID", segmentID),
+		zap.String("segmentType", targetSegment.segmentType.String()),
+		zap.Any("offset", offset),
+		zap.Any("ids", ids),
+		zap.Any("timestamps", timestamps),
+	)
+
 	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
 	if err != nil {
-		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
+		log.Error("deletePk targetSegment delete failed",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("SegmentID", segmentID),
+			zap.String("segmentType", targetSegment.segmentType.String()),
+			zap.Any("offset", offset),
+			zap.Any("ids", ids),
+			zap.Any("timestamps", timestamps),
+			zap.Error(err),
+		)
 		return
 	}
-	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("segmentType", targetSegment.segmentType))
+	log.Debug("deletePk targetSegment delete done",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("SegmentID", segmentID),
+		zap.String("segmentType", targetSegment.segmentType.String()),
+		zap.Any("offset", offset),
+		zap.Any("ids", ids),
+		zap.Any("timestamps", timestamps),
+	)
 }
 
 // JoinIDPath joins ids to path format.

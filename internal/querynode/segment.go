@@ -58,6 +58,21 @@ const (
 	segmentTypeIndexing
 )
 
+var segmentTypeNames = map[segmentType]string{
+	segmentTypeInvalid:  "Invalid",
+	segmentTypeGrowing:  "Growing",
+	segmentTypeSealed:   "Sealed",
+	segmentTypeIndexing: "Indexing",
+}
+
+func (x segmentType) String() string {
+	s, ok := segmentTypeNames[x]
+	if ok {
+		return s
+	}
+	return strconv.Itoa(int(x))
+}
+
 const (
 	bloomFilterSize       uint    = 100000
 	maxBloomFalsePositive float64 = 0.005
@@ -308,7 +323,8 @@ func (s *Segment) search(plan *SearchPlan,
 	ts := C.uint64_t(timestamp[0])
 	cPlaceHolderGroup := cPlaceholderGroups[0]
 
-	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
+	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()),
+		zap.Int64("collectionID", s.collectionID))
 	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult)
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err

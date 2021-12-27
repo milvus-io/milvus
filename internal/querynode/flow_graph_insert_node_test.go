@@ -167,7 +167,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		deleteData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
 		wg.Add(1)
-		insertNode.delete(deleteData, defaultSegmentID, wg)
+		insertNode.delete(deleteData, defaultSegmentID, defaultCollectionID, wg)
 	})
 
 	t.Run("test only delete", func(t *testing.T) {
@@ -187,7 +187,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		assert.NoError(t, err)
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		insertNode.delete(deleteData, defaultSegmentID, wg)
+		insertNode.delete(deleteData, defaultSegmentID, defaultCollectionID, wg)
 	})
 
 	t.Run("test segment delete error", func(t *testing.T) {
@@ -208,7 +208,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		deleteData.deleteTimestamps[defaultSegmentID] = deleteData.deleteTimestamps[defaultSegmentID][:len(deleteData.deleteTimestamps)/2]
-		insertNode.delete(deleteData, defaultSegmentID, wg)
+		insertNode.delete(deleteData, defaultSegmentID, defaultCollectionID, wg)
 	})
 
 	t.Run("test no target segment", func(t *testing.T) {
@@ -217,7 +217,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		insertNode := newInsertNode(streaming)
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		insertNode.delete(nil, defaultSegmentID, wg)
+		insertNode.delete(nil, defaultSegmentID, defaultCollectionID, wg)
 	})
 }
 

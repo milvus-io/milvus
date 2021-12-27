@@ -4785,6 +4785,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		dt.result.Status.Reason = err.Error()
 		return err
 	}
+	log.Debug("Proxy produce delete msg into stream done", zap.Int64("collectionID", dt.CollectionID))
 	return nil
 }
 

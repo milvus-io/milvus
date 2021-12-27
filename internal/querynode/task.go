@@ -532,7 +532,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		pDeltaChannels = append(pDeltaChannels, p)
 		VPDeltaChannels[v] = p
 	}
-	log.Debug("Starting WatchDeltaChannels ...",
+	log.Debug(" watchDeltaChannelsTask starting WatchDeltaChannels ...",
 		zap.Any("collectionID", collectionID),
 		zap.Any("vDeltaChannels", vDeltaChannels),
 		zap.Any("pChannels", pDeltaChannels),
@@ -540,7 +540,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	if len(VPDeltaChannels) != len(vDeltaChannels) {
 		return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
 	}
-	log.Debug("Get physical channels done",
+	log.Debug("watchDeltaChannelsTask get physical channels done",
 		zap.Any("collectionID", collectionID),
 	)
 
@@ -549,6 +549,10 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	}
 	hCol, err := w.node.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
+		log.Debug("watchDeltaChannelsTask getCollectionByID failed",
+			zap.Any("collectionID", collectionID),
+			zap.Error(err),
+		)
 		return err
 	}
 
@@ -556,6 +560,12 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	for _, dstChan := range vDeltaChannels {
 		for _, srcChan := range hCol.vDeltaChannels {
 			if dstChan == srcChan {
+				log.Debug("watchDeltaChannelsTask dstChan == srcChan",
+					zap.Any("collectionID", collectionID),
+					zap.String("srcChan", srcChan),
+					zap.String("dstChan", dstChan),
+					zap.Error(err),
+				)
 				return nil
 			}
 		}
@@ -586,12 +596,13 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	for _, info := range w.req.Infos {
 		toSubChannels = append(toSubChannels, info.ChannelName)
 	}
-	log.Debug("watchDeltaChannel, group channels done", zap.Any("collectionID", collectionID))
+	log.Debug("watchDeltaChannelsTask, group channels done", zap.Any("collectionID", collectionID))
 
 	// create tSafe
 	for _, channel := range vDeltaChannels {
 		w.node.tSafeReplica.addTSafe(channel)
 	}
+	log.Debug("watchDeltaChannelsTask, addTSafe done", zap.Any("collectionID", collectionID))
 
 	w.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels)
 
@@ -601,8 +612,10 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		for _, channel := range vDeltaChannels {
 			err = qc.addTSafeWatcher(channel)
 			if err != nil {
-				// tSafe have been existed, not error
-				log.Warn(err.Error())
+				log.Warn("watchDeltaChannelsTask, addTSafeWatcher failed",
+					zap.Any("collectionID", collectionID),
+					zap.String("channel", channel),
+				)
 			}
 		}
 	}
@@ -611,21 +624,35 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	for _, channel := range toSubChannels {
 		fg, err := w.node.dataSyncService.getFlowGraphByDeltaChannel(collectionID, channel)
 		if err != nil {
+			log.Error("watchDeltaChannelsTask, getFlowGraphByDeltaChannel failed",
+				zap.Any("collectionID", collectionID),
+				zap.String("channel", channel),
+			)
 			return errors.New("watchDeltaChannelsTask failed, error = " + err.Error())
 		}
 		// use pChannel to consume
 		err = fg.consumerFlowGraphLatest(VPDeltaChannels[channel], consumeSubName)
 		if err != nil {
+			log.Error("watchDeltaChannelsTask, consumerFlowGraphLatest failed",
+				zap.Any("collectionID", collectionID),
+				zap.String("channel", channel),
+				zap.String("consumeSubName", consumeSubName),
+				zap.Error(err),
+			)
 			return errors.New("watchDeltaChannelsTask failed, msgStream consume error :" + err.Error())
 		}
 	}
-	log.Debug("as consumer channels",
+	log.Debug(" watchDeltaChannelsTask as consumer channels",
 		zap.Any("collectionID", collectionID),
 		zap.Any("toSubChannels", toSubChannels))
 
 	for _, info := range w.req.Infos {
 		if err := w.node.loader.FromDmlCPLoadDelete(w.ctx, collectionID, info.SeekPosition); err != nil {
-			return errors.New("watchDeltaChannelsTask from dml cp load delete failed, error = " + err.Error())
+			log.Debug(" watchDeltaChannelsTask segmentLoader FromDmlCPLoadDelete failed",
+				zap.Any("collectionID", collectionID),
+				zap.Error(err),
+			)
+			return errors.New("watchDeltaChannelsTask failed, error = " + err.Error())
 		}
 	}
 
@@ -645,7 +672,6 @@ func (w *watchDeltaChannelsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-// loadSegmentsTask
 func (l *loadSegmentsTask) Timestamp() Timestamp {
 	if l.req.Base == nil {
 		log.Warn("nil base req in loadSegmentsTask")

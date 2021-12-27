@@ -150,7 +150,12 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				continue
 			}
 			iData.insertOffset[segmentID] = offset
-			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID))
+			log.Debug("fg_insert_node updateBloomFilter",
+				zap.Int64("collectionID", targetSegment.collectionID),
+				zap.Int64("segmentID", segmentID),
+				zap.String("segmentType", targetSegment.segmentType.String()),
+				zap.Any("offset", offset),
+			)
 			targetSegment.updateBloomFilter(iData.insertPKs[segmentID])
 		}
 	}
@@ -168,35 +173,72 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 		deleteOffset:     make(map[UniqueID]int64),
 	}
+	var delCollectionID UniqueID
 	// 1. filter segment by bloom filter
 	for _, delMsg := range iMsg.deleteMessages {
 		if iNode.streamingReplica.getSegmentNum() != 0 {
-			log.Debug("delete in streaming replica",
+			log.Debug("fg_insert_node delete in streaming replica",
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
 				zap.Any("pks", delMsg.PrimaryKeys),
 				zap.Any("timestamp", delMsg.Timestamps))
 			processDeleteMessages(iNode.streamingReplica, delMsg, delData)
+		} else {
+			log.Warn("fg_insert_node delete in streaming replica getSementNum = 0",
+				zap.Any("collectionID", delMsg.CollectionID),
+				zap.Any("collectionName", delMsg.CollectionName),
+				zap.Any("pks", delMsg.PrimaryKeys),
+				zap.Any("timestamp", delMsg.Timestamps))
 		}
+		delCollectionID = delMsg.CollectionID
 	}
+
+	log.Debug("fg_insert_node after processDeleteMessages",
+		zap.Int64("collectionID", delCollectionID),
+		zap.Any("deleteIDs", delData.deleteIDs),
+		zap.Any("deleteOffset", delData.deleteOffset),
+		zap.Any("deleteTimestamps", delData.deleteTimestamps),
+	)
 
 	// 2. do preDelete
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := iNode.streamingReplica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Debug(err.Error())
+			log.Warn("fg_insert_node getSegmentByID failed",
+				zap.Int64("collectionID", delCollectionID),
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
 			continue
 		}
+		log.Debug("fg_insert_node segmentPreDelete",
+			zap.Int64("collectionID", delCollectionID),
+			zap.Int64("segmentID", segmentID),
+			zap.Any("pks", pks),
+			zap.Any("len", len(pks)),
+		)
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
 	}
 
+	log.Debug("fg_insert_node after segmentPreDelete",
+		zap.Int64("collectionID", delCollectionID),
+		zap.Any("deleteIDs", delData.deleteIDs),
+		zap.Any("deleteOffset", delData.deleteOffset),
+		zap.Any("deleteTimestamps", delData.deleteTimestamps),
+	)
+
 	// 3. do delete
 	for segmentID := range delData.deleteOffset {
 		wg.Add(1)
-		go iNode.delete(delData, segmentID, &wg)
+		go iNode.delete(delData, segmentID, delCollectionID, &wg)
 	}
 	wg.Wait()
+
+	log.Debug("fg_insert_node done",
+		zap.Int64("collectionID", delCollectionID),
+		zap.Any("timeRange", iMsg.timeRange),
+	)
 
 	var res Msg = &serviceTimeMsg{
 		timeRange: iMsg.timeRange,
@@ -217,7 +259,7 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 	} else {
 		partitionIDs, err = replica.getPartitionIDs(msg.CollectionID)
 		if err != nil {
-			log.Warn(err.Error())
+			log.Warn("processDeleteMessages error occur", zap.Error(err))
 			return
 		}
 	}
@@ -225,7 +267,9 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 	for _, partitionID := range partitionIDs {
 		segmentIDs, err := replica.getSegmentIDs(partitionID)
 		if err != nil {
-			log.Warn(err.Error())
+			log.Warn("processDeleteMessages getSegmentIDs",
+				zap.Int64("collectionID", msg.CollectionID),
+				zap.Error(err))
 			continue
 		}
 		resultSegmentIDs = append(resultSegmentIDs, segmentIDs...)
@@ -233,18 +277,29 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 	for _, segmentID := range resultSegmentIDs {
 		segment, err := replica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Warn(err.Error())
+			log.Warn("processDeleteMessages getSegment",
+				zap.Int64("collectionID", msg.CollectionID),
+				zap.Error(err))
 			continue
 		}
 		pks, err := filterSegmentsByPKs(msg.PrimaryKeys, segment)
 		if err != nil {
-			log.Warn(err.Error())
+			log.Warn("processDeleteMessages filterSegmentsByPKs",
+				zap.Int64("collectionID", msg.CollectionID),
+				zap.Error(err),
+			)
 			continue
 		}
 		if len(pks) > 0 {
 			delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], pks...)
 			// TODO(yukun) get offset of pks
 			delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], msg.Timestamps[:len(pks)]...)
+			log.Debug("processDeleteMessages collection pks",
+				zap.Int("len", len(pks)),
+				zap.Any("pks", pks),
+				zap.Int64("collectionID", msg.CollectionID),
+				zap.Int64("segmentID", segmentID),
+			)
 		}
 	}
 }
@@ -266,13 +321,14 @@ func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
 			res = append(res, pk)
 		}
 	}
-	log.Debug("In filterSegmentsByPKs", zap.Any("pk len", len(res)), zap.Any("segment", segment.segmentID))
+	log.Debug("In filterSegmentsByPKs", zap.Any("pk len", len(res)), zap.Int64("segment", segment.segmentID),
+		zap.String("segmentType", segment.segmentType.String()))
 	return res, nil
 }
 
 // insert would execute insert operations for specific growing segment
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {
-	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
+	log.Debug("QueryNode::iNode::insert", zap.Int64("SegmentID", segmentID))
 	var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
 		log.Warn("cannot find segment:", zap.Int64("segmentID", segmentID))
@@ -293,7 +349,8 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 
 	err = targetSegment.segmentInsert(offsets, &ids, &timestamps, &records)
 	if err != nil {
-		log.Debug("QueryNode: targetSegmentInsert failed", zap.Error(err))
+		log.Debug("QueryNode: targetSegmentInsert failed", zap.Error(err),
+			zap.Int64("collectionID", targetSegment.collectionID))
 		// TODO: add error handling
 		wg.Done()
 		return
@@ -304,30 +361,56 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 }
 
 // delete would execute delete operations for specific growing segment
-func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
+func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, collectionID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
+	log.Debug("fg_insert_node delete",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("SegmentID", segmentID),
+	)
 	targetSegment, err := iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Error("flow_graph_insert_node delete getSegmentByID failed",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("segmentID", segmentID),
+			zap.Error(err))
 		return
 	}
 
 	if targetSegment.segmentType != segmentTypeGrowing {
+		log.Warn("fg_insert_node delete segmentType not match",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("segmentID", segmentID),
+			zap.String("needType", segmentTypeGrowing.String()),
+			zap.String("actualType", targetSegment.segmentType.String()),
+			zap.Error(err))
 		return
 	}
 
 	ids := deleteData.deleteIDs[segmentID]
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
+	log.Debug("fg_insert_node delete segmentDelete",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("SegmentID", segmentID),
+		zap.Any("ids", ids),
+		zap.Any("offset", offset),
+		zap.Any("timestamps", timestamps),
+	)
 
 	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
 	if err != nil {
-		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
+		log.Warn("fg_insert_node targetSegment call segmentDelete failed",
+			zap.Int64("collectionID", targetSegment.collectionID),
+			zap.Int64("segmentID", targetSegment.segmentID),
+			zap.String("segmentType", targetSegment.segmentType.String()),
+			zap.Error(err))
 		return
 	}
 
-	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
+	log.Debug("fg_insert_node do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])),
+		zap.Int64("segmentID", segmentID),
+		zap.Any("ids", ids),
+		zap.Int64("collectionID", targetSegment.collectionID))
 }
 
 // TODO: remove this function to proper file

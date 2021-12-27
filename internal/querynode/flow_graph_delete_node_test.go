@@ -46,7 +46,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		deleteNode.delete(deleteData, defaultSegmentID, wg)
+		deleteNode.delete(deleteData, defaultSegmentID, defaultCollectionID, wg)
 	})
 
 	t.Run("test segment delete error", func(t *testing.T) {
@@ -68,7 +68,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		deleteData.deleteTimestamps[defaultSegmentID] = deleteData.deleteTimestamps[defaultSegmentID][:len(deleteData.deleteTimestamps)/2]
-		deleteNode.delete(deleteData, defaultSegmentID, wg)
+		deleteNode.delete(deleteData, defaultSegmentID, defaultCollectionID, wg)
 	})
 
 	t.Run("test no target segment", func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 		deleteNode := newDeleteNode(historical)
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		deleteNode.delete(nil, defaultSegmentID, wg)
+		deleteNode.delete(nil, defaultSegmentID, defaultCollectionID, wg)
 	})
 
 	t.Run("test invalid segmentType", func(t *testing.T) {
@@ -95,7 +95,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		deleteNode.delete(&deleteData{}, defaultSegmentID, wg)
+		deleteNode.delete(&deleteData{}, defaultSegmentID, defaultCollectionID, wg)
 	})
 }
 

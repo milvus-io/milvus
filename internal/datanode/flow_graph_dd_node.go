@@ -172,6 +172,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			zap.String("vChannelName", ddn.vchannelName),
 			zap.Error(err))
 	}
+	log.Debug("DataNode forward to deltaChannel", zap.Uint64("ts", msMsg.TimestampMax()))
 
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
 	fgMsg.endPositions = append(fgMsg.endPositions, msMsg.EndPositions()...)

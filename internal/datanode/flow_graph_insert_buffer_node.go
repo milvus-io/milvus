@@ -287,7 +287,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		for _, segToFlush := range seg2Upload {
 			// If full, auto flush
 			if bd, ok := ibNode.insertBuffer.Load(segToFlush); ok && bd.(*BufferData).effectiveCap() <= 0 {
-				log.Info("Auto flush",
+				log.Info("Schedule auto flush",
 					zap.Int64("segment id", segToFlush),
 					zap.String("vchannel name", ibNode.channelName),
 				)

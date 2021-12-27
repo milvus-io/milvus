@@ -1024,6 +1024,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
 
+	log.Debug("QueryNode start to search on ", zap.Int64("collectionID", searchMsg.CollectionID),
+		zap.Int64("queryNum", queryNum), zap.Int64("topK", topK), zap.Int64("msgID", searchMsg.ID()))
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d), msgID = %d", searchMsg.CollectionID, queryNum, topK, searchMsg.ID()))
 
 	// get global sealed segments
@@ -1266,7 +1268,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	}
 
 	// historical retrieve
-	log.Debug("historical retrieve start", zap.Int64("msgID", retrieveMsg.ID()))
+	log.Debug("historical retrieve start", zap.Int64("msgID", retrieveMsg.ID()), zap.Int64("collectionID", retrieveMsg.CollectionID))
 	hisRetrieveResults, sealedSegmentRetrieved, sealedPartitionRetrieved, err := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
 	if err != nil {
 		return err
