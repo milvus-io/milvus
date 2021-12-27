@@ -390,7 +390,7 @@ func TestProxy(t *testing.T) {
 	}
 
 	ic := runIndexCoord(ctx, localMsg)
-	log.Info("running index coordinator ...")
+	log.Info("running IndexCoord ...")
 
 	if ic != nil {
 		defer func() {
