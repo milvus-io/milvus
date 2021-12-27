@@ -396,7 +396,7 @@ func TestProxy(t *testing.T) {
 		defer func() {
 			err := ic.Stop()
 			assert.NoError(t, err)
-			log.Info("stop index coordinator")
+			log.Info("stop IndexCoord")
 		}()
 	}
 
