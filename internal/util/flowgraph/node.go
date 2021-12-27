@@ -145,7 +145,7 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 		t := nodeCtx.inputMessages[0].TimeTick()
 		latestTime := t
 		for i := 1; i < len(nodeCtx.inputMessages); i++ {
-			if t < nodeCtx.inputMessages[i].TimeTick() {
+			if latestTime < nodeCtx.inputMessages[i].TimeTick() {
 				latestTime = nodeCtx.inputMessages[i].TimeTick()
 			}
 		}
