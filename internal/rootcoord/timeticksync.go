@@ -141,7 +141,7 @@ func (t *timetickSync) sendToChannel() {
 		// give warning every 2 second if not get ttMsg from proxy nodes
 		if maxCnt%10 == 0 {
 			log.Warn("proxy idle for long time", zap.Any("proxy list", idleProxyList),
-				zap.Int64("idle time", int64(Params.RootCoordCfg.TimeTickInterval)*maxCnt))
+				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.Milliseconds()*maxCnt))
 		}
 		return
 	}
@@ -314,7 +314,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			wg.Wait()
 			span := tr.ElapseSpan()
 			// rootcoord send tt msg to all channels every 200ms by default
-			if span.Milliseconds() > int64(Params.RootCoordCfg.TimeTickInterval) {
+			if span > Params.ProxyCfg.TimeTickInterval {
 				log.Warn("rootcoord send tt to all channels too slowly",
 					zap.Int("chanNum", len(local.chanTs)), zap.Int64("span", span.Milliseconds()))
 			}

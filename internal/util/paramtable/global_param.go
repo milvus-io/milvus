@@ -301,8 +301,7 @@ type rootCoordConfig struct {
 	DefaultIndexName            string
 	MinSegmentSizeToEnableIndex int64
 
-	Timeout          int
-	TimeTickInterval int
+	Timeout int
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -331,7 +330,6 @@ func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.initDefaultIndexName()
 
 	p.initTimeout()
-	p.initTimeTickInterval()
 
 	//p.initRoleName()
 }
@@ -453,10 +451,6 @@ func (p *rootCoordConfig) initDefaultIndexName() {
 
 func (p *rootCoordConfig) initTimeout() {
 	p.Timeout = p.BaseParams.ParseIntWithDefault("rootCoord.timeout", 3600)
-}
-
-func (p *rootCoordConfig) initTimeTickInterval() {
-	p.TimeTickInterval = p.BaseParams.ParseIntWithDefault("rootCoord.timeTickInterval", 200)
 }
 
 //func (p *rootCoordConfig) initRoleName() {
