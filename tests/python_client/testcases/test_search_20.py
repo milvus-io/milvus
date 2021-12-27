@@ -2694,7 +2694,7 @@ class TestSearchBase:
     def test_search_distance_jaccard_flat_index(self, connect, binary_collection):
         """
         target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with L2
+        method: compare the return distance with that computed with L2
         expected: the return distance equals to the computed value
         """
         nq = 1
