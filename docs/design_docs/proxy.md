@@ -492,7 +492,7 @@ type Cache interface {
 
 - GetPartition
 
-  GetPartition returns the partition ID of specific partition and collection;
+  GetPartition returns the partition ID of a specific partition and collection;
 
 - GetCollectionSchema
 
