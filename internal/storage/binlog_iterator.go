@@ -40,7 +40,7 @@ type Iterator interface {
 	Dispose()
 }
 
-// Value is the return value of HasNext
+// Value is the return value of Next
 type Value struct {
 	ID        int64
 	PK        int64
