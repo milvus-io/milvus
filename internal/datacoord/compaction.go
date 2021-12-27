@@ -23,10 +23,11 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"go.uber.org/zap"
 )
 
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
