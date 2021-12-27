@@ -4,6 +4,7 @@
 set -e
 function get_author_email(){
     email=$(git --no-pager show -s --format=\'%ae\' HEAD )
+    # Get last commit author when Jenkins submit a merge commit
     if [[ "${email}" == \'nobody@nowhere\' ]]; then 
         email=$(git --no-pager show -s --format=\'%ae\' HEAD^ )
     fi 
