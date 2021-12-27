@@ -10,13 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <optional>
-#include "segcore/SegmentGrowingImpl.h"
+
 #include <deque>
+#include <optional>
 #include <boost/dynamic_bitset.hpp>
-#include "query/SubSearchResult.h"
+
+#include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {
+
 using BitsetChunk = boost::dynamic_bitset<>;
 using BitsetSimple = std::deque<BitsetChunk>;
 
@@ -28,4 +30,5 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 int64_t num_queries,
                 const faiss::BitsetView& bitset,
                 SearchResult& results);
+
 }  // namespace milvus::query
