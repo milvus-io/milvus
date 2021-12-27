@@ -260,7 +260,7 @@ func saveBinLog(ctx context.Context,
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
 	for _, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		log.Debug("[query coord unittest] save binlog", zap.Int64("fieldID", fieldID))
+		log.Debug("[QueryCoord unittest] save binlog", zap.Int64("fieldID", fieldID))
 		if err != nil {
 			return nil, err
 		}
