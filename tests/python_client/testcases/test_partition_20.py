@@ -296,7 +296,7 @@ class TestPartitionParams(TestcaseBase):
         target: verify release partition
         method: 1. create a collection and two partitions
                 2. insert data into each partition
-                3. flush and load the  partition1
+                3. flush and load the partition1
                 4. release partition1
                 5. release partition2
         expected: 1. the 1st partition is released
