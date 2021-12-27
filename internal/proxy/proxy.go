@@ -251,7 +251,7 @@ func (node *Proxy) Init() error {
 	return nil
 }
 
-// sendChannelsTimeTickLoop starts a goroutine that synchronize the time tick information.
+// sendChannelsTimeTickLoop starts a goroutine that synchronizes the time tick information.
 func (node *Proxy) sendChannelsTimeTickLoop() {
 	node.wg.Add(1)
 	go func() {
