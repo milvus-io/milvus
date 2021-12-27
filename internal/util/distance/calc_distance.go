@@ -213,6 +213,7 @@ func CalcHamming(dim int64, left []byte, lIndex int64, right []byte, rIndex int6
 	return hamming
 }
 
+// CalcHammingBatch calculate HAMMING distance in batch, results are in @result
 func CalcHammingBatch(dim int64, left []byte, lIndex int64, right []byte, result *[]int32) {
 	rightNum := VectorCount(dim, len(right))
 
