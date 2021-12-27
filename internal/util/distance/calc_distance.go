@@ -159,6 +159,7 @@ func SingleBitLen(dim int64) int64 {
 	return dim + 8 - dim%8
 }
 
+// VectorCount counts bits by @dim & @length
 func VectorCount(dim int64, length int) int64 {
 	singleBitLen := SingleBitLen(dim)
 	return int64(length*8) / singleBitLen
