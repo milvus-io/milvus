@@ -269,6 +269,7 @@ func newBinIDMAPConfAdapter() *BinIDMAPConfAdapter {
 type BinIVFConfAdapter struct {
 }
 
+// CheckTrain checks if a binary ivf index can be built with specific parameters.
 func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
