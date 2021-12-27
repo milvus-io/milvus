@@ -252,6 +252,7 @@ func newIVFSQConfAdapter() *IVFSQConfAdapter {
 type BinIDMAPConfAdapter struct {
 }
 
+// CheckTrain checks if a binary flat index can be built with the specific parameters.
 func (adapter *BinIDMAPConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
