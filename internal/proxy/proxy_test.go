@@ -341,7 +341,7 @@ func TestProxy(t *testing.T) {
 		defer func() {
 			err := rc.Stop()
 			assert.NoError(t, err)
-			log.Info("stop root coordinator")
+			log.Info("stop RootCoord")
 		}()
 	}
 
