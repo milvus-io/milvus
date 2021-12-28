@@ -103,6 +103,7 @@ func (pc *pulsarClient) EarliestMessageID() MessageID {
 	return &pulsarID{messageID: msgID}
 }
 
+// StringToMsgID converts the string id to MessageID type
 func (pc *pulsarClient) StringToMsgID(id string) (MessageID, error) {
 	pID, err := StringToPulsarMsgID(id)
 	if err != nil {
