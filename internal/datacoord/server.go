@@ -390,10 +390,10 @@ func (s *Server) initGarbageCollection() error {
 func (s *Server) initServiceDiscovery() error {
 	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("DataCoord failed to init service discovery", zap.Error(err))
+		logutil.Logger(s.ctx).Debug("failed to init service discovery", zap.Error(err))
 		return err
 	}
-	log.Debug("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
+	logutil.Logger(s.ctx).Debug("success to get DataNode sessions", zap.Any("sessions", sessions))
 
 	datanodes := make([]*NodeInfo, 0, len(sessions))
 	for _, session := range sessions {
