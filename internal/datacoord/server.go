@@ -214,9 +214,9 @@ func (s *Server) QuitSignal() <-chan struct{} {
 func (s *Server) Register() error {
 	s.session.Register()
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		log.Error("DataCoord disconnected from etcd and exited", zap.Int64("ServerID", s.session.ServerID))
+		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
+			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
 		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
@@ -291,7 +291,7 @@ func (s *Server) Start() error {
 	Params.DataCoordCfg.CreatedTime = time.Now()
 	Params.DataCoordCfg.UpdatedTime = time.Now()
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
-	log.Debug("DataCoord startup success")
+	logutil.Logger(s.ctx).Debug("startup success")
 
 	return nil
 }
