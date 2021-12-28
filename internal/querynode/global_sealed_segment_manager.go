@@ -53,6 +53,7 @@ func (g *globalSealedSegmentManager) addGlobalSegmentInfo(segmentInfo *querypb.S
 	g.globalSealedSegments[segmentInfo.SegmentID] = segmentInfo
 }
 
+// getGlobalSegmentIDs returns globalSealedSegments
 func (g *globalSealedSegmentManager) getGlobalSegmentIDs() []UniqueID {
 	g.mu.Lock()
 	defer g.mu.Unlock()
