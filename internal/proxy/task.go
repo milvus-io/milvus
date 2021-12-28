@@ -4791,6 +4791,7 @@ func (dt *deleteTask) HashPK(pks []int64) {
 	}
 }
 
+// CreateAliasTask contains task information of CreateAlias
 type CreateAliasTask struct {
 	Condition
 	*milvuspb.CreateAliasRequest
