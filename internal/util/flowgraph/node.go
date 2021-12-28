@@ -12,12 +12,21 @@
 package flowgraph
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
+)
+
+const (
+	// TODO: better to be configured
+	nodeCtxTtInterval = 2 * time.Minute
+	enableTtChecker   = true
 )
 
 // Node is the interface defines the behavior of flowgraph
@@ -61,6 +70,17 @@ func (nodeCtx *nodeCtx) Start(wg *sync.WaitGroup) {
 // 2. invoke node.Operate
 // 3. deliver the Operate result to downstream nodes
 func (nodeCtx *nodeCtx) work() {
+	// TODO: necessary to check every node?
+	name := fmt.Sprintf("nodeCtxTtChecker-%s", nodeCtx.node.Name())
+	warn := fmt.Sprintf("node %s haven't received input for %f minutes",
+		nodeCtx.node.Name(), nodeCtxTtInterval.Minutes())
+	var checker *timerecord.LongTermChecker
+	if enableTtChecker {
+		checker = timerecord.NewLongTermChecker(context.Background(), name, nodeCtxTtInterval, warn)
+		checker.Start()
+		defer checker.Stop()
+	}
+
 	for {
 		select {
 		case <-nodeCtx.closeCh:
@@ -75,6 +95,10 @@ func (nodeCtx *nodeCtx) work() {
 			}
 			n := nodeCtx.node
 			res = n.Operate(inputs)
+
+			if enableTtChecker {
+				checker.Check()
+			}
 
 			downstreamLength := len(nodeCtx.downstreamInputChanIdx)
 			if len(nodeCtx.downstream) < downstreamLength {

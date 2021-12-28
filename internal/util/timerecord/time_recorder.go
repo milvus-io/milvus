@@ -12,6 +12,8 @@
 package timerecord
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -74,4 +76,52 @@ func (tr *TimeRecorder) printTimeRecord(msg string, span time.Duration) {
 	str += strconv.Itoa(int(span.Milliseconds()))
 	str += "ms)"
 	log.Debug(str)
+}
+
+// LongTermChecker checks we receive at least one msg in d duration. If not, checker
+// will print a warn message.
+type LongTermChecker struct {
+	d    time.Duration
+	t    *time.Ticker
+	ch   chan struct{}
+	warn string
+	name string
+}
+
+// NewLongTermChecker creates a long term checker specified name, checking interval and warning string to print
+func NewLongTermChecker(ctx context.Context, name string, d time.Duration, warn string) *LongTermChecker {
+	c := &LongTermChecker{
+		name: name,
+		d:    d,
+		warn: warn,
+		ch:   make(chan struct{}),
+	}
+	return c
+}
+
+// Start starts the check process
+func (c *LongTermChecker) Start() {
+	c.t = time.NewTicker(c.d)
+	go func() {
+		for {
+			select {
+			case <-c.ch:
+				log.Warn(fmt.Sprintf("long term checker [%s] shutdown", c.name))
+				return
+			case <-c.t.C:
+				log.Warn(c.warn)
+			}
+		}
+	}()
+}
+
+// Check resets the time ticker
+func (c *LongTermChecker) Check() {
+	c.t.Reset(c.d)
+}
+
+// Stop stops the checker
+func (c *LongTermChecker) Stop() {
+	c.t.Stop()
+	close(c.ch)
 }
