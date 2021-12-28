@@ -123,6 +123,7 @@ func (node *Proxy) Register() error {
 	return nil
 }
 
+// initSession initialize the session of Proxy.
 func (node *Proxy) initSession() error {
 	node.session = sessionutil.NewSession(node.ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	if node.session == nil {
