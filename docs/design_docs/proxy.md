@@ -399,7 +399,7 @@ type channelsMgr interface {
 
   getDMLStream returns the dml message stream of a collection;
 
-  Proxy uses these dml message stream to write dml data, such as insert request.
+  Proxy uses these dml message stream to write dml data, such as insert requests.
 
 - createDQLStream and getDQLStream
 
