@@ -61,7 +61,7 @@ if [[ -n "${RELEASE_NAME:-}" ]]; then
 fi
 
 # Uninstall Milvus Helm Release
-helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}"
+helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}" || true
 
 MILVUS_LABELS1="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
 MILVUS_LABELS2="release=${MILVUS_HELM_RELEASE_NAME}"
