@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+// Params contains parameters for indexcoord grpc server.
 var Params paramtable.GrpcServerConfig
 
 // UniqueID is an alias of int64, is used as a unique identifier for the request.
