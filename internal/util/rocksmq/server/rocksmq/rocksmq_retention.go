@@ -70,7 +70,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	for _, key := range topicKeys {
 		topic := key[len(TopicIDTitle):]
 		ri.topicRetetionTime.Store(topic, time.Now().Unix())
-		topicMu.Store(topic, new(sync.Mutex))
+		topicMu.Store(topic, new(sync.RWMutex))
 	}
 	return ri, nil
 }
@@ -319,7 +319,7 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topic)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*sync.RWMutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topic)
 	}

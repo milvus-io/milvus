@@ -304,7 +304,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	}
 
 	if _, ok := topicMu.Load(topicName); !ok {
-		topicMu.Store(topicName, new(sync.Mutex))
+		topicMu.Store(topicName, new(sync.RWMutex))
 	}
 
 	kvs := make(map[string]string)
@@ -336,7 +336,7 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*sync.RWMutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -472,7 +472,7 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*sync.RWMutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -507,12 +507,12 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*sync.RWMutex)
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
-	lock.Lock()
-	defer lock.Unlock()
+	lock.RLock()
+	defer lock.RUnlock()
 
 	getLockTime := time.Since(start).Milliseconds()
 
@@ -638,12 +638,12 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	if !ok {
 		return nil, fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*sync.RWMutex)
 	if !ok {
 		return nil, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
-	lock.Lock()
-	defer lock.Unlock()
+	lock.RLock()
+	defer lock.RUnlock()
 	getLockTime := time.Since(start).Milliseconds()
 
 	metaKey := constructCurrentID(topicName, groupName)
@@ -778,12 +778,12 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*sync.RWMutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
-	lock.Lock()
-	defer lock.Unlock()
+	lock.RLock()
+	defer lock.RUnlock()
 
 	err := rmq.seek(topicName, groupName, msgID)
 	if err != nil {
