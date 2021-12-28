@@ -201,7 +201,6 @@ func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
-
 func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
