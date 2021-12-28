@@ -20,12 +20,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 )
 
