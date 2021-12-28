@@ -13,8 +13,8 @@
 #include <chrono>
 #include <memory>
 #include <string>
-#include <utility>
 #include <unordered_set>
+#include <utility>
 
 #include "cache/CpuCacheMgr.h"
 #include "codecs/default/DefaultCodec.h"
