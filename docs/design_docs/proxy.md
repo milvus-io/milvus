@@ -439,7 +439,7 @@ type channelsTimeTicker interface {
 
 - getLastTick
 
-  getLastTick returns the minimum timestamp which has already been synchronized of physical channel;
+  getLastTick returns the minimum timestamp which has already been synchronized of a physical channel;
 
 channelsTimeTicker will maintain the map minTsStatistics that can be synchronized and the map currents that will be
 synchronized. They are all mappings from pChan to Timestamp. The channelsTimeTicker itself has a background coroutine,
