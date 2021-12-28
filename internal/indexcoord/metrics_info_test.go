@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
-
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/stretchr/testify/assert"
 )
