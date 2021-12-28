@@ -17,9 +17,8 @@
 package datacoord
 
 import (
-	"stathat.com/c/consistent"
-
 	"github.com/milvus-io/milvus/internal/kv"
+	"stathat.com/c/consistent"
 )
 
 // ChannelPolicyFactory is the abstract factory to create policies for channel manager
