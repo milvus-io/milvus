@@ -113,6 +113,7 @@ func (pc *pulsarClient) StringToMsgID(id string) (MessageID, error) {
 	return &pulsarID{messageID: pID}, nil
 }
 
+// BytesToMsgID converts []byte id to MessageID type
 func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 	pID, err := DeserializePulsarMsgID(id)
 	if err != nil {
