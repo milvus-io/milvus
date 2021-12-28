@@ -563,7 +563,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		}
 		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
 		if err != nil {
-			log.Debug("registerNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
+			log.Debug("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
 		node.setState(state)
@@ -571,10 +571,10 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 			go node.start()
 		}
 		c.nodes[id] = node
-		log.Debug("registerNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
+		log.Debug("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
-	return fmt.Errorf("registerNode: node %d alredy exists in cluster", id)
+	return fmt.Errorf("registerNode: QueryNode %d alredy exists in cluster", id)
 }
 
 func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {
