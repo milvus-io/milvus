@@ -311,7 +311,10 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return err
 	}
 
-	rmq.kv.MultiSave(kvs)
+	err = rmq.kv.MultiSave(kvs)
+	if err != nil {
+		return retry.Unrecoverable(err)
+	}
 
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
