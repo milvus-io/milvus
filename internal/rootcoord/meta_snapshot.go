@@ -120,7 +120,7 @@ func (ms *metaSnapshot) loadTs() error {
 		strTs := string(resp.Kvs[0].Value)
 		if strTs == "0" {
 			//#issue 7150, index building inserted "0", skipping
-			//this is a special fix for backward compatibility, previous version will put 0 ts into snapshot building index
+			//this is a special fix for backward compatibility, the previous version will put 0 ts into the snapshot building index
 			continue
 		}
 		curTs, err := strconv.ParseUint(strTs, 10, 64)
