@@ -33,6 +33,8 @@ Set the pod（querynode, indexnode and datanode）as multiple replicas, make one
 
 #### pod memory stress
 
+Limit the memory resource of pod and generate plenty of stresses over a group of pods
+
 ### Milvus in standalone mode
 1. standalone pod is killed
 
