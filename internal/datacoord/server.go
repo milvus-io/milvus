@@ -445,12 +445,12 @@ func (s *Server) startServerLoop() {
 func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	ttMsgStream, err := s.msFactory.NewMsgStream(ctx)
 	if err != nil {
-		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
+		logutil.Logger(s.ctx).Error("failed to create timetick channel", zap.Error(err))
 		return
 	}
 	ttMsgStream.AsConsumerWithPosition([]string{Params.DataCoordCfg.TimeTickChannelName},
 		Params.DataCoordCfg.DataCoordSubscriptionName, mqclient.SubscriptionPositionLatest)
-	log.Debug("DataCoord creates the timetick channel consumer",
+	logutil.Logger(s.ctx).Debug("success to create the timetick channel consumer",
 		zap.String("timeTickChannel", Params.DataCoordCfg.TimeTickChannelName),
 		zap.String("subscription", Params.DataCoordCfg.DataCoordSubscriptionName))
 	ttMsgStream.Start()
@@ -469,19 +469,19 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Debug("DataNode timetick loop shutdown")
+				logutil.Logger(s.ctx).Debug("DataNode timetick loop shutdown")
 				return
 			default:
 			}
 			msgPack := ttMsgStream.Consume()
 			if msgPack == nil {
-				log.Debug("receive nil timetick msg and shutdown timetick channel")
+				logutil.Logger(s.ctx).Debug("receive nil timetick msg and shutdown timetick channel")
 				return
 			}
 			for _, msg := range msgPack.Msgs {
 				ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
 				if !ok {
-					log.Warn("receive unexpected msg type from tt channel")
+					logutil.Logger(s.ctx).Warn("receive unexpected msg type from tt channel")
 					continue
 				}
 				if enableTtChecker {
@@ -489,7 +489,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 				}
 
 				if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
-					log.Error("failed to handle timetick message", zap.Error(err))
+					logutil.Logger(s.ctx).Error("failed to handle timetick message", zap.Error(err))
 					continue
 				}
 			}
