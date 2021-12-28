@@ -104,6 +104,7 @@ func (g *globalSealedSegmentManager) removeGlobalSegmentIDsByPartitionIds(partit
 	}
 }
 
+// close would free globalSealedSegmentManager
 func (g *globalSealedSegmentManager) close() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
