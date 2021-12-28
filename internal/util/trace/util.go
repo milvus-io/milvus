@@ -76,7 +76,7 @@ func StartSpanFromContext(ctx context.Context, opts ...opentracing.StartSpanOpti
 	return StartSpanFromContextWithSkip(ctx, 3, opts...)
 }
 
-// StartSpanFromContextWithSkip starts a opentracing span with call skip. The operation
+// StartSpanFromContextWithSkip starts an opentracing span with call skip. The operation
 // name is upper @skip call stacks of the function
 func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {
