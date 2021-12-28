@@ -88,6 +88,11 @@ func (p *GlobalParamTable) Init() {
 	p.IndexNodeCfg.init(&p.BaseParams)
 }
 
+func (p *GlobalParamTable) SetLogConfig(role string) {
+	p.BaseParams.RoleName = role
+	p.BaseParams.SetLogConfig()
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
 //type commonConfig struct {
@@ -330,8 +335,6 @@ func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.initDefaultIndexName()
 
 	p.initTimeout()
-
-	//p.initRoleName()
 }
 
 func (p *rootCoordConfig) initPulsarAddress() {
@@ -453,10 +456,6 @@ func (p *rootCoordConfig) initTimeout() {
 	p.Timeout = p.BaseParams.ParseIntWithDefault("rootCoord.timeout", 3600)
 }
 
-//func (p *rootCoordConfig) initRoleName() {
-//	p.RoleName = "rootcoord"
-//}
-
 ///////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
 type proxyConfig struct {
@@ -531,8 +530,6 @@ func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.initMaxTaskNum()
 	p.initBufFlagExpireTime()
 	p.initBufFlagCleanupInterval()
-
-	//p.initRoleName()
 }
 
 // Refresh is called after session init
@@ -657,10 +654,6 @@ func (p *proxyConfig) initPulsarMaxMessageSize() {
 	}
 }
 
-//func (p *proxyConfig) initRoleName() {
-//	p.RoleName = "proxy"
-//}
-
 func (p *proxyConfig) initEtcdEndpoints() {
 	endpoints, err := p.BaseParams.Load("_EtcdEndpoints")
 	if err != nil {
@@ -750,8 +743,6 @@ type queryCoordConfig struct {
 
 func (p *queryCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
-
-	//p.initRoleName()
 
 	// --- Channels ---
 	p.initClusterMsgChannelPrefix()
@@ -908,10 +899,6 @@ func (p *queryCoordConfig) initMinioBucketName() {
 	}
 	p.MinioBucketName = bucketName
 }
-
-//func (p *queryCoordConfig) initRoleName() {
-//	p.RoleName = "querycoord"
-//}
 
 func (p *queryCoordConfig) initPulsarAddress() {
 	addr, err := p.BaseParams.Load("_PulsarAddress")
@@ -1088,8 +1075,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 
 	p.initSegcoreChunkRows()
 	p.initKnowhereSimdType()
-
-	//p.initRoleName()
 
 	p.initSkipQueryChannelRecovery()
 	p.initOverloadedMemoryThresholdPercentage()
@@ -1288,10 +1273,6 @@ func (p *queryNodeConfig) initKnowhereSimdType() {
 	log.Debug("initialize the knowhere simd type", zap.String("simd_type", p.SimdType))
 }
 
-//func (p *queryNodeConfig) initRoleName() {
-//	p.RoleName = "querynode"
-//}
-
 func (p *queryNodeConfig) initSkipQueryChannelRecovery() {
 	p.SkipQueryChannelRecovery = p.BaseParams.ParseBool("msgChannel.skipQueryChannelRecovery", false)
 }
@@ -1391,7 +1372,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initTimeTickChannelName()
 	p.initSegmentInfoChannelName()
 	p.initDataCoordSubscriptionName()
-	//p.initRoleName()
 
 	p.initFlushStreamPosSubPath()
 	p.initStatsStreamPosSubPath()
@@ -1533,10 +1513,6 @@ func (p *dataCoordConfig) initDataCoordSubscriptionName() {
 	s := []string{p.ClusterChannelPrefix, config}
 	p.DataCoordSubscriptionName = strings.Join(s, "-")
 }
-
-//func (p *dataCoordConfig) initRoleName() {
-//	p.RoleName = "datacoord"
-//}
 
 func (p *dataCoordConfig) initFlushStreamPosSubPath() {
 	subPath, err := p.BaseParams.Load("etcd.flushStreamPosSubPath")
@@ -1725,8 +1701,6 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 
 	p.initDmlChannelName()
 	p.initDeltaChannelName()
-
-	//p.initRoleName()
 }
 
 // Refresh is called after session init
@@ -1883,10 +1857,6 @@ func (p *dataNodeConfig) initMinioBucketName() {
 	p.MinioBucketName = bucketName
 }
 
-//func (p *dataNodeConfig) initRoleName() {
-//	p.RoleName = "datanode"
-//}
-
 func (p *dataNodeConfig) initDmlChannelName() {
 	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
 	if err != nil {
@@ -1940,7 +1910,6 @@ func (p *indexCoordConfig) init(bp *BaseParamTable) {
 	p.initMinIOUseSSL()
 	p.initMinioBucketName()
 	p.initIndexStorageRootPath()
-	//p.initRoleName()
 }
 
 func (p *indexCoordConfig) initEtcdEndpoints() {
@@ -2032,10 +2001,6 @@ func (p *indexCoordConfig) initIndexStorageRootPath() {
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
 }
 
-//func (p *indexCoordConfig) initRoleName() {
-//	p.RoleName = "indexcoord"
-//}
-
 ///////////////////////////////////////////////////////////////////////////////
 // --- indexnode ---
 type indexNodeConfig struct {
@@ -2075,7 +2040,6 @@ func (p *indexNodeConfig) init(bp *BaseParamTable) {
 	p.initEtcdEndpoints()
 	p.initMetaRootPath()
 	p.initIndexStorageRootPath()
-	//p.initRoleName()
 	p.initKnowhereSimdType()
 }
 
@@ -2154,10 +2118,6 @@ func (p *indexNodeConfig) initMinioBucketName() {
 	}
 	p.MinioBucketName = bucketName
 }
-
-//func (p *indexNodeConfig) initRoleName() {
-//	p.RoleName = "indexnode"
-//}
 
 func (p *indexNodeConfig) initKnowhereSimdType() {
 	simdType := p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
