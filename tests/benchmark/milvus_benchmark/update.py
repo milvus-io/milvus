@@ -10,20 +10,6 @@ import requests
 import json
 
 
-def get_image_tag():
-    url = ""
-    headers = {"accept": "application/json"}
-    try:
-        rep = requests.get(url, headers=headers)
-        data = json.loads(rep.text)
-        tag_name = data[0]["tags"][0]["name"]
-        print("[benchmark update] The image name used is %s" % str(tag_name))
-        return tag_name
-    except:
-        print("Can not get the tag list")
-        return "master-latest"
-
-
 def parse_server_tag(server_tag):
     """ paser server tag from server config"""
     # tag format: "8c"/"8c16m"/"8c16m1g"
