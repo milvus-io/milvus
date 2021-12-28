@@ -2,8 +2,8 @@ cluster:
   enabled: true
 image:
   all:
-    repository: ${IMAGE_REPO:-milvusdb/milvus-dev}
-    tag: ${IMAGE_TAG:-master-latest}
+    repository: milvusdb/milvus-dev
+    tag: master-latest
     pullPolicy: IfNotPresent
 etcd:
   replicaCount: 1
