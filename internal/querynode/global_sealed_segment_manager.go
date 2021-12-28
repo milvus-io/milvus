@@ -92,6 +92,7 @@ func (g *globalSealedSegmentManager) removeGlobalSealedSegmentInfo(segmentID Uni
 	delete(g.globalSealedSegments, segmentID)
 }
 
+// removeGlobalSegmentIDsByPartitionIds would remove globalSealedSegments by partitionIDs
 func (g *globalSealedSegmentManager) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
