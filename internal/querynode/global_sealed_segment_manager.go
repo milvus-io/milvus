@@ -63,6 +63,7 @@ func (g *globalSealedSegmentManager) getGlobalSegmentIDs() []UniqueID {
 	return resIDs
 }
 
+// getGlobalSegmentIDsByPartitionIds returns globalSealedSegments by partitionIDs
 func (g *globalSealedSegmentManager) getGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) []UniqueID {
 	g.mu.Lock()
 	defer g.mu.Unlock()
