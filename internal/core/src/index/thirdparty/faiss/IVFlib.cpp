@@ -265,7 +265,7 @@ void SlidingIndexWindow::step(const Index *sub_index, bool remove_oldest) {
 
 
 // Get a subset of inverted lists [i0, i1). Works on IndexIVF's and
-// IndexIVF's embedded in a IndexPreTransform
+// IndexIVF's embedded in an IndexPreTransform
 
 ArrayInvertedLists *
 get_invlist_range (const Index *index, long i0, long i1)
