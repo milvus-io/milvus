@@ -363,7 +363,7 @@ coroutine reduces the timestamp result and sends the final timestamp result back
 taskScheduler is also responsible for collecting the results of search requests. For each search request, when Proxy
 writes the request to the DqRequestChannel, it will attach the ReqID, and the query nodes will also bring the ReqID back
 when writing the search result back to the DqResultChannel. taskScheduler will start a background coroutine to consume
-search result from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
+search results from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
 the same ReqID are collected and the termination condition is reached, these results will be passed to the blocking task
 coroutine which is waiting. The waken task will reduce the search results and then send the final search result to
 clients.
