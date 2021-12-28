@@ -125,7 +125,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.activeTasks[tID] = t
 }
 
-// PopActiveTask tasks out a task from activateTask and the task will be executed.
+// PopActiveTask pops a task from activateTask and the task will be executed.
 func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
