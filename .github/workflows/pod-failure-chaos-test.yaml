@@ -1,4 +1,4 @@
-name: Pod Failure Chaos Test
+name: Cluster N node Chaos Test
 
 on:
   workflow_dispatch:
@@ -6,19 +6,22 @@ on:
     - cron: "30 19 * * *"
 jobs:
   
-  test-pod-failure-chaos:
+  test-cluster-n-node-chaos:
    
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
+        chaos_type: [pod_failure, pod_kill]
         pod: [querynode, datanode, indexnode, proxy]
     
     steps:
       - name: Set env param
         run: |
-          echo "RELEASE=test-${{ matrix.pod }}-pod-failure" >> $GITHUB_ENV
+          chaos_type=${{ matrix.chaos_type }}
+          release="test"-${{ matrix.pod }}-${chaos_type/_/-}
+          echo "RELEASE=$release" >> $GITHUB_ENV
 
       - name: Creating kind cluster
         uses: helm/kind-action@v1.2.0
@@ -56,7 +59,7 @@ jobs:
           helm repo add chaos-mesh https://charts.chaos-mesh.org
           helm search repo chaos-mesh
           kubectl create ns chaos-testing
-          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v2.0.2 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
+          helm install chaos-mesh chaos-mesh/chaos-mesh --namespace=chaos-testing --version v2.0.3 --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock
           sleep 60s
           kubectl get po -n chaos-testing
       
@@ -87,11 +90,11 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           # replace chaos object
-          sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/pod_failure\/'/g" constants.py
-          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_failure.yaml\'/g" constants.py
+          sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${{ matrix.chaos_type }}\/'/g" constants.py
+          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_${{ matrix.chaos_type }}.yaml\'/g" constants.py
           sed -i "s/CHAOS_DURATION =.*/CHAOS_DURATION = 80/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
+          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
 
       - name: Milvus E2E Test
         timeout-minutes: 10
@@ -164,5 +167,5 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v2
         with:
-          name: logs-${{ matrix.pod }}
+          name: logs-${{ matrix.pod }}-${{ matrix.chaos_type }}
           path: tests/python_client/chaos/k8s_logs
