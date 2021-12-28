@@ -45,6 +45,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+// Params is the parameters for DataCoord grpc server
 var Params paramtable.GrpcServerConfig
 
 // Server is the grpc server of datacoord
