@@ -308,7 +308,6 @@ class MilvusClient(object):
         if guarantee_timestamp is not None:
             params.update({"guarantee_timestamp": guarantee_timestamp})
 
-        # logger.debug("Params of search : %s" % str(params))
         result = self._milvus.search(tmp_collection_name, **params)
 
         # must_params = [vector_query]
