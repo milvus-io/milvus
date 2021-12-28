@@ -16,7 +16,6 @@ import (
 	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
