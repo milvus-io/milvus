@@ -292,6 +292,7 @@ func TestNSGConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// HNSWConfAdapter checks if a hnsw index can be built.
 func TestHNSWConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:            strconv.Itoa(128),
