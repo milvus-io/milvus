@@ -180,6 +180,7 @@ func TestIVFSQConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// BinIDMAPConfAdapter checks if a bin id map index can be built.
 func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
