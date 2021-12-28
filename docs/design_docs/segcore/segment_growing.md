@@ -39,7 +39,7 @@ When `metric type` is specified in the schema, the default parameters will build
 
 ### InsertRecord
 
-Used to manage concurrent inserted data, incluing
+Used to manage concurrent inserted data, including:
 
 1. `atomic<int64_t> reserved` reserved space calculation
 2. `AckResponder` calculate which segment to insert，returns current segment offset
