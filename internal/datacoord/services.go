@@ -312,6 +312,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	log.Debug("receive SaveBinlogPaths request",
+		zap.Int64("nodeID", req.GetBase().GetSourceID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Bool("isFlush", req.GetFlushed()),
