@@ -46,6 +46,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+// Params contains parameters for datanode grpc server.
 var Params paramtable.GrpcServerConfig
 
 type Server struct {
