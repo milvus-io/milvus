@@ -2,13 +2,13 @@
 
 # ref: github.com/milvus-io/milvus/docker/buidler/cpu/centos7/Dockerfile github.com/milvus-io/milvus/docker/openblas/centos7/Dockerfile
 
-# install devltoolset
+# Install devltoolset
 yum install -y epel-release centos-release-scl-rh && yum install -y wget make automake \
     devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran && \
     rm -rf /var/cache/yum/* && \
     echo "source scl_source enable devtoolset-7" >> /etc/profile.d/devtoolset-7.sh
 
-# install openblas
+# Install openblas
 source /etc/profile.d/devtoolset-7.sh && \
     wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
     tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
