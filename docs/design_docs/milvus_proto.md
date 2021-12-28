@@ -389,7 +389,7 @@ message ShowCollectionsResponse {
   // The utc timestamp calculated by created_timestamp
   repeated uint64 created_utc_timestamps = 5;
 
-  // Load percentage on querynode when type is InMemory
+  // Load percentage on QueryNode when type is InMemory
   repeated int64 inMemory_percentages = 6; 
 }
 ```
