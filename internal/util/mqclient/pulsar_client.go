@@ -98,6 +98,7 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	return pConsumer, nil
 }
 
+// EarliestMessageID returns the earliest message id
 func (pc *pulsarClient) EarliestMessageID() MessageID {
 	msgID := pulsar.EarliestMessageID()
 	return &pulsarID{messageID: msgID}
