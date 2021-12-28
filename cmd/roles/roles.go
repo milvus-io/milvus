@@ -210,8 +210,10 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 		f := setLoggerFunc()
 		datacoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
+
+		dctx := logutil.WithModule(ctx, "DataCoord")
 		var err error
-		ds, err = components.NewDataCoord(ctx, factory)
+		ds, err = components.NewDataCoord(dctx, factory)
 		if err != nil {
 			panic(err)
 		}
