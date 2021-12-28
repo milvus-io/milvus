@@ -235,27 +235,53 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test merge", func(t *testing.T) {
-		iData := genInsertData()
-		meta := NewMetaFactory().GetCollectionMeta(1, "test")
+		t.Run("Merge without expiration", func(t *testing.T) {
+			Params.DataCoordCfg.EnableAutoExpiration = false
+			iData := genInsertDataWithExpiredTS()
+			meta := NewMetaFactory().GetCollectionMeta(1, "test")
 
-		iblobs, err := getInsertBlobs(100, iData, meta)
-		require.NoError(t, err)
+			iblobs, err := getInsertBlobs(100, iData, meta)
+			require.NoError(t, err)
 
-		iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
-		require.NoError(t, err)
+			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
+			require.NoError(t, err)
 
-		mitr := storage.NewMergeIterator([]iterator{iitr})
+			mitr := storage.NewMergeIterator([]iterator{iitr})
 
-		dm := map[UniqueID]Timestamp{
-			1: 10000,
-		}
+			dm := map[UniqueID]Timestamp{
+				1: 10000,
+			}
 
-		ct := &compactionTask{}
-		idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema())
-		assert.NoError(t, err)
-		assert.Equal(t, int64(1), numOfRow)
-		assert.Equal(t, 1, len(idata))
+			ct := &compactionTask{}
+			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			assert.NoError(t, err)
+			assert.Equal(t, int64(1), numOfRow)
+			assert.Equal(t, 1, len(idata))
+		})
+		t.Run("Merge with expiration", func(t *testing.T) {
+			Params.DataCoordCfg.EnableAutoExpiration = true
+			Params.DataCoordCfg.CompactionEntityExpiration = 259200 // 3 days in seconds
+			iData := genInsertDataWithExpiredTS()
+			meta := NewMetaFactory().GetCollectionMeta(1, "test")
 
+			iblobs, err := getInsertBlobs(100, iData, meta)
+			require.NoError(t, err)
+
+			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
+			require.NoError(t, err)
+
+			mitr := storage.NewMergeIterator([]iterator{iitr})
+
+			dm := map[UniqueID]Timestamp{
+				1: 10000,
+			}
+
+			ct := &compactionTask{}
+			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
+			assert.NoError(t, err)
+			assert.Equal(t, int64(0), numOfRow)
+			assert.Equal(t, 1, len(idata))
+		})
 	})
 }
 

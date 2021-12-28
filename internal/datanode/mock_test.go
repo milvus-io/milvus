@@ -33,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -815,4 +817,62 @@ func genEmptyInsertData() *InsertData {
 				Data:    []float64{},
 			},
 		}}
+}
+
+func genInsertDataWithExpiredTS() *InsertData {
+	return &InsertData{
+		Data: map[int64]s.FieldData{
+			0: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{11, 22},
+			},
+			1: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{329749364736000000, 329636118528000000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-11-05 23:00:00 +0000 UTC
+			},
+			100: &s.FloatVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{1.0, 6.0, 7.0, 8.0},
+				Dim:     2,
+			},
+			101: &s.BinaryVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []byte{0, 255, 255, 255, 128, 128, 128, 0},
+				Dim:     32,
+			},
+			102: &s.BoolFieldData{
+				NumRows: []int64{2},
+				Data:    []bool{true, false},
+			},
+			103: &s.Int8FieldData{
+				NumRows: []int64{2},
+				Data:    []int8{5, 6},
+			},
+			104: &s.Int16FieldData{
+				NumRows: []int64{2},
+				Data:    []int16{7, 8},
+			},
+			105: &s.Int32FieldData{
+				NumRows: []int64{2},
+				Data:    []int32{9, 10},
+			},
+			106: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{1, 2},
+			},
+			107: &s.FloatFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{2.333, 2.334},
+			},
+			108: &s.DoubleFieldData{
+				NumRows: []int64{2},
+				Data:    []float64{3.333, 3.334},
+			},
+		}}
+}
+
+func genTimestamp() typeutil.Timestamp {
+	// Generate birthday of Golang
+	gb := time.Date(2009, time.Month(11), 10, 23, 0, 0, 0, time.UTC)
+	return tsoutil.ComposeTSByTime(gb, 0)
 }

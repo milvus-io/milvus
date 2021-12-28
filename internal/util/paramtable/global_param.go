@@ -1088,6 +1088,9 @@ type dataCoordConfig struct {
 	EnableAutoCompaction    bool
 	EnableGarbageCollection bool
 
+	RetentionDuration          int64
+	EnableAutoExpiration       bool
+	CompactionEntityExpiration int64
 	// Garbage Collection
 	GCInterval         time.Duration
 	GCMissingTolerance time.Duration
@@ -1112,6 +1115,8 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
+	p.initEnableAutoExpiration()
+	p.initCompactionEntityExpiration()
 
 	p.initEnableGarbageCollection()
 	p.initGCInterval()
@@ -1205,6 +1210,14 @@ func (p *dataCoordConfig) initGCDropTolerance() {
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
 	p.EnableAutoCompaction = p.BaseParams.ParseBool("dataCoord.compaction.enableAutoCompaction", false)
+}
+
+func (p *dataCoordConfig) initEnableAutoExpiration() {
+	p.EnableAutoExpiration = p.BaseParams.ParseBool("dataCoord.compaction.enableAutoExpiration", false)
+}
+
+func (p *dataCoordConfig) initCompactionEntityExpiration() {
+	p.CompactionEntityExpiration = p.BaseParams.ParseInt64WithDefault("dataCoord.compaction.entityExpiration", 259200)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

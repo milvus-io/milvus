@@ -33,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -179,7 +181,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 	return pk2ts, dbuff, nil
 }
 
-func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, schema *schemapb.CollectionSchema) ([]*InsertData, int64, error) {
+func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, schema *schemapb.CollectionSchema, currentTs Timestamp) ([]*InsertData, int64, error) {
 
 	var (
 		dim int // dimension of vector field
@@ -221,6 +223,14 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 
 		if _, ok := delta[v.PK]; ok {
 			continue
+		}
+
+		if Params.DataCoordCfg.EnableAutoExpiration {
+			ts := Timestamp(v.Timestamp)
+			// Filtering expired entity
+			if t.isExpiredEntity(ts, currentTs) {
+				continue
+			}
 		}
 
 		row, ok := v.Value.(map[UniqueID]interface{})
@@ -415,7 +425,7 @@ func (t *compactionTask) compact() error {
 		return err
 	}
 
-	iDatas, numRows, err := t.merge(mergeItr, deltaPk2Ts, meta.GetSchema())
+	iDatas, numRows, err := t.merge(mergeItr, deltaPk2Ts, meta.GetSchema(), t.GetCurrentTime())
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return err
@@ -646,4 +656,15 @@ func (t *compactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID, *et
 
 func (t *compactionTask) getCollection() UniqueID {
 	return t.getCollectionID()
+}
+
+func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {
+	return tsoutil.GetCurrentTime()
+}
+
+func (t *compactionTask) isExpiredEntity(ts, now Timestamp) bool {
+	pts, _ := tsoutil.ParseTS(ts)
+	pnow, _ := tsoutil.ParseTS(now)
+	expireTime := pts.Add(time.Duration(Params.DataCoordCfg.CompactionEntityExpiration) * time.Second)
+	return expireTime.Before(pnow)
 }
