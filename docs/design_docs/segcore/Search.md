@@ -26,7 +26,7 @@ After obtaining the AST, the execution engine uses the visitor mode to explain a
    2. If Predicate does not exist, vector search bitmask will be empty.
    3. Bitmask will be used to mark filtered out / deleted entities in the vector execution engine.
 
-2. Currently, Milvus supports following node on the AST, visitor mode is used to interpret and execute from top to bottom and generate the final bitmask.
+2. Currently, Milvus supports the following node on the AST, visitor mode is used to interpret and execute from top to bottom and generate the final bitmask.
 
    1. LogicalUnaryExpr: not expression
    2. LogicalBinaryExpr: and or expression
