@@ -119,6 +119,7 @@ func (c *ClientBase) connect(ctx context.Context) error {
 	opts := trace.GetInterceptorOpts()
 	dialContext, cancel := context.WithTimeout(ctx, dialTimeout)
 
+	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
 	retryPolicy := `{
 		"methodConfig": [{
 		  "name": [{}],
@@ -145,9 +146,9 @@ func (c *ClientBase) connect(ctx context.Context) error {
 		grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
 		grpc.WithDefaultServiceConfig(retryPolicy),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                keepAliveTime,    // send pings every 60 seconds if there is no activity
-			Timeout:             keepAliveTimeout, // wait 6 second for ping ack before considering the connection dead
-			PermitWithoutStream: true,             // send pings even without active streams
+			Time:                keepAliveTime,
+			Timeout:             keepAliveTimeout,
+			PermitWithoutStream: true,
 		}),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
