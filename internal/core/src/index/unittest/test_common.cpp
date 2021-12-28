@@ -15,7 +15,6 @@
 #include "knowhere/knowhere/common/Exception.h"
 #include "unittest/utils.h"
 #include "faiss/utils/BitsetView.h"
-#include "faiss/utils/ConcurrentBitset.h"
 #include <boost/dynamic_bitset.hpp>
 
 /*Some unittest for knowhere/common, mainly for improve code coverage.*/
