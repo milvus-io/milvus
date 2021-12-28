@@ -359,10 +359,6 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 // GetMetrics gets the metrics info of IndexNode.
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("IndexNode.GetMetrics",
-		zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
-		zap.String("req", req.Request))
-
 	if !i.isHealthy() {
 		log.Warn("IndexNode.GetMetrics failed",
 			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
@@ -401,7 +397,6 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
-			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
 		return metrics, nil

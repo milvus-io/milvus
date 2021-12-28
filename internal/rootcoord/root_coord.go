@@ -1805,9 +1805,6 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 			Count:  in.Count,
 		}, nil
 	}
-	log.Debug("AllocID success", zap.String("role", typeutil.RootCoordRole),
-		zap.Int64("id start", start), zap.Uint32("count", in.Count), zap.Int64("msgID", in.Base.MsgID))
-
 	return &rootcoordpb.AllocIDResponse{
 		Status: succStatus(),
 		ID:     start,

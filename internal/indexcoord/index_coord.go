@@ -698,7 +698,6 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 			return
 		case <-timeTicker.C:
 			metas := i.metaTable.GetUnusedIndexFiles(i.taskLimit)
-			log.Debug("IndexCoord recycleUnusedIndexFiles", zap.Int("Need recycle tasks num", len(metas)))
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
 					unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID))

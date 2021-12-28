@@ -255,8 +255,9 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 	if len(mergeCompactionPlans) != 0 {
 		log.Debug("global merge compaction plans", zap.Int64("signalID", signal.id), zap.Int64s("plans", getPlanIDs(mergeCompactionPlans)))
 	}
-
-	log.Info("handle global compaction cost", zap.Int64("milliseconds", time.Since(t1).Milliseconds()))
+	if time.Since(t1).Milliseconds() > 500 {
+		log.Info("handle global compaction cost too long", zap.Int64("milliseconds", time.Since(t1).Milliseconds()))
+	}
 }
 
 func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
