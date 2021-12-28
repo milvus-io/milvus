@@ -20,8 +20,6 @@ pipeline {
                 defaultContainer 'main'
                 yamlFile 'build/ci/jenkins/pod/rte.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
-                // idle 5 minutes to wait clean up tasks
-                idleMinutes 5
             }
     }
     environment {
