@@ -2566,7 +2566,7 @@ class TestSearchBase:
     def test_search_without_connect(self, dis_connect, collection):
         """
         target: test search vectors without connection
-        method: use dis connected instance, call search method and check if search successfully
+        method: use disconnected instance, call search method and check if search successfully
         expected: raise exception
         """
         with pytest.raises(Exception) as e:
