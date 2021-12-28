@@ -166,7 +166,7 @@ type Core struct {
 
 // --------------------- function --------------------------
 
-// NewCore create rootcoord core
+// NewCore creates a new rootcoord core
 func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
