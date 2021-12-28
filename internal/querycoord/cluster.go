@@ -422,7 +422,7 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 		return nil
 	}
 
-	return fmt.Errorf("releasePartitions: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releasePartitions: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error) {
