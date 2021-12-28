@@ -516,7 +516,7 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
         time_stamp = insert_res.timestamp
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
-        start = start + nb // num
+        start += nb // num
     return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
 
