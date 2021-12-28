@@ -21,11 +21,11 @@ Please refer to [Run E2E Tests](https://github.com/milvus-io/milvus/blob/master/
 ### Milvus in cluster mode
 #### pod kill
 
-kill pod every 5s
+Kill pod every 5s
 
 #### pod network partition
 
-two direction(to and from) network isolation between a pod and the rest of the pods
+Two direction(to and from) network isolation between a pod and the rest of the pods
 
 #### pod failure
 
