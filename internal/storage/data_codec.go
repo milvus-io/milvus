@@ -105,6 +105,7 @@ func (b Blob) GetValue() []byte {
 	return b.Value
 }
 
+// FieldData defines field data interface
 type FieldData interface {
 	GetMemorySize() int
 	RowNum() int
