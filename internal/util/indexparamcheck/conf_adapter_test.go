@@ -230,6 +230,7 @@ func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// NSGConfAdapter checks if a nsg index can be built.
 func TestNSGConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:          strconv.Itoa(128),
