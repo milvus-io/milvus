@@ -87,6 +87,7 @@ func (g *globalSealedSegmentManager) hasGlobalSealedSegment(segmentID UniqueID) 
 	return ok
 }
 
+// removeGlobalSealedSegmentInfo would remove globalSealSegment by segment
 func (g *globalSealedSegmentManager) removeGlobalSealedSegmentInfo(segmentID UniqueID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
