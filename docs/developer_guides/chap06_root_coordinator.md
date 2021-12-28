@@ -464,7 +464,7 @@ type Core struct {
 	// if RootCoord create segment, DataCoord will put segment msg into this channel
 	DataCoordSegmentChan <-chan *ms.MsgPack
 
-	// if segment flush completed, data node would put segment msg into this channel
+	// if segment flush completed, DataNode would put segment msg into this channel
 	DataNodeFlushedSegmentChan <-chan *ms.MsgPack
 
 	//get binlog file path from data service,
