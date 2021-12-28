@@ -96,7 +96,7 @@ func Test_ProcessFuncParallel(t *testing.T) {
 	err = ProcessFuncParallel(total, runtime.NumCPU(), evenErrorF, "evenErrorF") // Parallel by CPU
 	assert.NotEqual(t, err, nil, "process function parallel must be right")
 
-	// rand.Int() may be always a even number
+	// rand.Int() may be always an even number
 	randomErrorF := func(idx int) error {
 		if rand.Int()%2 == 0 {
 			return errors.New("random location: " + strconv.Itoa(idx))
