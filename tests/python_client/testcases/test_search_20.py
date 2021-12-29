@@ -2581,7 +2581,7 @@ class TestSearchBase:
         """
         collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
-            res = connect.search(collection_name, **default_query)
+            connect.search(collection_name, **default_query)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_distance_l2(self, connect, collection):
