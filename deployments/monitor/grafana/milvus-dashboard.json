@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1640683159600,
+  "iteration": 1640743735973,
   "links": [],
   "panels": [
     {
@@ -3247,7 +3247,7 @@
       },
       "yaxes": [
         {
-          "format": "short",
+          "format": "bytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -3764,7 +3764,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Rate of bytes allocated, even if freed.",
+      "description": "Rate of bytes allocated, even if freed",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -3960,11 +3960,9 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Number of heap bytes waiting to be used.",
+      "description": "Number of heap bytes waiting to be used",
       "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
+        "defaults": {},
         "overrides": []
       },
       "fill": 1,
@@ -4033,7 +4031,7 @@
       "yaxes": [
         {
           "decimals": null,
-          "format": "short",
+          "format": "bytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -4109,9 +4107,9 @@
       {
         "allValue": null,
         "current": {
-          "selected": true,
-          "text": "chaos-testing",
-          "value": "chaos-testing"
+          "selected": false,
+          "text": "default",
+          "value": "default"
         },
         "datasource": "$datasource",
         "definition": "label_values(kube_pod_info, namespace)",
@@ -4140,9 +4138,10 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
-          "text": "mic-memory",
-          "value": "mic-memory"
+          "isNone": true,
+          "selected": true,
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}, app_kubernetes_io_instance)",
@@ -4171,9 +4170,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": "mic-memory-milvus-datacoord-5d9d9c4bcb-qp2sm",
-          "value": "mic-memory-milvus-datacoord-5d9d9c4bcb-qp2sm"
+          "text": "None",
+          "value": ""
         },
         "datasource": "$datasource",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , pod)",
@@ -4202,9 +4202,10 @@
       {
         "allValue": null,
         "current": {
+          "isNone": true,
           "selected": false,
-          "text": "datacoord",
-          "value": "datacoord"
+          "text": "None",
+          "value": ""
         },
         "datasource": "${datasource}",
         "definition": "label_values(go_info{namespace=\"$namespace\", app_kubernetes_io_instance=~\"$instance\",app_kubernetes_io_name=\"$app_name\"} , app_kubernetes_io_component)",
@@ -4233,7 +4234,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {
@@ -4266,5 +4267,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 212
+  "version": 215
 }
