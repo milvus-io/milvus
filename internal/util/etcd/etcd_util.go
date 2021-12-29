@@ -14,46 +14,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package etcdkv
+package etcd
 
 import (
-	"github.com/milvus-io/milvus/internal/kv"
+	"fmt"
+	"time"
+
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 )
 
-// NewMetaKvFactory returns an object that implements the kv.MetaKv interface using etcd.
-// The UseEmbedEtcd in the param is used to determine whether the etcd service is external or embedded.
-func NewMetaKvFactory(rootPath string, param *paramtable.BaseParamTable) (kv.MetaKv, error) {
-	log.Info("start etcd with rootPath",
-		zap.String("rootpath", rootPath),
-		zap.Bool("isEmbed", param.UseEmbedEtcd))
-	if param.UseEmbedEtcd {
-		path := param.EtcdConfigPath
+var EtcdServer *embed.Etcd
+
+func InitEtcdServer(pt *paramtable.BaseParamTable) error {
+	if pt.UseEmbedEtcd {
+		path := pt.EtcdConfigPath
+		fmt.Println("path", path, "data", pt.EtcdDataDir)
 		var cfg *embed.Config
 		if len(path) > 0 {
 			cfgFromFile, err := embed.ConfigFromFile(path)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			cfg = cfgFromFile
 		} else {
 			cfg = embed.NewConfig()
 		}
-		cfg.Dir = param.EtcdDataDir
-		metaKv, err := NewEmbededEtcdKV(cfg, rootPath)
+		cfg.Dir = pt.EtcdDataDir
+		e, err := embed.StartEtcd(cfg)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return metaKv, err
+		EtcdServer = e
+		log.Info("finish init embedded etcd")
 	}
-	client, err := etcd.GetEtcdClient(param)
-	if err != nil {
-		return nil, err
+	return nil
+}
+
+func StopEtcdServer() {
+	if EtcdServer != nil {
+		EtcdServer.Close()
 	}
-	metaKv := NewEtcdKV(client, rootPath)
-	return metaKv, err
+}
+
+func GetEtcdClient(pt *paramtable.BaseParamTable) (*clientv3.Client, error) {
+	if pt.UseEmbedEtcd {
+		return GetEmbedEtcdClient()
+	}
+	return GetRemoteEtcdClient(pt.EtcdEndpoints)
+}
+
+func GetEmbedEtcdClient() (*clientv3.Client, error) {
+	client := v3client.New(EtcdServer.Server)
+	return client, nil
+}
+
+func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
+	return clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
+	})
 }

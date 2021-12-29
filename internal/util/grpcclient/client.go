@@ -112,7 +112,7 @@ func (c *ClientBase) resetConnection(client interface{}) {
 func (c *ClientBase) connect(ctx context.Context) error {
 	addr, err := c.getAddrFunc()
 	if err != nil {
-		log.Error("failed to get cclient address", zap.Error(err))
+		log.Error("failed to get client address", zap.Error(err))
 		return err
 	}
 

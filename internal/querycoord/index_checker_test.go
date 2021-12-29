@@ -28,14 +28,17 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 func TestReloadFromKV(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	defer etcdCli.Close()
 	assert.Nil(t, err)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 
@@ -88,8 +91,10 @@ func TestReloadFromKV(t *testing.T) {
 func TestCheckIndexLoop(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	defer etcdCli.Close()
 	assert.Nil(t, err)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 
@@ -152,8 +157,11 @@ func TestCheckIndexLoop(t *testing.T) {
 func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
+	defer etcdCli.Close()
+
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 	taskScheduler := &TaskScheduler{
@@ -162,8 +170,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		client:           kv,
 		triggerTaskQueue: NewTaskQueue(),
 	}
-	idAllocatorKV, err := tsoutil.NewTSOKVBase(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.KvRootPath, "queryCoordTaskID")
-	assert.Nil(t, err)
+	idAllocatorKV := tsoutil.NewTSOKVBase(etcdCli, Params.QueryCoordCfg.KvRootPath, "queryCoordTaskID")
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 	err = idAllocator.Initialize()
 	assert.Nil(t, err)

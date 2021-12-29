@@ -28,12 +28,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Mock is an alternative to IndexCoord, it will return specific results based on specific parameters.
 type Mock struct {
-	etcdKV *etcdkv.EtcdKV
-
+	etcdKV  *etcdkv.EtcdKV
+	etcdCli *clientv3.Client
 	Failure bool
 }
 
@@ -67,12 +68,22 @@ func (icm *Mock) Register() error {
 	if icm.Failure {
 		return errors.New("IndexCoordinate register failed")
 	}
-	icm.etcdKV, _ = etcdkv.NewEtcdKV(Params.IndexCoordCfg.EtcdEndpoints, Params.IndexCoordCfg.MetaRootPath)
+	icm.etcdKV = etcdkv.NewEtcdKV(icm.etcdCli, Params.IndexCoordCfg.MetaRootPath)
 	err := icm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
-	session := sessionutil.NewSession(context.Background(), Params.IndexCoordCfg.MetaRootPath, Params.IndexCoordCfg.EtcdEndpoints)
-	session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true)
+	if err != nil {
+		return err
+	}
+	session := sessionutil.NewSession(context.Background(), Params.IndexCoordCfg.MetaRootPath, icm.etcdCli)
+	session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true, false)
 	session.Register()
 	return err
+}
+
+func (icm *Mock) SetEtcdClient(client *clientv3.Client) {
+	icm.etcdCli = client
+}
+
+func (icm *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
 }
 
 // GetComponentStates gets the component states of the mocked IndexCoord, if Param `Failure` is true, it will return an error,

@@ -14,36 +14,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package querynode
+package etcd
 
 import (
 	"context"
+	"os"
+	"path"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
-func TestGetSystemInfoMetrics(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+var Params paramtable.GlobalParamTable
 
-	node, err := genSimpleQueryNode(ctx)
+func TestEtcd(t *testing.T) {
+	Params.Init()
+	Params.BaseParams.UseEmbedEtcd = true
+	Params.BaseParams.EtcdDataDir = "/tmp/data"
+	err := InitEtcdServer(&Params.BaseParams)
+	assert.NoError(t, err)
+	defer os.RemoveAll(Params.BaseParams.EtcdDataDir)
+	defer StopEtcdServer()
+
+	// port is binded
+	err = InitEtcdServer(&Params.BaseParams)
+	assert.Error(t, err)
+
+	etcdCli, err := GetEtcdClient(&Params.BaseParams)
 	assert.NoError(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	key := path.Join("test", "test")
+	_, err = etcdCli.Put(context.TODO(), key, "value")
 	assert.NoError(t, err)
-	defer etcdCli.Close()
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.QueryNodeCfg.MetaRootPath, etcdCli)
 
-	req := &milvuspb.GetMetricsRequest{
-		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
-	}
-	resp, err := getSystemInfoMetrics(ctx, req, node)
+	resp, err := etcdCli.Get(context.TODO(), key)
 	assert.NoError(t, err)
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	assert.False(t, resp.Count < 1)
+	assert.Equal(t, string(resp.Kvs[0].Value), "value")
 }
