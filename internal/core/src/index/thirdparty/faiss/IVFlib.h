@@ -40,7 +40,7 @@ const IndexIVF * try_extract_index_ivf (const Index * index);
 IndexIVF * try_extract_index_ivf (Index * index);
 
 /** Merge index1 into index0. Works on IndexIVF's and IndexIVF's
- *  embedded in a IndexPreTransform. On output, the index1 is empty.
+ *  embedded in an IndexPreTransform. On output, the index1 is empty.
  *
  * @param shift_ids: translate the ids from index1 to index0->prev_ntotal
  */
