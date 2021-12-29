@@ -128,7 +128,7 @@ func (nm *NodeManager) PeekClient(meta Meta) (UniqueID, types.IndexNode) {
 	return nodeID, client
 }
 
-// ListNode list all IndexNodes in node manager.
+// ListNode lists all IndexNodes in node manager.
 func (nm *NodeManager) ListNode() []UniqueID {
 	//nm.lock.Lock()
 	//defer nm.lock.Unlock()
