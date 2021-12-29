@@ -2983,7 +2983,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "GC Max duration seconds",
+      "description": "GC Max duration seconds.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -3960,7 +3960,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Number of heap bytes waiting to be used",
+      "description": "Number of heap bytes waiting to be used.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
