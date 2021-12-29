@@ -65,6 +65,7 @@ func TestBaseConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// IVFConfAdapter checks if an ivf index can be built.
 func TestIVFConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
