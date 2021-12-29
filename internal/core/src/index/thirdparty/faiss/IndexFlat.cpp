@@ -11,7 +11,6 @@
 
 #include <cstring>
 #include <faiss/utils/distances.h>
-#include <faiss/utils/distances_range.h>
 #include <faiss/utils/extra_distances.h>
 #include <faiss/utils/utils.h>
 #include <faiss/utils/Heap.h>
