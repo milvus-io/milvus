@@ -183,7 +183,7 @@ The semantics of the Release operation is the reverse operation of the Load oper
 data of the Collection or Partition from the memory. For Release operations, Query Coordinator is responsible for
 notifying query nodes to unload the corresponding Collection or Partition in memory, and then sending the
 ReleaseDqlMessageStream command to Root Coordinator, and Root Coordinator is responsible for broadcasting the
-ReleaseDqlMessageStream command to all Proxies, so that all related streams used to send search request and receive
+ReleaseDqlMessageStream command to all Proxies, so that all related streams used to send search requests and receive
 search result in Proxy will be closed.
 
 The other interaction between Proxy and Query Coordinator is that Proxy needs to query from Query Coordinator for statistics
