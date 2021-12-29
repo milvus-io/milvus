@@ -527,10 +527,6 @@ func (node *QueryNode) isHealthy() bool {
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("QueryNode.GetMetrics",
-		zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
-		zap.String("req", req.Request))
-
 	if !node.isHealthy() {
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
@@ -562,9 +558,6 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		}, nil
 	}
 
-	log.Debug("QueryNode.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 
@@ -572,7 +565,6 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
-			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
 		return metrics, nil
