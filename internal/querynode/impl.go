@@ -519,6 +519,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 	}, nil
 }
 
+// isHealthy checks if QueryNode is healthy
 func (node *QueryNode) isHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	return code == internalpb.StateCode_Healthy
