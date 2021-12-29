@@ -538,7 +538,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_drop_non_empty_partition(self):
         """
         target: verify drop a partition which has data inserted
-        method: 1.create a partition with default schema
+        method: 1. create a partition with default schema
                 2. insert some data
                 3. drop the partition
         expected: drop successfully
