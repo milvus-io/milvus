@@ -147,15 +147,14 @@ class TestChaosData:
     def test_chaos_memory_stress_indexnode(self, connection, chaos_yaml):
         """
         target: test inject memory stress into indexnode
-        method: 1.Deploy milvus and limit indexnode memory resource 1Gi
+        method: 1.Deploy milvus and limit indexnode memory resource 3 / 4Gi
                 2.Create collection and insert some data
-                3.Create index
-                4.Inject memory stress chaos 512Mi
+                3.Inject memory stress chaos 512Mi
+                4.Create index
         expected:
         """
-        # init collection and insert 250 nb
-        # nb = 50000  # vector size: 512*4*nb about 100Mi and create index need 600Mi memory
-        nb = 256000
+        # init collection and insert
+        nb = 256000  # vector size: 512*4*nb about 512Mi and create index need 2.8Gi memory
         dim = 512
         # c_name = cf.gen_unique_str('chaos_memory')
         c_name = 'chaos_memory_gKs8aSUu'
@@ -181,14 +180,9 @@ class TestChaosData:
         tt_flush = datetime.datetime.now() - t0_flush
         log.info(f'flush {nb * 10} entities cost: {tt_flush}')
 
-        # create index
-        t0_index = datetime.datetime.now()
-        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=index_params)
-        tt_index = datetime.datetime.now() - t0_index
-
-        log.info(f"create index cost: {tt_index}")
-        log.info(collection_w.indexes)
+        log.info(collection_w.indexes[0].params)
+        if collection_w.has_index()[0]:
+            collection_w.drop_index()
 
         # indexNode start build index, inject chaos memory stress
         chaos_config = gen_experiment_config(chaos_yaml)
@@ -199,6 +193,15 @@ class TestChaosData:
                                 namespace=constants.CHAOS_NAMESPACE)
         chaos_res.create(chaos_config)
         log.debug("inject chaos")
+
+        # create index
+        t0_index = datetime.datetime.now()
+        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
+                                             index_params=index_params)
+        tt_index = datetime.datetime.now() - t0_index
+
+        log.info(f"create index cost: {tt_index}")
+        log.info(collection_w.indexes[0].params)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', cc.get_chaos_yamls())
@@ -238,7 +241,7 @@ class TestChaosData:
 
         # convert string duration time to a int number in seconds
         if isinstance(duration, str):
-            duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+')+'+0'
+            duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
         else:
             log.error("Duration must be string type")
 
