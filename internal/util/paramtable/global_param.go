@@ -1212,7 +1212,7 @@ func (p *dataCoordConfig) initEnableAutoCompaction() {
 }
 
 func (p *dataCoordConfig) initCompactionEntityExpiration() {
-	p.CompactionEntityExpiration = p.BaseParams.ParseInt64WithDefault("dataCoord.compaction.entityExpiration", 864000)
+	p.CompactionEntityExpiration = p.BaseParams.ParseInt64WithDefault("dataCoord.compaction.entityExpiration", math.MaxInt64)
 	p.CompactionEntityExpiration = func(x, y int64) int64 {
 		if x > y {
 			return x
