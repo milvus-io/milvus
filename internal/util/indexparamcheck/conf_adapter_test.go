@@ -202,6 +202,7 @@ func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// BinIVFConfAdapter checks if a bin ivf index can be built.
 func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
