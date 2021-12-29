@@ -62,12 +62,12 @@ if [ ! -d "${CI_LOG_PATH}" ]; then
 fi
 trace "prepare e2e test"  install_pytest_requirements  
 
-CASE_TIMEOUT=${CASE_TIMEOUT:-600}
+
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
   timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
-                                     --timeout ${CASE_TIMEOUT} --html=${CI_LOG_PATH}/report.html  --self-contained-html ${@:-}
+                                     --html=${CI_LOG_PATH}/report.html  --self-contained-html ${@:-}
 else
   pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
-                                     --timeout ${CASE_TIMEOUT}  --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
+                                     --html=${CI_LOG_PATH}/report.html --self-contained-html ${@:-}
 fi
