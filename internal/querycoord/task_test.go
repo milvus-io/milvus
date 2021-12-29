@@ -491,64 +491,6 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func Test_LoadSegmentReschedule(t *testing.T) {
-	refreshParams()
-	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
-	assert.Nil(t, err)
-
-	node1, err := startQueryNodeServer(ctx)
-	assert.Nil(t, err)
-	node1.loadSegment = returnFailedResult
-
-	node2, err := startQueryNodeServer(ctx)
-	assert.Nil(t, err)
-
-	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
-
-	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
-	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
-	assert.Nil(t, err)
-
-	waitTaskFinalState(loadCollectionTask, taskExpired)
-
-	node1.stop()
-	node2.stop()
-	queryCoord.Stop()
-	err = removeAllSession()
-	assert.Nil(t, err)
-}
-
-func Test_WatchDmChannelReschedule(t *testing.T) {
-	refreshParams()
-	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
-	assert.Nil(t, err)
-
-	node1, err := startQueryNodeServer(ctx)
-	assert.Nil(t, err)
-	node1.watchDmChannels = returnFailedResult
-
-	node2, err := startQueryNodeServer(ctx)
-	assert.Nil(t, err)
-
-	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
-
-	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
-	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
-	assert.Nil(t, err)
-
-	waitTaskFinalState(loadCollectionTask, taskExpired)
-
-	node1.stop()
-	node2.stop()
-	queryCoord.Stop()
-	err = removeAllSession()
-	assert.Nil(t, err)
-}
-
 func Test_ReleaseSegmentTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
@@ -569,7 +511,7 @@ func Test_ReleaseSegmentTask(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func Test_RescheduleDmChannelWithWatchQueryChannel(t *testing.T) {
+func Test_RescheduleDmChannel(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
@@ -595,7 +537,7 @@ func Test_RescheduleDmChannelWithWatchQueryChannel(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func Test_RescheduleSegmentWithWatchQueryChannel(t *testing.T) {
+func Test_RescheduleSegment(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
