@@ -217,7 +217,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("watchDmChannelsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	log.Debug("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -229,7 +229,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
