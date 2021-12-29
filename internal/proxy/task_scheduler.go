@@ -373,6 +373,7 @@ func newDqTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInte
 	}
 }
 
+// taskScheduler schedules the gRPC tasks.
 type taskScheduler struct {
 	ddQueue *ddTaskQueue
 	dmQueue *dmTaskQueue
