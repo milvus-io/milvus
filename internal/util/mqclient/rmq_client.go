@@ -110,6 +110,5 @@ func (rc *rmqClient) BytesToMsgID(id []byte) (MessageID, error) {
 }
 
 func (rc *rmqClient) Close() {
-	// TODO(yukun): What to do here?
-	// rc.client.Close()
+	rc.client.Close()
 }

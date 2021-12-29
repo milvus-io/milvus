@@ -625,7 +625,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 
 	for _, info := range w.req.Infos {
 		if err := w.node.loader.FromDmlCPLoadDelete(w.ctx, collectionID, info.SeekPosition); err != nil {
-			return errors.New("watchDeltaChannelsTask failed, error = " + err.Error())
+			return errors.New("watchDeltaChannelsTask from dml cp load delete failed, error = " + err.Error())
 		}
 	}
 

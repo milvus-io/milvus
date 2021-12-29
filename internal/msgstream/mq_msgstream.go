@@ -226,6 +226,13 @@ func (ms *mqMsgStream) Close() {
 			consumer.Close()
 		}
 	}
+
+	for _, reader := range ms.readers {
+		if reader != nil {
+			reader.Close()
+		}
+	}
+	ms.client.Close()
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {

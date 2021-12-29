@@ -1002,6 +1002,20 @@ func (rmq *rocksmq) getReader(topicName, readerName string) *rocksmqReader {
 	return nil
 }
 
+func (rmq *rocksmq) getAndDeleteReader(topicName, readerName string) *rocksmqReader {
+	if vals, ok := rmq.readers.Load(topicName); ok {
+		readers := vals.([]*rocksmqReader)
+		for i, v := range vals.([]*rocksmqReader) {
+			if v.readerName == readerName {
+				readers[i] = readers[len(readers)-1]
+				rmq.readers.Store(topicName, readers[:len(readers)-1])
+				return v
+			}
+		}
+	}
+	return nil
+}
+
 // ReaderSeek seek a reader to the pointed position
 func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID UniqueID) error {
 	if rmq.isClosed() {
@@ -1046,10 +1060,11 @@ func (rmq *rocksmq) CloseReader(topicName string, readerName string) {
 	if rmq.isClosed() {
 		return
 	}
-	reader := rmq.getReader(topicName, readerName)
+	reader := rmq.getAndDeleteReader(topicName, readerName)
 	if reader == nil {
 		log.Warn("reader not exist", zap.String("topic", topicName), zap.String("readerName", readerName))
 		return
 	}
 	reader.Close()
+	reader = nil
 }
