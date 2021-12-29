@@ -164,5 +164,7 @@ func (q *queryService) stopQueryCollection(collectionID UniqueID) {
 	}
 	sc.close()
 	sc.cancel()
+	// for not blocking waitNewTsafe, which will block doUnsolvedMsg quit.
+	sc.watcherCond.Broadcast()
 	delete(q.queryCollections, collectionID)
 }
