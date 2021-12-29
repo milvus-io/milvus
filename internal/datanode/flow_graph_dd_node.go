@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -68,7 +69,7 @@ type ddNode struct {
 
 // Name returns node name, implementing flowgraph.Node
 func (ddn *ddNode) Name() string {
-	return "ddNode"
+	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vchannelName)
 }
 
 // Operate handles input messages, implementing flowgrpah.Node
