@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -454,9 +456,9 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	ttMsgStream.Start()
 
 	go func() {
-		var checker *LongTermChecker
+		var checker *timerecord.LongTermChecker
 		if enableTtChecker {
-			checker = NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
+			checker = timerecord.NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
 			checker.Start()
 			defer checker.Stop()
 		}
