@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
 const ctxTimeInMillisecond = 5000
@@ -106,10 +107,11 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func clearEtcd(rootPath string) error {
-	etcdKV, err := etcdkv.NewEtcdKV(Params.DataNodeCfg.EtcdEndpoints, rootPath)
+	client, err := etcd.GetEtcdClient(&Params.BaseParams)
 	if err != nil {
 		return err
 	}
+	etcdKV := etcdkv.NewEtcdKV(client, rootPath)
 
 	err = etcdKV.RemoveWithPrefix("writer/segment")
 	if err != nil {

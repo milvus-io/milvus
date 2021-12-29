@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -208,8 +209,10 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 
 func TestUnMarshalTask(t *testing.T) {
 	refreshParams()
-	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
+	defer etcdCli.Close()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 	baseCtx, cancel := context.WithCancel(context.Background())
 	taskScheduler := &TaskScheduler{
 		ctx:    baseCtx,
@@ -454,7 +457,10 @@ func TestUnMarshalTask(t *testing.T) {
 
 func TestReloadTaskFromKV(t *testing.T) {
 	refreshParams()
-	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
 	baseCtx, cancel := context.WithCancel(context.Background())
 	taskScheduler := &TaskScheduler{

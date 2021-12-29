@@ -32,10 +32,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -49,7 +51,7 @@ type UniqueID = typeutil.UniqueID
 
 // Server is the grpc wrapper of IndexCoord.
 type Server struct {
-	indexcoord types.IndexCoord
+	indexcoord types.IndexCoordComponent
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -57,6 +59,8 @@ type Server struct {
 	loopCtx    context.Context
 	loopCancel func()
 	loopWg     sync.WaitGroup
+
+	etcdCli *clientv3.Client
 
 	closer io.Closer
 }
@@ -85,6 +89,14 @@ func (s *Server) init() error {
 
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
+
+	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.BaseParams)
+	if err != nil {
+		log.Debug("IndexCoord connect to etcd failed", zap.Error(err))
+		return err
+	}
+	s.etcdCli = etcdCli
+	s.indexcoord.SetEtcdClient(s.etcdCli)
 
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(indexcoord.Params.IndexCoordCfg.Port)
@@ -126,7 +138,9 @@ func (s *Server) Stop() error {
 	if s.indexcoord != nil {
 		s.indexcoord.Stop()
 	}
-
+	if s.etcdCli != nil {
+		defer s.etcdCli.Close()
+	}
 	s.loopCancel()
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")
@@ -138,7 +152,7 @@ func (s *Server) Stop() error {
 }
 
 // SetClient sets the IndexCoord's instance.
-func (s *Server) SetClient(indexCoordClient types.IndexCoord) error {
+func (s *Server) SetClient(indexCoordClient types.IndexCoordComponent) error {
 	s.indexcoord = indexCoordClient
 	return nil
 }
