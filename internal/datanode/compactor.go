@@ -184,10 +184,11 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, schema *schemapb.CollectionSchema, currentTs Timestamp) ([]*InsertData, int64, error) {
 
 	var (
-		dim int // dimension of vector field
-		num int // numOfRows in each binlog
-		n   int // binlog number
-		err error
+		dim     int   // dimension of vector field
+		num     int   // numOfRows in each binlog
+		n       int   // binlog number
+		expired int64 // the number of expired entity
+		err     error
 
 		iDatas      = make([]*InsertData, 0)
 		fID2Type    = make(map[UniqueID]schemapb.DataType)
@@ -211,6 +212,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		}
 	}
 
+	expired = 0
 	for mergeItr.HasNext() {
 		//  no error if HasNext() returns true
 		vInter, _ := mergeItr.Next()
@@ -228,6 +230,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		ts := Timestamp(v.Timestamp)
 		// Filtering expired entity
 		if t.isExpiredEntity(ts, currentTs) {
+			expired += 1
 			continue
 		}
 
@@ -281,7 +284,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 
 	}
 
-	log.Debug("merge end", zap.Int64("planID", t.getPlanID()), zap.Int64("remaining insert numRows", numRows))
+	log.Debug("merge end", zap.Int64("planID", t.getPlanID()), zap.Int64("remaining insert numRows", numRows), zap.Int64("expired entities", expired))
 	return iDatas, numRows, nil
 }
 
