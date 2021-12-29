@@ -34,7 +34,6 @@ import (
 var Params paramtable.BaseTable
 var rmqPath = "/tmp/rocksmq"
 var kvPathSuffix = "_kv"
-var dbPathSuffix = "_db"
 var metaPathSuffix = "_meta"
 
 func InitIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
@@ -70,7 +69,7 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	rocksdbPath := rmqPath + suffix
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
 
@@ -135,7 +134,7 @@ func TestRocksmq_Basic(t *testing.T) {
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	rocksdbPath := rmqPath + suffix
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
@@ -190,7 +189,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	rocksdbPath := rmqPath + suffix
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
 
@@ -260,7 +259,7 @@ func TestRocksmq_Seek(t *testing.T) {
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + dbPathSuffix + suffix
+	rocksdbPath := rmqPath + suffix
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
 

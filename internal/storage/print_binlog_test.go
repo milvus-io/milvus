@@ -73,6 +73,7 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 	w.Close()
 
 	fd, err := ioutil.TempFile("", "binlog_int64.db")
+	defer os.RemoveAll(fd.Name())
 	assert.Nil(t, err)
 	num, err := fd.Write(buf)
 	assert.Nil(t, err)
@@ -322,6 +323,9 @@ func TestPrintBinlogFiles(t *testing.T) {
 	binlogFiles = append(binlogFiles, "test")
 
 	PrintBinlogFiles(binlogFiles)
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
 }
 
 func TestPrintDDFiles(t *testing.T) {
@@ -433,6 +437,10 @@ func TestPrintDDFiles(t *testing.T) {
 	assert.Equal(t, resultRequests, ddRequests)
 
 	PrintBinlogFiles(binlogFiles)
+
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
 }
 
 func TestPrintIndexFile(t *testing.T) {

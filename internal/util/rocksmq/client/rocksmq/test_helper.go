@@ -14,11 +14,13 @@ package rocksmq
 import (
 	"fmt"
 	"os"
+	"testing"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	server "github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
+	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/zap"
 )
@@ -43,26 +45,23 @@ func newMockClient() *client {
 	return client
 }
 
-func newRocksMQ(rmqPath string) server.RocksMQ {
-	rocksdbPath := rmqPath + "_db"
-	rmq, _ := rocksmq.NewRocksMQ(rocksdbPath, nil)
+func newRocksMQ(t *testing.T, rmqPath string) server.RocksMQ {
+	rocksdbPath := rmqPath
+	rmq, err := rocksmq.NewRocksMQ(rocksdbPath, nil)
+	assert.NoError(t, err)
 	return rmq
 }
 
 func removePath(rmqPath string) {
-	kvPath := rmqPath + "_kv"
-	err := os.RemoveAll(kvPath)
+	// remove path rocksmq created
+	rocksdbPath := rmqPath
+	err := os.RemoveAll(rocksdbPath)
 	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.Any("path", kvPath))
-	}
-	rocksdbPath := rmqPath + "_db"
-	err = os.RemoveAll(rocksdbPath)
-	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.Any("path", kvPath))
+		log.Error("Failed to call os.removeAll.", zap.Any("path", rocksdbPath))
 	}
 	metaPath := rmqPath + "_meta_kv"
 	err = os.RemoveAll(metaPath)
 	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.Any("path", kvPath))
+		log.Error("Failed to call os.removeAll.", zap.Any("path", metaPath))
 	}
 }
