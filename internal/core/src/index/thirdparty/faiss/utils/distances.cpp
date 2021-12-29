@@ -7,16 +7,15 @@
 
 // -*- c++ -*-
 
-#include <faiss/utils/distances.h>
-
 #include <cstdio>
 #include <cassert>
 #include <cstring>
 #include <cmath>
-
 #include <omp.h>
-#include <faiss/FaissHook.h>
+
 #include <faiss/impl/FaissAssert.h>
+#include <faiss/utils/distances.h>
+#include <faiss/FaissHook.h>
 
 
 #ifndef FINTEGER

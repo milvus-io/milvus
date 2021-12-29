@@ -1,14 +1,11 @@
 
 // -*- c++ -*-
 
-#include <faiss/utils/distances_avx.h>
+#include <faiss/utils/distances_simd_avx.h>
 #include <faiss/impl/FaissAssert.h>
 
 #include <cstdio>
 #include <cassert>
-#include <cstring>
-#include <cmath>
-
 #include <immintrin.h>
 
 namespace faiss {

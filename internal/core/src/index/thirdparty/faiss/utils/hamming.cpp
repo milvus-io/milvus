@@ -33,7 +33,6 @@
 #include <omp.h>
 
 #include <faiss/utils/Heap.h>
-#include <faiss/utils/distances_avx.h>
 #include <faiss/utils/utils.h>
 #include <faiss/impl/AuxIndexStructures.h>
 #include <faiss/impl/FaissAssert.h>
