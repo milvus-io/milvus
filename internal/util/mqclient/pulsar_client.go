@@ -123,5 +123,6 @@ func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 }
 
 func (pc *pulsarClient) Close() {
-	pc.client.Close()
+	// FIXME(yukun): pulsar.client is a singleton, so can't invoke this close when server run
+	// pc.client.Close()
 }
