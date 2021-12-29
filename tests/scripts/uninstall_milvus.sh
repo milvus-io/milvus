@@ -61,6 +61,7 @@ if [[ -n "${RELEASE_NAME:-}" ]]; then
 fi
 
 # Uninstall Milvus Helm Release
+# Do not exit with error when release not found so that the script can also be used to clean up related pvc even helm release has been uninstalled already
 helm uninstall -n "${MILVUS_HELM_NAMESPACE}" "${MILVUS_HELM_RELEASE_NAME}" || true
 
 MILVUS_LABELS1="app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME}"
