@@ -44,10 +44,10 @@ pull_request_rules:
         add:
           - ci-passed
   
-  - name: Test passed for tests scripts changed
+  - name: Test passed for non go or c++ code changed
     conditions:
       - base=master
-      - -files~=^(?!tests\/scripts).+
+      - files~=^(?!.*\.(go|h|cpp)).*$
       - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
       label:
