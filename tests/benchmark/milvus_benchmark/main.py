@@ -219,7 +219,6 @@ def main():
                     }
                     # job = back_scheduler.add_job(run_suite, args=[run_type, suite, env_mode, env_params],
                     #                              misfire_grace_time=36000)
-                    # logger.info(job)
                     # logger.info(job.id)
 
     elif args.local:
