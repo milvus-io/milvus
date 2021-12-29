@@ -638,11 +638,18 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 
 			childTasks := triggerTask.getChildTask()
 			if len(childTasks) != 0 {
-				// process loadSegment before watchDmChannel, avoid delete not taking effect
-				highPriorityTasks, lowPriorityTasks := sortInternalTaskByPriority(childTasks, commonpb.MsgType_LoadSegments)
-				processInternalTaskFn(highPriorityTasks, triggerTask)
+				// include loadSegment, watchDmChannel, releaseCollection, releasePartition, releaseSegment
+				processInternalTaskFn(childTasks, triggerTask)
 				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
-					processInternalTaskFn(lowPriorityTasks, triggerTask)
+					// derivedInternalTasks include watchDeltaChannel, watchQueryChannel
+					// derivedInternalTasks generate from loadSegment and watchDmChannel reqs
+					derivedInternalTasks, err := generateDerivedInternalTasks(triggerTask, scheduler.meta, scheduler.cluster)
+					if err != nil {
+						log.Error("scheduleLoop: generate derived watchDeltaChannel and watchcQueryChannel tasks failed", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
+						triggerTask.setResultInfo(err)
+					} else {
+						processInternalTaskFn(derivedInternalTasks, triggerTask)
+					}
 				}
 
 				//TODO::xige-16, judging the triggerCondition is ugly, the taskScheduler will be refactored soon
@@ -975,16 +982,93 @@ func reverseSealedSegmentChangeInfo(changeInfosMap map[UniqueID]*querypb.SealedS
 	return result
 }
 
-func sortInternalTaskByPriority(tasks []task, taskType commonpb.MsgType) ([]task, []task) {
-	highPriorityTasks := make([]task, 0)
-	lowPriorityTasks := make([]task, 0)
-	for _, t := range tasks {
-		if t.msgType() == taskType {
-			highPriorityTasks = append(highPriorityTasks, t)
-		} else {
-			lowPriorityTasks = append(lowPriorityTasks, t)
+// generateDerivedInternalTasks generate watchDeltaChannel and watchQueryChannel tasks
+func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) ([]task, error) {
+	var derivedInternalTasks []task
+	watchQueryChannelInfo := make(map[int64]map[UniqueID]struct{})
+	watchDeltaChannelInfo := make(map[int64]map[UniqueID]struct{})
+	addChannelWatchInfoFn := func(nodeID int64, collectionID UniqueID, watchInfo map[int64]map[UniqueID]struct{}) {
+		if _, ok := watchInfo[nodeID]; !ok {
+			watchInfo[nodeID] = make(map[UniqueID]struct{})
+		}
+
+		watchInfo[nodeID][collectionID] = struct{}{}
+	}
+
+	for _, childTask := range triggerTask.getChildTask() {
+		if childTask.msgType() == commonpb.MsgType_LoadSegments {
+			loadSegmentTask := childTask.(*loadSegmentTask)
+			collectionID := loadSegmentTask.CollectionID
+			nodeID := loadSegmentTask.DstNodeID
+			if !cluster.hasWatchedQueryChannel(triggerTask.traceCtx(), nodeID, collectionID) {
+				addChannelWatchInfoFn(nodeID, collectionID, watchQueryChannelInfo)
+			}
+			if !cluster.hasWatchedDeltaChannel(triggerTask.traceCtx(), nodeID, collectionID) {
+				addChannelWatchInfoFn(nodeID, collectionID, watchDeltaChannelInfo)
+			}
+		}
+
+		if childTask.msgType() == commonpb.MsgType_WatchDmChannels {
+			watchDmChannelTask := childTask.(*watchDmChannelTask)
+			collectionID := watchDmChannelTask.CollectionID
+			nodeID := watchDmChannelTask.NodeID
+			if !cluster.hasWatchedQueryChannel(triggerTask.traceCtx(), nodeID, collectionID) {
+				addChannelWatchInfoFn(nodeID, collectionID, watchQueryChannelInfo)
+			}
 		}
 	}
 
-	return highPriorityTasks, lowPriorityTasks
+	for nodeID, collectionIDs := range watchQueryChannelInfo {
+		for collectionID := range collectionIDs {
+			queryChannelInfo := meta.getQueryChannelInfoByID(collectionID)
+			msgBase := proto.Clone(triggerTask.msgBase()).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
+			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
+				Base:                 msgBase,
+				NodeID:               nodeID,
+				CollectionID:         collectionID,
+				QueryChannel:         queryChannelInfo.QueryChannel,
+				QueryResultChannel:   queryChannelInfo.QueryResultChannel,
+				GlobalSealedSegments: queryChannelInfo.GlobalSealedSegments,
+			}
+			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getTriggerCondition())
+			baseTask.setParentTask(triggerTask)
+			watchQueryChannelTask := &watchQueryChannelTask{
+				baseTask: baseTask,
+
+				AddQueryChannelRequest: addQueryChannelRequest,
+				cluster:                cluster,
+			}
+			derivedInternalTasks = append(derivedInternalTasks, watchQueryChannelTask)
+		}
+	}
+
+	for nodeID, collectionIDs := range watchDeltaChannelInfo {
+		for collectionID := range collectionIDs {
+			deltaChannelInfo, err := meta.getDeltaChannelsByCollectionID(collectionID)
+			if err != nil {
+				return nil, err
+			}
+			msgBase := proto.Clone(triggerTask.msgBase()).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
+			watchDeltaRequest := &querypb.WatchDeltaChannelsRequest{
+				Base:         msgBase,
+				CollectionID: collectionID,
+				Infos:        deltaChannelInfo,
+			}
+			watchDeltaRequest.NodeID = nodeID
+			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getTriggerCondition())
+			baseTask.setParentTask(triggerTask)
+			watchDeltaTask := &watchDeltaChannelTask{
+				baseTask:                  baseTask,
+				WatchDeltaChannelsRequest: watchDeltaRequest,
+				meta:                      meta,
+				cluster:                   cluster,
+				excludeNodeIDs:            []int64{},
+			}
+			derivedInternalTasks = append(derivedInternalTasks, watchDeltaTask)
+		}
+	}
+
+	return derivedInternalTasks, nil
 }
