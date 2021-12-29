@@ -7,9 +7,6 @@
 
 // -*- c++ -*-
 
-#include <faiss/utils/distances.h>
-#include <faiss/FaissHook.h>
-
 #include <cstdio>
 #include <cassert>
 #include <cstring>
@@ -118,12 +115,10 @@ void fvec_L2sqr_ny_ref (float * dis,
                     size_t d, size_t ny)
 {
     for (size_t i = 0; i < ny; i++) {
-        dis[i] = fvec_L2sqr (x, y, d);
+        dis[i] = fvec_L2sqr_ref (x, y, d);
         y += d;
     }
 }
-
-
 
 
 /*********************************************************

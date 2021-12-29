@@ -1,14 +1,11 @@
 
 // -*- c++ -*-
-#include <faiss/utils/distances_avx.h>
-#include <faiss/utils/distances_avx512.h>
+
+#include <faiss/utils/distances_simd_avx512.h>
 #include <faiss/impl/FaissAssert.h>
 
 #include <cstdio>
 #include <cassert>
-#include <cstring>
-#include <cmath>
-
 #include <immintrin.h>
 
 namespace faiss {
@@ -32,6 +29,8 @@ static inline __m128 masked_read (int d, const float *x) {
 #endif
 
 #if (defined(__AVX512F__) && defined(__AVX512DQ__))
+
+extern uint8_t lookup8bit[256];
 
 float
 fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
