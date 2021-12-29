@@ -828,7 +828,7 @@ func genInsertDataWithExpiredTS() *InsertData {
 			},
 			1: &s.Int64FieldData{
 				NumRows: []int64{2},
-				Data:    []int64{329749364736000000, 329636118528000000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-11-05 23:00:00 +0000 UTC
+				Data:    []int64{329749364736000000, 329500223078400000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-10-31 23:00:00 +0000 UTC
 			},
 			100: &s.FloatVectorFieldData{
 				NumRows: []int64{2},

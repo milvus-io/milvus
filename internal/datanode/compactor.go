@@ -225,12 +225,10 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 			continue
 		}
 
-		if Params.DataCoordCfg.EnableAutoExpiration {
-			ts := Timestamp(v.Timestamp)
-			// Filtering expired entity
-			if t.isExpiredEntity(ts, currentTs) {
-				continue
-			}
+		ts := Timestamp(v.Timestamp)
+		// Filtering expired entity
+		if t.isExpiredEntity(ts, currentTs) {
+			continue
 		}
 
 		row, ok := v.Value.(map[UniqueID]interface{})
@@ -663,8 +661,20 @@ func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {
 }
 
 func (t *compactionTask) isExpiredEntity(ts, now Timestamp) bool {
+	const MAX_ENTITY_EXPIRATION = 9223372036 // math.MaxInt64 / time.Second
+	// Check calculable range of milvus config value
+	if Params.DataCoordCfg.CompactionEntityExpiration > MAX_ENTITY_EXPIRATION {
+		return false
+	}
+
+	duration := time.Duration(Params.DataCoordCfg.CompactionEntityExpiration) * time.Second
+	// Prevent from duration overflow value
+	if duration < 0 {
+		return false
+	}
+
 	pts, _ := tsoutil.ParseTS(ts)
 	pnow, _ := tsoutil.ParseTS(now)
-	expireTime := pts.Add(time.Duration(Params.DataCoordCfg.CompactionEntityExpiration) * time.Second)
+	expireTime := pts.Add(duration)
 	return expireTime.Before(pnow)
 }
