@@ -19,9 +19,9 @@
 #include "exceptions/EasyAssert.h"
 #include "IndexWrapper.h"
 #include "indexbuilder/utils.h"
-#include "index/knowhere/knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "index/knowhere/knowhere/common/Timer.h"
-#include "index/knowhere/knowhere/common/Utils.h"
+#include "knowhere/index/vector_index/ConfAdapterMgr.h"
+#include "knowhere/common/Timer.h"
+#include "knowhere/common/Utils.h"
 
 namespace milvus {
 namespace indexbuilder {

@@ -29,9 +29,7 @@ set( VALUE_SRCS     config/ConfigInit.cpp
                     ValueType.cpp
                     )
 
-set( VALUE_LIBS     yaml-cpp
-                    fiu
-                    )
+set( VALUE_LIBS     yaml-cpp)
 
 create_library(
         TARGET      value
@@ -41,20 +39,17 @@ create_library(
 
 if ( BUILD_UNIT_TEST )
     create_library(
-            TARGET      value-fiu
+            TARGET      value-test
             SRCS        ${VALUE_SRCS}
-            LIBS        ${VALUE_LIBS}
-            DEFS        FIU_ENABLE
-    )
-    target_compile_definitions(value-fiu PRIVATE FIU_ENABLE)
+            LIBS        ${VALUE_LIBS})
 
     set(GTEST_LIBS gtest gtest_main gmock gmock_main)
 
     create_executable(
             TARGET      ConfigMgrTest
             SRCS        config/ConfigMgrTest
-            LIBS        value-fiu ${GTEST_LIBS}
-            DEFS        FIU_ENABLE
+            LIBS        value-test ${GTEST_LIBS}
+            DEFS        ""
     )
 
     add_test ( NAME     ConfigMgrTest
@@ -65,7 +60,7 @@ if ( BUILD_UNIT_TEST )
             TARGET      ServerConfigTest
             SRCS        config/ServerConfigTest
             LIBS        value-fiu ${GTEST_LIBS}
-            DEFS        FIU_ENABLE
+            DEFS        ""
     )
 
     add_test ( NAME     ServerConfigTest
@@ -75,8 +70,8 @@ if ( BUILD_UNIT_TEST )
     create_executable(
             TARGET      ValueTypeTest
             SRCS        ValueTypeTest1 ValueTypeTest2
-            LIBS        value-fiu ${GTEST_LIBS}
-            DEFS        FIU_ENABLE
+            LIBS        value-test ${GTEST_LIBS}
+            DEFS        ""
     )
 
     add_test ( NAME     ValueTypeTest

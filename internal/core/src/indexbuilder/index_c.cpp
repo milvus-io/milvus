@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string>
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
 

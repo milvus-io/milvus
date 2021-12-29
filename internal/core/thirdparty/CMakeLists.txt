@@ -38,6 +38,8 @@ message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
+add_subdirectory( knowhere )
+
 # ****************************** Thirdparty googletest ***************************************
 if ( MILVUS_BUILD_TESTS )
     add_subdirectory( gtest )
@@ -56,4 +58,3 @@ endif()
 
 add_subdirectory( protobuf )
 add_subdirectory( boost_ext )
-add_subdirectory( fiu )
