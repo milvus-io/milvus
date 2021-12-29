@@ -55,6 +55,7 @@ type taskQueue interface {
 	getMaxTaskNum() int64
 }
 
+// baseTaskQueue implements taskQueue.
 type baseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[UniqueID]task
