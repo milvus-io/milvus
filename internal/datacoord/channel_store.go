@@ -132,7 +132,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 
 // Reload restores the buffer channels and node-channels mapping from kv
 func (c *ChannelStore) Reload() error {
-	keys, values, err := c.store.LoadWithPrefix(Params.ChannelWatchSubPath)
+	keys, values, err := c.store.LoadWithPrefix(Params.DataCoordCfg.ChannelWatchSubPath)
 	if err != nil {
 		return err
 	}
@@ -341,11 +341,11 @@ func (c *ChannelStore) txn(opSet ChannelOpSet) error {
 }
 
 func buildChannelKey(nodeID int64, channel string) string {
-	return fmt.Sprintf("%s%s%d%s%s", Params.ChannelWatchSubPath, delimeter, nodeID, delimeter, channel)
+	return fmt.Sprintf("%s%s%d%s%s", Params.DataCoordCfg.ChannelWatchSubPath, delimeter, nodeID, delimeter, channel)
 }
 
 func buildNodeKey(nodeID int64) string {
-	return fmt.Sprintf("%s%s%d", Params.ChannelWatchSubPath, delimeter, nodeID)
+	return fmt.Sprintf("%s%s%d", Params.DataCoordCfg.ChannelWatchSubPath, delimeter, nodeID)
 }
 
 func parseNodeID(key string) (int64, error) {

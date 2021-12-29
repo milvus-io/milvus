@@ -2387,7 +2387,7 @@ class TestSearchBase:
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_empty_partition(self, connect, collection, get_simple_index, get_top_k, get_nq):
         """
-        target: test basic search function, all the search params is correct, test all index params, and build
+        target: test basic search function, all the search params are correct, test all index params, and build
         method: add vectors into collection, search with the given vectors, check the result
         expected: the length of the result is top_k, search collection with partition tag return empty
         """
@@ -2566,7 +2566,7 @@ class TestSearchBase:
     def test_search_without_connect(self, dis_connect, collection):
         """
         target: test search vectors without connection
-        method: use dis connected instance, call search method and check if search successfully
+        method: use disconnected instance, call search method and check if search successfully
         expected: raise exception
         """
         with pytest.raises(Exception) as e:
@@ -2581,7 +2581,7 @@ class TestSearchBase:
         """
         collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
-            res = connect.search(collection_name, **default_query)
+            connect.search(collection_name, **default_query)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_distance_l2(self, connect, collection):
@@ -2694,7 +2694,7 @@ class TestSearchBase:
     def test_search_distance_jaccard_flat_index(self, connect, binary_collection):
         """
         target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with L2
+        method: compare the return distance with that computed with L2
         expected: the return distance equals to the computed value
         """
         nq = 1
@@ -2712,7 +2712,7 @@ class TestSearchBase:
     def test_search_binary_flat_with_L2(self, connect, binary_collection):
         """
         target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with L2
+        method: compare the return distance with that computed with L2
         expected: the return distance equals to the computed value
         """
         nq = 1
@@ -2726,7 +2726,7 @@ class TestSearchBase:
     def test_search_distance_hamming_flat_index(self, connect, binary_collection):
         """
         target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with Inner product
+        method: compare the return distance with that computed with Inner product
         expected: the return distance equals to the computed value
         """
         nq = 1
@@ -2781,7 +2781,7 @@ class TestSearchBase:
     def test_search_distance_superstructure_flat_index(self, connect, binary_collection):
         """
         target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with Inner product
+        method: compare the return distance with that computed with Inner product
         expected: the return distance equals to the computed value
         """
         nq = 1
@@ -2925,4 +2925,4 @@ class TestSearchDSL(object):
         """
         query = {}
         with pytest.raises(Exception) as e:
-            res = connect.search(collection, query)
+            connect.search(collection, query)

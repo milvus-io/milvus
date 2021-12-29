@@ -279,7 +279,7 @@ IndexWrapper::Load(const char* serialized_sliced_blob_buffer, int32_t size) {
     milvus::knowhere::BinarySet binarySet;
     for (auto i = 0; i < blob_buffer.datas_size(); i++) {
         const auto& binary = blob_buffer.datas(i);
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
+        auto deleter = [&](uint8_t*) {};  // avoid repeated destruction
         auto bptr = std::make_shared<milvus::knowhere::Binary>();
         bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)binary.value().c_str(), deleter);
         bptr->size = binary.value().length();

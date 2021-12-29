@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -70,6 +71,9 @@ func (m *MockDataCoord) Stop() error {
 
 func (m *MockDataCoord) Register() error {
 	return m.regErr
+}
+
+func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
 func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
@@ -163,13 +167,12 @@ func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.Drop
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
-	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	server := NewServer(ctx, nil)
 	assert.NotNil(t, server)
 
 	t.Run("Run", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{}
-		err = server.Run()
+		err := server.Run()
 		assert.Nil(t, err)
 	})
 
@@ -335,21 +338,20 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	err = server.Stop()
+	err := server.Stop()
 	assert.Nil(t, err)
 }
 
 func Test_Run(t *testing.T) {
 	ctx := context.Background()
-	server, err := NewServer(ctx, nil)
-	assert.Nil(t, err)
+	server := NewServer(ctx, nil)
 	assert.NotNil(t, server)
 
 	server.dataCoord = &MockDataCoord{
 		regErr: errors.New("error"),
 	}
 
-	err = server.Run()
+	err := server.Run()
 	assert.Error(t, err)
 
 	server.dataCoord = &MockDataCoord{

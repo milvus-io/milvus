@@ -9,20 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "utils/Json.h"
-#include "query/PlanImpl.h"
-#include "segcore/SegmentGrowing.h"
 #include <utility>
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "query/generated/ExecExprVisitor.h"
-#include "query/SearchOnGrowing.h"
-#include "query/SearchOnSealed.h"
 #include "boost_ext/dynamic_bitset_ext.hpp"
+
+#include "query/PlanImpl.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/generated/ExecExprVisitor.h"
+#include "query/SubSearchResult.h"
+#include "segcore/SegmentGrowing.h"
+#include "utils/Json.h"
 
 namespace milvus::query {
 
-#if 1
 namespace impl {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
@@ -60,7 +58,6 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
     std::optional<RetType> ret_;
 };
 }  // namespace impl
-#endif
 
 static SearchResult
 empty_search_result(int64_t num_queries, int64_t topk, int64_t round_decimal, MetricType metric_type) {

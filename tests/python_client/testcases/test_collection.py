@@ -981,10 +981,6 @@ class TestCollectionOperation(TestcaseBase):
     ******************************************************************
     """
 
-    # def teardown_method(self):
-    #     if self.self.collection_wrap is not None and self.self.collection_wrap.collection is not None:
-    #         self.self.collection_wrap.drop()
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_without_connection(self):
         """
@@ -1073,7 +1069,7 @@ class TestCollectionOperation(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
-   
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_load_partition(self):
         """
@@ -1120,7 +1116,6 @@ class TestCollectionOperation(TestcaseBase):
         collection_w.insert(cf.gen_default_list_data())
         collection_w.load()
         collection_w.release()
-
 
 
 class TestCollectionDataframe(TestcaseBase):

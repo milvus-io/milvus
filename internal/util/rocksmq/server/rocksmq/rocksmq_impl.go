@@ -262,6 +262,7 @@ func (rmq *rocksmq) Close() {
 	defer rmq.storeMu.Unlock()
 	rmq.kv.Close()
 	rmq.store.Close()
+	log.Info("Successfully close rocksmq")
 }
 
 func (rmq *rocksmq) stopRetention() {
@@ -565,7 +566,6 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	if err != nil {
 		return []UniqueID{}, err
 	}
-	updatePageTime := time.Since(start).Milliseconds()
 
 	// TODO add this to monitor metrics
 	getProduceTime := time.Since(start).Milliseconds()
@@ -574,7 +574,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 			zap.Int64("get lock elapse", getLockTime),
 			zap.Int64("alloc elapse", allocTime),
 			zap.Int64("write elapse", writeTime),
-			zap.Int64("updatePage elapse", updatePageTime))
+			zap.Int64("updatePage elapse", getProduceTime))
 	}
 	return msgIDs, nil
 }
@@ -699,11 +699,17 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		consumedIDs = append(consumedIDs, msg.MsgID)
 	}
 	newID := consumedIDs[len(consumedIDs)-1]
+	err := rmq.updateAckedInfo(topicName, groupName, consumedIDs)
+	if err != nil {
+		log.Warn("failed to update acked info ", zap.String("topic", topicName),
+			zap.String("groupName", groupName), zap.Error(err))
+		return nil, err
+	}
 	rmq.moveConsumePos(topicName, groupName, newID+1)
-	rmq.updateAckedInfo(topicName, groupName, consumedIDs)
+
 	// TODO add this to monitor metrics
 	getConsumeTime := time.Since(start).Milliseconds()
-	if getLockTime > 200 || getConsumeTime > 200 {
+	if getConsumeTime > 200 {
 		log.Warn("rocksmq consume too slowly", zap.String("topic", topicName),
 			zap.Int64("get lock elapse", getLockTime), zap.Int64("consume elapse", getConsumeTime))
 	}
@@ -764,7 +770,13 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	lock.Lock()
 	defer lock.Unlock()
 
-	return rmq.seek(topicName, groupName, msgID)
+	err := rmq.seek(topicName, groupName, msgID)
+	if err != nil {
+		log.Debug("failed to seek", zap.String("topic", topicName), zap.String("group", groupName), zap.Uint64("msgId", uint64(msgID)), zap.Error(err))
+		return err
+	}
+	log.Debug("successfully seek", zap.String("topic", topicName), zap.String("group", groupName), zap.Uint64("msgId", uint64(msgID)))
+	return nil
 }
 
 // SeekToLatest updates current id to the msg id of latest message + 1
@@ -786,8 +798,9 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	iter := rmq.store.NewIterator(readOpts)
 	defer iter.Close()
 
+	prefix := topicName + "/"
 	// seek to the last message of thie topic
-	iter.SeekForPrev([]byte(typeutil.AddOne(topicName + "/")))
+	iter.SeekForPrev([]byte(typeutil.AddOne(prefix)))
 
 	// if iterate fail
 	if err := iter.Err(); err != nil {
@@ -799,15 +812,13 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 		return nil
 	}
 
-	fixTopicName := topicName + "/"
-
 	iKey := iter.Key()
 	seekMsgID := string(iKey.Data())
 	if iKey != nil {
 		iKey.Free()
 	}
 	// if find message is not belong to current channel, start from 0
-	if !strings.Contains(seekMsgID, fixTopicName) {
+	if !strings.Contains(seekMsgID, prefix) {
 		return nil
 	}
 
@@ -817,6 +828,8 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	}
 	// current msgID should not be included
 	rmq.moveConsumePos(topicName, groupName, msgID+1)
+	log.Debug("successfully seek to latest", zap.String("topic", topicName),
+		zap.String("group", groupName), zap.Uint64("latest", uint64(msgID+1)))
 	return nil
 }
 

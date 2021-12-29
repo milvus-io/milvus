@@ -10,7 +10,7 @@ Milvus exposes the following set of data features to applications:
 
 - a query language specifies data definition, data manipulation, and data query, where data definition includes create, drop, and data manipulation includes insert, upsert, delete, and data query falls into three types, primary key search, approximate nearest neighbor search (ANNS), ANNS with predicates.
 
-The requests' execution order is strictly in accordance with their issue-time order. We take proxy's issue time as a request's issue time. For a batch request, all its sub-requests share the same issue time. In cases there are multiple proxies, issue time from different proxies are regarded as coming from a central clock.
+The requests' execution order is strictly in accordance with their issue-time order. We take Proxy's issue time as a request's issue time. For a batch request, all its sub-requests share the same issue time. In cases there are multiple proxies, issue time from different proxies are regarded as coming from a central clock.
 
 The transaction is currently not supported by Milvus.
 
@@ -30,9 +30,9 @@ Each collection or partition contains a set of 'segment groups'. The Segment gro
 
 <img src="./figs/system_framework.png" width=800>
 
-The main components, proxy, WAL, query node, and write node can scale to multiple instances. These components scale separately for a better tradeoff between availability and cost.
+The main components, Proxy, WAL, query node, and write node can scale to multiple instances. These components scale separately for a better tradeoff between availability and cost.
 
-The WAL forms a hash ring. Requests (i.e. inserts and deletes) from clients will be repacked by proxy. Operations shared the identical hash value (the hash value of primary key) will be routed to the same hash bucket. In addition, some preprocessing work will be done by proxy, such as static validity checking, primary key assignment (if not given by the user), timestamp assignment.
+The WAL forms a hash ring. Requests (i.e. inserts and deletes) from clients will be repacked by Proxy. Operations shared the identical hash value (the hash value of primary key) will be routed to the same hash bucket. In addition, some preprocessing work will be done by proxy, such as static validity checking, primary key assignment (if not given by the user), timestamp assignment.
 
 The query/write nodes are linked to the hash ring, with each node covering some portion of the buckets. Once the hash function and bucket coverage are settled, the chain 'proxy -> WAL -> query/write node' will act as a producer-consumer pipeline. Logs in each bucket are a determined operation stream. Via performing the operation stream in order, the query nodes keep themselves up to date.
 

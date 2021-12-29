@@ -302,7 +302,7 @@ if [[ -n "${DISABLE_KIND:-}" ]]; then
 fi
 if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
 
-  #[remove-kind] if disable_kind exist, do not need kind registry
+  # If disable_kind exist,login ci docker registry instead
   if [[ -n "${DISABLE_KIND:-}" ]]; then
       trace "docker login in ci registry" docker_login_ci_registry
   else

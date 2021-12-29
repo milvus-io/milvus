@@ -37,8 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,7 +58,7 @@ func TestGetSegmentInfoChannel(t *testing.T) {
 		resp, err := svr.GetSegmentInfoChannel(context.TODO())
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, Params.SegmentInfoChannelName, resp.Value)
+		assert.EqualValues(t, Params.DataCoordCfg.SegmentInfoChannelName, resp.Value)
 	})
 }
 
@@ -245,7 +245,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	resp, err := svr.GetTimeTickChannel(context.TODO())
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.EqualValues(t, Params.TimeTickChannelName, resp.Value)
+	assert.EqualValues(t, Params.DataCoordCfg.TimeTickChannelName, resp.Value)
 }
 
 func TestGetSegmentStates(t *testing.T) {
@@ -613,8 +613,7 @@ func TestGetFlushedSegments(t *testing.T) {
 
 func TestService_WatchServices(t *testing.T) {
 	factory := msgstream.NewPmsFactory()
-	svr, err := CreateServer(context.TODO(), factory)
-	assert.Nil(t, err)
+	svr := CreateServer(context.TODO(), factory)
 	svr.serverLoopWg.Add(1)
 
 	ech := make(chan *sessionutil.SessionEvent)
@@ -1064,7 +1063,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
@@ -1132,7 +1131,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		})
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
@@ -1214,7 +1213,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.TimeTickChannelName})
+		ttMsgStream.AsProducer([]string{Params.DataCoordCfg.TimeTickChannelName})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		node := &NodeInfo{
@@ -1522,7 +1521,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1565,7 +1564,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1593,7 +1592,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1621,7 +1620,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1699,7 +1698,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1736,7 +1735,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 }
 
 func TestGetCompactionState(t *testing.T) {
-	Params.EnableCompaction = true
+	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
 		svr := &Server{}
 		svr.isServing = ServerStateHealthy
@@ -1791,12 +1790,12 @@ func TestGetCompactionState(t *testing.T) {
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.GetStatus().GetReason())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.GetStatus().GetReason())
 	})
 }
 
 func TestCompleteCompaction(t *testing.T) {
-	Params.EnableCompaction = true
+	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test complete compaction successfully", func(t *testing.T) {
 		svr := &Server{}
 		svr.isServing = ServerStateHealthy
@@ -1835,12 +1834,12 @@ func TestCompleteCompaction(t *testing.T) {
 		resp, err := svr.CompleteCompaction(context.Background(), &datapb.CompactionResult{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.GetReason())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.GetReason())
 	})
 }
 
 func TestManualCompaction(t *testing.T) {
-	Params.EnableCompaction = true
+	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: &MockAllocator{}}
 		svr.isServing = ServerStateHealthy
@@ -1896,7 +1895,7 @@ func TestManualCompaction(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.Status.Reason)
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.Status.Reason)
 	})
 }
 
@@ -1946,7 +1945,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.NodeID), resp.Status.Reason)
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.Status.Reason)
 	})
 }
 
@@ -1954,7 +1953,7 @@ func TestOptions(t *testing.T) {
 	t.Run("SetRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, endpoints []string) (types.RootCoord, error) {
+		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoord, error) {
 			return nil, errors.New("dummy")
 		}
 		opt := SetRootCoordCreator(crt)
@@ -1992,8 +1991,7 @@ func TestOptions(t *testing.T) {
 
 		factory := msgstream.NewPmsFactory()
 
-		svr, err := CreateServer(context.TODO(), factory, opt)
-		assert.Nil(t, err)
+		svr := CreateServer(context.TODO(), factory, opt)
 		dn, err := svr.dataNodeCreator(context.Background(), "")
 		assert.Nil(t, dn)
 		assert.Nil(t, err)
@@ -2235,29 +2233,29 @@ func TestGetFlushState(t *testing.T) {
 
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
 	Params.Init()
-	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())
+	Params.DataCoordCfg.TimeTickChannelName = Params.DataCoordCfg.TimeTickChannelName + strconv.Itoa(rand.Int())
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.DataCoordCfg.PulsarAddress,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024,
 	}
 	err = factory.SetParams(m)
 	assert.Nil(t, err)
 
-	etcdCli, err := initEtcd(Params.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
-	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.DataCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr, err := CreateServer(context.TODO(), factory, opts...)
-	assert.Nil(t, err)
+	svr := CreateServer(context.TODO(), factory, opts...)
+	svr.SetEtcdClient(etcdCli)
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
 	assert.Nil(t, err)
@@ -2275,21 +2273,4 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 	err = svr.CleanMeta()
 	assert.Nil(t, err)
-}
-
-func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
-	var etcdCli *clientv3.Client
-	connectEtcdFn := func() error {
-		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
-		if err != nil {
-			return err
-		}
-		etcdCli = etcd
-		return nil
-	}
-	err := retry.Do(context.TODO(), connectEtcdFn, retry.Attempts(300))
-	if err != nil {
-		return nil, err
-	}
-	return etcdCli, nil
 }

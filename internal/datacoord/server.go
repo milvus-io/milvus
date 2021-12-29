@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -38,12 +40,14 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -81,10 +85,12 @@ const (
 )
 
 type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
-type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error)
+type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
+
+var Params paramtable.GlobalParamTable
 
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs
@@ -97,6 +103,7 @@ type Server struct {
 	isServing        ServerState
 	helper           ServerHelper
 
+	etcdCli          *clientv3.Client
 	kvClient         *etcdkv.EtcdKV
 	meta             *meta
 	segmentManager   Manager
@@ -174,7 +181,7 @@ func SetSegmentManager(manager Manager) Option {
 }
 
 // CreateServer creates a `Server` instance
-func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) (*Server, error) {
+func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:                    ctx,
@@ -191,15 +198,15 @@ func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option
 	for _, opt := range opts {
 		opt(s)
 	}
-	return s, nil
+	return s
 }
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
 	return datanodeclient.NewClient(ctx, addr)
 }
 
-func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
-	return rootcoordclient.NewClient(ctx, metaRootPath, etcdEndpoints)
+func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoord, error) {
+	return rootcoordclient.NewClient(ctx, metaRootPath, client)
 }
 
 // QuitSignal returns signal when server quits
@@ -211,24 +218,26 @@ func (s *Server) QuitSignal() <-chan struct{} {
 func (s *Server) Register() error {
 	s.session.Register()
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		log.Error("DataCoord disconnected from etcd, process will exit", zap.Int64("ServerID", s.session.ServerID))
+		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
-			log.Fatal("failed to stop server", zap.Error(err))
+			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		if s.session.TriggerKill {
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		}
 	})
 	return nil
 }
 
 func (s *Server) initSession() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
+	s.session = sessionutil.NewSession(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	s.session.Init(typeutil.DataCoordRole, Params.Address, true)
-	Params.NodeID = s.session.ServerID
-	Params.SetLogger(Params.NodeID)
+	s.session.Init(typeutil.DataCoordRole, Params.DataCoordCfg.Address, true, true)
+	Params.DataCoordCfg.NodeID = s.session.ServerID
+	Params.BaseParams.SetLogger(Params.DataCoordCfg.NodeID)
 	return nil
 }
 
@@ -248,7 +257,7 @@ func (s *Server) Init() error {
 func (s *Server) Start() error {
 	var err error
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
+		"PulsarAddress":  Params.DataCoordCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err = s.msFactory.SetParams(m)
@@ -270,7 +279,7 @@ func (s *Server) Start() error {
 	}
 
 	s.allocator = newRootCoordAllocator(s.rootCoordClient)
-	if Params.EnableCompaction {
+	if Params.DataCoordCfg.EnableCompaction {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
 	}
@@ -285,10 +294,10 @@ func (s *Server) Start() error {
 	}
 
 	s.startServerLoop()
-	Params.CreatedTime = time.Now()
-	Params.UpdatedTime = time.Now()
+	Params.DataCoordCfg.CreatedTime = time.Now()
+	Params.DataCoordCfg.UpdatedTime = time.Now()
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
-	log.Debug("DataCoord startup success")
+	logutil.Logger(s.ctx).Debug("startup success")
 
 	return nil
 }
@@ -306,6 +315,11 @@ func (s *Server) initCluster() error {
 	s.sessionManager = NewSessionManager(withSessionCreator(s.dataNodeCreator))
 	s.cluster = NewCluster(s.sessionManager, s.channelManager)
 	return nil
+}
+
+// SetEtcdClient sets etcd client for datacoord.
+func (s *Server) SetEtcdClient(client *clientv3.Client) {
+	s.etcdCli = client
 }
 
 func (s *Server) createCompactionHandler() {
@@ -329,35 +343,47 @@ func (s *Server) stopCompactionTrigger() {
 func (s *Server) initGarbageCollection() error {
 	var cli *minio.Client
 	var err error
-	if Params.EnableGarbageCollection {
-		cli, err = minio.New(Params.MinioAddress, &minio.Options{
-			Creds:  credentials.NewStaticV4(Params.MinioAccessKeyID, Params.MinioSecretAccessKey, ""),
-			Secure: Params.MinioUseSSL,
+	if Params.DataCoordCfg.EnableGarbageCollection {
+		cli, err = minio.New(Params.DataCoordCfg.MinioAddress, &minio.Options{
+			Creds:  credentials.NewStaticV4(Params.DataCoordCfg.MinioAccessKeyID, Params.DataCoordCfg.MinioSecretAccessKey, ""),
+			Secure: Params.DataCoordCfg.MinioUseSSL,
 		})
 		if err != nil {
 			return err
 		}
-		has, err := cli.BucketExists(context.TODO(), Params.MinioBucketName)
-		if err != nil {
-			return err
-		}
-		if !has {
-			err = cli.MakeBucket(context.TODO(), Params.MinioBucketName, minio.MakeBucketOptions{})
+
+		checkBucketFn := func() error {
+			has, err := cli.BucketExists(context.TODO(), Params.DataCoordCfg.MinioBucketName)
 			if err != nil {
 				return err
 			}
+			if !has {
+				err = cli.MakeBucket(context.TODO(), Params.DataCoordCfg.MinioBucketName, minio.MakeBucketOptions{})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		// retry times shall be two, just to prevent
+		// 1. bucket not exists
+		// 2. bucket is created by other componnent
+		// 3. datacoord try to create but failed with bucket already exists error
+		err = retry.Do(s.ctx, checkBucketFn, retry.Attempts(2))
+		if err != nil {
+			return err
 		}
 	}
 
 	s.garbageCollector = newGarbageCollector(s.meta, GcOption{
 		cli:        cli,
-		enabled:    Params.EnableGarbageCollection,
-		bucketName: Params.MinioBucketName,
-		rootPath:   Params.MinioRootPath,
+		enabled:    Params.DataCoordCfg.EnableGarbageCollection,
+		bucketName: Params.DataCoordCfg.MinioBucketName,
+		rootPath:   Params.DataCoordCfg.MinioRootPath,
 
-		checkInterval:    Params.GCInterval,
-		missingTolerance: Params.GCMissingTolerance,
-		dropTolerance:    Params.GCDropTolerance,
+		checkInterval:    Params.DataCoordCfg.GCInterval,
+		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,
+		dropTolerance:    Params.DataCoordCfg.GCDropTolerance,
 	})
 	return nil
 }
@@ -392,20 +418,17 @@ func (s *Server) startSegmentManager() {
 }
 
 func (s *Server) initMeta() error {
-	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		if err != nil {
-			return err
-		}
-
-		s.kvClient = etcdKV
+	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.DataCoordCfg.MetaRootPath)
+	s.kvClient = etcdKV
+	reloadEtcdFn := func() error {
+		var err error
 		s.meta, err = newMeta(s.kvClient)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	return retry.Do(s.ctx, connectEtcdFn, retry.Attempts(connEtcdMaxRetryTime))
+	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connEtcdMaxRetryTime))
 }
 
 func (s *Server) startServerLoop() {
@@ -425,17 +448,17 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		return
 	}
-	ttMsgStream.AsConsumerWithPosition([]string{Params.TimeTickChannelName},
-		Params.DataCoordSubscriptionName, mqclient.SubscriptionPositionLatest)
+	ttMsgStream.AsConsumerWithPosition([]string{Params.DataCoordCfg.TimeTickChannelName},
+		Params.DataCoordCfg.DataCoordSubscriptionName, mqclient.SubscriptionPositionLatest)
 	log.Debug("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", Params.TimeTickChannelName),
-		zap.String("subscription", Params.DataCoordSubscriptionName))
+		zap.String("timeTickChannel", Params.DataCoordCfg.TimeTickChannelName),
+		zap.String("subscription", Params.DataCoordCfg.DataCoordSubscriptionName))
 	ttMsgStream.Start()
 
 	go func() {
-		var checker *LongTermChecker
+		var checker *timerecord.LongTermChecker
 		if enableTtChecker {
-			checker = NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
+			checker = timerecord.NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
 			checker.Start()
 			defer checker.Stop()
 		}
@@ -709,7 +732,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.MetaRootPath, Params.EtcdEndpoints); err != nil {
+	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli); err != nil {
 		return err
 	}
 	if err = s.rootCoordClient.Init(); err != nil {
@@ -732,7 +755,7 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	s.session.Revoke(time.Second)
 
-	if Params.EnableCompaction {
+	if Params.DataCoordCfg.EnableCompaction {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}
@@ -769,7 +792,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
-			SourceID: Params.NodeID,
+			SourceID: Params.DataCoordCfg.NodeID,
 		},
 		DbName:       "",
 		CollectionID: collectionID,
@@ -782,7 +805,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.NodeID,
+			SourceID:  Params.DataCoordCfg.NodeID,
 		},
 		DbName:         "",
 		CollectionName: resp.Schema.Name,

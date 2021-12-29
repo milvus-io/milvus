@@ -53,6 +53,7 @@ func insertRepackFunc(
 	return result, nil
 }
 
+// defaultInsertRepackFunc repacks the dml messages.
 func defaultInsertRepackFunc(
 	tsMsgs []msgstream.TsMsg,
 	hashKeys [][]int32,

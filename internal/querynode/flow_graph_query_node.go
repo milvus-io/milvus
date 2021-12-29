@@ -182,8 +182,8 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 		q.dmlStream = insertStream
 	}
 
-	maxQueueLength := Params.FlowGraphMaxQueueLength
-	maxParallelism := Params.FlowGraphMaxParallelism
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
 	node := flowgraph.NewInputNode(insertStream, "dmlInputNode", maxQueueLength, maxParallelism)
 	return node
@@ -228,6 +228,7 @@ func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosi
 	return err
 }
 
+// close would close queryNodeFlowGraph
 func (q *queryNodeFlowGraph) close() {
 	q.cancel()
 	q.flowGraph.Close()

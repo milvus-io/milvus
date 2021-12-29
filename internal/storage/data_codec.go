@@ -105,6 +105,7 @@ func (b Blob) GetValue() []byte {
 	return b.Value
 }
 
+// FieldData defines field data interface
 type FieldData interface {
 	GetMemorySize() int
 	RowNum() int
@@ -242,7 +243,7 @@ type BlobInfo struct {
 	Length int
 }
 
-// example row_schema: {float_field, int_field, float_vector_field, string_field}
+// InsertData example row_schema: {float_field, int_field, float_vector_field, string_field}
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 type InsertData struct {
 	Data  map[FieldID]FieldData // field id to field data
@@ -261,7 +262,7 @@ func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 }
 
 // Serialize transfer insert data to blob. It will sort insert data by timestamp.
-// From schema, it get all fields.
+// From schema, it gets all fields.
 // For each field, it will create a binlog writer, and write an event to the binlog.
 // It returns binlog buffer in the end.
 func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID UniqueID, data *InsertData) ([]*Blob, []*Blob, error) {
@@ -1008,10 +1009,12 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 type IndexFileBinlogCodec struct {
 }
 
+// NewIndexFileBinlogCodec is constructor for IndexFileBinlogCodec
 func NewIndexFileBinlogCodec() *IndexFileBinlogCodec {
 	return &IndexFileBinlogCodec{}
 }
 
+// Serialize serilizes data as blobs.
 func (codec *IndexFileBinlogCodec) Serialize(
 	indexBuildID UniqueID,
 	version int64,
@@ -1233,6 +1236,7 @@ func NewIndexCodec() *IndexCodec {
 	return &IndexCodec{}
 }
 
+// Serialize serializes index
 func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string, indexName string, indexID UniqueID) ([]*Blob, error) {
 	paramsBytes, err := json.Marshal(struct {
 		Params    map[string]string
@@ -1250,6 +1254,7 @@ func (indexCodec *IndexCodec) Serialize(blobs []*Blob, params map[string]string,
 	return blobs, nil
 }
 
+// Deserialize deserializes index
 func (indexCodec *IndexCodec) Deserialize(blobs []*Blob) ([]*Blob, map[string]string, string, UniqueID, error) {
 	var file *Blob
 	for i := 0; i < len(blobs); i++ {

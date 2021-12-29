@@ -16,11 +16,11 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	"github.com/stretchr/testify/assert"
 )
 
 func TestBaseParamTable(t *testing.T) {
+	var Params BaseParamTable
 	Params.Init()
 
 	assert.NotZero(t, len(Params.EtcdEndpoints))

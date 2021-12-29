@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 
@@ -51,10 +52,10 @@ import (
 
 func TestMain(t *testing.M) {
 	rand.Seed(time.Now().Unix())
-	Params.InitAlias("datanode-alias-1")
+	Params.DataNodeCfg.InitAlias("datanode-alias-1")
 	Params.Init()
 	// change to specific channel for test
-	Params.TimeTickChannelName = Params.TimeTickChannelName + strconv.Itoa(rand.Int())
+	Params.DataNodeCfg.TimeTickChannelName = Params.DataNodeCfg.TimeTickChannelName + strconv.Itoa(rand.Int())
 	code := t.Run()
 	os.Exit(code)
 }
@@ -62,7 +63,11 @@ func TestMain(t *testing.M) {
 func TestDataNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
-	err := node.Init()
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	node.SetEtcdClient(etcdCli)
+	err = node.Init()
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
@@ -164,6 +169,7 @@ func TestDataNode(t *testing.T) {
 		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
 
 		node1 := newIDLEDataNodeMock(context.TODO())
+		node1.SetEtcdClient(etcdCli)
 		err = node1.Init()
 		assert.Nil(t, err)
 		err = node1.Start()
@@ -229,7 +235,7 @@ func TestDataNode(t *testing.T) {
 			// pulsar produce
 			msFactory := msgstream.NewPmsFactory()
 			m := map[string]interface{}{
-				"pulsarAddress":  Params.PulsarAddress,
+				"pulsarAddress":  Params.DataNodeCfg.PulsarAddress,
 				"receiveBufSize": 1024,
 				"pulsarBufSize":  1024}
 			err = msFactory.SetParams(m)
@@ -475,7 +481,11 @@ func TestDataNode(t *testing.T) {
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
-	err := node.Init()
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	node.SetEtcdClient(etcdCli)
+	err = node.Init()
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
@@ -485,18 +495,17 @@ func TestWatchChannel(t *testing.T) {
 	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
-		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		require.NoError(t, err)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.DataNodeCfg.MetaRootPath)
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
-		path := fmt.Sprintf("%s/%d/%s", Params.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
+		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))
 		assert.NoError(t, err)
 
 		ch := fmt.Sprintf("datanode-etcd-test-by-dev-rootcoord-dml-channel_%d", rand.Int31())
-		path = fmt.Sprintf("%s/%d/%s", Params.ChannelWatchSubPath, node.NodeID, ch)
+		path = fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, ch)
 		c := make(chan struct{})
 		go func() {
-			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.ChannelWatchSubPath, node.NodeID))
+			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID))
 			c <- struct{}{}
 			cnt := 0
 			for {
@@ -536,7 +545,7 @@ func TestWatchChannel(t *testing.T) {
 		node.chanMut.RUnlock()
 		assert.True(t, has)
 
-		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.ChannelWatchSubPath, node.NodeID))
+		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID))
 		assert.Nil(t, err)
 		//TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)

@@ -69,6 +69,16 @@ func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
 	}
 }
 
+func (ddb *DelDataBuf) updateFromBuf(buf *DelDataBuf) {
+	ddb.updateSize(buf.EntriesNum)
+
+	tr := TimeRange{timestampMax: buf.TimestampTo, timestampMin: buf.TimestampFrom}
+	ddb.updateTimeRange(tr)
+
+	ddb.delData.Pks = append(ddb.delData.Pks, buf.delData.Pks...)
+	ddb.delData.Tss = append(ddb.delData.Tss, buf.delData.Tss...)
+}
+
 func newDelDataBuf() *DelDataBuf {
 	return &DelDataBuf{
 		delData: &DeleteData{},
@@ -89,7 +99,25 @@ func (dn *deleteNode) Close() {
 }
 
 func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) error {
-	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys))
+	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
+
+	// Update delBuf for merged segments
+	compactedTo2From := dn.replica.listCompactedSegmentIDs()
+	for compactedTo, compactedFrom := range compactedTo2From {
+		compactToDelBuff := newDelDataBuf()
+		for _, segID := range compactedFrom {
+			value, loaded := dn.delBuf.LoadAndDelete(segID)
+			if loaded {
+				compactToDelBuff.updateFromBuf(value.(*DelDataBuf))
+			}
+		}
+		dn.delBuf.Store(compactedTo, compactToDelBuff)
+		dn.replica.removeSegments(compactedFrom...)
+		log.Debug("update delBuf for merged segments",
+			zap.Int64("compactedTo segmentID", compactedTo),
+			zap.Int64s("compactedFrom segmentIDs", compactedFrom),
+		)
+	}
 
 	segIDToPkMap := make(map[UniqueID][]int64)
 	segIDToTsMap := make(map[UniqueID][]uint64)

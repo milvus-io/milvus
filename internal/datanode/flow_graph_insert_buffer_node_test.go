@@ -61,7 +61,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.MetaRootPath = testPath
+	Params.DataNodeCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -76,7 +76,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.DataNodeCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -151,7 +151,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.MetaRootPath = testPath
+	Params.DataNodeCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -166,7 +166,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.DataNodeCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -352,7 +352,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.MetaRootPath = testPath
+	Params.DataNodeCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -372,7 +372,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.DataNodeCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -412,10 +412,10 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	t.Run("Pure auto flush", func(t *testing.T) {
 		// iBNode.insertBuffer.maxSize = 2
-		tmp := Params.FlushInsertBufferSize
-		Params.FlushInsertBufferSize = 4 * 4
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
 		defer func() {
-			Params.FlushInsertBufferSize = tmp
+			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
 
 		for i := range inMsg.insertMessages {
@@ -513,10 +513,10 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	})
 
 	t.Run("Auto with manual flush", func(t *testing.T) {
-		tmp := Params.FlushInsertBufferSize
-		Params.FlushInsertBufferSize = 4 * 4
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
 		defer func() {
-			Params.FlushInsertBufferSize = tmp
+			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
 
 		fpMut.Lock()
@@ -626,7 +626,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.MetaRootPath = testPath
+	Params.DataNodeCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -646,7 +646,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.DataNodeCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -718,7 +718,7 @@ func TestInsertBufferNode_updateSegStatesInReplica(te *testing.T) {
 }
 
 func TestInsertBufferNode_BufferData(te *testing.T) {
-	Params.FlushInsertBufferSize = 16 * (1 << 20) // 16 MB
+	Params.DataNodeCfg.FlushInsertBufferSize = 16 * (1 << 20) // 16 MB
 
 	tests := []struct {
 		isValid bool

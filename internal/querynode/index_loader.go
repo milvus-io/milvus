@@ -240,12 +240,12 @@ func (loader *indexLoader) setIndexInfo(segment *Segment, info *indexInfo) {
 
 func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface) *indexLoader {
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryNodeCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 	}
 
 	client, err := minioKV.NewMinIOKV(ctx, option)

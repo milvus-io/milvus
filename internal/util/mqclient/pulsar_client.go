@@ -42,6 +42,7 @@ func GetPulsarClientInstance(opts pulsar.ClientOptions) (*pulsarClient, error) {
 	return sc, nil
 }
 
+// CreateProducer create a pulsar producer from options
 func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error) {
 	opts := pulsar.ProducerOptions{Topic: options.Topic}
 	pp, err := pc.client.CreateProducer(opts)
@@ -55,6 +56,7 @@ func (pc *pulsarClient) CreateProducer(options ProducerOptions) (Producer, error
 	return producer, nil
 }
 
+// CreateReader creates a pulsar reader instance
 func (pc *pulsarClient) CreateReader(options ReaderOptions) (Reader, error) {
 	opts := pulsar.ReaderOptions{
 		Topic:                   options.Topic,
@@ -73,6 +75,7 @@ func (pc *pulsarClient) CreateReader(options ReaderOptions) (Reader, error) {
 	return reader, nil
 }
 
+// Subscribe creates a pulsar consumer instance and subscribe a topic
 func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	receiveChannel := make(chan pulsar.ConsumerMessage, options.BufSize)
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
@@ -95,11 +98,13 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	return pConsumer, nil
 }
 
+// EarliestMessageID returns the earliest message id
 func (pc *pulsarClient) EarliestMessageID() MessageID {
 	msgID := pulsar.EarliestMessageID()
 	return &pulsarID{messageID: msgID}
 }
 
+// StringToMsgID converts the string id to MessageID type
 func (pc *pulsarClient) StringToMsgID(id string) (MessageID, error) {
 	pID, err := StringToPulsarMsgID(id)
 	if err != nil {
@@ -108,6 +113,7 @@ func (pc *pulsarClient) StringToMsgID(id string) (MessageID, error) {
 	return &pulsarID{messageID: pID}, nil
 }
 
+// BytesToMsgID converts []byte id to MessageID type
 func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 	pID, err := DeserializePulsarMsgID(id)
 	if err != nil {
@@ -117,5 +123,6 @@ func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 }
 
 func (pc *pulsarClient) Close() {
-	pc.client.Close()
+	// FIXME(yukun): pulsar.client is a singleton, so can't invoke this close when server run
+	// pc.client.Close()
 }

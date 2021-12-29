@@ -8,6 +8,7 @@ import (
 
 var _ Reader = (*rmqReader)(nil)
 
+// rmqReader contains a rocksmq reader
 type rmqReader struct {
 	r rocksmq.Reader
 }
@@ -32,6 +33,7 @@ func (rr *rmqReader) HasNext() bool {
 	return rr.r.HasNext()
 }
 
+// Seek seeks the reader position to id
 func (rr *rmqReader) Seek(id MessageID) error {
 	msgID := id.(*rmqID).messageID
 	return rr.r.Seek(msgID)

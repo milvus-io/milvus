@@ -68,7 +68,7 @@ The following scripts are found in the [`build/`](.) directory. Note that all sc
 
 You can specify different OS for builder by setting `OS_NAME` which defaults to `ubuntu18.04`. Valid OS are `ubuntu18.04`, `centos7`.
 
-To specify `centos7` builder, use these command:
+To specify `centos7` builder, use these commands:
 
 ```shell
 export OS_NAME=centos7
@@ -130,7 +130,7 @@ Stop Dev Container
 
 ## E2E Tests
 
-Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before run E2E tests, you need a running Milvus:
+Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before running E2E tests, you need a running Milvus:
 
 ```shell
 cd deployments/docker/dev
@@ -143,7 +143,7 @@ or
 build/builder.sh /bin/bash -c "./scripts/start_cluster.sh && cat"
 ```
 
-To run E2E tests, use these command:
+To run E2E tests, use these commands:
 
 ```shell
 MILVUS_SERVICE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q builder))
@@ -156,7 +156,7 @@ docker-compose run --rm pytest /bin/bash -c "pytest --host ${MILVUS_SERVICE_IP}"
 
 The scripts under [`build/`](.) are used to build and test. They will ensure that the `builder` Docker image is built (based on [`build/docker/builder`] ) and then execute the appropriate command in that container. These scripts will both ensure that the right data is cached from run to run for incremental builds and will copy the results back out of the container. You can specify a different registry/name for `builder` by setting `IMAGE_REPO` which defaults to  `milvusdb`.
 
-The `builder.sh` is execute by first creating a “docker volume“ directory in `.docker/`. The `.docker/` directory is used to cache the third-party package and compiler cache data. It speeds up recompilation by caching previous compilations and detecting when the same compilation is being done again.
+The `builder.sh` is executed by first creating a “docker volume“ directory in `.docker/`. The `.docker/` directory is used to cache the third-party package and compiler cache data. It speeds up recompilation by caching previous compilations and detecting when the same compilation is being done again.
 
 ## Debug on Host Machine
 

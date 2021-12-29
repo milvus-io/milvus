@@ -95,11 +95,11 @@ class Base:
 class TestcaseBase(Base):
     """
     Additional methods;
-    Public methods that can be used to add cases.
+    Public methods that can be used for test cases.
     """
 
     def _connect(self):
-        """ Add an connection and create the connect """
+        """ Add a connection and create the connect """
         res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
                                                     port=param_info.param_port)
         return res
@@ -197,29 +197,6 @@ class TestcaseBase(Base):
         conn.flush([collection_w.name])
         collection_w.load(partition_names=[partition_w.name, "_default"])
         return collection_w, partition_w, df_partition, df_default
-   
-
-    def insert_entities_into_two_partitions(self, half, prefix='query'):
-        """
-        insert default entities into two partitions(partition_w and _default) in half(int64 and float fields values)
-        :param half: half of nb
-        :return: collection wrap and partition wrap
-        """
-        conn = self._connect()
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-        partition_e = self.init_partition_wrap(collection_wrap=collection_w)
-        # insert [0, half) into partition_w
-        df_partition = cf.gen_default_dataframe_data(nb=half, start=0)
-        partition_w.insert(df_partition)
-        # insert [half, nb) into _default
-        df_default = cf.gen_default_dataframe_data(nb=half, start=half)
-        partition_e.insert(df_default)
-        conn.flush([collection_w.name])
-        partition_w.load()
-        # partition_e.load()
-        return collection_w, partition_w, partition_e,df_default
-
 
     def collection_insert_multi_segments_one_shard(self, collection_prefix, num_of_segment=2, nb_of_segment=1,
                                                    is_dup=True):

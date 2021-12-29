@@ -119,7 +119,7 @@ type ConnectionEdge struct {
 	TargetType          ConnectionTargetType `json:"target_type"` // RootCoord, DataCoord ...
 }
 
-// SystemTopologyNode is a node in system topogoly graph.
+// SystemTopologyNode is a node in system topology graph.
 type SystemTopologyNode struct {
 	Identifier int              `json:"identifier"` // unique in the SystemTopology graph
 	Connected  []ConnectionEdge `json:"connected"`

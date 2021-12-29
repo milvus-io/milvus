@@ -249,19 +249,6 @@ func TestSegmentReplica(t *testing.T) {
 func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	rc := &RootCoordFactory{}
 
-	t.Run("Test refreshFlushedSegmentPKRange", func(t *testing.T) {
-		replica, err := newReplica(context.TODO(), rc, 1)
-		require.NoError(t, err)
-
-		require.False(t, replica.hasSegment(100, true))
-		replica.refreshFlushedSegmentPKRange(100, []int64{10})
-
-		replica.addFlushedSegmentWithPKs(100, 1, 10, "a", 1, []int64{9})
-		require.True(t, replica.hasSegment(100, true))
-		replica.refreshFlushedSegmentPKRange(100, []int64{10})
-
-	})
-
 	t.Run("Test addFlushedSegmentWithPKs", func(t *testing.T) {
 		tests := []struct {
 			isvalid bool
@@ -476,7 +463,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 					sr.flushedSegments[test.flushedSegID] = &Segment{}
 				}
 				sr.updateSegmentEndPosition(test.inSegID, new(internalpb.MsgPosition))
-				sr.removeSegment(0)
+				sr.removeSegments(0)
 
 			})
 		}
@@ -580,7 +567,6 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 				}
 			})
 		}
-
 	})
 
 	t.Run("Test listAllSegmentIDs", func(t *testing.T) {
@@ -592,7 +578,6 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		ids := sr.listAllSegmentIDs()
 		assert.ElementsMatch(t, []UniqueID{1, 2, 3}, ids)
-
 	})
 
 	t.Run("Test_addSegmentMinIOLoadError", func(t *testing.T) {
@@ -632,6 +617,28 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		assert.NotNil(t, err)
 		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()})
 		assert.NotNil(t, err)
+	})
+
+	t.Run("Test_mergeFlushedSegments", func(t *testing.T) {
+		sr, err := newReplica(context.Background(), rc, 1)
+		assert.Nil(t, err)
+
+		sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, []UniqueID{1})
+		sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, []UniqueID{1})
+		require.True(t, sr.hasSegment(1, true))
+		require.True(t, sr.hasSegment(2, true))
+
+		sr.mergeFlushedSegments(3, 1, 0, []UniqueID{1, 2}, "channel", 15)
+		assert.True(t, sr.hasSegment(3, true))
+		assert.False(t, sr.hasSegment(1, true))
+		assert.False(t, sr.hasSegment(2, true))
+
+		to2from := sr.listCompactedSegmentIDs()
+		assert.NotEmpty(t, to2from)
+
+		from, ok := to2from[3]
+		assert.True(t, ok)
+		assert.ElementsMatch(t, []UniqueID{1, 2}, from)
 	})
 
 }

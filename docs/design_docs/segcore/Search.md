@@ -11,7 +11,7 @@ Search now supports two modes: json DSL mode and Boolean Expr mode. We will talk
 The execution mode of Boolean Expr works as follows:
 
 1. client packs search expr, topk, and query vector into proto and sends to Proxy node.
-2. Proxy Node unmarshals the proto, parses it to logical plan, makes static check, and generates protobuf IR.
+2. Proxy Node unmarshals the proto, parses it to logical plan, makes a static check, and generates protobuf IR.
 3. Query Node unmarshals the plan, generates an executable plan AST, and queries in the segcore.
 
 See details of expression usage at [expr_grammar.md](https://milvus.io/docs/v2.0.0/expression.md)
@@ -26,7 +26,7 @@ After obtaining the AST, the execution engine uses the visitor mode to explain a
    2. If Predicate does not exist, vector search bitmask will be empty.
    3. Bitmask will be used to mark filtered out / deleted entities in the vector execution engine.
 
-2. Currently, Milvus supports following node on the AST, visitor mode is used to interpret and execute from top to bottom and generate the final bitmask.
+2. Currently, Milvus supports the following node on the AST, visitor mode is used to interpret and execute from top to bottom and generate the final bitmask.
 
    1. LogicalUnaryExpr: not expression
    2. LogicalBinaryExpr: and or expression

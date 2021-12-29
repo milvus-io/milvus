@@ -22,8 +22,9 @@ import (
 	"fmt"
 	"sync"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"go.uber.org/zap"
+
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -116,6 +117,7 @@ func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueI
 	}
 }
 
+// // retrieve will retrieve from the segments in historical
 func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.ChunkManager,
 	plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 

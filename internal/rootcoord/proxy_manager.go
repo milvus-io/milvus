@@ -46,20 +46,16 @@ type proxyManager struct {
 // newProxyManager helper function to create a proxyManager
 // etcdEndpoints is the address list of etcd
 // fns are the custom getSessions function list
-func newProxyManager(ctx context.Context, etcdEndpoints []string, fns ...func([]*sessionutil.Session)) (*proxyManager, error) {
-	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
-	if err != nil {
-		return nil, err
-	}
+func newProxyManager(ctx context.Context, client *clientv3.Client, fns ...func([]*sessionutil.Session)) *proxyManager {
 	ctx2, cancel2 := context.WithCancel(ctx)
 	p := &proxyManager{
 		ctx:     ctx2,
 		cancel:  cancel2,
 		lock:    sync.Mutex{},
-		etcdCli: cli,
+		etcdCli: client,
 	}
 	p.getSessions = append(p.getSessions, fns...)
-	return p, nil
+	return p
 }
 
 // AddSession adds functions to addSessions function list
@@ -92,7 +88,7 @@ func (p *proxyManager) WatchProxy() error {
 
 	eventCh := p.etcdCli.Watch(
 		p.ctx,
-		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithCreatedNotify(),
 		clientv3.WithPrevKV(),
@@ -172,7 +168,7 @@ func (p *proxyManager) parseSession(value []byte) (*sessionutil.Session, error) 
 func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Session, int64, error) {
 	resp, err := p.etcdCli.Get(
 		ctx,
-		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
@@ -204,7 +200,7 @@ func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sess
 	defer cancel()
 	resp, err := cli.Get(
 		ctx2,
-		path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)

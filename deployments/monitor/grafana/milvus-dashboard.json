@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1639710092805,
+  "iteration": 1640743735973,
   "links": [],
   "panels": [
     {
@@ -39,7 +39,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of has_collection requests",
+      "description": "per-minute increasing rate of has_collection requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -230,7 +230,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": "0",
+          "min": null,
           "show": true
         }
       ],
@@ -436,7 +436,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": "0",
+          "min": null,
           "show": true
         }
       ],
@@ -554,7 +554,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of show_partitions requests.",
+      "description": "per-minute increasing rate of show_partitions requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -760,7 +760,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of create_partition requests.",
+      "description": "per-minute increasing rate of create_partition requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -863,7 +863,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_partition requests.",
+      "description": "per-minute increasing rate of drop_partition requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -966,7 +966,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of show_segments requests.",
+      "description": "per-minute increasing rate of show_segments requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1069,7 +1069,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_index requests.",
+      "description": "per-minute increasing rate of drop_index requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1672,7 +1672,7 @@
           "label": null,
           "logBase": 1,
           "max": null,
-          "min": null,
+          "min": "0",
           "show": true
         },
         {
@@ -1695,7 +1695,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of watch_dm_channels requests.",
+      "description": "per-minute increasing rate of watch_dm_channels requests",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1798,7 +1798,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "List of data nodes which has register with etcd.",
+      "description": "List of data nodes which has register with etcd",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2293,7 +2293,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Total cpu usage of all milvus components.",
+      "description": "Total cpu usage of all milvus components",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2681,7 +2681,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "prometheus",
-      "description": "Process memory of milvus pods.",
+      "description": "Process memory of milvus pod",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -2983,7 +2983,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "GC Max duration seconds",
+      "description": "GC Max duration seconds.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -3247,7 +3247,7 @@
       },
       "yaxes": [
         {
-          "format": "short",
+          "format": "bytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -3933,7 +3933,7 @@
       "yaxes": [
         {
           "decimals": null,
-          "format": "short",
+          "format": "bytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -3960,7 +3960,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Number of heap bytes waiting to be used",
+      "description": "Number of heap bytes waiting to be used.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -4031,7 +4031,7 @@
       "yaxes": [
         {
           "decimals": null,
-          "format": "short",
+          "format": "bytes",
           "label": null,
           "logBase": 1,
           "max": null,
@@ -4139,7 +4139,7 @@
         "allValue": null,
         "current": {
           "isNone": true,
-          "selected": false,
+          "selected": true,
           "text": "None",
           "value": ""
         },
@@ -4234,7 +4234,7 @@
     ]
   },
   "time": {
-    "from": "now-15m",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {
@@ -4267,5 +4267,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 210
+  "version": 215
 }

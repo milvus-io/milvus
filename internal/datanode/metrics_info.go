@@ -29,7 +29,7 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 	// TODO(dragondriver): add more metrics
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, Params.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, Params.DataNodeCfg.NodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           node.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
@@ -40,13 +40,13 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.CreatedTime.String(),
-			UpdatedTime: Params.UpdatedTime.String(),
+			CreatedTime: Params.DataNodeCfg.CreatedTime.String(),
+			UpdatedTime: Params.DataNodeCfg.UpdatedTime.String(),
 			Type:        typeutil.DataNodeRole,
 			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataNodeConfiguration{
-			FlushInsertBufferSize: Params.FlushInsertBufferSize,
+			FlushInsertBufferSize: Params.DataNodeCfg.FlushInsertBufferSize,
 		},
 	}
 
@@ -60,7 +60,7 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, Params.NodeID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, Params.DataNodeCfg.NodeID),
 		}, nil
 	}
 
@@ -70,6 +70,6 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, Params.NodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, Params.DataNodeCfg.NodeID),
 	}, nil
 }

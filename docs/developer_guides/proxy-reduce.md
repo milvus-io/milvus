@@ -4,7 +4,7 @@
 
 For a specified Search request, with nq = 2 and topk = 10, Proxy receives 4 search results from query nodes.
 
-Each Search Result is nq * topk two-dimensional structure，as the illustration below. The result indicates that the user input nq vectors and wanted to obtain the topk similar vectors to these nq vectors respectively.
+Each Search Result is nq * topk two-dimensional structure, as the illustration below. The result indicates that the user input nq vectors and wanted to obtain the topk similar vectors to these nq vectors respectively.
 
 ![search_result_format](./figs/nq_topk_search_results.png)
 

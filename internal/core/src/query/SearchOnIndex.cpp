@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+
 namespace milvus::query {
 SubSearchResult
 SearchOnIndex(const dataset::SearchDataset& search_dataset,

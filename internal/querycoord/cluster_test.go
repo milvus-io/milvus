@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -272,7 +273,7 @@ func saveBinLog(ctx context.Context,
 			Binlogs: []*datapb.Binlog{{LogPath: key}},
 		})
 	}
-	log.Debug("[query coord unittest] save binlog file to MinIO/S3")
+	log.Debug("[QueryCoord unittest] save binlog file to MinIO/S3")
 
 	err = dataKV.MultiSave(kvs)
 	return fieldBinlog, err
@@ -335,11 +336,11 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		BucketName:        Params.MinioBucketName,
+		Address:           Params.QueryCoordCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
+		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 		CreateBucket:      true,
 	}
 
@@ -390,13 +391,15 @@ func TestQueryNodeCluster_getMetrics(t *testing.T) {
 }
 
 func TestReloadClusterFromKV(t *testing.T) {
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	defer etcdCli.Close()
+	assert.Nil(t, err)
 	t.Run("Test LoadOnlineNodes", func(t *testing.T) {
 		refreshParams()
 		baseCtx := context.Background()
-		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		assert.Nil(t, err)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-		clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
+		clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, etcdCli)
+		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
 			ctx:              baseCtx,
@@ -422,10 +425,9 @@ func TestReloadClusterFromKV(t *testing.T) {
 
 	t.Run("Test LoadOfflineNodes", func(t *testing.T) {
 		refreshParams()
-		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		assert.Nil(t, err)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-		clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
+		clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, etcdCli)
+		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
 			client:           kv,
@@ -459,14 +461,16 @@ func TestReloadClusterFromKV(t *testing.T) {
 func TestGrpcRequest(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
-	clusterSession := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-	clusterSession.Init(typeutil.QueryCoordRole, Params.Address, true)
+	defer etcdCli.Close()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, etcdCli)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 	clusterSession.Register()
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
+		"PulsarAddress":  Params.QueryCoordCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err = factory.SetParams(m)
@@ -650,12 +654,12 @@ func TestEstimateSegmentSize(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryCoordCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 	}
 
 	dataKV, err := minioKV.NewMinIOKV(baseCtx, option)

@@ -144,6 +144,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 				SubscriptionName:            subName,
 				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
+				BufSize:                     ms.bufSize,
 			})
 			if err != nil {
 				return err
@@ -166,7 +167,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 	}
 }
 
-// AsProducer create producer to send message to channels
+// AsReader create producer to send message to channels
 func (ms *mqMsgStream) AsReader(channels []string, subName string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
@@ -714,6 +715,7 @@ func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName strin
 				SubscriptionName:            subName,
 				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
+				BufSize:                     ms.bufSize,
 			})
 			if err != nil {
 				return err
@@ -764,6 +766,7 @@ func (ms *MqTtMsgStream) Close() {
 			reader.Close()
 		}
 	}
+	ms.client.Close()
 }
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {

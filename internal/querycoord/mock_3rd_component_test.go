@@ -311,11 +311,11 @@ func newDataCoordMock(ctx context.Context) (*dataCoordMock, error) {
 
 	// create minio client
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		BucketName:        Params.MinioBucketName,
+		Address:           Params.QueryCoordCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
+		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 		CreateBucket:      true,
 	}
 	kv, err := minioKV.NewMinIOKV(ctx, option)

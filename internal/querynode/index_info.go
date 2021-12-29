@@ -65,7 +65,7 @@ func (info *indexInfo) setIndexParams(params map[string]string) {
 	info.indexParams = params
 }
 
-// setReadyLoad the the flag to check if the index is ready to load
+// setReadyLoad the flag to check if the index is ready to load
 func (info *indexInfo) setReadyLoad(load bool) {
 	info.readyLoad = load
 }
@@ -80,6 +80,7 @@ func (info *indexInfo) getIndexID() UniqueID {
 	return info.indexID
 }
 
+// getBuildID returns the build id of index
 func (info *indexInfo) getBuildID() UniqueID {
 	return info.buildID
 }

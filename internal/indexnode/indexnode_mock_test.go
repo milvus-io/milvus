@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,7 +38,11 @@ func TestIndexNodeMock(t *testing.T) {
 	inm := Mock{
 		Build: true,
 	}
-	err := inm.Register()
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	inm.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+	err = inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)
@@ -151,8 +156,11 @@ func TestIndexNodeMockFiled(t *testing.T) {
 		Build:   true,
 		Err:     false,
 	}
-
-	err := inm.Register()
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	inm.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+	err = inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)

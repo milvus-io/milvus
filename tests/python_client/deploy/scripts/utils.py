@@ -64,9 +64,10 @@ def get_collections(prefix):
     return col_list
 
 
-def create_collections_and_insert_data(prefix):
+def create_collections_and_insert_data(prefix, count=3000):
     import random
     dim = 128
+    nb = count // 10
     default_fields = [
         FieldSchema(name="count", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="random_value", dtype=DataType.DOUBLE),
@@ -78,10 +79,8 @@ def create_collections_and_insert_data(prefix):
         col_name = prefix + index_name
         collection = Collection(name=col_name, schema=default_schema) 
         print(f"collection name: {col_name}")
-        count = 3000
-        nb = 500
         print(f"begin insert, count: {count} nb: {nb}")
-        times = int(count / nb)
+        times = int(count // nb)
         total_time = 0.0
         vectors = [[random.random() for _ in range(dim)] for _ in range(count)]
         for j in range(times):
@@ -161,7 +160,7 @@ def load_and_search(prefix):
         t0 = time.time()
         expr = "count in [2,4,6,8]"
         output_fields = ["count", "random_value"]
-        res = c.query(expr, output_fields)
+        res = c.query(expr, output_fields, timeout=20)
         sorted_res = sorted(res, key=lambda k: k['count'])
         for r in sorted_res:
             print(r)

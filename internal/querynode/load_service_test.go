@@ -815,12 +815,12 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	}
 
 	// create minio client
-	bucketName := Params.MinioBucketName
+	bucketName := Params.QueryNodeCfg.MinioBucketName
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryNodeCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
 		BucketName:        bucketName,
 		CreateBucket:      true,
 	}
@@ -928,7 +928,7 @@ func doInsert(ctx context.Context, collectionID UniqueID, partitionID UniqueID, 
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err := msFactory.SetParams(m)
 	if err != nil {

@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
 
-// TODO(dragondriver): add more detail metrics
+// TODO(dragondriver): add more detailed metrics
 func getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
@@ -50,13 +50,13 @@ func getSystemInfoMetrics(
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
-				CreatedTime: Params.CreatedTime.String(),
-				UpdatedTime: Params.UpdatedTime.String(),
+				CreatedTime: Params.IndexCoordCfg.CreatedTime.String(),
+				UpdatedTime: Params.IndexCoordCfg.UpdatedTime.String(),
 				Type:        typeutil.IndexCoordRole,
 				ID:          coord.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.IndexCoordConfiguration{
-				MinioBucketName: Params.MinioBucketName,
+				MinioBucketName: Params.IndexCoordCfg.MinioBucketName,
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.IndexNodeInfos, 0),

@@ -460,7 +460,7 @@ func (pc *parserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 	exprs := []*planpb.Expr{}
 	curNode := node
 
-	// handle multiple relational operator
+	// handle multiple relational operators
 	for {
 		binNodeLeft, LeftOk := curNode.Left.(*ant_ast.BinaryNode)
 		if !LeftOk {

@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -79,15 +80,15 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 
 	rootcoord.Params.Init()
-	rootcoord.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
-	rootcoord.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	rootcoord.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
-	rootcoord.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	rootcoord.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
+	rootcoord.Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
+	rootcoord.Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
+	rootcoord.Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
+	rootcoord.Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
 
-	rootcoord.Params.MaxPartitionNum = 64
-	rootcoord.Params.DefaultPartitionName = "_default"
-	rootcoord.Params.DefaultIndexName = "_default"
+	rootcoord.Params.RootCoordCfg.MaxPartitionNum = 64
+	rootcoord.Params.RootCoordCfg.DefaultPartitionName = "_default"
+	rootcoord.Params.RootCoordCfg.DefaultIndexName = "_default"
 
 	t.Logf("service port = %d", Params.Port)
 
@@ -98,9 +99,9 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	etcdCli, err := initEtcd(rootcoord.Params.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
 	assert.Nil(t, err)
-	sessKey := path.Join(rootcoord.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
@@ -113,8 +114,9 @@ func TestGrpcService(t *testing.T) {
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
-	rootcoord.Params.Address = Params.GetAddress()
+	rootcoord.Params.RootCoordCfg.Address = Params.GetAddress()
 
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
@@ -156,7 +158,7 @@ func TestGrpcService(t *testing.T) {
 		return []string{"file1", "file2", "file3"}, nil
 	}
 	core.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
-		return rootcoord.Params.MinSegmentSizeToEnableIndex, nil
+		return rootcoord.Params.RootCoordCfg.MinSegmentSizeToEnableIndex, nil
 	}
 	core.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
 		return nil
@@ -214,7 +216,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
+	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.RootCoordCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -637,7 +639,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, rootcoord.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, rootcoord.Params.RootCoordCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
@@ -685,7 +687,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, rootcoord.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, rootcoord.Params.RootCoordCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 
 	})
 
@@ -700,9 +702,9 @@ func TestGrpcService(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collName,
 			FieldName:      fieldName,
-			IndexName:      rootcoord.Params.DefaultIndexName,
+			IndexName:      rootcoord.Params.RootCoordCfg.DefaultIndexName,
 		}
-		_, idx, err := core.MetaTable.GetIndexByName(collName, rootcoord.Params.DefaultIndexName)
+		_, idx, err := core.MetaTable.GetIndexByName(collName, rootcoord.Params.RootCoordCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
 		rsp, err := cli.DropIndex(ctx, req)
@@ -735,7 +737,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
 		partName, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, rootcoord.Params.DefaultPartitionName, partName)
+		assert.Equal(t, rootcoord.Params.RootCoordCfg.DefaultPartitionName, partName)
 		assert.Equal(t, 2, len(collectionMetaCache))
 	})
 
@@ -792,6 +794,9 @@ type mockCore struct {
 }
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
+}
+
+func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
 func (m *mockCore) SetDataCoord(context.Context, types.DataCoord) error {
@@ -895,13 +900,13 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataCoordClient = func(string, []string) types.DataCoord {
+	svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, []string) types.IndexCoord {
+	svr.newIndexCoordClient = func(string, *clientv3.Client) types.IndexCoord {
 		return &mockIndex{}
 	}
-	svr.newQueryCoordClient = func(string, []string) types.QueryCoord {
+	svr.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
 		return &mockQuery{}
 	}
 
@@ -910,11 +915,11 @@ func TestRun(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	rootcoord.Params.Init()
-	rootcoord.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
-	etcdCli, err := initEtcd(rootcoord.Params.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
 	assert.Nil(t, err)
-	sessKey := path.Join(rootcoord.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	err = svr.Run()

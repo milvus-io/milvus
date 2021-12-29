@@ -308,7 +308,6 @@ class MilvusClient(object):
         if guarantee_timestamp is not None:
             params.update({"guarantee_timestamp": guarantee_timestamp})
 
-        # logger.debug("Params of search : %s" % str(params))
         result = self._milvus.search(tmp_collection_name, **params)
 
         # must_params = [vector_query]
@@ -489,6 +488,12 @@ class MilvusClient(object):
         if collection_name is None:
             collection_name = self._collection_name
         return self._milvus.release_partitions(collection_name, tag_names, timeout=timeout)
+
+    @time_wrapper
+    def get_query_segment_info(self, collection_name=None, timeout=300, **kwargs):
+        if collection_name is None:
+            collection_name = self._collection_name
+        return self._milvus.get_query_segment_info(collection_name, timeout=timeout, **kwargs)
 
     @time_wrapper
     def scene_test(self, collection_name=None, vectors=None, ids=None):

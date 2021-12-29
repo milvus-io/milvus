@@ -38,6 +38,6 @@ const (
 	// RowIDFieldName name of row ID field
 	RowIDFieldName = common.RowIDFieldName
 
-	// TimeStampFieldName name of timestamp field
+	// TimeStampFieldName name of the timestamp field
 	TimeStampFieldName = common.TimeStampFieldName
 )

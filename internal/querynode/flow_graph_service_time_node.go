@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
+// serviceTimeNode is one of the nodes in delta flow graph
 type serviceTimeNode struct {
 	baseNode
 	collectionID      UniqueID
@@ -34,15 +35,18 @@ type serviceTimeNode struct {
 	timeTickMsgStream msgstream.MsgStream
 }
 
+// Name returns the name of serviceTimeNode
 func (stNode *serviceTimeNode) Name() string {
 	return "stNode"
 }
 
+// Close would close serviceTimeNode
 func (stNode *serviceTimeNode) Close() {
 	// `Close` needs to be invoked to close producers
 	stNode.timeTickMsgStream.Close()
 }
 
+// Operate handles input messages, to execute insert operations
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do serviceTimeNode operation")
 
@@ -106,14 +110,15 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 //	return stNode.timeTickMsgStream.Produce(&msgPack)
 //}
 
+// newServiceTimeNode returns a new serviceTimeNode
 func newServiceTimeNode(ctx context.Context,
 	tSafeReplica TSafeReplicaInterface,
 	collectionID UniqueID,
 	channel Channel,
 	factory msgstream.Factory) *serviceTimeNode {
 
-	maxQueueLength := Params.FlowGraphMaxQueueLength
-	maxParallelism := Params.FlowGraphMaxParallelism
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
 	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

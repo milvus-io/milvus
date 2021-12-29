@@ -37,6 +37,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -81,7 +82,7 @@ func (c *Collection) addPartitionID(partitionID UniqueID) {
 	log.Debug("queryNode collection info after add a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
 }
 
-// removePartitionID remove the partition id from partition id list of collection
+// removePartitionID removes the partition id from partition id list of collection
 func (c *Collection) removePartitionID(partitionID UniqueID) {
 	tmpIDs := make([]UniqueID, 0)
 	for _, id := range c.partitionIDs {
@@ -92,7 +93,7 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 	c.partitionIDs = tmpIDs
 }
 
-// addVChannels add virtual channels to collection
+// addVChannels adds virtual channels to collection
 func (c *Collection) addVChannels(channels []Channel) {
 	c.channelMu.Lock()
 	defer c.channelMu.Unlock()

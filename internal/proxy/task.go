@@ -718,7 +718,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
 	defer sp.Finish()
 	it.Base.MsgType = commonpb.MsgType_Insert
-	it.Base.SourceID = Params.ProxyID
+	it.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	it.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -889,7 +889,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		return 0
 	}
 
-	threshold := Params.PulsarMaxMessageSize
+	threshold := Params.ProxyCfg.PulsarMaxMessageSize
 	log.Debug("Proxy", zap.Int("threshold of message size: ", threshold))
 	// not accurate
 	/* #nosec G103 */
@@ -1002,7 +1002,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 			return err
 		}
 	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.DefaultPartitionName)
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.ProxyCfg.DefaultPartitionName)
 		if err != nil {
 			return err
 		}
@@ -1104,13 +1104,13 @@ func (cct *createCollectionTask) SetTs(ts Timestamp) {
 func (cct *createCollectionTask) OnEnqueue() error {
 	cct.Base = &commonpb.MsgBase{}
 	cct.Base.MsgType = commonpb.MsgType_CreateCollection
-	cct.Base.SourceID = Params.ProxyID
+	cct.Base.SourceID = Params.ProxyCfg.ProxyID
 	return nil
 }
 
 func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 	cct.Base.MsgType = commonpb.MsgType_CreateCollection
-	cct.Base.SourceID = Params.ProxyID
+	cct.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	cct.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(cct.Schema, cct.schema)
@@ -1123,12 +1123,12 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if cct.ShardsNum > Params.MaxShardNum {
-		return fmt.Errorf("maximum shards's number should be limited to %d", Params.MaxShardNum)
+	if cct.ShardsNum > Params.ProxyCfg.MaxShardNum {
+		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum)
 	}
 
-	if int64(len(cct.schema.Fields)) > Params.MaxFieldNum {
-		return fmt.Errorf("maximum field's number should be limited to %d", Params.MaxFieldNum)
+	if int64(len(cct.schema.Fields)) > Params.ProxyCfg.MaxFieldNum {
+		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum)
 	}
 
 	// validate collection name
@@ -1248,7 +1248,7 @@ func (dct *dropCollectionTask) OnEnqueue() error {
 
 func (dct *dropCollectionTask) PreExecute(ctx context.Context) error {
 	dct.Base.MsgType = commonpb.MsgType_DropCollection
-	dct.Base.SourceID = Params.ProxyID
+	dct.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	if err := validateCollectionName(dct.CollectionName); err != nil {
 		return err
@@ -1376,7 +1376,7 @@ func (st *searchTask) SetTs(ts Timestamp) {
 func (st *searchTask) OnEnqueue() error {
 	st.Base = &commonpb.MsgBase{}
 	st.Base.MsgType = commonpb.MsgType_Search
-	st.Base.SourceID = Params.ProxyID
+	st.Base.SourceID = Params.ProxyCfg.ProxyID
 	return nil
 }
 
@@ -1422,7 +1422,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PreExecute")
 	defer sp.Finish()
 	st.Base.MsgType = commonpb.MsgType_Search
-	st.Base.SourceID = Params.ProxyID
+	st.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collectionName := st.query.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
@@ -1446,7 +1446,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     st.Base.MsgID,
 			Timestamp: st.Base.Timestamp,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbID: 0, // TODO(dragondriver)
 	})
@@ -1589,7 +1589,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		st.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
-	st.SearchRequest.ResultChannelID = Params.SearchResultChannelNames[0]
+	st.SearchRequest.ResultChannelID = Params.ProxyCfg.SearchResultChannelNames[0]
 	st.SearchRequest.DbID = 0 // todo
 	st.SearchRequest.CollectionID = collID
 	st.SearchRequest.PartitionIDs = make([]UniqueID, 0)
@@ -1639,7 +1639,7 @@ func (st *searchTask) Execute(ctx context.Context) error {
 		SearchRequest: *st.SearchRequest,
 		BaseMsg: msgstream.BaseMsg{
 			Ctx:            ctx,
-			HashValues:     []uint32{uint32(Params.ProxyID)},
+			HashValues:     []uint32{uint32(Params.ProxyCfg.ProxyID)},
 			BeginTimestamp: st.Base.Timestamp,
 			EndTimestamp:   st.Base.Timestamp,
 		},
@@ -2052,6 +2052,7 @@ func (qt *queryTask) getVChannels() ([]vChan, error) {
 	return channels, nil
 }
 
+// IDs2Expr converts ids slices to bool expresion with specified field name
 func IDs2Expr(fieldName string, ids []int64) string {
 	idsStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids)), ", "), "[]")
 	return fieldName + " in [ " + idsStr + " ]"
@@ -2059,7 +2060,7 @@ func IDs2Expr(fieldName string, ids []int64) string {
 
 func (qt *queryTask) PreExecute(ctx context.Context) error {
 	qt.Base.MsgType = commonpb.MsgType_Retrieve
-	qt.Base.SourceID = Params.ProxyID
+	qt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collectionName := qt.query.CollectionName
 
@@ -2096,7 +2097,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     qt.Base.MsgID,
 			Timestamp: qt.Base.Timestamp,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbID: 0, // TODO(dragondriver)
 	})
@@ -2201,7 +2202,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		qt.RetrieveRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
-	qt.ResultChannelID = Params.RetrieveResultChannelNames[0]
+	qt.ResultChannelID = Params.ProxyCfg.RetrieveResultChannelNames[0]
 	qt.DbID = 0 // todo(yukun)
 
 	qt.CollectionID = collectionID
@@ -2255,7 +2256,7 @@ func (qt *queryTask) Execute(ctx context.Context) error {
 		RetrieveRequest: *qt.RetrieveRequest,
 		BaseMsg: msgstream.BaseMsg{
 			Ctx:            ctx,
-			HashValues:     []uint32{uint32(Params.ProxyID)},
+			HashValues:     []uint32{uint32(Params.ProxyCfg.ProxyID)},
 			BeginTimestamp: qt.Base.Timestamp,
 			EndTimestamp:   qt.Base.Timestamp,
 		},
@@ -2461,7 +2462,7 @@ func (hct *hasCollectionTask) OnEnqueue() error {
 
 func (hct *hasCollectionTask) PreExecute(ctx context.Context) error {
 	hct.Base.MsgType = commonpb.MsgType_HasCollection
-	hct.Base.SourceID = Params.ProxyID
+	hct.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	if err := validateCollectionName(hct.CollectionName); err != nil {
 		return err
@@ -2472,13 +2473,16 @@ func (hct *hasCollectionTask) PreExecute(ctx context.Context) error {
 func (hct *hasCollectionTask) Execute(ctx context.Context) error {
 	var err error
 	hct.result, err = hct.rootCoord.HasCollection(ctx, hct.HasCollectionRequest)
+	if err != nil {
+		return err
+	}
 	if hct.result == nil {
 		return errors.New("has collection resp is nil")
 	}
 	if hct.result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(hct.result.Status.Reason)
 	}
-	return err
+	return nil
 }
 
 func (hct *hasCollectionTask) PostExecute(ctx context.Context) error {
@@ -2532,7 +2536,7 @@ func (dct *describeCollectionTask) OnEnqueue() error {
 
 func (dct *describeCollectionTask) PreExecute(ctx context.Context) error {
 	dct.Base.MsgType = commonpb.MsgType_DescribeCollection
-	dct.Base.SourceID = Params.ProxyID
+	dct.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	if dct.CollectionID != 0 && len(dct.CollectionName) == 0 {
 		return nil
@@ -2646,7 +2650,7 @@ func (g *getCollectionStatisticsTask) OnEnqueue() error {
 
 func (g *getCollectionStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetCollectionStatistics
-	g.Base.SourceID = Params.ProxyID
+	g.Base.SourceID = Params.ProxyCfg.ProxyID
 	return nil
 }
 
@@ -2733,7 +2737,7 @@ func (g *getPartitionStatisticsTask) OnEnqueue() error {
 
 func (g *getPartitionStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
-	g.Base.SourceID = Params.ProxyID
+	g.Base.SourceID = Params.ProxyCfg.ProxyID
 	return nil
 }
 
@@ -2826,7 +2830,7 @@ func (sct *showCollectionsTask) OnEnqueue() error {
 
 func (sct *showCollectionsTask) PreExecute(ctx context.Context) error {
 	sct.Base.MsgType = commonpb.MsgType_ShowCollections
-	sct.Base.SourceID = Params.ProxyID
+	sct.Base.SourceID = Params.ProxyCfg.ProxyID
 	if sct.GetType() == milvuspb.ShowType_InMemory {
 		for _, collectionName := range sct.CollectionNames {
 			if err := validateCollectionName(collectionName); err != nil {
@@ -2980,7 +2984,7 @@ func (cpt *createPartitionTask) OnEnqueue() error {
 
 func (cpt *createPartitionTask) PreExecute(ctx context.Context) error {
 	cpt.Base.MsgType = commonpb.MsgType_CreatePartition
-	cpt.Base.SourceID = Params.ProxyID
+	cpt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName, partitionTag := cpt.CollectionName, cpt.PartitionName
 
@@ -3057,7 +3061,7 @@ func (dpt *dropPartitionTask) OnEnqueue() error {
 
 func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 	dpt.Base.MsgType = commonpb.MsgType_DropPartition
-	dpt.Base.SourceID = Params.ProxyID
+	dpt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName, partitionTag := dpt.CollectionName, dpt.PartitionName
 
@@ -3134,7 +3138,7 @@ func (hpt *hasPartitionTask) OnEnqueue() error {
 
 func (hpt *hasPartitionTask) PreExecute(ctx context.Context) error {
 	hpt.Base.MsgType = commonpb.MsgType_HasPartition
-	hpt.Base.SourceID = Params.ProxyID
+	hpt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName, partitionTag := hpt.CollectionName, hpt.PartitionName
 
@@ -3211,7 +3215,7 @@ func (spt *showPartitionsTask) OnEnqueue() error {
 
 func (spt *showPartitionsTask) PreExecute(ctx context.Context) error {
 	spt.Base.MsgType = commonpb.MsgType_ShowPartitions
-	spt.Base.SourceID = Params.ProxyID
+	spt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	if err := validateCollectionName(spt.CollectionName); err != nil {
 		return err
@@ -3375,7 +3379,7 @@ func (cit *createIndexTask) OnEnqueue() error {
 
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	cit.Base.MsgType = commonpb.MsgType_CreateIndex
-	cit.Base.SourceID = Params.ProxyID
+	cit.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName, fieldName := cit.CollectionName, cit.FieldName
 
@@ -3489,7 +3493,7 @@ func (dit *describeIndexTask) OnEnqueue() error {
 
 func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
-	dit.Base.SourceID = Params.ProxyID
+	dit.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
@@ -3497,7 +3501,7 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 
 	// only support default index name for now. @2021.02.18
 	if dit.IndexName == "" {
-		dit.IndexName = Params.DefaultIndexName
+		dit.IndexName = Params.ProxyCfg.DefaultIndexName
 	}
 
 	return nil
@@ -3566,7 +3570,7 @@ func (dit *dropIndexTask) OnEnqueue() error {
 
 func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DropIndex
-	dit.Base.SourceID = Params.ProxyID
+	dit.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
@@ -3579,7 +3583,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	}
 
 	if dit.IndexName == "" {
-		dit.IndexName = Params.DefaultIndexName
+		dit.IndexName = Params.ProxyCfg.DefaultIndexName
 	}
 
 	return nil
@@ -3650,7 +3654,7 @@ func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
 
 func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
 	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
-	gibpt.Base.SourceID = Params.ProxyID
+	gibpt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	if err := validateCollectionName(gibpt.CollectionName); err != nil {
 		return err
@@ -3671,7 +3675,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     gibpt.Base.MsgID,
 			Timestamp: gibpt.Base.Timestamp,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbName:         gibpt.DbName,
 		CollectionName: collectionName,
@@ -3683,7 +3687,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	}
 
 	if gibpt.IndexName == "" {
-		gibpt.IndexName = Params.DefaultIndexName
+		gibpt.IndexName = Params.ProxyCfg.DefaultIndexName
 	}
 
 	describeIndexReq := milvuspb.DescribeIndexRequest{
@@ -3691,7 +3695,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 			MsgType:   commonpb.MsgType_DescribeIndex,
 			MsgID:     gibpt.Base.MsgID,
 			Timestamp: gibpt.Base.Timestamp,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbName:         gibpt.DbName,
 		CollectionName: gibpt.CollectionName,
@@ -3723,7 +3727,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     gibpt.Base.MsgID,
 				Timestamp: gibpt.Base.Timestamp,
-				SourceID:  Params.ProxyID,
+				SourceID:  Params.ProxyCfg.ProxyID,
 			},
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
@@ -3749,7 +3753,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 				MsgType:   commonpb.MsgType_DescribeSegment,
 				MsgID:     gibpt.Base.MsgID,
 				Timestamp: gibpt.Base.Timestamp,
-				SourceID:  Params.ProxyID,
+				SourceID:  Params.ProxyCfg.ProxyID,
 			},
 			CollectionID: collectionID,
 			SegmentID:    segmentID,
@@ -3789,7 +3793,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		SegmentIDs: allSegmentIDs,
 	})
@@ -3871,7 +3875,7 @@ func (gist *getIndexStateTask) OnEnqueue() error {
 
 func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 	gist.Base.MsgType = commonpb.MsgType_GetIndexState
-	gist.Base.SourceID = Params.ProxyID
+	gist.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	if err := validateCollectionName(gist.CollectionName); err != nil {
 		return err
@@ -3892,7 +3896,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     gist.Base.MsgID,
 			Timestamp: gist.Base.Timestamp,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbName:         gist.DbName,
 		CollectionName: collectionName,
@@ -3904,7 +3908,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	}
 
 	if gist.IndexName == "" {
-		gist.IndexName = Params.DefaultIndexName
+		gist.IndexName = Params.ProxyCfg.DefaultIndexName
 	}
 
 	describeIndexReq := milvuspb.DescribeIndexRequest{
@@ -3912,7 +3916,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 			MsgType:   commonpb.MsgType_DescribeIndex,
 			MsgID:     gist.Base.MsgID,
 			Timestamp: gist.Base.Timestamp,
-			SourceID:  Params.ProxyID,
+			SourceID:  Params.ProxyCfg.ProxyID,
 		},
 		DbName:         gist.DbName,
 		CollectionName: gist.CollectionName,
@@ -3944,7 +3948,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 				MsgType:   commonpb.MsgType_ShowSegments,
 				MsgID:     gist.Base.MsgID,
 				Timestamp: gist.Base.Timestamp,
-				SourceID:  Params.ProxyID,
+				SourceID:  Params.ProxyCfg.ProxyID,
 			},
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
@@ -3969,7 +3973,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 				MsgType:   commonpb.MsgType_DescribeSegment,
 				MsgID:     gist.Base.MsgID,
 				Timestamp: gist.Base.Timestamp,
-				SourceID:  Params.ProxyID,
+				SourceID:  Params.ProxyCfg.ProxyID,
 			},
 			CollectionID: collectionID,
 			SegmentID:    segmentID,
@@ -4077,7 +4081,7 @@ func (ft *flushTask) OnEnqueue() error {
 
 func (ft *flushTask) PreExecute(ctx context.Context) error {
 	ft.Base.MsgType = commonpb.MsgType_Flush
-	ft.Base.SourceID = Params.ProxyID
+	ft.Base.SourceID = Params.ProxyCfg.ProxyID
 	return nil
 }
 
@@ -4170,7 +4174,7 @@ func (lct *loadCollectionTask) OnEnqueue() error {
 func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 	log.Debug("loadCollectionTask PreExecute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	lct.Base.MsgType = commonpb.MsgType_LoadCollection
-	lct.Base.SourceID = Params.ProxyID
+	lct.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName := lct.CollectionName
 
@@ -4267,7 +4271,7 @@ func (rct *releaseCollectionTask) OnEnqueue() error {
 
 func (rct *releaseCollectionTask) PreExecute(ctx context.Context) error {
 	rct.Base.MsgType = commonpb.MsgType_ReleaseCollection
-	rct.Base.SourceID = Params.ProxyID
+	rct.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName := rct.CollectionName
 
@@ -4352,7 +4356,7 @@ func (lpt *loadPartitionsTask) OnEnqueue() error {
 
 func (lpt *loadPartitionsTask) PreExecute(ctx context.Context) error {
 	lpt.Base.MsgType = commonpb.MsgType_LoadPartitions
-	lpt.Base.SourceID = Params.ProxyID
+	lpt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName := lpt.CollectionName
 
@@ -4447,7 +4451,7 @@ func (rpt *releasePartitionsTask) OnEnqueue() error {
 
 func (rpt *releasePartitionsTask) PreExecute(ctx context.Context) error {
 	rpt.Base.MsgType = commonpb.MsgType_ReleasePartitions
-	rpt.Base.SourceID = Params.ProxyID
+	rpt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collName := rpt.CollectionName
 
@@ -4604,7 +4608,7 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.Base.MsgType = commonpb.MsgType_Delete
-	dt.Base.SourceID = Params.ProxyID
+	dt.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	dt.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -4787,6 +4791,7 @@ func (dt *deleteTask) HashPK(pks []int64) {
 	}
 }
 
+// CreateAliasTask contains task information of CreateAlias
 type CreateAliasTask struct {
 	Condition
 	*milvuspb.CreateAliasRequest
@@ -4842,7 +4847,7 @@ func (c *CreateAliasTask) OnEnqueue() error {
 
 func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	c.Base.MsgType = commonpb.MsgType_CreateAlias
-	c.Base.SourceID = Params.ProxyID
+	c.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collAlias := c.Alias
 	// collection alias uses the same format as collection name
@@ -4915,7 +4920,7 @@ func (d *DropAliasTask) OnEnqueue() error {
 
 func (d *DropAliasTask) PreExecute(ctx context.Context) error {
 	d.Base.MsgType = commonpb.MsgType_DropAlias
-	d.Base.SourceID = Params.ProxyID
+	d.Base.SourceID = Params.ProxyCfg.ProxyID
 	collAlias := d.Alias
 	if err := ValidateCollectionAlias(collAlias); err != nil {
 		return err
@@ -4933,6 +4938,7 @@ func (d *DropAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// AlterAliasTask is the task to alter alias
 type AlterAliasTask struct {
 	Condition
 	*milvuspb.AlterAliasRequest
@@ -4980,7 +4986,7 @@ func (a *AlterAliasTask) OnEnqueue() error {
 
 func (a *AlterAliasTask) PreExecute(ctx context.Context) error {
 	a.Base.MsgType = commonpb.MsgType_AlterAlias
-	a.Base.SourceID = Params.ProxyID
+	a.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	collAlias := a.Alias
 	// collection alias uses the same format as collection name

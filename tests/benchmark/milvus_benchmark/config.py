@@ -4,7 +4,7 @@ MONGO_SERVER = 'mongodb://192.168.1.234:27017/'
 SCHEDULER_DB = "scheduler"
 JOB_COLLECTION = "jobs"
 
-REGISTRY_URL = "registry.zilliz.com/milvus/milvus"
+REGISTRY_URL = "registry.milvus.io/milvus/milvus"
 IDC_NAS_URL = "//172.16.70.249/test"
 DEFAULT_IMAGE = "milvusdb/milvus:latest"
 
@@ -52,5 +52,7 @@ MINIO_BUCKET_NAME = "test"
 FLUSH_PRECISION = 4
 INDEX_PRECISION = 4
 SEARCH_PRECISION = 4
+INSERT_PRECISION = 4
+QUERY_PRECISION = 4
 COMMON_PRECISION = 4
 

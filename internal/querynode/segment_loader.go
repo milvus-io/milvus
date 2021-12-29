@@ -464,7 +464,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
-	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeID, collectionID))
+	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
 	stream.SeekReaders([]*internalpb.MsgPosition{position})
 
 	delData := &deleteData{
@@ -472,11 +472,12 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 		deleteOffset:     make(map[UniqueID]int64),
 	}
-	log.Debug("start read msg from stream reader")
+	log.Debug("start read msg from stream reader", zap.Any("msg id", position.GetMsgID()))
 	for stream.HasNext(pChannelName) {
 		ctx, cancel := context.WithTimeout(ctx, timeoutForEachRead)
 		tsMsg, err := stream.Next(ctx, pChannelName)
 		if err != nil {
+			log.Warn("fail to load delete", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
 			cancel()
 			return err
 		}
@@ -491,12 +492,16 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 				cancel()
 				continue
 			}
-			log.Debug("delete pk", zap.Any("pk", dmsg.PrimaryKeys))
+			log.Debug("delete pk",
+				zap.Any("pk", dmsg.PrimaryKeys),
+				zap.String("vChannelName", position.GetChannelName()),
+				zap.Any("msg id", position.GetMsgID()),
+			)
 			processDeleteMessages(loader.historicalReplica, dmsg, delData)
 		}
 		cancel()
 	}
-	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName))
+	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
 		if err != nil {
@@ -514,7 +519,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 	wg.Wait()
 	stream.Close()
-	log.Debug("from dml check point load done")
+	log.Debug("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
 }
 
@@ -639,16 +644,16 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentSize
 			zap.Any("usedMem", usedMem),
 			zap.Any("segmentTotalSize", segmentTotalSize),
 			zap.Any("currentSegmentSize", size),
-			zap.Any("thresholdFactor", Params.OverloadedMemoryThresholdPercentage),
+			zap.Any("thresholdFactor", Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage),
 		)
-		if int64(usedMem)+segmentTotalSize+size > int64(float64(totalMem)*Params.OverloadedMemoryThresholdPercentage) {
+		if int64(usedMem)+segmentTotalSize+size > int64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
 			return errors.New(fmt.Sprintln("load segment failed, OOM if load, "+
 				"collectionID = ", collectionID, ", ",
 				"usedMem = ", usedMem, ", ",
 				"segmentTotalSize = ", segmentTotalSize, ", ",
 				"currentSegmentSize = ", size, ", ",
 				"totalMem = ", totalMem, ", ",
-				"thresholdFactor = ", Params.OverloadedMemoryThresholdPercentage,
+				"thresholdFactor = ", Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage,
 			))
 		}
 	}
@@ -664,12 +669,12 @@ func newSegmentLoader(ctx context.Context,
 	etcdKV *etcdkv.EtcdKV,
 	factory msgstream.Factory) *segmentLoader {
 	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
+		Address:           Params.QueryNodeCfg.MinioEndPoint,
+		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
+		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
+		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
 		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
+		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 	}
 
 	client, err := minioKV.NewMinIOKV(ctx, option)

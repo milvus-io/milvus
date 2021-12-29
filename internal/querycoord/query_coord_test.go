@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"go.uber.org/zap"
 )
@@ -45,11 +46,11 @@ func setup() {
 func refreshParams() {
 	rand.Seed(time.Now().UnixNano())
 	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
-	Params.StatsChannelName = Params.StatsChannelName + suffix
-	Params.TimeTickChannelName = Params.TimeTickChannelName + suffix
-	Params.MetaRootPath = Params.MetaRootPath + suffix
-	Params.DmlChannelPrefix = "Dml"
-	Params.DeltaChannelPrefix = "delta"
+	Params.QueryCoordCfg.StatsChannelName = Params.QueryCoordCfg.StatsChannelName + suffix
+	Params.QueryCoordCfg.TimeTickChannelName = Params.QueryCoordCfg.TimeTickChannelName + suffix
+	Params.QueryCoordCfg.MetaRootPath = Params.QueryCoordCfg.MetaRootPath + suffix
+	Params.QueryCoordCfg.DmlChannelPrefix = "Dml"
+	Params.QueryCoordCfg.DeltaChannelPrefix = "delta"
 	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
 }
 
@@ -91,7 +92,11 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
 	coord.SetIndexCoord(indexCoord)
-
+	etcd, err := etcd.GetEtcdClient(&Params.BaseParams)
+	if err != nil {
+		return nil, err
+	}
+	coord.SetEtcdClient(etcd)
 	err = coord.Init()
 	if err != nil {
 		return nil, err
@@ -132,7 +137,11 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
-
+	etcd, err := etcd.GetEtcdClient(&Params.BaseParams)
+	if err != nil {
+		return nil, err
+	}
+	coord.SetEtcdClient(etcd)
 	err = coord.Init()
 	if err != nil {
 		return nil, err
@@ -147,11 +156,12 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 func TestWatchNodeLoop(t *testing.T) {
 	baseCtx := context.Background()
-
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
 	t.Run("Test OfflineNodes", func(t *testing.T) {
 		refreshParams()
-		kv, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		assert.Nil(t, err)
+
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 
 		kvs := make(map[string]string)
 		session := &sessionutil.Session{
@@ -184,7 +194,7 @@ func TestWatchNodeLoop(t *testing.T) {
 				break
 			}
 			// if session id not exist, means querycoord already handled it and remove
-			_, err = kv.Load(nodeKey)
+			_, err = kv.Load(sessionKey)
 			if err != nil {
 				log.Warn("already handled by querycoord", zap.Error(err))
 				break
@@ -514,7 +524,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 
 func TestLoadBalanceSegmentLoop(t *testing.T) {
 	refreshParams()
-	Params.BalanceIntervalSeconds = 10
+	Params.QueryCoordCfg.BalanceIntervalSeconds = 10
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
@@ -555,7 +565,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		waitTaskFinalState(loadPartitionTask, taskExpired)
 		nodeInfo, err := queryCoord.cluster.getNodeInfoByID(queryNode1.queryNodeID)
 		assert.Nil(t, err)
-		if nodeInfo.(*queryNode).memUsageRate >= Params.OverloadedMemoryThresholdPercentage {
+		if nodeInfo.(*queryNode).memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
 			break
 		}
 		partitionID++

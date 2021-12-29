@@ -389,7 +389,7 @@ message ShowCollectionsResponse {
   // The utc timestamp calculated by created_timestamp
   repeated uint64 created_utc_timestamps = 5;
 
-  // Load percentage on querynode when type is InMemory
+  // Load percentage on QueryNode when type is InMemory
   repeated int64 inMemory_percentages = 6; 
 }
 ```
@@ -443,7 +443,7 @@ message DropPartitionRequest {
 ```
 
 ## HasPartition
-To test existence of a partition by name. Return [BoolResponse](#boolresponse) to tell client whether the partition is exist.
+To test existence of a partition by name. Return [BoolResponse](#boolresponse) to tell client whether the partition exists
 ```
 rpc HasPartition(HasPartitionRequest) returns (BoolResponse) {}
 ```

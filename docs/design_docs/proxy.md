@@ -92,8 +92,8 @@ requests will get the latest meta information.
 
 For inserts to a collection that is auto_id configured in the collection schema, Proxy assigns a primary key for
 every row of insert requests. For now the only supported data type of auto-generated primary field is `int64`. Proxy 
-applies for a batch of primary keys from Root Coordinator, and caches them for local assignments. When the primary keys in cache
-is not enough, Proxy will continue to apply for another batch of primary keys.
+applies for a batch of primary keys from Root Coordinator and caches them for local assignments. When the primary keys in the cache
+are not enough, Proxy will continue to apply for another batch of primary keys.
 
 Proxy forwards ReleaseCollection and ReleasePartition to Query Coordinator, Query Coordinator then informs Root
 Coordinator the events. After that, Root Coordinator will inform all Proxies to close the search-related and
@@ -138,7 +138,7 @@ the actual implementation, the DqRequestChannel of each collection can be exclus
 exclusive or shared by all collections on Proxy. When Proxy applies for the DqRequestChannel and DqResultChannel
 information of the collection from the Query Coordinator, it can attach Proxy's own ID: ProxyID.
 
-With DqRequestChannel of the collection, the proxy will create a msgstream object to generate data into
+With DqRequestChannel of the collection, Proxy will create a msgstream object to generate data into
 DqRequestChannel. With the DqResultChannel of the collection, Proxy will create a msgstream object, and Proxy will
 consume the data in the DqResultChannel. When these msgstream objects are closed, messages cannot be written to or
 consumed from them.
@@ -183,7 +183,7 @@ The semantics of the Release operation is the reverse operation of the Load oper
 data of the Collection or Partition from the memory. For Release operations, Query Coordinator is responsible for
 notifying query nodes to unload the corresponding Collection or Partition in memory, and then sending the
 ReleaseDqlMessageStream command to Root Coordinator, and Root Coordinator is responsible for broadcasting the
-ReleaseDqlMessageStream command to all Proxies, so that all related streams used to send search request and receive
+ReleaseDqlMessageStream command to all Proxies, so that all related streams used to send search requests and receive
 search result in Proxy will be closed.
 
 The other interaction between Proxy and Query Coordinator is that Proxy needs to query from Query Coordinator for statistics
@@ -208,7 +208,7 @@ communication between components is mostly undertaken by grpc, and the message f
 Therefore, in the original design, Milvus 2.0 decoupled the core function of the component and the communication between
 components. Taking Proxy as an example, the core function of Proxy component is determined and has nothing to do
 with the deployment form. In the project's internal/proxy directory, it contains the functions of the core components of
-Proxy; and internal/distributed/proxy contains the core functions of Proxy in the deployment of cluster distributed
+Proxy; and internal/distributed/proxy contain the core functions of Proxy in the deployment of cluster distributed
 which contains the re-encapsulation and communication implementation of Proxy. The following article will mainly
 introduce the functions of Proxy core layer.
 
@@ -226,7 +226,7 @@ There are three main functions in taskScheduler:
 
     - Schedule task
     - Maintain the snapshot of timestamp statistics
-    - Receive the search results from stream and then distribute them to related task
+    - Receive the search results from all streams and then distribute them to related task
 
 taskScheduler maintains three queues: ddQueue, dmQueue and dqQueue correspond to DdRequest, DmRequest, and DqRequest
 respectively. The interface of taskQueue is defined as follows:
@@ -273,7 +273,7 @@ type task interface {
 
 Each specific task object must implement the interface defined by the task.
 
-The key members of taskQueue are unissuedTasks of type List and activateTasks of type map. Among them, unissuedTasks
+The key members of taskQueue are unissuedTasks of type List and activateTasks of type maps. Among them, unissuedTasks
 contain all tasks that have not been scheduled, and activateTasks contain all tasks that are being scheduled.
 
 When the external caller of taskScheduler stuffs the task into the corresponding taskQueue, it will call the OnEnqueue
@@ -283,7 +283,7 @@ for the task. It can be seen that the timestamp of entering the queue must be gr
 exists in the queue, and it will also be greater than the timestamp of the task that exists in activateTask. At the end
 of the task's OnEnqueue, call the taskQueue's addUnissuedTask to add the task to the unissuedTasks. When OnEnqueue is
 executed, the external caller of taskScheduler calls WaitToFinish of the task to synchronously block and wait for the
-execution of task to be done.
+execution of the task to be done.
 
 When taskScheduler's background scheduling coroutine decides to schedule a task, it will call the taskQueue's
 PopUnissuedTask to remove a task from unissuedTasks, and then call the taskQueue's AddActivateTask to put the task in
@@ -360,10 +360,10 @@ members minTs and maxTs, which respectively represent the minimum and maximum ti
 completed on pChan. The channelsTimeTicker collects timestamp information mainly depends on this method. The awakened
 coroutine reduces the timestamp result and sends the final timestamp result back to the RootCoord.
 
-taskScheduler is also responsible for collecting the results of search requests. For each search request, when the proxy
+taskScheduler is also responsible for collecting the results of search requests. For each search request, when Proxy
 writes the request to the DqRequestChannel, it will attach the ReqID, and the query nodes will also bring the ReqID back
 when writing the search result back to the DqResultChannel. taskScheduler will start a background coroutine to consume
-search result from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
+search results from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
 the same ReqID are collected and the termination condition is reached, these results will be passed to the blocking task
 coroutine which is waiting. The waken task will reduce the search results and then send the final search result to
 clients.
@@ -391,7 +391,7 @@ type channelsMgr interface {
 - getChannels and getVChannels
 
   getVChannels returns a list that represents all virtual DmChannels of collection, getChannels returns a list that
-  represents all physical DmChannels of collection. The two lists correspond one-to-one according to position.
+  represents all physical DmChannels of collection. The two lists correspond one-to-one according to a position.
 
 - createDMLStream and getDMLStream
 
@@ -399,7 +399,7 @@ type channelsMgr interface {
 
   getDMLStream returns the dml message stream of a collection;
 
-  Proxy uses these dml message stream to write dml data, such as insert request.
+  Proxy uses these dml message streams to write dml data, such as insert requests.
 
 - createDQLStream and getDQLStream
 
@@ -407,10 +407,10 @@ type channelsMgr interface {
 
   getDQLStream returns the dql message stream of a collection;
 
-  Proxy uses these dql message stream to send search requests.
+  Proxy uses these dql message streams to send search requests.
 
 The Remove related operation is to delete the corresponding message stream object, but the stream is not immediately
-closed because maybe there are some data needs to be written into stream currently.
+closed because maybe there are some data that needs to be written into stream currently.
 
 ##### 6.6.3 channelsTimeTicker
 
@@ -439,7 +439,7 @@ type channelsTimeTicker interface {
 
 - getLastTick
 
-  getLastTick returns the minimum timestamp which has already been synchronized of physical channel;
+  getLastTick returns the minimum timestamp which has already been synchronized of a physical channel;
 
 channelsTimeTicker will maintain the map minTsStatistics that can be synchronized and the map currents that will be
 synchronized. They are all mappings from pChan to Timestamp. The channelsTimeTicker itself has a background coroutine,
@@ -492,7 +492,7 @@ type Cache interface {
 
 - GetPartition
 
-  GetPartition returns the partition ID of specific partition and collection;
+  GetPartition returns the partition ID of a specific partition and collection;
 
 - GetCollectionSchema
 

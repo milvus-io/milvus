@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -227,7 +227,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 
 	// calculate numRows from rowID field, fieldID 0
 	numRows := int64(len(fID2Content[0]))
-	num = int(Params.FlushInsertBufferSize / (int64(dim) * 4))
+	num = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
 	n = int(numRows)/num + 1
 
 	for i := 0; i < n; i++ {
@@ -442,22 +442,11 @@ func (t *compactionTask) compact() error {
 
 	//  Compaction I: update pk range.
 	//  Compaction II: remove the segments and add a new flushed segment with pk range.
-	fd := make([]UniqueID, 0, numRows)
-	if numRows > 0 {
-		for _, iData := range iDatas {
-			fd = append(fd, iData.Data[common.TimeStampField].(*storage.Int64FieldData).Data...)
-		}
-
-	}
 	if t.hasSegment(targetSegID, true) {
 		t.refreshFlushedSegStatistics(targetSegID, numRows)
-		t.refreshFlushedSegmentPKRange(targetSegID, fd)
+		// no need to shorten the PK range of a segment, deleting dup PKs is valid
 	} else {
-		t.addFlushedSegmentWithPKs(targetSegID, collID, partID, t.plan.GetChannel(), numRows, fd)
-
-		for _, seg := range segIDs {
-			t.removeSegment(seg)
-		}
+		t.mergeFlushedSegments(targetSegID, collID, partID, segIDs, t.plan.GetChannel(), numRows)
 	}
 
 	ti.injectDone(true)

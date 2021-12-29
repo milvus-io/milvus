@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -100,9 +101,13 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 }
 
 func (qs *queryNodeServerMock) Register() error {
-	log.Debug("query node session info", zap.String("metaPath", Params.MetaRootPath), zap.Strings("etcdEndPoints", Params.EtcdEndpoints))
-	qs.session = sessionutil.NewSession(qs.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	qs.session.Init(typeutil.QueryNodeRole, qs.queryNodeIP+":"+strconv.FormatInt(qs.queryNodePort, 10), false)
+	log.Debug("query node session info", zap.String("metaPath", Params.QueryCoordCfg.MetaRootPath))
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	if err != nil {
+		return err
+	}
+	qs.session = sessionutil.NewSession(qs.ctx, Params.QueryCoordCfg.MetaRootPath, etcdCli)
+	qs.session.Init(typeutil.QueryNodeRole, qs.queryNodeIP+":"+strconv.FormatInt(qs.queryNodePort, 10), false, false)
 	qs.queryNodeID = qs.session.ServerID
 	log.Debug("query nodeID", zap.Int64("nodeID", qs.queryNodeID))
 	log.Debug("query node address", zap.String("address", qs.session.Address))
@@ -113,7 +118,7 @@ func (qs *queryNodeServerMock) Register() error {
 
 func (qs *queryNodeServerMock) init() error {
 	qs.queryNodeIP = funcutil.GetLocalIP()
-	grpcPort := Params.Port
+	grpcPort := Params.QueryCoordCfg.Port
 
 	go func() {
 		var lis net.Listener

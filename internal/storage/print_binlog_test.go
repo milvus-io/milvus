@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package storage
 
@@ -68,6 +73,7 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 	w.Close()
 
 	fd, err := ioutil.TempFile("", "binlog_int64.db")
+	defer os.RemoveAll(fd.Name())
 	assert.Nil(t, err)
 	num, err := fd.Write(buf)
 	assert.Nil(t, err)
@@ -317,6 +323,9 @@ func TestPrintBinlogFiles(t *testing.T) {
 	binlogFiles = append(binlogFiles, "test")
 
 	PrintBinlogFiles(binlogFiles)
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
 }
 
 func TestPrintDDFiles(t *testing.T) {
@@ -428,6 +437,10 @@ func TestPrintDDFiles(t *testing.T) {
 	assert.Equal(t, resultRequests, ddRequests)
 
 	PrintBinlogFiles(binlogFiles)
+
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
 }
 
 func TestPrintIndexFile(t *testing.T) {

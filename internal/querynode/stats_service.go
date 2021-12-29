@@ -52,10 +52,10 @@ func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsCh
 }
 
 func (sService *statsService) start() {
-	sleepTimeInterval := Params.StatsPublishInterval
+	sleepTimeInterval := Params.QueryNodeCfg.StatsPublishInterval
 
 	// start pulsar
-	producerChannels := []string{Params.StatsChannelName}
+	producerChannels := []string{Params.QueryNodeCfg.StatsChannelName}
 
 	statsStream, _ := sService.msFactory.NewMsgStream(sService.ctx)
 	statsStream.AsProducer(producerChannels)
@@ -92,7 +92,7 @@ func (sService *statsService) publicStatistic(fieldStats []*internalpb.FieldStat
 	queryNodeStats := internalpb.QueryNodeStats{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_QueryNodeStats,
-			SourceID: Params.QueryNodeID,
+			SourceID: Params.QueryNodeCfg.QueryNodeID,
 		},
 		SegStats:   segStats,
 		FieldStats: fieldStats,

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Mock is an alternative to IndexNode, it will return specific results based on specific parameters.
@@ -46,7 +47,8 @@ type Mock struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	etcdKV *etcdkv.EtcdKV
+	etcdCli *clientv3.Client
+	etcdKV  *etcdkv.EtcdKV
 
 	buildIndex chan *indexpb.CreateIndexRequest
 }
@@ -182,14 +184,23 @@ func (inm *Mock) Register() error {
 		return errors.New("IndexNode register failed")
 	}
 	Params.Init()
-	inm.etcdKV, _ = etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
+	inm.etcdKV = etcdkv.NewEtcdKV(inm.etcdCli, Params.IndexNodeCfg.MetaRootPath)
 	if err := inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole); err != nil {
 		return err
 	}
-	session := sessionutil.NewSession(context.Background(), Params.MetaRootPath, Params.EtcdEndpoints)
-	session.Init(typeutil.IndexNodeRole, "localhost:21121", false)
+	session := sessionutil.NewSession(context.Background(), Params.IndexNodeCfg.MetaRootPath, inm.etcdCli)
+	session.Init(typeutil.IndexNodeRole, "localhost:21121", false, false)
 	session.Register()
 	return nil
+}
+
+// SetClient sets the IndexNode's instance.
+func (inm *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
+}
+
+// SetEtcdClient assigns parameter client to its member etcdCli
+func (inm *Mock) SetEtcdClient(client *clientv3.Client) {
+	inm.etcdCli = client
 }
 
 // GetComponentStates gets the component states of the mocked IndexNode, if the internal member `Err` is true, it will return an error,
@@ -296,7 +307,7 @@ func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		metrics, err := getMockSystemInfoMetrics(ctx, req, inm)
 
 		log.Debug("IndexNode.GetMetrics",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
@@ -306,7 +317,7 @@ func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}
 
 	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 
@@ -327,7 +338,7 @@ func getMockSystemInfoMetrics(
 	// TODO(dragondriver): add more metrics
 	nodeInfos := metricsinfo.IndexNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.NodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
 				CPUCoreUsage: metricsinfo.GetCPUUsage(),
@@ -337,14 +348,14 @@ func getMockSystemInfoMetrics(
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.CreatedTime.String(),
-			UpdatedTime: Params.UpdatedTime.String(),
+			CreatedTime: Params.IndexNodeCfg.CreatedTime.String(),
+			UpdatedTime: Params.IndexNodeCfg.UpdatedTime.String(),
 			Type:        typeutil.IndexNodeRole,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
-			MinioBucketName: Params.MinioBucketName,
+			MinioBucketName: Params.IndexNodeCfg.MinioBucketName,
 
-			SimdType: Params.SimdType,
+			SimdType: Params.IndexNodeCfg.SimdType,
 		},
 	}
 
@@ -358,6 +369,6 @@ func getMockSystemInfoMetrics(
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.NodeID),
 	}, nil
 }

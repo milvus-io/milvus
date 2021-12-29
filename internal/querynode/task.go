@@ -157,9 +157,9 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 		return err
 	}
 	consumeChannels := []string{r.req.QueryChannel}
-	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+	consumeSubName := Params.QueryNodeCfg.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 
-	if Params.skipQueryChannelRecovery {
+	if Params.QueryNodeCfg.SkipQueryChannelRecovery {
 		log.Debug("Skip query channel seek back ", zap.Strings("channels", consumeChannels),
 			zap.String("seek position", string(r.req.SeekPosition.MsgID)),
 			zap.Uint64("ts", r.req.SeekPosition.Timestamp))
@@ -312,7 +312,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// get subscription name
 	getUniqueSubName := func() string {
-		prefixName := Params.MsgChannelSubName
+		prefixName := Params.QueryNodeCfg.MsgChannelSubName
 		return prefixName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 	}
 	consumeSubName := getUniqueSubName()
@@ -427,7 +427,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 		pos.MsgGroup = consumeSubName
 		// use pChannel to seek
-		pos.ChannelName = VPChannels[fg.channel]
+		pChannel, ok := VPChannels[fg.channel]
+		if pChannel == "" || !ok {
+			log.Error("watch dm channel task found unmatched channel name", zap.Any("position", pos), zap.String("fg channel", fg.channel), zap.String("pchannel", pChannel))
+			return errors.New("empty pchannel found")
+		}
+		pos.ChannelName = pChannel
 		err = fg.seekQueryNodeFlowGraph(pos)
 		if err != nil {
 			return errors.New("msgStream seek error :" + err.Error())
@@ -571,7 +576,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 
 	// get subscription name
 	getUniqueSubName := func() string {
-		prefixName := Params.MsgChannelSubName
+		prefixName := Params.QueryNodeCfg.MsgChannelSubName
 		return prefixName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
 	}
 	consumeSubName := getUniqueSubName()
@@ -619,7 +624,9 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("toSubChannels", toSubChannels))
 
 	for _, info := range w.req.Infos {
-		w.node.loader.FromDmlCPLoadDelete(w.ctx, collectionID, info.SeekPosition)
+		if err := w.node.loader.FromDmlCPLoadDelete(w.ctx, collectionID, info.SeekPosition); err != nil {
+			return errors.New("watchDeltaChannelsTask failed, error = " + err.Error())
+		}
 	}
 
 	// start flow graphs

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
@@ -70,6 +71,11 @@ func TestIndexNode(t *testing.T) {
 	in, err := NewIndexNode(ctx)
 	assert.Nil(t, err)
 	Params.Init()
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
 
 	err = in.Init()
 	assert.Nil(t, err)
@@ -477,6 +483,11 @@ func TestCreateIndexFailed(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+
 	err = in.Init()
 	assert.Nil(t, err)
 
@@ -743,6 +754,11 @@ func TestIndexNode_Error(t *testing.T) {
 	in, err := NewIndexNode(ctx)
 	assert.Nil(t, err)
 	Params.Init()
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
 
 	err = in.Init()
 	assert.Nil(t, err)

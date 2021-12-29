@@ -10,114 +10,6 @@ import requests
 import json
 
 
-def get_token(url):
-    """ get the request token and return the value """
-    rep = requests.get(url)
-    data = json.loads(rep.text)
-    if 'token' in data:
-        token = data['token']
-    else:
-        token = ''
-        print("Can not get token.")
-    return token
-
-
-def get_tags(url, token):
-    headers = {'Content-type': "application/json",
-               "charset": "UTF-8",
-               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
-               "Authorization": "Bearer %s" % token}
-    try:
-        rep = requests.get(url, headers=headers)
-        data = json.loads(rep.text)
-
-        tags = []
-        if 'tags' in data:
-            tags = data["tags"]
-        else:
-            print("Can not get the tag list")
-        return tags
-    except:
-        print("Can not get the tag list")
-        return []
-
-
-def get_master_tags(tags_list):
-    _list = []
-    tag_name = "master"
-
-    if not isinstance(tags_list, list):
-        print("tags_list is not a list.")
-        return _list
-
-    for tag in tags_list:
-        if tag_name in tag and tag != tag_name + "-latest":
-            _list.append(tag)
-    return _list
-
-
-def get_config_digest(url, token):
-    headers = {'Content-type': "application/json",
-               "charset": "UTF-8",
-               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
-               "Authorization": "Bearer %s" % token}
-    try:
-        rep = requests.get(url, headers=headers)
-        data = json.loads(rep.text)
-
-        digest = ''
-        if 'config' in data and 'digest' in data["config"]:
-            digest = data["config"]["digest"]
-        else:
-            print("Can not get the digest")
-        return digest
-    except:
-        print("Can not get the digest")
-        return ""
-
-
-def get_latest_tag(limit=200):
-    """ get the latest tag of master """
-
-    auth_url = ""
-    tags_url = ""
-    tag_url = ""
-    master_latest = "master-latest"
-
-    master_latest_digest = get_config_digest(tag_url + master_latest, get_token(auth_url))
-    tags = get_tags(tags_url, get_token(auth_url))
-    tag_list = get_master_tags(tags)
-
-    latest_tag = ""
-    for i in range(1, len(tag_list) + 1):
-        tag_name = str(tag_list[-i])
-        tag_digest = get_config_digest(tag_url + tag_name, get_token(auth_url))
-        if tag_digest == master_latest_digest:
-            latest_tag = tag_name
-            break
-        if i > limit:
-            break
-
-    if latest_tag == "":
-        raise print("Can't find the latest image name")
-    print("The image name used is %s" % str(latest_tag))
-    return latest_tag
-
-
-def get_image_tag():
-    url = ""
-    headers = {"accept": "application/json"}
-    try:
-        rep = requests.get(url, headers=headers)
-        data = json.loads(rep.text)
-        tag_name = data[0]["tags"][0]["name"]
-        print("[benchmark update] The image name used is %s" % str(tag_name))
-        return tag_name
-    except:
-        print("Can not get the tag list")
-        return "master-latest"
-
-
 def parse_server_tag(server_tag):
     """ paser server tag from server config"""
     # tag format: "8c"/"8c16m"/"8c16m1g"
@@ -146,6 +38,12 @@ def update_values(src_values_file, deploy_params_file):
     return: no return
     """
 
+    perf_tolerations = [{
+        "key": "node-role.kubernetes.io/benchmark",
+        "operator": "Exists",
+        "effect": "NoSchedule"
+    }]
+
     # deploy_mode, hostname, server_tag, milvus_config, server_config=None
     try:
         with open(src_values_file) as f:
@@ -172,16 +70,10 @@ def update_values(src_values_file, deploy_params_file):
     server_tag = utils.get_server_tag(deploy_params)
     print(server_tag)
     # TODO: update milvus config
-    # # update values.yaml with the given host
-    perf_tolerations = [{
-            "key": "node-role.kubernetes.io/benchmark",
-            "operator": "Exists",
-            "effect": "NoSchedule"
-        }]  
+    # update values.yaml with the given host
     # if server_name:
     #     node_config = {'kubernetes.io/hostname': server_name}
     # elif server_tag:
-    #     # server tag
     #     node_config = {'instance-type': server_tag}
     cpus = None
     mems = None
@@ -218,7 +110,6 @@ def update_values(src_values_file, deploy_params_file):
     # use external minio/s3
     
     # TODO: disable temp
-    # values_dict['minio']['enabled'] = False
     values_dict['minio']['enabled'] = True
     # values_dict["externalS3"]["enabled"] = True
     values_dict["externalS3"]["enabled"] = False

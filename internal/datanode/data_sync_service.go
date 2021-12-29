@@ -109,7 +109,7 @@ type nodeConfig struct {
 }
 
 func newParallelConfig() parallelConfig {
-	return parallelConfig{Params.FlowGraphMaxQueueLength, Params.FlowGraphMaxParallelism}
+	return parallelConfig{Params.DataNodeCfg.FlowGraphMaxQueueLength, Params.DataNodeCfg.FlowGraphMaxParallelism}
 }
 
 // start starts the flowgraph in datasyncservice
@@ -137,7 +137,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarAddress,
+		"PulsarAddress":  Params.DataNodeCfg.PulsarAddress,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024,
 	}

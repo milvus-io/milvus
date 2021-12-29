@@ -16,8 +16,8 @@ import (
 	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -71,6 +71,6 @@ func AddPhysicalTimeOnTs(timeInMs int64, ts uint64) uint64 {
 }
 
 // NewTSOKVBase returns a etcdkv.EtcdKV object
-func NewTSOKVBase(etcdEndpoints []string, tsoRoot, subPath string) (*etcdkv.EtcdKV, error) {
-	return etcdkv.NewEtcdKV(etcdEndpoints, path.Join(tsoRoot, subPath))
+func NewTSOKVBase(client *clientv3.Client, tsoRoot, subPath string) *etcdkv.EtcdKV {
+	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
 }

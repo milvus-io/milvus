@@ -63,7 +63,6 @@ rootCoord:
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
   timeout: 3600 # time out, 5 seconds
-  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:

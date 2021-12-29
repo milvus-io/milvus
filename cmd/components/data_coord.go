@@ -34,10 +34,7 @@ type DataCoord struct {
 
 // NewDataCoord creates a new DataCoord
 func NewDataCoord(ctx context.Context, factory msgstream.Factory) (*DataCoord, error) {
-	s, err := grpcdatacoordclient.NewServer(ctx, factory)
-	if err != nil {
-		return nil, err
-	}
+	s := grpcdatacoordclient.NewServer(ctx, factory)
 
 	return &DataCoord{
 		ctx: ctx,

@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
 
+// rmqClient contains a rocksmq client
 type rmqClient struct {
 	client rocksmq.Client
 }

@@ -35,7 +35,7 @@
 1. In the processing of `create index`, `RootCoord` calls `metaTable`'s `GetNotIndexedSegments` to get all segment ids that are not indexed.
 2. After getting the segment ids, `RootCoord` calls `IndexCoord` to create index on these segment ids.
 3. In the current implementation, the `create index` requests will return after the segment ids are put into a go channel.
-4. The `RC` starts a background task that keeps reading the segment ids from the go channel, and then calls the `IndexCoord` to create the index.
+4. The `RootCoord` starts a background task that keeps reading the segment ids from the go channel, and then calls the `IndexCoord` to create the index.
 5. There is a fault here, the segment ids have been put into the go channel in the processing function of the grpc request, and then the grpc returns, but the `RootCoord`'s background task has not yet read them from the go channel, then `RootCoord` crashes. At this time, the client thinks that the index is created, but the `RootCoord` does not call `IndexCoord` to create the index.
 6. The solution for the fault mentioned in item 5:
    - Remove the go channel and `RootCoord`'s background task.
@@ -51,7 +51,7 @@
 
 ### 2.5 Flushed segment from `data node`
 
-1. Each time the `data node` finishes flushing a segment, it sends the segment id to the `RC` via msgstream.
+1. Each time the `DataNode` finishes flushing a segment, it sends the segment id to the `RootCoord` via msgstream.
 2. `RootCoord` needs to fetch binlog from `DataCoord` by id and send a request to `IndexCoord` to create an index on this segment.
 3. When the `IndexCoord` is called successfully, it will return a build id, and then `RootCoord` will update the build id to the `collection meta` and record the position of the msgstream in etcd.
 4. Step 3 is transactional and the operation will be successful only if the `collection meta` in etcd is updated.
@@ -59,23 +59,23 @@
 
 ### 2.6 Failed to call external grpc service
 
-1. `RC` depends on `DC` and `IC`, if the grpc call failed, it needs to reconnect.
-2. `RC` does not listen to the status of the `DC` and `IC` in real time.
+1. `RootCoord` depends on `DataCoord` and `IndexCoord`, if the grpc call failed, it needs to reconnect.
+2. `RootCoord` does not listen to the status of the `DataCoord` and `IndexCoord` in real time.
 
 ### 2.7 Add virtual channel assignment when creating a collection
 
-1. Add a new field, "number of shards" in the `create collection` request. The "num of shards" tells the `RC` to create the number of virtual channels for this collection.
+1. Add a new field, "number of shards" in the `create collection` request. The "num of shards" tells the `RootCoord` to create the number of virtual channels for this collection.
 2. In the current implementation, virtual channels and physical channels have a one-to-one relationship, and the total number of physical channels increases as the number of virtual channels increases; later, the total number of physical channels needs to be fixed, and multiple virtual channels share one physical channel.
 3. The name of the virtual channel is globally unique, and the `collection meta` records the correspondence between the virtual channel and the physical channel.
 
 ### Add processing of time synchronization signals from Proxy node
 
 1. A virtual channel can be inserted by multiple proxies, so the timestamp in the virtual channel does not increase monotonically.
-2. All proxies report the timestamp of all the virtual channels to the `RC` periodically.
-3. The `RC` collects the timestamps from the proxies on each virtual channel and gets the minimum one as the timestamp of that virtual channel, and then inserts the timestamp into the virtual channel.
-4. Proxy reports the timestamp to the `RC` via grpc.
-5. Proxy needs to register itself in etcd when it starts, `RC` will listen to the corresponding key to determine how many active proxies there are, and thus determine if all of them have sent timestamps to `RC`.
-6. If a proxy is not registered in etcd but sends a timestamp or any other grpc request to `RC`, `RC` will ignore the grpc request.
+2. All proxies report the timestamp of all the virtual channels to the `RootCoord` periodically.
+3. The `RootCoord` collects the timestamps from the proxies on each virtual channel and gets the minimum one as the timestamp of that virtual channel, and then inserts the timestamp into the virtual channel.
+4. Proxy reports the timestamp to the `RootCoord` via grpc.
+5. Proxy needs to register itself in etcd when it starts, `RootCoord` will listen to the corresponding key to determine how many active proxies there are, and thus determine if all of them have sent timestamps to `RootCoord`.
+6. If a proxy is not registered in etcd but sends a timestamp or any other grpc request to `RootCoord`, `RootCoord` will ignore the grpc request.
 
 ### 2.9 Register service in etcd
 

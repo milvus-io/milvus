@@ -21,7 +21,7 @@ class ApiUtilityWrapper:
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.get_query_segment_info, collection_name, timeout, using])
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                        collection_name=collection_name, timeout=timeout, using=using).run()
+                                       collection_name=collection_name, timeout=timeout, using=using).run()
         return res, check_result
 
     def loading_progress(self, collection_name, partition_names=None,

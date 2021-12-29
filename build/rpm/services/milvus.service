@@ -1,0 +1,33 @@
+# Simple Milvus systemd service file
+#
+# systemd supports lots of fancy features, look here (and linked docs) for a full list:
+#   http://www.freedesktop.org/software/systemd/man/systemd.exec.html
+#
+# Note: this file ( /usr/lib/systemd/system/milvus.service )
+# will be overwritten on package upgrade, please copy the file to
+#
+#  /etc/systemd/system/milvus.service
+#
+# to make needed changes.
+#
+# systemd-delta can be used to check differences between the two milvus.service files.
+#
+[Unit]
+Description=Milvus Standalone Server
+Wants=milvus-etcd.service milvus-minio.service
+Requires=milvus-etcd.service milvus-minio.service
+After=network.target syslog.target milvus-etcd.service milvus-minio.service
+
+[Install]
+WantedBy=multi-user.target
+Alias=milvus.service
+
+[Service]
+Type=simple
+StandardOutput=journal
+StandardError=inherit
+Restart=always
+
+# Start main service
+Environment="MILVUSCONF=/etc/milvus/configs/"
+ExecStart=/usr/bin/milvus-server run standalone

@@ -78,7 +78,7 @@ func (mt *metaTable) reloadFromKV() error {
 		indexMeta := indexpb.IndexMeta{}
 		err = proto.Unmarshal([]byte(values[i]), &indexMeta)
 		if err != nil {
-			return fmt.Errorf("indexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
+			return fmt.Errorf("IndexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
 		}
 
 		meta := &Meta{
@@ -280,6 +280,7 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexInfo {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
+	log.Debug("IndexCoord get index states from meta table", zap.Int64s("indexBuildIDs", indexBuildIDs))
 	var indexStates []*indexpb.IndexInfo
 	for _, id := range indexBuildIDs {
 		state := &indexpb.IndexInfo{
@@ -305,6 +306,7 @@ func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexIn
 func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.IndexFilePathInfo, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
+	log.Debug("IndexCoord get index file path from meta table", zap.Int64("indexBuildID", indexBuildID))
 	ret := &indexpb.IndexFilePathInfo{
 		IndexBuildID: indexBuildID,
 	}
@@ -317,6 +319,9 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	}
 	ret.IndexFilePaths = meta.indexMeta.IndexFilePaths
 	ret.SerializedSize = meta.indexMeta.GetSerializeSize()
+
+	log.Debug("IndexCoord get index file path successfully", zap.Int64("indexBuildID", indexBuildID),
+		zap.Strings("index file path", ret.IndexFilePaths))
 	return ret, nil
 }
 
@@ -328,8 +333,10 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	delete(mt.indexBuildID2Meta, indexBuildID)
 	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
 
-	err := mt.client.Remove(key)
-	log.Debug("IndexCoord metaTable DeleteIndex", zap.Error(err))
+	if err := mt.client.Remove(key); err != nil {
+		log.Error("IndexCoord delete index meta from etcd failed", zap.Error(err))
+	}
+	log.Debug("IndexCoord delete index meta successfully", zap.Int64("indexBuildID", indexBuildID))
 }
 
 // UpdateRecycleState update the recycle state corresponding the indexBuildID,
@@ -376,6 +383,7 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
+	log.Debug("IndexCoord get the meta which need to recycle")
 	var metas []Meta
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.State == commonpb.IndexState_Finished && (meta.indexMeta.MarkDeleted || !meta.indexMeta.Recycled) {
@@ -393,7 +401,6 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
-
 	var metas []Meta
 
 	for _, meta := range mt.indexBuildID2Meta {
@@ -416,7 +423,6 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
 		}
 	}
-
 	return metas
 }
 
@@ -425,6 +431,9 @@ func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID)
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
+	log.Debug("IndexCoord judges whether the same task exists in meta table", zap.Int64("indexBuildID", req.IndexBuildID),
+		zap.Int64("indexID", req.IndexID), zap.Any("index params", req.IndexParams),
+		zap.Any("type params", req.TypeParams))
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID != req.IndexID {
 			continue
@@ -491,12 +500,12 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable LoadMetaFromETCD", zap.Any("indexBuildID", indexBuildID),
-		zap.Any("revision", revision), zap.Any("ok", ok))
+	log.Debug("IndexCoord metaTable LoadMetaFromETCD", zap.Int64("indexBuildID", indexBuildID),
+		zap.Int64("revision", revision), zap.Bool("ok", ok))
 	if ok {
 		log.Debug("IndexCoord metaTable LoadMetaFromETCD",
-			zap.Any("meta.revision", meta.revision),
-			zap.Any("revision", revision))
+			zap.Int64("meta.revision", meta.revision),
+			zap.Int64("revision", revision))
 
 		if meta.revision >= revision {
 			return false

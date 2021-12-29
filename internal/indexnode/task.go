@@ -134,7 +134,7 @@ func (bt *BaseTask) Name() string {
 // OnEnqueue enqueues indexing tasks.
 func (it *IndexBuildTask) OnEnqueue() error {
 	it.SetID(it.req.IndexBuildID)
-	log.Debug("IndexNode IndexBuilderTask Enqueue", zap.Int64("TaskID", it.ID()))
+	log.Debug("IndexNode IndexBuilderTask Enqueue", zap.Int64("taskID", it.ID()), zap.Int64("index buildID", it.req.IndexBuildID))
 	return nil
 }
 
@@ -149,7 +149,7 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 			return err
 		}
 		if len(values) == 0 {
-			return fmt.Errorf("indexNode checkIndexMeta the indexMeta is empty")
+			return fmt.Errorf("IndexNode checkIndexMeta the indexMeta is empty")
 		}
 		log.Debug("IndexNode checkIndexMeta load meta success", zap.Any("path", it.req.MetaPath), zap.Any("pre", pre))
 		err = proto.Unmarshal([]byte(values[0]), &indexMeta)
@@ -357,6 +357,12 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	if len(insertData.Data) != 1 {
 		return errors.New("we expect only one field in deserialized insert data")
 	}
+	log.Debug("IndexNode deserialize data success",
+		zap.Int64("taskID", it.ID()),
+		zap.Int64("index buildID", it.req.IndexBuildID),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64("segmentID", segmentID))
 	tr.Record("deserialize storage blobs done")
 
 	for fieldID, value := range insertData.Data {
@@ -417,7 +423,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		getSavePathByKey := func(key string) string {
 
-			return path.Join(Params.IndexStorageRootPath, strconv.Itoa(int(it.req.IndexBuildID)), strconv.Itoa(int(it.req.Version)),
+			return path.Join(Params.IndexNodeCfg.IndexStorageRootPath, strconv.Itoa(int(it.req.IndexBuildID)), strconv.Itoa(int(it.req.Version)),
 				strconv.Itoa(int(partitionID)), strconv.Itoa(int(segmentID)), key)
 		}
 		saveBlob := func(path string, value []byte) error {

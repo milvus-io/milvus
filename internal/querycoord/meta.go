@@ -834,8 +834,8 @@ func (m *MetaReplica) createQueryChannel(collectionID UniqueID) *querypb.QueryCh
 	// all collection use the same query channel
 	colIDForAssignChannel := UniqueID(0)
 
-	searchPrefix := Params.SearchChannelPrefix
-	searchResultPrefix := Params.SearchResultChannelPrefix
+	searchPrefix := Params.QueryCoordCfg.SearchChannelPrefix
+	searchResultPrefix := Params.QueryCoordCfg.SearchResultChannelPrefix
 	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(colIDForAssignChannel, 10)
 	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(colIDForAssignChannel, 10)
 	log.Debug("query coordinator create query channel", zap.String("queryChannelName", allocatedQueryChannel), zap.String("queryResultChannelName", allocatedQueryResultChannel))

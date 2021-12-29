@@ -9,17 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "SearchBruteForce.h"
-#include <vector>
-#include <common/Types.h>
-#include <boost/dynamic_bitset.hpp>
-#include <queue>
 #include <string>
-#include "SubSearchResult.h"
-#include "segcore/Utils.h"
+#include <vector>
 
 #include <faiss/utils/distances.h>
 #include <faiss/utils/BinaryDistance.h>
+
+#include "SearchBruteForce.h"
+#include "SubSearchResult.h"
+#include "common/Types.h"
+#include "segcore/Utils.h"
 
 namespace milvus::query {
 

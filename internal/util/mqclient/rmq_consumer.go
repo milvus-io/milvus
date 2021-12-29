@@ -13,6 +13,7 @@ package mqclient
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/rocksmq/client/rocksmq"
 )
@@ -23,7 +24,7 @@ type RmqConsumer struct {
 	msgChannel chan Message
 	closeCh    chan struct{}
 	once       sync.Once
-	skip       bool
+	skip       int32
 }
 
 // Subscription returns the subscription name of this consumer
@@ -44,10 +45,11 @@ func (rc *RmqConsumer) Chan() <-chan Message {
 							close(rc.msgChannel)
 							return
 						}
-						if !rc.skip {
+						skip := atomic.LoadInt32(&rc.skip)
+						if skip != 1 {
 							rc.msgChannel <- &rmqMessage{msg: msg}
 						} else {
-							rc.skip = false
+							atomic.StoreInt32(&rc.skip, 0)
 						}
 					case <-rc.closeCh:
 						close(rc.msgChannel)
@@ -64,7 +66,9 @@ func (rc *RmqConsumer) Chan() <-chan Message {
 func (rc *RmqConsumer) Seek(id MessageID, inclusive bool) error {
 	msgID := id.(*rmqID).messageID
 	// skip the first message when consume
-	rc.skip = !inclusive
+	if !inclusive {
+		atomic.StoreInt32(&rc.skip, 1)
+	}
 	return rc.c.Seek(msgID)
 }
 

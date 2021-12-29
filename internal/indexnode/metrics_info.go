@@ -35,7 +35,7 @@ func getSystemInfoMetrics(
 	// TODO(dragondriver): add more metrics
 	nodeInfos := metricsinfo.IndexNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.NodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           node.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
@@ -46,15 +46,15 @@ func getSystemInfoMetrics(
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.CreatedTime.String(),
-			UpdatedTime: Params.UpdatedTime.String(),
+			CreatedTime: Params.IndexNodeCfg.CreatedTime.String(),
+			UpdatedTime: Params.IndexNodeCfg.UpdatedTime.String(),
 			Type:        typeutil.IndexNodeRole,
 			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
-			MinioBucketName: Params.MinioBucketName,
+			MinioBucketName: Params.IndexNodeCfg.MinioBucketName,
 
-			SimdType: Params.SimdType,
+			SimdType: Params.IndexNodeCfg.SimdType,
 		},
 	}
 
@@ -68,7 +68,7 @@ func getSystemInfoMetrics(
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.NodeID),
 		}, nil
 	}
 
@@ -78,6 +78,6 @@ func getSystemInfoMetrics(
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.NodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.NodeID),
 	}, nil
 }

@@ -12,12 +12,13 @@ def get_tag(url):
     response = requests.request("GET", url, headers=headers, data=payload)
 
     res = response.json()["results"]
-    tags = [r["name"] for r in res]
+    sorted_r = sorted(res, key=lambda k: k['last_updated'])
+    tags = [r["name"] for r in sorted_r]
     return tags
 
 
-latest_tag = "master-latest"
-latest_rc_tag = [tag for tag in sorted(get_tag(milvus)) if "rc" and "v" in tag][-1]
+latest_tag = [tag for tag in get_tag(milvus_dev) if "latest" not in tag][-1]
+latest_rc_tag = [tag for tag in get_tag(milvus) if "rc" and "v" in tag][-1]
 release_version = "-".join(latest_rc_tag.split("-")[:-2])
 print(release_version)
 print(latest_tag, latest_rc_tag)

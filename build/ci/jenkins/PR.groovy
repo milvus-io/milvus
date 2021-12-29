@@ -3,7 +3,7 @@
 int total_timeout_minutes = 120
 int e2e_timeout_seconds = 70 * 60
 def imageTag=''
-
+int case_timeout_seconds = 10 * 60
 pipeline {
     options {
         timestamps()
@@ -20,8 +20,6 @@ pipeline {
                 defaultContainer 'main'
                 yamlFile 'build/ci/jenkins/pod/rte.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
-                // idle 5 minutes to wait clean up tasks
-                idleMinutes 5
             }
     }
     environment {
@@ -153,7 +151,7 @@ pipeline {
                                             MILVUS_HELM_RELEASE_NAME="${release_name}" \
                                             MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                             TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                            ./ci_e2e.sh  "-n 6 -x --tags L0 L1" 
+                                            ./ci_e2e.sh  "-n 6 -x --tags L0 L1 --timeout ${case_timeout_seconds}"
                                             """
                                         } else {
                                         error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"

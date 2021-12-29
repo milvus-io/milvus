@@ -24,14 +24,19 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestIndexCoordMock(t *testing.T) {
 	Params.Init()
 	icm := Mock{}
-	err := icm.Register()
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
+	icm.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+	err = icm.Register()
 	assert.Nil(t, err)
 	err = icm.Init()
 	assert.Nil(t, err)

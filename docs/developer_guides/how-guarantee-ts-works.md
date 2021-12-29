@@ -46,7 +46,7 @@ timetick is consumed, QueryNodes will update this timetick as the serviceable ti
 it is easy to understand that QueryNodes can see all the data before ServiceTime.
 
 With ServiceTime, Milvus provides GuaranteeTs according to the needs of different users for consistency and
-availability. Users can specify GuaranteeTs to inform QueryNodes that search request must see all the data before
+availability. Users can specify GuaranteeTs to inform QueryNodes that the search request must see all the data before
 GuaranteeTs.
 
 As shown in the figure below, if GuaranteeTs is less than ServiceTime, QueryNodes can execute search request

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -48,10 +49,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -136,7 +137,7 @@ func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInf
 		},
 		Infos: []*datapb.SegmentInfo{
 			{
-				NumOfRows: Params.MinSegmentSizeToEnableIndex,
+				NumOfRows: Params.RootCoordCfg.MinSegmentSizeToEnableIndex,
 				State:     commonpb.SegmentState_Flushed,
 			},
 		},
@@ -344,7 +345,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		ID:                         collID,
 		Schema:                     &schema,
 		PartitionIDs:               []typeutil.UniqueID{partID},
-		PartitionNames:             []string{Params.DefaultPartitionName},
+		PartitionNames:             []string{Params.RootCoordCfg.DefaultPartitionName},
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
@@ -369,7 +370,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		Base:                 t.Base,
 		DbName:               t.DbName,
 		CollectionName:       t.CollectionName,
-		PartitionName:        Params.DefaultPartitionName,
+		PartitionName:        Params.RootCoordCfg.DefaultPartitionName,
 		DbID:                 0, //TODO,not used
 		CollectionID:         collID,
 		PartitionID:          partID,
@@ -432,29 +433,36 @@ func TestRootCoordInit(t *testing.T) {
 
 	coreFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+
 	core, err := NewCore(ctx, coreFactory)
 	require.Nil(t, err)
 	assert.Nil(t, err)
+	core.SetEtcdClient(etcdCli)
 	randVal := rand.Int()
 
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
 
 	err = core.Init()
 	assert.Nil(t, err)
-
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	// inject kvBaseCreate fail
 	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
 	require.Nil(t, err)
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		return nil, retry.Unrecoverable(errors.New("injected"))
@@ -462,20 +470,22 @@ func TestRootCoordInit(t *testing.T) {
 	err = core.Init()
 	assert.NotNil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	// inject metaKV create fail
 	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
 	require.Nil(t, err)
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
 
 	core.kvBaseCreate = func(root string) (kv.TxnKV, error) {
-		if root == Params.MetaRootPath {
+		if root == Params.RootCoordCfg.MetaRootPath {
 			return nil, retry.Unrecoverable(errors.New("injected"))
 		}
 		return memkv.NewMemoryKV(), nil
@@ -483,17 +493,19 @@ func TestRootCoordInit(t *testing.T) {
 	err = core.Init()
 	assert.NotNil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	// inject newSuffixSnapshot failure
 	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
 	require.Nil(t, err)
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		return nil, nil
@@ -501,17 +513,19 @@ func TestRootCoordInit(t *testing.T) {
 	err = core.Init()
 	assert.NotNil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	// inject newMetaTable failure
 	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
 	require.Nil(t, err)
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		kv := memkv.NewMemoryKV()
@@ -520,6 +534,7 @@ func TestRootCoordInit(t *testing.T) {
 	err = core.Init()
 	assert.NotNil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
@@ -540,22 +555,23 @@ func TestRootCoord(t *testing.T) {
 
 	coreFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, coreFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
+	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
+	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.RootCoordCfg.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	Params.RootCoordCfg.DeltaChannelName = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
 
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-	Params.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
-	Params.DeltaChannelName = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second})
-	assert.Nil(t, err)
-	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	defer func() {
@@ -603,18 +619,20 @@ func TestRootCoord(t *testing.T) {
 	tmpFactory := msgstream.NewPmsFactory()
 
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err = tmpFactory.SetParams(m)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
 	clearMsgChan(1500*time.Millisecond, dmlStream.Chan())
+
+	core.SetEtcdClient(etcdCli)
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -631,13 +649,18 @@ func TestRootCoord(t *testing.T) {
 	err = core.Start()
 	assert.Nil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	time.Sleep(100 * time.Millisecond)
 	shardsNum := int32(8)
 
+	fmt.Printf("hello world2")
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("time tick", func(t *testing.T) {
+		defer wg.Done()
 		ttmsg, ok := <-timeTickStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, 1, len(ttmsg.Msgs))
@@ -655,7 +678,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, ttm2.Base.Timestamp, ttm.Base.Timestamp+1)
 	})
 
+	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
+		defer wg.Done()
 		schema := schemapb.CollectionSchema{
 			Name:   collName,
 			AutoID: true,
@@ -698,7 +723,7 @@ func TestRootCoord(t *testing.T) {
 
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
-		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.RootCoordCfg.MsgChannelSubName)
 		dmlStream.Start()
 
 		pChanMap := core.MetaTable.ListCollectionPhysicalChannels()
@@ -789,7 +814,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("has collection", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_HasCollection,
@@ -837,7 +864,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, true, rsp.Value)
 	})
 
+	wg.Add(1)
 	t.Run("describe collection", func(t *testing.T) {
+		defer wg.Done()
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
@@ -860,7 +889,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, shardsNum, rsp.ShardsNum)
 	})
 
+	wg.Add(1)
 	t.Run("show collection", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
@@ -877,7 +908,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, len(rsp.CollectionNames), 2)
 	})
 
+	wg.Add(1)
 	t.Run("create partition", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.CreatePartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreatePartition,
@@ -932,7 +965,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("has partition", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.HasPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_HasPartition,
@@ -950,7 +985,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, true, rsp.Value)
 	})
 
+	wg.Add(1)
 	t.Run("show partition", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionsRequest{
@@ -971,7 +1008,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 2, len(rsp.PartitionIDs))
 	})
 
+	wg.Add(1)
 	t.Run("show segment", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
@@ -996,7 +1035,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 1, len(rsp.SegmentIDs))
 	})
 
+	wg.Add(1)
 	t.Run("create index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateIndex,
@@ -1030,7 +1071,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.FieldIndexes))
 		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultIndexName, idxMeta.IndexName)
+		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, idxMeta.IndexName)
 
 		req.FieldName = "no field"
 		rsp, err = core.CreateIndex(ctx, req)
@@ -1038,7 +1079,9 @@ func TestRootCoord(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("describe segment", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 
@@ -1058,7 +1101,9 @@ func TestRootCoord(t *testing.T) {
 		t.Logf("index id = %d", rsp.IndexID)
 	})
 
+	wg.Add(1)
 	t.Run("describe index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DescribeIndex,
@@ -1075,11 +1120,13 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 		assert.Equal(t, "vector", rsp.IndexDescriptions[0].FieldName)
 	})
 
+	wg.Add(1)
 	t.Run("describe index not exist", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DescribeIndex,
@@ -1098,7 +1145,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 0, len(rsp.IndexDescriptions))
 	})
 
+	wg.Add(1)
 	t.Run("flush segment", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
@@ -1133,10 +1182,12 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 	})
 
+	wg.Add(1)
 	t.Run("over ride index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateIndex,
@@ -1172,15 +1223,17 @@ func TestRootCoord(t *testing.T) {
 
 		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultIndexName, idxMeta.IndexName)
+		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, idxMeta.IndexName)
 
 		idxMeta, err = core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultIndexName+"_bak", idxMeta.IndexName)
+		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName+"_bak", idxMeta.IndexName)
 
 	})
 
+	wg.Add(1)
 	t.Run("drop index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropIndex,
@@ -1191,9 +1244,9 @@ func TestRootCoord(t *testing.T) {
 			DbName:         "",
 			CollectionName: collName,
 			FieldName:      "vector",
-			IndexName:      Params.DefaultIndexName,
+			IndexName:      Params.RootCoordCfg.DefaultIndexName,
 		}
-		_, idx, err := core.MetaTable.GetIndexByName(collName, Params.DefaultIndexName)
+		_, idx, err := core.MetaTable.GetIndexByName(collName, Params.RootCoordCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(idx))
 
@@ -1206,12 +1259,14 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, idx[0].IndexID, im.idxDropID[0])
 		im.mutex.Unlock()
 
-		_, idx, err = core.MetaTable.GetIndexByName(collName, Params.DefaultIndexName)
+		_, idx, err = core.MetaTable.GetIndexByName(collName, Params.RootCoordCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, 0, len(idx))
 	})
 
+	wg.Add(1)
 	t.Run("drop partition", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropPartition,
@@ -1234,7 +1289,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
 		partName, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultPartitionName, partName)
+		assert.Equal(t, Params.RootCoordCfg.DefaultPartitionName, partName)
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
@@ -1267,7 +1322,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("remove DQL msgstream", func(t *testing.T) {
+		defer wg.Done()
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 
@@ -1283,7 +1340,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("drop collection", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropCollection,
@@ -1356,7 +1415,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("context_cancel", func(t *testing.T) {
+		defer wg.Done()
 		ctx2, cancel2 := context.WithTimeout(ctx, time.Millisecond*100)
 		defer cancel2()
 		time.Sleep(100 * time.Millisecond)
@@ -1516,7 +1577,9 @@ func TestRootCoord(t *testing.T) {
 		time.Sleep(1 * time.Second)
 	})
 
+	wg.Add(1)
 	t.Run("undefined req type", func(t *testing.T) {
+		defer wg.Done()
 		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1673,7 +1736,9 @@ func TestRootCoord(t *testing.T) {
 
 	})
 
+	wg.Add(1)
 	t.Run("alloc time tick", func(t *testing.T) {
+		defer wg.Done()
 		req := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1689,7 +1754,9 @@ func TestRootCoord(t *testing.T) {
 		assert.NotZero(t, rsp.Timestamp)
 	})
 
+	wg.Add(1)
 	t.Run("alloc id", func(t *testing.T) {
+		defer wg.Done()
 		req := &rootcoordpb.AllocIDRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1705,14 +1772,18 @@ func TestRootCoord(t *testing.T) {
 		assert.NotZero(t, rsp.ID)
 	})
 
+	wg.Add(1)
 	t.Run("get_channels", func(t *testing.T) {
+		defer wg.Done()
 		_, err := core.GetTimeTickChannel(ctx)
 		assert.Nil(t, err)
 		_, err = core.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("channel timetick", func(t *testing.T) {
+		defer wg.Done()
 		const (
 			proxyIDInvalid = 102
 			proxyName0     = "proxy_0"
@@ -1825,7 +1896,9 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
+	wg.Add(1)
 	t.Run("create alias", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.CreateAliasRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateAlias,
@@ -1841,7 +1914,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("describe collection2", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DescribeCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DescribeCollection,
@@ -1879,7 +1954,9 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
+	wg.Add(1)
 	t.Run("alter alias", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.AlterAliasRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_AlterAlias,
@@ -1895,7 +1972,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("drop collection with alias", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropAlias,
@@ -1910,7 +1989,9 @@ func TestRootCoord(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("drop alias", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropAliasRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropAlias,
@@ -1951,7 +2032,9 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
+	wg.Add(1)
 	t.Run("get metrics", func(t *testing.T) {
+		defer wg.Done()
 		// not healthy
 		stateSave := core.stateCode.Load().(internalpb.StateCode)
 		core.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -1985,7 +2068,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("get system info", func(t *testing.T) {
+		defer wg.Done()
 		// normal case
 		systemInfoMetricType := metricsinfo.SystemInfoMetrics
 		req, err := metricsinfo.ConstructRequestByMetricType(systemInfoMetricType)
@@ -2002,7 +2087,9 @@ func TestRootCoord(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, st.Status.ErrorCode)
 	assert.NotEqual(t, internalpb.StateCode_Healthy, st.State.StateCode)
 
+	wg.Add(1)
 	t.Run("state_not_healthy", func(t *testing.T) {
+		defer wg.Done()
 		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateCollection,
@@ -2159,7 +2246,9 @@ func TestRootCoord(t *testing.T) {
 
 	})
 
+	wg.Add(1)
 	t.Run("alloc_error", func(t *testing.T) {
+		defer wg.Done()
 		core.Stop()
 		core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return 0, 0, fmt.Errorf("id allocator error test")
@@ -2195,9 +2284,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, p2.Status.ErrorCode)
 	})
+	wg.Wait()
 	err = core.Stop()
 	assert.Nil(t, err)
-
 }
 
 func TestRootCoord2(t *testing.T) {
@@ -2212,16 +2301,21 @@ func TestRootCoord2(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
+	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2248,29 +2342,34 @@ func TestRootCoord2(t *testing.T) {
 		return nil, nil
 	}
 
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
 	err = core.Start()
 	assert.Nil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("time tick", func(t *testing.T) {
+		defer wg.Done()
 		ttmsg, ok := <-timeTickStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, 1, len(ttmsg.Msgs))
@@ -2279,7 +2378,9 @@ func TestRootCoord2(t *testing.T) {
 		assert.Greater(t, ttm.Base.Timestamp, typeutil.Timestamp(0))
 	})
 
+	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
+		defer wg.Done()
 		schema := schemapb.CollectionSchema{
 			Name: collName,
 		}
@@ -2303,7 +2404,7 @@ func TestRootCoord2(t *testing.T) {
 		collInfo, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		dmlStream, _ := msFactory.NewMsgStream(ctx)
-		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.RootCoordCfg.MsgChannelSubName)
 		dmlStream.Start()
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
@@ -2314,7 +2415,9 @@ func TestRootCoord2(t *testing.T) {
 		t.Log("time tick", m1.Base.Timestamp)
 	})
 
+	wg.Add(1)
 	t.Run("describe collection", func(t *testing.T) {
+		defer wg.Done()
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
@@ -2336,6 +2439,7 @@ func TestRootCoord2(t *testing.T) {
 		assert.Equal(t, common.DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
 		assert.Equal(t, common.DefaultShardsNum, rsp.ShardsNum)
 	})
+	wg.Wait()
 	err = core.Stop()
 	assert.Nil(t, err)
 }
@@ -2480,16 +2584,16 @@ func TestCheckFlushedSegments(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
+	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2516,28 +2620,37 @@ func TestCheckFlushedSegments(t *testing.T) {
 		return nil, nil
 	}
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
 	err = core.Start()
 	assert.Nil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("check flushed segments", func(t *testing.T) {
+		defer wg.Done()
 		ctx := context.Background()
 		var collID int64 = 1
 		var partID int64 = 2
@@ -2620,6 +2733,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 		core.checkFlushedSegments(core.ctx)
 
 	})
+	wg.Wait()
 	err = core.Stop()
 	assert.Nil(t, err)
 }
@@ -2636,17 +2750,16 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
-
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
+	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
+	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2673,24 +2786,30 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 		return nil, nil
 	}
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
 	err = core.Start()
 	assert.Nil(t, err)
 
+	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
+		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
