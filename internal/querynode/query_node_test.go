@@ -177,7 +177,7 @@ func newQueryNodeMock() *QueryNode {
 
 	var ctx context.Context
 
-	if debug {
+	if debugUT {
 		ctx = context.Background()
 	} else {
 		var cancel context.CancelFunc

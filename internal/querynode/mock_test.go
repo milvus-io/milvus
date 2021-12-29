@@ -49,7 +49,7 @@ import (
 // ---------- unittest util functions ----------
 // common definitions
 const ctxTimeInMillisecond = 500
-const debug = false
+const debugUT = false
 
 const (
 	dimKey        = "dim"
