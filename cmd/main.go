@@ -26,6 +26,8 @@ import (
 	"strings"
 	"syscall"
 
+	// use auto max procs to set container CPU quota
+	_ "go.uber.org/automaxprocs"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/roles"
