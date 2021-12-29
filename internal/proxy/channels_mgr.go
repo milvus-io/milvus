@@ -461,6 +461,7 @@ func newSingleTypeChannelsMgr(
 // implementation assertion
 var _ channelsMgr = (*channelsMgrImpl)(nil)
 
+// channelsMgrImpl implements channelsMgr.
 type channelsMgrImpl struct {
 	dmlChannelsMgr *singleTypeChannelsMgr
 	dqlChannelsMgr *singleTypeChannelsMgr
