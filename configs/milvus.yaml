@@ -177,7 +177,6 @@ dataCoord:
 
   compaction:
     enableAutoCompaction: true
-    retentionDuration: 432000 # 5 days in seconds
 
   gc:
     interval: 3600 # gc interval in seconds
@@ -220,7 +219,7 @@ log:
 msgChannel:
   # Channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
-    cluster:           "by-dev"
+    cluster: "by-dev"
     rootCoordTimeTick: "rootcoord-timetick"
     rootCoordStatistics: "rootcoord-statistics"
     rootCoordDml: "rootcoord-dml"
@@ -250,6 +249,7 @@ msgChannel:
 common:
   defaultPartitionName: "_default"  # default partition name for a collection
   defaultIndexName: "_default_idx"  # default index name
+  retentionDuration: 432000 # 5 days in seconds
 
 knowhere:
   # Default value: auto

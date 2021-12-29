@@ -42,6 +42,9 @@ const (
 
 	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
 	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
+
+	// DefaultRetentionDuration defines the default duration for retention which is 5 days in seconds.
+	DefaultRetentionDuration = 3600 * 24 * 5
 )
 
 // GlobalParamTable is a derived struct of BaseParamTable.
@@ -489,6 +492,8 @@ type proxyConfig struct {
 
 	PulsarMaxMessageSize int
 
+	RetentionDuration int64
+
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -518,6 +523,7 @@ func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.initMaxTaskNum()
 	p.initBufFlagExpireTime()
 	p.initBufFlagCleanupInterval()
+	p.initRetentionDuration()
 }
 
 // Refresh is called after session init
@@ -666,6 +672,10 @@ func (p *proxyConfig) initBufFlagExpireTime() {
 func (p *proxyConfig) initBufFlagCleanupInterval() {
 	interval := p.BaseParams.ParseInt64WithDefault("proxy.bufFlagCleanupInterval", 600)
 	p.BufFlagCleanupInterval = time.Duration(interval) * time.Second
+}
+
+func (p *proxyConfig) initRetentionDuration() {
+	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1298,8 +1308,8 @@ type dataCoordConfig struct {
 	EnableCompaction        bool
 	EnableGarbageCollection bool
 
-	CompactionRetentionDuration int64
-	EnableAutoCompaction        bool
+	RetentionDuration    int64
+	EnableAutoCompaction bool
 
 	// Garbage Collection
 	GCInterval         time.Duration
@@ -1342,7 +1352,7 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initMinioBucketName()
 	p.initMinioRootPath()
 
-	p.initCompactionRetentionDuration()
+	p.initRetentionDuration()
 	p.initEnableAutoCompaction()
 
 	p.initEnableGarbageCollection()
@@ -1556,8 +1566,8 @@ func (p *dataCoordConfig) initMinioRootPath() {
 	p.MinioRootPath = rootPath
 }
 
-func (p *dataCoordConfig) initCompactionRetentionDuration() {
-	p.CompactionRetentionDuration = p.BaseParams.ParseInt64WithDefault("dataCoord.compaction.retentionDuration", 432000)
+func (p *dataCoordConfig) initRetentionDuration() {
+	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {

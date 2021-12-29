@@ -55,6 +55,13 @@ func ParseHybridTs(ts uint64) (int64, int64) {
 	return int64(physical), int64(logical)
 }
 
+// CalculateDuration returns the number of milliseconds obtained by subtracting ts2 from ts1.
+func CalculateDuration(ts1, ts2 typeutil.Timestamp) int64 {
+	p1, _ := ParseHybridTs(ts1)
+	p2, _ := ParseHybridTs(ts2)
+	return p1 - p2
+}
+
 // Mod24H parses the ts to millisecond in one day
 func Mod24H(ts uint64) uint64 {
 	logical := ts & logicalBitsMask
