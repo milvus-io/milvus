@@ -32,7 +32,7 @@ The use of the search box requires configuration of the log collection system. F
 
 ### Service
 
-Filter with service name.
+Filter with the service name.
 
 ### Operation
 
