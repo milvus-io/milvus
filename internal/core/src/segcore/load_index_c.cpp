@@ -11,8 +11,8 @@
 
 #include "common/LoadInfo.h"
 #include "exceptions/EasyAssert.h"
-#include "index/knowhere/knowhere/common/BinarySet.h"
-#include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
+#include "knowhere/common/BinarySet.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "segcore/load_index_c.h"
 
 CStatus

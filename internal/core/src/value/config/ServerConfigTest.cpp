@@ -9,15 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <fiu-control.h>
-#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 
 #include "value/config/ServerConfig.h"
 
 TEST(ServerConfigTest, parse_invalid_devices) {
-    fiu_init(0);
-    fiu_enable("ParseGPUDevices.invalid_format", 1, nullptr, 0);
     auto collections = milvus::ParseGPUDevices("gpu0,gpu1");
     ASSERT_EQ(collections.size(), 0);
 }

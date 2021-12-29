@@ -14,7 +14,7 @@
 #include <exception>
 #include <stdexcept>
 
-#include "index/thirdparty/faiss/MetricType.h"
+#include "faiss/MetricType.h"
 
 namespace milvus::segcore {
 
