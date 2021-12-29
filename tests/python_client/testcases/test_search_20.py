@@ -2781,7 +2781,7 @@ class TestSearchBase:
     def test_search_distance_superstructure_flat_index(self, connect, binary_collection):
         """
         target: search binary_collection, and check the result: distance
-        method: compare the return distance value with value computed with Inner product
+        method: compare the return distance with that computed with Inner product
         expected: the return distance equals to the computed value
         """
         nq = 1
