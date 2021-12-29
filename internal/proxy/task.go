@@ -4852,11 +4852,13 @@ func (c *CreateAliasTask) SetTs(ts Timestamp) {
 	c.Base.Timestamp = ts
 }
 
+// OnEnqueue defines the behavior task enqueued
 func (c *CreateAliasTask) OnEnqueue() error {
 	c.Base = &commonpb.MsgBase{}
 	return nil
 }
 
+// PreExecute defines the action before task execution
 func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	c.Base.MsgType = commonpb.MsgType_CreateAlias
 	c.Base.SourceID = Params.ProxyCfg.ProxyID
@@ -4874,12 +4876,14 @@ func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+// Execute defines the actual execution of create alias
 func (c *CreateAliasTask) Execute(ctx context.Context) error {
 	var err error
 	c.result, err = c.rootCoord.CreateAlias(ctx, c.CreateAliasRequest)
 	return err
 }
 
+// PostExecute defines the post execution, do nothing for create alias
 func (c *CreateAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }
