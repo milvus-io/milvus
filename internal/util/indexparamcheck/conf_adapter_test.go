@@ -334,6 +334,7 @@ func TestHNSWConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// ANNOYConfAdapter checks if an annoy index can be built
 func TestANNOYConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
