@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -1577,6 +1578,12 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	travelTimestamp := st.query.TravelTimestamp
 	if travelTimestamp == 0 {
 		travelTimestamp = st.BeginTs()
+	} else {
+		durationSeconds := tsoutil.CalculateDuration(st.BeginTs(), travelTimestamp) / 1000
+		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+			duration := time.Second * time.Duration(durationSeconds)
+			return fmt.Errorf("only support to travel back to %s so far", duration.String())
+		}
 	}
 	guaranteeTimestamp := st.query.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
@@ -2186,10 +2193,15 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
 	travelTimestamp := qt.query.TravelTimestamp
 	if travelTimestamp == 0 {
 		travelTimestamp = qt.BeginTs()
+	} else {
+		durationSeconds := tsoutil.CalculateDuration(qt.BeginTs(), travelTimestamp) / 1000
+		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+			duration := time.Second * time.Duration(durationSeconds)
+			return fmt.Errorf("only support to travel back to %s so far", duration.String())
+		}
 	}
 	guaranteeTimestamp := qt.query.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
