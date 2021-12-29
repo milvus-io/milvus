@@ -80,6 +80,7 @@ func (info *indexInfo) getIndexID() UniqueID {
 	return info.indexID
 }
 
+// getBuildID returns the build id of index
 func (info *indexInfo) getBuildID() UniqueID {
 	return info.buildID
 }
