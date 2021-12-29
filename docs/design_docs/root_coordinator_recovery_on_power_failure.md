@@ -79,13 +79,13 @@
 
 ### 2.9 Register service in etcd
 
-1. `RC` needs to register itself with etcd when it starts.
+1. `RootCoord` needs to register itself with etcd when it starts.
 2. The registration should include IP address, port, its own id, global incremental timestamp.
 
 ### 2.10 Remove the code related to Proxy service
 
 1. `Proxy service` related code will be removed.
-2. The job of time synchronization which is done by `Proxy service` is partially simplified and handed over to the `RC` (subsection 2.8).
+2. The job of time synchronization which is done by `Proxy service` is partially simplified and handed over to the `RootCoord` (subsection 2.8).
 
 ### 2.11 Query collection meta based on timeline
 
