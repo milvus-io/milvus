@@ -467,7 +467,7 @@ message HasPartitionRequest {
 ```
 
 ## LoadPartitions
-Load multiple partitions data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Load multiple partitions data into cache of QueryNode. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
 Note: this interface only send a request to server ask to load partitions, it returns at once after the request is consumed. Loading progress is asynchronously.
 ```
 rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {}
@@ -492,7 +492,7 @@ message LoadPartitionsRequest {
 ```
 
 ## ReleasePartitions
-Release partitions data from cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Release partitions data from cache of QueryNode. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
 ```
 rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
 ```
