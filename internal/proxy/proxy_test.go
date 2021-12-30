@@ -349,7 +349,7 @@ func TestProxy(t *testing.T) {
 	}
 
 	dc := runDataCoord(ctx, localMsg)
-	log.Info("running data coordinator ...")
+	log.Info("running DataCoord ...")
 
 	if dc != nil {
 		defer func() {
