@@ -31,17 +31,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 )
-
-type indexInfo struct {
-	segmentID    UniqueID
-	collectionID UniqueID
-	partitionID  UniqueID
-
-	infos       []*indexpb.IndexFilePathInfo
-	enableIndex bool
-}
 
 // IndexChecker checks index
 type IndexChecker struct {
@@ -127,7 +119,8 @@ func (ic *IndexChecker) reloadFromKV() error {
 			log.Error("reloadFromKV: unmarshal failed", zap.Any("error", err.Error()))
 			return err
 		}
-		if ic.verifyHandoffReqValid(segmentInfo) && Params.QueryCoordCfg.AutoHandoff {
+		validHandoffReq, _ := ic.verifyHandoffReqValid(segmentInfo)
+		if validHandoffReq && Params.QueryCoordCfg.AutoHandoff {
 			// push the req to handoffReqChan and then wait to load after index created
 			// in case handoffReqChan is full, and block start process
 			go ic.enqueueHandoffReq(segmentInfo)
@@ -146,7 +139,7 @@ func (ic *IndexChecker) reloadFromKV() error {
 	return nil
 }
 
-func (ic *IndexChecker) verifyHandoffReqValid(req *querypb.SegmentInfo) bool {
+func (ic *IndexChecker) verifyHandoffReqValid(req *querypb.SegmentInfo) (bool, *querypb.CollectionInfo) {
 	// if collection has not been loaded, then skip the segment
 	collectionInfo, err := ic.meta.getCollectionInfoByID(req.CollectionID)
 	if err == nil {
@@ -154,7 +147,7 @@ func (ic *IndexChecker) verifyHandoffReqValid(req *querypb.SegmentInfo) bool {
 		if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
 			for _, id := range collectionInfo.PartitionIDs {
 				if id == req.PartitionID {
-					return true
+					return true, collectionInfo
 				}
 			}
 		} else {
@@ -165,12 +158,12 @@ func (ic *IndexChecker) verifyHandoffReqValid(req *querypb.SegmentInfo) bool {
 				}
 			}
 			if !partitionReleased {
-				return true
+				return true, collectionInfo
 			}
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func (ic *IndexChecker) enqueueHandoffReq(req *querypb.SegmentInfo) {
@@ -196,15 +189,14 @@ func (ic *IndexChecker) checkIndexLoop() {
 			// TODO:: check whether the index exists in parallel, in case indexCoord cannot create the index normally, and then block the loop
 			log.Debug("checkIndexLoop: start check index for handoff segment", zap.Int64("segmentID", segmentInfo.SegmentID))
 			for {
-				if ic.verifyHandoffReqValid(segmentInfo) && Params.QueryCoordCfg.AutoHandoff {
-					indexInfo, err := getIndexInfo(ic.ctx, segmentInfo, ic.rootCoord, ic.indexCoord)
+				validHandoffReq, collectionInfo := ic.verifyHandoffReqValid(segmentInfo)
+				if validHandoffReq && Params.QueryCoordCfg.AutoHandoff {
+					indexInfo, err := getIndexInfo(ic.ctx, segmentInfo, collectionInfo.Schema, ic.rootCoord, ic.indexCoord)
 					if err != nil {
 						continue
 					}
-					if indexInfo.enableIndex {
-						segmentInfo.EnableIndex = true
-					}
-					segmentInfo.IndexPathInfos = indexInfo.infos
+
+					segmentInfo.IndexInfos = indexInfo
 					ic.enqueueIndexedSegment(segmentInfo)
 					break
 				}
@@ -278,13 +270,18 @@ func (ic *IndexChecker) processHandoffAfterIndexDone() {
 	}
 }
 
-func getIndexInfo(ctx context.Context, info *querypb.SegmentInfo, root types.RootCoord, index types.IndexCoord) (*indexInfo, error) {
-	indexInfo := &indexInfo{
-		segmentID:    info.SegmentID,
-		partitionID:  info.PartitionID,
-		collectionID: info.CollectionID,
+func getIndexInfo(ctx context.Context, info *querypb.SegmentInfo, schema *schemapb.CollectionSchema, root types.RootCoord, index types.IndexCoord) ([]*querypb.VecFieldIndexInfo, error) {
+	// TODO:: collection has multi vec field, and build index for every vec field, get indexInfo by fieldID
+	// Currently, each collection can only have one vector field
+	vecFieldIDs := getVecFieldIDs(schema)
+	if len(vecFieldIDs) != 1 {
+		err := fmt.Errorf("collection %d has multi vec field, num of vec fields = %d", info.CollectionID, len(vecFieldIDs))
+		log.Error("get index info failed", zap.Int64("collectionID", info.CollectionID), zap.Int64("segmentID", info.SegmentID), zap.Error(err))
+		return nil, err
 	}
-
+	indexInfo := &querypb.VecFieldIndexInfo{
+		FieldID: vecFieldIDs[0],
+	}
 	// check the buildID of the segment's index whether exist on rootCoord
 	req := &milvuspb.DescribeSegmentRequest{
 		Base: &commonpb.MsgBase{
@@ -305,36 +302,36 @@ func getIndexInfo(ctx context.Context, info *querypb.SegmentInfo, root types.Roo
 
 	// if the segment.EnableIndex == false, then load the segment immediately
 	if !response.EnableIndex {
-		indexInfo.enableIndex = false
-		return indexInfo, nil
-	}
+		indexInfo.EnableIndex = false
+	} else {
+		indexInfo.BuildID = response.BuildID
+		indexInfo.EnableIndex = true
+		// if index created done on indexNode, then handoff start
+		indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
+			IndexBuildIDs: []UniqueID{response.BuildID},
+		}
+		ctx3, cancel3 := context.WithTimeout(ctx, timeoutForRPC)
+		defer cancel3()
+		pathResponse, err2 := index.GetIndexFilePaths(ctx3, indexFilePathRequest)
+		if err2 != nil {
+			return nil, err2
+		}
 
-	// if index created done on indexNode, then handoff start
-	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
-		IndexBuildIDs: []UniqueID{response.BuildID},
-	}
-	ctx3, cancel3 := context.WithTimeout(ctx, timeoutForRPC)
-	defer cancel3()
-	pathResponse, err2 := index.GetIndexFilePaths(ctx3, indexFilePathRequest)
-	if err2 != nil {
-		return nil, err2
-	}
+		if pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return nil, errors.New(pathResponse.Status.Reason)
+		}
 
-	if pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, errors.New(pathResponse.Status.Reason)
-	}
+		if len(pathResponse.FilePaths) != 1 {
+			return nil, errors.New("illegal index file paths, there should be only one vector column")
+		}
 
-	if len(pathResponse.FilePaths) <= 0 {
-		return nil, errors.New("illegal index file paths")
-	}
-	for _, fieldPath := range pathResponse.FilePaths {
-		if len(fieldPath.IndexFilePaths) == 0 {
+		fieldPathInfo := pathResponse.FilePaths[0]
+		if len(fieldPathInfo.IndexFilePaths) == 0 {
 			return nil, errors.New("empty index paths")
 		}
+
+		indexInfo.IndexFilePaths = fieldPathInfo.IndexFilePaths
+		indexInfo.IndexSize = int64(fieldPathInfo.SerializedSize)
 	}
-
-	indexInfo.enableIndex = true
-	indexInfo.infos = pathResponse.FilePaths
-
-	return indexInfo, nil
+	return []*querypb.VecFieldIndexInfo{indexInfo}, nil
 }
