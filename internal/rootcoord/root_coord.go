@@ -623,12 +623,16 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		if binlog.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return nil, fmt.Errorf("getInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
 		}
+		binlogPaths := make([]string, 0)
 		for i := range binlog.FieldIDs {
 			if binlog.FieldIDs[i] == fieldID {
-				return binlog.Paths[i].Values, nil
+				binlogPaths = append(binlogPaths, binlog.Paths[i].Values...)
 			}
 		}
-		return nil, fmt.Errorf("binlog file does not exist, segment id = %d, field id = %d", segID, fieldID)
+		if len(binlogPaths) == 0 {
+			return nil, fmt.Errorf("binlog file does not exist, segment id = %d, field id = %d", segID, fieldID)
+		}
+		return binlogPaths, nil
 	}
 
 	c.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (retRows int64, retErr error) {
