@@ -10,6 +10,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
+
 if(NOT DEFINED KNOWHERE_VERSION)
    set(KNOWHERE_VERSION 1.00)
 endif()
@@ -23,13 +24,14 @@ endif ()
 message( STATUS "Building knowhere-${KNOWHERE_VERSION} from source" )
 FetchContent_Declare(
     knowhere
-    GIT_REPOSITORY      ${KNOWHERE_GIT_URL}
-    GIT_TAG             main
-    DOWNLOAD_DIR        ${THIRDPARTY_DOWNLOAD_PATH}
-    SOURCE_DIR          ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
-    BINARY_DIR          ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
+    GIT_REPOSITORY         ${KNOWHERE_GIT_URL}
+    GIT_TAG                 main
+    DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
+    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
+    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
     )
 
+set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}")
 FetchContent_GetProperties(knowhere)
 if ( NOT knowhere_POPULATED )
     FetchContent_Populate( knowhere )
