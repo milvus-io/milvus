@@ -296,7 +296,27 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 	for _, t := range childTasks {
 		if t.getState() != taskDone {
 			allDone = false
+			break
 		}
+
+		// wait watchDeltaChannel and watchQueryChannel task done after loading segment
+		nodeID := getDstNodeIDByTask(t)
+		if t.msgType() == commonpb.MsgType_LoadSegments {
+			if !lct.cluster.hasWatchedDeltaChannel(lct.ctx, nodeID, collectionID) ||
+				!lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
+				allDone = false
+				break
+			}
+		}
+
+		// wait watchQueryChannel task done after watch dmChannel
+		if t.msgType() == commonpb.MsgType_WatchDmChannels {
+			if !lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
+				allDone = false
+				break
+			}
+		}
+
 	}
 	if allDone {
 		err := lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_loadCollection)
@@ -671,6 +691,24 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 	for _, t := range childTasks {
 		if t.getState() != taskDone {
 			allDone = false
+		}
+
+		// wait watchDeltaChannel and watchQueryChannel task done after loading segment
+		nodeID := getDstNodeIDByTask(t)
+		if t.msgType() == commonpb.MsgType_LoadSegments {
+			if !lpt.cluster.hasWatchedDeltaChannel(lpt.ctx, nodeID, collectionID) ||
+				!lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
+				allDone = false
+				break
+			}
+		}
+
+		// wait watchQueryChannel task done after watching dmChannel
+		if t.msgType() == commonpb.MsgType_WatchDmChannels {
+			if !lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
+				allDone = false
+				break
+			}
 		}
 	}
 	if allDone {
@@ -1498,8 +1536,6 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 						CollectionID:   collectionID,
 						BinlogPaths:    segmentBinlogs.FieldBinlogs,
 						NumOfRows:      segmentBinlogs.NumOfRows,
-						Statslogs:      segmentBinlogs.Statslogs,
-						Deltalogs:      segmentBinlogs.Deltalogs,
 						CompactionFrom: segmentInfo.CompactionFrom,
 						IndexInfos:     segmentInfo.IndexInfos,
 					}
