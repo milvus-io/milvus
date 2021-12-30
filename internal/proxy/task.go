@@ -891,7 +891,6 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	}
 
 	threshold := Params.ProxyCfg.PulsarMaxMessageSize
-	log.Debug("Proxy", zap.Int("threshold of message size: ", threshold))
 	// not accurate
 	/* #nosec G103 */
 	getFixedSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
