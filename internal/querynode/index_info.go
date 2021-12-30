@@ -95,6 +95,7 @@ func (info *indexInfo) getIndexPaths() []string {
 	return info.indexPaths
 }
 
+// getIndexParams returns indexParams
 func (info *indexInfo) getIndexParams() map[string]string {
 	return info.indexParams
 }
