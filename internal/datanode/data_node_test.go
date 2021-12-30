@@ -29,10 +29,15 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
-
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -42,12 +47,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 func TestMain(t *testing.M) {
@@ -62,6 +61,8 @@ func TestMain(t *testing.M) {
 
 func TestDataNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	node := newIDLEDataNodeMock(ctx)
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
@@ -132,39 +133,6 @@ func TestDataNode(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.Status.ErrorCode)
 	})
 
-	t.Run("Test NewDataSyncService", func(t *testing.T) {
-		t.Skip()
-		ctx, cancel := context.WithCancel(context.Background())
-		node2 := newIDLEDataNodeMock(ctx)
-		err = node2.Start()
-		assert.Nil(t, err)
-		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-NewDataSyncService"
-
-		vchan := &datapb.VchannelInfo{
-			CollectionID:      1,
-			ChannelName:       dmChannelName,
-			UnflushedSegments: []*datapb.SegmentInfo{},
-		}
-
-		require.Equal(t, 0, len(node2.vchan2FlushChs))
-		require.Equal(t, 0, len(node2.vchan2SyncService))
-
-		err := node2.NewDataSyncService(vchan)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(node2.vchan2FlushChs))
-		assert.Equal(t, 1, len(node2.vchan2SyncService))
-
-		err = node2.NewDataSyncService(vchan)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(node2.vchan2FlushChs))
-		assert.Equal(t, 1, len(node2.vchan2SyncService))
-
-		cancel()
-		<-node2.ctx.Done()
-		err = node2.Stop()
-		assert.Nil(t, err)
-	})
-
 	t.Run("Test FlushSegments", func(t *testing.T) {
 		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
 
@@ -185,12 +153,14 @@ func TestDataNode(t *testing.T) {
 			UnflushedSegments: []*datapb.SegmentInfo{},
 			FlushedSegments:   []*datapb.SegmentInfo{},
 		}
-		err := node1.NewDataSyncService(vchan)
-		assert.Nil(t, err)
 
-		service, ok := node1.vchan2SyncService[dmChannelName]
+		err := node1.flowgraphManager.addAndStart(node1, vchan)
+		require.Nil(t, err)
+
+		fgservice, ok := node1.flowgraphManager.getFlowgraphService(dmChannelName)
 		assert.True(t, ok)
-		err = service.replica.addNewSegment(0, 1, 1, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+
+		err = fgservice.replica.addNewSegment(0, 1, 1, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 		assert.Nil(t, err)
 
 		req := &datapb.FlushSegmentsRequest{
@@ -282,25 +252,6 @@ func TestDataNode(t *testing.T) {
 		status, err = node1.FlushSegments(node1.ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-
-		// manual inject meta error
-		node1.chanMut.Lock()
-		node1.vchan2FlushChs[dmChannelName+"1"] = node1.vchan2FlushChs[dmChannelName]
-		delete(node1.vchan2FlushChs, dmChannelName)
-		node1.chanMut.Unlock()
-		node1.segmentCache.Remove(0)
-
-		req = &datapb.FlushSegmentsRequest{
-			Base:         &commonpb.MsgBase{},
-			DbID:         0,
-			CollectionID: 1,
-			SegmentIDs:   []int64{0},
-		}
-
-		status, err = node1.FlushSegments(node1.ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-
 	})
 
 	t.Run("Test GetTimeTickChannel", func(t *testing.T) {
@@ -383,99 +334,13 @@ func TestDataNode(t *testing.T) {
 
 		for i, test := range testDataSyncs {
 			if i <= 2 {
-
-				err = node.NewDataSyncService(&datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName})
-
+				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName})
 				assert.Nil(t, err)
-
 				vchanNameCh <- test.dmChannelName
 			}
 		}
-
-		assert.Eventually(t, func() bool {
-			node.chanMut.Lock()
-			defer node.chanMut.Unlock()
-			return len(node.vchan2FlushChs) == 0
-		}, time.Second, time.Millisecond)
-
 		cancel()
 	})
-
-	t.Run("Test ReleaseDataSyncService", func(t *testing.T) {
-		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-NewDataSyncService"
-
-		vchan := &datapb.VchannelInfo{
-			CollectionID:      1,
-			ChannelName:       dmChannelName,
-			UnflushedSegments: []*datapb.SegmentInfo{},
-		}
-
-		err := node.NewDataSyncService(vchan)
-		require.NoError(t, err)
-		require.Equal(t, 1, len(node.vchan2FlushChs))
-		require.Equal(t, 1, len(node.vchan2SyncService))
-		time.Sleep(100 * time.Millisecond)
-
-		node.ReleaseDataSyncService(dmChannelName)
-		assert.Equal(t, 0, len(node.vchan2FlushChs))
-		assert.Equal(t, 0, len(node.vchan2SyncService))
-
-		s, ok := node.vchan2SyncService[dmChannelName]
-		assert.False(t, ok)
-		assert.Nil(t, s)
-	})
-
-	t.Run("Test GetChannelName", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		node := newIDLEDataNodeMock(ctx)
-
-		testCollIDs := []UniqueID{0, 1, 2, 1}
-		testSegIDs := []UniqueID{10, 11, 12, 13}
-		testchanNames := []string{"a", "b", "c", "d"}
-
-		node.chanMut.Lock()
-		for i, name := range testchanNames {
-			replica := &SegmentReplica{
-				collectionID: testCollIDs[i],
-				newSegments:  make(map[UniqueID]*Segment),
-			}
-
-			err = replica.addNewSegment(testSegIDs[i], testCollIDs[i], 0, name, &internalpb.MsgPosition{}, nil)
-			assert.Nil(t, err)
-			node.vchan2SyncService[name] = &dataSyncService{collectionID: testCollIDs[i], replica: replica}
-		}
-		node.chanMut.Unlock()
-
-		type Test struct {
-			inCollID         UniqueID
-			expectedChannels []string
-
-			inSegID         UniqueID
-			expectedChannel string
-		}
-		tests := []Test{
-			{0, []string{"a"}, 10, "a"},
-			{1, []string{"b", "d"}, 11, "b"},
-			{2, []string{"c"}, 12, "c"},
-			{3, []string{}, 13, "d"},
-			{3, []string{}, 100, ""},
-		}
-
-		for _, test := range tests {
-			actualChannels := node.getChannelNamesbyCollectionID(test.inCollID)
-			assert.ElementsMatch(t, test.expectedChannels, actualChannels)
-
-			actualChannel := node.getChannelNamebySegmentID(test.inSegID)
-			assert.Equal(t, test.expectedChannel, actualChannel)
-		}
-
-		cancel()
-	})
-
-	cancel()
-	<-node.ctx.Done()
-	err = node.Stop()
-	require.Nil(t, err)
 }
 
 func TestWatchChannel(t *testing.T) {
@@ -495,6 +360,7 @@ func TestWatchChannel(t *testing.T) {
 	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
+		// GOOSE TODO
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
 		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
@@ -540,29 +406,27 @@ func TestWatchChannel(t *testing.T) {
 
 		// wait for check goroutine received 2 events
 		<-c
-		node.chanMut.RLock()
-		_, has := node.vchan2SyncService[ch]
-		node.chanMut.RUnlock()
-		assert.True(t, has)
+		exist := node.flowgraphManager.exist(ch)
+		assert.True(t, exist)
 
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID))
 		assert.Nil(t, err)
 		//TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)
 
-		node.chanMut.RLock()
-		_, has = node.vchan2SyncService[ch]
-		node.chanMut.RUnlock()
-		assert.False(t, has)
+		exist = node.flowgraphManager.exist(ch)
+		assert.False(t, exist)
 	})
 
 	t.Run("handle watch info failed", func(t *testing.T) {
-		node.handleWatchInfo("test1", []byte{23})
+		e := &event{
+			eventType: putEventType,
+		}
 
-		node.chanMut.RLock()
-		_, has := node.vchan2SyncService["test1"]
-		assert.False(t, has)
-		node.chanMut.RUnlock()
+		node.handleWatchInfo(e, "test1", []byte{23})
+
+		exist := node.flowgraphManager.exist("test1")
+		assert.False(t, exist)
 
 		info := datapb.ChannelWatchInfo{
 			Vchan: nil,
@@ -570,12 +434,10 @@ func TestWatchChannel(t *testing.T) {
 		}
 		bs, err := proto.Marshal(&info)
 		assert.NoError(t, err)
-		node.handleWatchInfo("test2", bs)
+		node.handleWatchInfo(e, "test2", bs)
 
-		node.chanMut.RLock()
-		_, has = node.vchan2SyncService["test2"]
-		assert.False(t, has)
-		node.chanMut.RUnlock()
+		exist = node.flowgraphManager.exist("test2")
+		assert.False(t, exist)
 
 		info = datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{},
@@ -587,12 +449,9 @@ func TestWatchChannel(t *testing.T) {
 		node.msFactory = &FailMessageStreamFactory{
 			node.msFactory,
 		}
-		node.handleWatchInfo("test3", bs)
-		node.chanMut.RLock()
-		_, has = node.vchan2SyncService["test3"]
-		assert.False(t, has)
-		node.chanMut.RUnlock()
-
+		node.handleWatchInfo(e, "test3", bs)
+		exist = node.flowgraphManager.exist("test3")
+		assert.False(t, exist)
 	})
 }
 
