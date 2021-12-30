@@ -46,6 +46,6 @@ int
 popcnt_AVX2_lookup(const uint8_t* data, const size_t n);
 
 float
-jaccard__AVX2(const uint8_t * a, const uint8_t * b, size_t n);
+jaccard_AVX2(const uint8_t * a, const uint8_t * b, size_t n);
 
 } // namespace faiss

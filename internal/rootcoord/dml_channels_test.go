@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -82,12 +83,17 @@ func TestDmlChannels(t *testing.T) {
 }
 
 func TestDmChannelsFailure(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("Test newDmlChannels", func(t *testing.T) {
+		defer wg.Done()
 		mockFactory := &FailMessageStreamFactory{}
 		assert.Panics(t, func() { newDmlChannels(context.TODO(), mockFactory, "test-newdmlchannel-root", 1) })
 	})
 
+	wg.Add(1)
 	t.Run("Test broadcast", func(t *testing.T) {
+		defer wg.Done()
 		mockFactory := &FailMessageStreamFactory{errBroadcast: true}
 		dml := newDmlChannels(context.TODO(), mockFactory, "test-newdmlchannel-root", 1)
 		chanName0 := dml.getChannelName()
@@ -101,6 +107,7 @@ func TestDmChannelsFailure(t *testing.T) {
 		assert.Empty(t, v)
 		assert.Error(t, err)
 	})
+	wg.Wait()
 }
 
 // FailMessageStreamFactory mock MessageStreamFactory failure

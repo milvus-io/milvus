@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -42,7 +43,9 @@ func TestIndexCoordClient(t *testing.T) {
 	err = server.Run()
 	assert.Nil(t, err)
 
-	icc, err := NewClient(ctx, indexcoord.Params.IndexCoordCfg.MetaRootPath, indexcoord.Params.IndexCoordCfg.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.BaseParams)
+	assert.Nil(t, err)
+	icc, err := NewClient(ctx, indexcoord.Params.IndexCoordCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 	assert.NotNil(t, icc)
 

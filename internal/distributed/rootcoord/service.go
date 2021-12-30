@@ -25,10 +25,7 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
-	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -39,14 +36,20 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
+
+	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
+	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -62,13 +65,14 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	etcdCli    *clientv3.Client
 	dataCoord  types.DataCoord
 	indexCoord types.IndexCoord
 	queryCoord types.QueryCoord
 
-	newIndexCoordClient func(string, []string) types.IndexCoord
-	newDataCoordClient  func(string, []string) types.DataCoord
-	newQueryCoordClient func(string, []string) types.QueryCoord
+	newIndexCoordClient func(string, *clientv3.Client) types.IndexCoord
+	newDataCoordClient  func(string, *clientv3.Client) types.DataCoord
+	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoord
 
 	closer io.Closer
 }
@@ -106,22 +110,22 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 }
 
 func (s *Server) setClient() {
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdEndpoints []string) types.DataCoord {
-		dsClient, err := dcc.NewClient(s.ctx, etcdMetaRoot, etcdEndpoints)
+	s.newDataCoordClient = func(etcdMetaRoot string, etcdCli *clientv3.Client) types.DataCoord {
+		dsClient, err := dcc.NewClient(s.ctx, etcdMetaRoot, etcdCli)
 		if err != nil {
 			panic(err)
 		}
 		return dsClient
 	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdEndpoints []string) types.IndexCoord {
-		isClient, err := icc.NewClient(s.ctx, metaRootPath, etcdEndpoints)
+	s.newIndexCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.IndexCoord {
+		isClient, err := icc.NewClient(s.ctx, metaRootPath, etcdCli)
 		if err != nil {
 			panic(err)
 		}
 		return isClient
 	}
-	s.newQueryCoordClient = func(metaRootPath string, etcdEndpoints []string) types.QueryCoord {
-		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdEndpoints)
+	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoord {
+		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdCli)
 		if err != nil {
 			panic(err)
 		}
@@ -149,17 +153,25 @@ func (s *Server) init() error {
 	rootcoord.Params.InitOnce()
 	rootcoord.Params.RootCoordCfg.Address = Params.GetAddress()
 	rootcoord.Params.RootCoordCfg.Port = Params.Port
-	log.Debug("grpc init done ...")
+	log.Debug("init params done..")
 
 	closer := trace.InitTracing("root_coord")
 	s.closer = closer
 
-	log.Debug("init params done")
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
+	if err != nil {
+		log.Debug("RootCoord connect to etcd failed", zap.Error(err))
+		return err
+	}
+	s.etcdCli = etcdCli
+	s.rootCoord.SetEtcdClient(s.etcdCli)
+	log.Debug("etcd connect done ...")
 
-	err := s.startGrpc(Params.Port)
+	err = s.startGrpc(Params.Port)
 	if err != nil {
 		return err
 	}
+	log.Debug("grpc init done ...")
 
 	s.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
@@ -181,7 +193,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, rootcoord.Params.RootCoordCfg.EtcdEndpoints)
+		dataCoord := s.newDataCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, s.etcdCli)
 		if err := s.rootCoord.SetDataCoord(s.ctx, dataCoord); err != nil {
 			panic(err)
 		}
@@ -189,7 +201,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexCoordClient != nil {
 		log.Debug("RootCoord start to create IndexCoord client")
-		indexCoord := s.newIndexCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, rootcoord.Params.RootCoordCfg.EtcdEndpoints)
+		indexCoord := s.newIndexCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, s.etcdCli)
 		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
 			panic(err)
 		}
@@ -197,7 +209,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, rootcoord.Params.RootCoordCfg.EtcdEndpoints)
+		queryCoord := s.newQueryCoordClient(rootcoord.Params.RootCoordCfg.MetaRootPath, s.etcdCli)
 		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
 		}
@@ -272,6 +284,9 @@ func (s *Server) Stop() error {
 		if err := s.closer.Close(); err != nil {
 			log.Error("Failed to close opentracing", zap.Error(err))
 		}
+	}
+	if s.etcdCli != nil {
+		defer s.etcdCli.Close()
 	}
 	if s.indexCoord != nil {
 		if err := s.indexCoord.Stop(); err != nil {

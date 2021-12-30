@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,10 +33,12 @@ func Test_InitRmq(t *testing.T) {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, "/etcd/test/root")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	defer etcdCli.Close()
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 

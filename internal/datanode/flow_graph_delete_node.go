@@ -91,7 +91,7 @@ func newDelDataBuf() *DelDataBuf {
 }
 
 func (dn *deleteNode) Name() string {
-	return "deleteNode"
+	return "deleteNode-" + dn.channelName
 }
 
 func (dn *deleteNode) Close() {

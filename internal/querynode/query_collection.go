@@ -266,6 +266,10 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 	q.watcherCond.L.Lock()
 	for !q.tSafeUpdate {
 		q.watcherCond.Wait()
+		err := q.releaseCtx.Err()
+		if err != nil {
+			return 0, err
+		}
 	}
 	q.tSafeUpdate = false
 	q.watcherCond.Broadcast()
@@ -574,6 +578,9 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			//time.Sleep(10 * time.Millisecond)
 			serviceTime, err := q.waitNewTSafe()
 			if err != nil {
+				if err == q.releaseCtx.Err() {
+					continue
+				}
 				log.Error("[should not happen!] stop doUnsolvedMsg, err = " + err.Error())
 				return
 			}

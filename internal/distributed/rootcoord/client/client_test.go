@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,7 +33,9 @@ func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 
 	ctx := context.Background()
-	client, err := NewClient(ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&proxy.Params.BaseParams)
+	assert.NoError(t, err)
+	client, err := NewClient(ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 

@@ -13,6 +13,7 @@ package rocksmq
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"testing"
 
@@ -40,8 +41,9 @@ func Test_NewReader(t *testing.T) {
 }
 
 func TestReader_Next(t *testing.T) {
-	rmqPath := rmqPath + "/test_reader"
-	rmq := newRocksMQ(rmqPath)
+	os.MkdirAll(rmqPath, os.ModePerm)
+	rmqPathTest := rmqPath + "/test_reader"
+	rmq := newRocksMQ(t, rmqPathTest)
 	defer removePath(rmqPath)
 	client, err := newClient(ClientOptions{
 		Server: rmq,

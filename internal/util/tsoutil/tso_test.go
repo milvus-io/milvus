@@ -15,11 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func TestParseHybridTs(t *testing.T) {
@@ -49,4 +48,13 @@ func Test_Tso(t *testing.T) {
 		assert.Less(t, subTime, time.Millisecond)
 		assert.Equal(t, typeutil.ZeroTimestamp, l)
 	})
+}
+
+func TestCalculateDuration(t *testing.T) {
+	now := time.Now()
+	ts1 := ComposeTSByTime(now, 0)
+	durationInMilliSecs := int64(20 * 1000)
+	ts2 := ComposeTSByTime(now.Add(time.Duration(durationInMilliSecs)*time.Millisecond), 0)
+	diff := CalculateDuration(ts2, ts1)
+	assert.Equal(t, durationInMilliSecs, diff)
 }

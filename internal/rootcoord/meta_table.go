@@ -96,7 +96,7 @@ type MetaTable struct {
 	ddLock     sync.RWMutex
 }
 
-// NewMetaTable create meta table for rootcoord, which stores all in-memory information
+// NewMetaTable creates meta table for rootcoord, which stores all in-memory information
 // for collection, partition, segment, index etc.
 func NewMetaTable(txn kv.TxnKV, snap kv.SnapShotKV) (*MetaTable, error) {
 	mt := &MetaTable{

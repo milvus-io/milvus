@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -1577,6 +1578,12 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	travelTimestamp := st.query.TravelTimestamp
 	if travelTimestamp == 0 {
 		travelTimestamp = st.BeginTs()
+	} else {
+		durationSeconds := tsoutil.CalculateDuration(st.BeginTs(), travelTimestamp) / 1000
+		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+			duration := time.Second * time.Duration(durationSeconds)
+			return fmt.Errorf("only support to travel back to %s so far", duration.String())
+		}
 	}
 	guaranteeTimestamp := st.query.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
@@ -2186,10 +2193,15 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
 	travelTimestamp := qt.query.TravelTimestamp
 	if travelTimestamp == 0 {
 		travelTimestamp = qt.BeginTs()
+	} else {
+		durationSeconds := tsoutil.CalculateDuration(qt.BeginTs(), travelTimestamp) / 1000
+		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+			duration := time.Second * time.Duration(durationSeconds)
+			return fmt.Errorf("only support to travel back to %s so far", duration.String())
+		}
 	}
 	guaranteeTimestamp := qt.query.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
@@ -4791,6 +4803,7 @@ func (dt *deleteTask) HashPK(pks []int64) {
 	}
 }
 
+// CreateAliasTask contains task information of CreateAlias
 type CreateAliasTask struct {
 	Condition
 	*milvuspb.CreateAliasRequest
@@ -4839,11 +4852,13 @@ func (c *CreateAliasTask) SetTs(ts Timestamp) {
 	c.Base.Timestamp = ts
 }
 
+// OnEnqueue defines the behavior task enqueued
 func (c *CreateAliasTask) OnEnqueue() error {
 	c.Base = &commonpb.MsgBase{}
 	return nil
 }
 
+// PreExecute defines the action before task execution
 func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	c.Base.MsgType = commonpb.MsgType_CreateAlias
 	c.Base.SourceID = Params.ProxyCfg.ProxyID
@@ -4861,12 +4876,14 @@ func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+// Execute defines the actual execution of create alias
 func (c *CreateAliasTask) Execute(ctx context.Context) error {
 	var err error
 	c.result, err = c.rootCoord.CreateAlias(ctx, c.CreateAliasRequest)
 	return err
 }
 
+// PostExecute defines the post execution, do nothing for create alias
 func (c *CreateAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }

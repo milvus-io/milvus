@@ -13,8 +13,8 @@
 #define FAISS_JACCARD_INL_H
 
 #include <faiss/utils/BinaryDistance.h>
-#include <faiss/utils/distances_avx.h>
-#include <faiss/utils/distances_avx512.h>
+#include <faiss/utils/distances_simd_avx.h>
+#include <faiss/utils/distances_simd_avx512.h>
 
 namespace faiss {
 
@@ -353,7 +353,7 @@ struct JaccardComputer256 {
         }
 
         float compute (const uint8_t *b8) const {
-            return jaccard__AVX2(a, b8, n);
+            return jaccard_AVX2(a, b8, n);
         }
 
     };

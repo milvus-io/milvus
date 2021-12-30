@@ -31,10 +31,10 @@ extern sq_get_distance_computer_func_ptr sq_get_distance_computer;
 extern sq_sel_quantizer_func_ptr sq_sel_quantizer;
 extern sq_sel_inv_list_scanner_func_ptr sq_sel_inv_list_scanner;
 
-extern bool support_avx512();
-extern bool support_avx2();
-extern bool support_sse4_2();
+bool cpu_support_avx512();
+bool cpu_support_avx2();
+bool cpu_support_sse4_2();
 
-extern bool hook_init(std::string& cpu_flag);
+void hook_init(std::string& cpu_flag);
 
 } // namespace faiss
