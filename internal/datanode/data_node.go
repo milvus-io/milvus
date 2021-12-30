@@ -388,13 +388,17 @@ func (node *DataNode) ReleaseDataSyncService(vchanName string) {
 	log.Info("Release flowgraph resources begin", zap.String("Vchannel", vchanName))
 
 	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
-	if dss, ok := node.vchan2SyncService[vchanName]; ok {
+	dss, ok := node.vchan2SyncService[vchanName]
+	node.chanMut.Unlock()
+	if ok {
+		// This is a time-consuming process, better to put outside of the lock
 		dss.close()
 	}
 
+	node.chanMut.Lock()
 	delete(node.vchan2SyncService, vchanName)
 	delete(node.vchan2FlushChs, vchanName)
+	node.chanMut.Unlock()
 
 	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
