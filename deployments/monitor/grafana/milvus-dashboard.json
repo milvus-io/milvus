@@ -1069,7 +1069,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_index requests",
+      "description": "per-minute increasing rate of drop_index requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
