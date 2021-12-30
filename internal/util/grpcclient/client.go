@@ -208,6 +208,7 @@ func (c *ClientBase) Call(ctx context.Context, caller func(client interface{}) (
 	return ret, err
 }
 
+// ReCall does the grpc call twice
 func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error) {
 	if !funcutil.CheckCtxValid(ctx) {
 		return nil, ctx.Err()
