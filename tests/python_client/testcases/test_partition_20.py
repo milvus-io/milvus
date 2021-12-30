@@ -238,8 +238,8 @@ class TestPartitionParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partiton_respectively(self):
         """
-        target: test release the partiton after load partiton
-        method: load partiton1 and load other partiton
+        target: test release the partition after load partition
+        method: load partition1 and load other partition
         expected: raise exception
         """
         self._connect()
@@ -256,8 +256,8 @@ class TestPartitionParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partitons_after_release(self):
         """
-        target: test release the partiton after load partition
-        method: load partitons and release partitions
+        target: test release the partition after load partition
+        method: load partitions and release partitions
         expected: no exception
         """
         self._connect()
@@ -515,7 +515,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_create_and_drop_multi_times(self):
         """
         target: verify create and drop for times
-        method: 1.create a partition with default schema
+        method: 1. create a partition with default schema
                 2. drop the partition
                 3. loop #1 and #2 for times
         expected: create and drop successfully
@@ -538,7 +538,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_drop_non_empty_partition(self):
         """
         target: verify drop a partition which has data inserted
-        method: 1.create a partition with default schema
+        method: 1. create a partition with default schema
                 2. insert some data
                 3. drop the partition
         expected: drop successfully

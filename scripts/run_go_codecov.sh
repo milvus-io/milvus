@@ -25,7 +25,7 @@ echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 # run unittest
 echo "Running unittest under ./internal"
 for d in $(go list ./internal... | grep -v vendor); do
-    go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    go test -race -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
     if [ -f profile.out ]; then
         sed '1d' profile.out >> ${FILE_COVERAGE_INFO}
         rm profile.out

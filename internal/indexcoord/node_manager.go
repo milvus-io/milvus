@@ -21,13 +21,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"go.uber.org/zap"
 
 	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 // NodeManager is used by IndexCoord to manage the client of IndexNode.
@@ -128,7 +128,7 @@ func (nm *NodeManager) PeekClient(meta Meta) (UniqueID, types.IndexNode) {
 	return nodeID, client
 }
 
-// ListNode list all IndexNodes in node manager.
+// ListNode lists all IndexNodes in node manager.
 func (nm *NodeManager) ListNode() []UniqueID {
 	//nm.lock.Lock()
 	//defer nm.lock.Unlock()

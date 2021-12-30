@@ -83,6 +83,7 @@ func InitMetaCache(client types.RootCoord) error {
 	return nil
 }
 
+// NewMetaCache creates a MetaCache with provided RootCoord
 func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	return &MetaCache{
 		client:   client,

@@ -1,23 +1,37 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package flowgraph
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
+)
+
+const (
+	// TODO: better to be configured
+	nodeCtxTtInterval = 2 * time.Minute
+	enableTtChecker   = true
 )
 
 // Node is the interface defines the behavior of flowgraph
@@ -61,6 +75,17 @@ func (nodeCtx *nodeCtx) Start(wg *sync.WaitGroup) {
 // 2. invoke node.Operate
 // 3. deliver the Operate result to downstream nodes
 func (nodeCtx *nodeCtx) work() {
+	// TODO: necessary to check every node?
+	name := fmt.Sprintf("nodeCtxTtChecker-%s", nodeCtx.node.Name())
+	warn := fmt.Sprintf("node %s haven't received input for %f minutes",
+		nodeCtx.node.Name(), nodeCtxTtInterval.Minutes())
+	var checker *timerecord.LongTermChecker
+	if enableTtChecker {
+		checker = timerecord.NewLongTermChecker(context.Background(), name, nodeCtxTtInterval, warn)
+		checker.Start()
+		defer checker.Stop()
+	}
+
 	for {
 		select {
 		case <-nodeCtx.closeCh:
@@ -75,6 +100,10 @@ func (nodeCtx *nodeCtx) work() {
 			}
 			n := nodeCtx.node
 			res = n.Operate(inputs)
+
+			if enableTtChecker {
+				checker.Check()
+			}
 
 			downstreamLength := len(nodeCtx.downstreamInputChanIdx)
 			if len(nodeCtx.downstream) < downstreamLength {
@@ -145,7 +174,7 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 		t := nodeCtx.inputMessages[0].TimeTick()
 		latestTime := t
 		for i := 1; i < len(nodeCtx.inputMessages); i++ {
-			if t < nodeCtx.inputMessages[i].TimeTick() {
+			if latestTime < nodeCtx.inputMessages[i].TimeTick() {
 				latestTime = nodeCtx.inputMessages[i].TimeTick()
 			}
 		}

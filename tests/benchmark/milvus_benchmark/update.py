@@ -7,7 +7,6 @@ from yaml import full_load, dump
 import config
 import utils
 import requests
-import json
 
 
 def parse_server_tag(server_tag):
@@ -74,7 +73,6 @@ def update_values(src_values_file, deploy_params_file):
     # if server_name:
     #     node_config = {'kubernetes.io/hostname': server_name}
     # elif server_tag:
-    #     # server tag
     #     node_config = {'instance-type': server_tag}
     cpus = None
     mems = None

@@ -55,10 +55,11 @@ type Session struct {
 	// keepAliveCancel to cancel the etcd KeepAlive
 	keepAliveCancel context.CancelFunc
 
-	ServerID   int64  `json:"ServerID,omitempty"`
-	ServerName string `json:"ServerName,omitempty"`
-	Address    string `json:"Address,omitempty"`
-	Exclusive  bool   `json:"Exclusive,omitempty"`
+	ServerID    int64  `json:"ServerID,omitempty"`
+	ServerName  string `json:"ServerName,omitempty"`
+	Address     string `json:"Address,omitempty"`
+	Exclusive   bool   `json:"Exclusive,omitempty"`
+	TriggerKill bool
 
 	liveCh  <-chan bool
 	etcdCli *clientv3.Client
@@ -73,7 +74,7 @@ type Session struct {
 // ServerID, ServerName, Address, Exclusive will be assigned after Init().
 // metaRoot is a path in etcd to save session information.
 // etcdEndpoints is to init etcdCli when NewSession
-func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *Session {
+func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client) *Session {
 	session := &Session{
 		ctx:      ctx,
 		metaRoot: metaRoot,
@@ -83,16 +84,12 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 
 	connectEtcdFn := func() error {
 		log.Debug("Session try to connect to etcd")
-		etcdCli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
-		if err != nil {
-			return err
-		}
 		ctx2, cancel2 := context.WithTimeout(session.ctx, 5*time.Second)
 		defer cancel2()
-		if _, err = etcdCli.Get(ctx2, "health"); err != nil {
+		if _, err := client.Get(ctx2, "health"); err != nil {
 			return err
 		}
-		session.etcdCli = etcdCli
+		session.etcdCli = client
 		return nil
 	}
 	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(300))
@@ -107,10 +104,11 @@ func NewSession(ctx context.Context, metaRoot string, etcdEndpoints []string) *S
 
 // Init will initialize base struct of the Session, including ServerName, ServerID,
 // Address, Exclusive. ServerID is obtained in getServerID.
-func (s *Session) Init(serverName, address string, exclusive bool) {
+func (s *Session) Init(serverName, address string, exclusive bool, triggerKill bool) {
 	s.ServerName = serverName
 	s.Address = address
 	s.Exclusive = exclusive
+	s.TriggerKill = triggerKill
 	s.checkIDExist()
 	serverID, err := s.getServerID()
 	if err != nil {

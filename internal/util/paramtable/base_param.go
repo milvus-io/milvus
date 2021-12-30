@@ -20,9 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
-// Params is a package scoped variable of type BaseParamTable.
-var Params BaseParamTable
-
 // BaseParamTable is a derived struct of BaseTable. It achieves Composition by
 // embedding BaseTable. It is used to quickly and easily access the system configuration.
 type BaseParamTable struct {

@@ -51,10 +51,10 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -63,6 +63,9 @@ type UniqueID = typeutil.UniqueID
 
 // make sure IndexNode implements types.IndexNode
 var _ types.IndexNode = (*IndexNode)(nil)
+
+// make sure IndexNode implements types.IndexNodeComponent
+var _ types.IndexNodeComponent = (*IndexNode)(nil)
 
 var Params paramtable.GlobalParamTable
 
@@ -84,6 +87,7 @@ type IndexNode struct {
 	startCallbacks []func()
 	closeCallbacks []func()
 
+	etcdCli       *clientv3.Client
 	etcdKV        *etcdkv.EtcdKV
 	finishedTasks map[UniqueID]commonpb.IndexState
 
@@ -122,7 +126,9 @@ func (i *IndexNode) Register() error {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		if i.session.TriggerKill {
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		}
 	})
 	return nil
 }
@@ -139,11 +145,11 @@ func (i *IndexNode) initKnowhere() {
 }
 
 func (i *IndexNode) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexNodeCfg.MetaRootPath, Params.IndexNodeCfg.EtcdEndpoints)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexNodeCfg.MetaRootPath, i.etcdCli)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	i.session.Init(typeutil.IndexNodeRole, Params.IndexNodeCfg.IP+":"+strconv.Itoa(Params.IndexNodeCfg.Port), false)
+	i.session.Init(typeutil.IndexNodeRole, Params.IndexNodeCfg.IP+":"+strconv.Itoa(Params.IndexNodeCfg.Port), false, true)
 	Params.IndexNodeCfg.NodeID = i.session.ServerID
 	Params.BaseParams.SetLogger(Params.IndexNodeCfg.NodeID)
 	return nil
@@ -165,18 +171,8 @@ func (i *IndexNode) Init() error {
 		}
 		log.Debug("IndexNode init session successful", zap.Int64("serverID", i.session.ServerID))
 
-		connectEtcdFn := func() error {
-			etcdKV, err := etcdkv.NewEtcdKV(Params.IndexNodeCfg.EtcdEndpoints, Params.IndexNodeCfg.MetaRootPath)
-			i.etcdKV = etcdKV
-			return err
-		}
-		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
-		if err != nil {
-			log.Error("IndexNode failed to connect to etcd", zap.Error(err))
-			initErr = err
-			return
-		}
-		log.Debug("IndexNode connected to etcd successfully")
+		etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.IndexNodeCfg.MetaRootPath)
+		i.etcdKV = etcdKV
 
 		option := &miniokv.Option{
 			Address:           Params.IndexNodeCfg.MinIOAddress,
@@ -248,6 +244,11 @@ func (i *IndexNode) Stop() error {
 // UpdateStateCode updates the component state of IndexNode.
 func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
+}
+
+// SetEtcdClient assigns parameter client to its member etcdCli
+func (node *IndexNode) SetEtcdClient(client *clientv3.Client) {
+	node.etcdCli = client
 }
 
 func (i *IndexNode) isHealthy() bool {
@@ -359,10 +360,6 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 // GetMetrics gets the metrics info of IndexNode.
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("IndexNode.GetMetrics",
-		zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
-		zap.String("req", req.Request))
-
 	if !i.isHealthy() {
 		log.Warn("IndexNode.GetMetrics failed",
 			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
@@ -401,7 +398,6 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
-			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
 		return metrics, nil

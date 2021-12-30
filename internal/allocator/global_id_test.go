@@ -17,24 +17,24 @@
 package allocator
 
 import (
-	"os"
-	"strings"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 )
 
 var gTestIDAllocator *GlobalIDAllocator
 
+var Params paramtable.GlobalParamTable
+
 func TestGlobalTSOAllocator_All(t *testing.T) {
-	endpoints := os.Getenv("ETCD_ENDPOINTS")
-	if endpoints == "" {
-		endpoints = "localhost:2379"
-	}
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdKV, err := tsoutil.NewTSOKVBase(etcdEndpoints, "/test/root/kv", "gidTest")
+	Params.Init()
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.NoError(t, err)
+	defer etcdCli.Close()
+	etcdKV := tsoutil.NewTSOKVBase(etcdCli, "/test/root/kv", "gidTest")
 
 	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", etcdKV)
 

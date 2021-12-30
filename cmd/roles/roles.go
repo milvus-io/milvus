@@ -43,12 +43,16 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/healthz"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var Params paramtable.GlobalParamTable
 
 func newMsgFactory(localMsg bool) msgstream.Factory {
 	if localMsg {
@@ -92,9 +96,12 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 	wg.Add(1)
 	go func() {
 		rootcoord.Params.InitOnce()
+		if localMsg {
+			rootcoord.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			rootcoord.Params.SetLogConfig(typeutil.RootCoordRole)
+		}
 
-		f := setLoggerFunc()
-		rootcoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
@@ -121,9 +128,12 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 	go func() {
 		proxy.Params.ProxyCfg.InitAlias(alias)
 		proxy.Params.InitOnce()
+		if localMsg {
+			proxy.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			proxy.Params.SetLogConfig(typeutil.ProxyRole)
+		}
 
-		f := setLoggerFunc()
-		proxy.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
@@ -149,9 +159,12 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 	wg.Add(1)
 	go func() {
 		querycoord.Params.InitOnce()
+		if localMsg {
+			querycoord.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			querycoord.Params.SetLogConfig(typeutil.QueryCoordRole)
+		}
 
-		f := setLoggerFunc()
-		querycoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
@@ -178,9 +191,12 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 	go func() {
 		querynode.Params.QueryNodeCfg.InitAlias(alias)
 		querynode.Params.InitOnce()
+		if localMsg {
+			querynode.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			querynode.Params.SetLogConfig(typeutil.QueryNodeRole)
+		}
 
-		f := setLoggerFunc()
-		querynode.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
@@ -206,12 +222,17 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 	wg.Add(1)
 	go func() {
 		datacoord.Params.InitOnce()
+		if localMsg {
+			datacoord.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			datacoord.Params.SetLogConfig(typeutil.DataCoordRole)
+		}
 
-		f := setLoggerFunc()
-		datacoord.Params.BaseParams.SetLogConfig(f)
 		factory := newMsgFactory(localMsg)
+
+		dctx := logutil.WithModule(ctx, "DataCoord")
 		var err error
-		ds, err = components.NewDataCoord(ctx, factory)
+		ds, err = components.NewDataCoord(dctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -235,8 +256,12 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 	go func() {
 		datanode.Params.DataNodeCfg.InitAlias(alias)
 		datanode.Params.InitOnce()
-		f := setLoggerFunc()
-		datanode.Params.BaseParams.SetLogConfig(f)
+		if localMsg {
+			datanode.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			datanode.Params.SetLogConfig(typeutil.DataNodeRole)
+		}
+
 		factory := newMsgFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
@@ -262,9 +287,12 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 	wg.Add(1)
 	go func() {
 		indexcoord.Params.InitOnce()
+		if localMsg {
+			indexcoord.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			indexcoord.Params.SetLogConfig(typeutil.IndexCoordRole)
+		}
 
-		f := setLoggerFunc()
-		indexcoord.Params.BaseParams.SetLogConfig(f)
 		var err error
 		is, err = components.NewIndexCoord(ctx)
 		if err != nil {
@@ -290,9 +318,12 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 	go func() {
 		indexnode.Params.IndexNodeCfg.InitAlias(alias)
 		indexnode.Params.InitOnce()
+		if localMsg {
+			indexnode.Params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			indexnode.Params.SetLogConfig(typeutil.IndexNodeRole)
+		}
 
-		f := setLoggerFunc()
-		indexnode.Params.BaseParams.SetLogConfig(f)
 		var err error
 		in, err = components.NewIndexNode(ctx)
 		if err != nil {
@@ -311,7 +342,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 }
 
 // Run Milvus components.
-func (mr *MilvusRoles) Run(localMsg bool, alias string) {
+func (mr *MilvusRoles) Run(local bool, alias string) {
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
 		if closer != nil {
@@ -322,19 +353,22 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// only standalone enable localMsg
-	if localMsg {
+	if local {
+		Params.Init()
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
-
-		paramtable.Params.Init()
-		f := setLoggerFunc()
-		paramtable.Params.SetLogConfig(f)
 
 		if err := initRocksmq(); err != nil {
 			panic(err)
 		}
 		defer stopRocksmq()
+
+		if Params.BaseParams.UseEmbedEtcd {
+			// start etcd server
+			etcd.InitEtcdServer(&Params.BaseParams)
+			defer etcd.StopEtcdServer()
+		}
 	} else {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
@@ -343,7 +377,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var rc *components.RootCoord
 	if mr.EnableRootCoord {
-		rc = mr.runRootCoord(ctx, localMsg)
+		rc = mr.runRootCoord(ctx, local)
 		if rc != nil {
 			defer rc.Stop()
 		}
@@ -352,7 +386,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 	var pn *components.Proxy
 	if mr.EnableProxy {
 		pctx := logutil.WithModule(ctx, "Proxy")
-		pn = mr.runProxy(pctx, localMsg, alias)
+		pn = mr.runProxy(pctx, local, alias)
 		if pn != nil {
 			defer pn.Stop()
 		}
@@ -360,7 +394,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var qs *components.QueryCoord
 	if mr.EnableQueryCoord {
-		qs = mr.runQueryCoord(ctx, localMsg)
+		qs = mr.runQueryCoord(ctx, local)
 		if qs != nil {
 			defer qs.Stop()
 		}
@@ -368,7 +402,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var qn *components.QueryNode
 	if mr.EnableQueryNode {
-		qn = mr.runQueryNode(ctx, localMsg, alias)
+		qn = mr.runQueryNode(ctx, local, alias)
 		if qn != nil {
 			defer qn.Stop()
 		}
@@ -376,7 +410,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var ds *components.DataCoord
 	if mr.EnableDataCoord {
-		ds = mr.runDataCoord(ctx, localMsg)
+		ds = mr.runDataCoord(ctx, local)
 		if ds != nil {
 			defer ds.Stop()
 		}
@@ -384,7 +418,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var dn *components.DataNode
 	if mr.EnableDataNode {
-		dn = mr.runDataNode(ctx, localMsg, alias)
+		dn = mr.runDataNode(ctx, local, alias)
 		if dn != nil {
 			defer dn.Stop()
 		}
@@ -392,7 +426,7 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var is *components.IndexCoord
 	if mr.EnableIndexCoord {
-		is = mr.runIndexCoord(ctx, localMsg)
+		is = mr.runIndexCoord(ctx, local)
 		if is != nil {
 			defer is.Stop()
 		}
@@ -400,13 +434,13 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	var in *components.IndexNode
 	if mr.EnableIndexNode {
-		in = mr.runIndexNode(ctx, localMsg, alias)
+		in = mr.runIndexNode(ctx, local, alias)
 		if in != nil {
 			defer in.Stop()
 		}
 	}
 
-	if localMsg {
+	if local {
 		standaloneHealthzHandler := func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
@@ -463,12 +497,4 @@ func (mr *MilvusRoles) Run(localMsg bool, alias string) {
 
 	// some deferred Stop has race with context cancel
 	cancel()
-}
-
-func setLoggerFunc() func(cfg log.Config) {
-	return func(cfg log.Config) {
-		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
-		logutil.SetupLogger(&cfg)
-		defer log.Sync()
-	}
 }

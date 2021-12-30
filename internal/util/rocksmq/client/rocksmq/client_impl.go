@@ -183,10 +183,5 @@ func (c *client) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closeCh)
 		c.wg.Wait()
-		if c.server != nil {
-			c.server.Close()
-		}
-		// Wait all consume goroutines exit
-		c.consumerOptions = nil
 	})
 }

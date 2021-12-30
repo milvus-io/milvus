@@ -33,6 +33,7 @@ type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 type channelsTimeTicker interface {
 	start() error
 	close() error
+	// getLastTick returns the last write timestamp of specific pchan.
 	getLastTick(pchan pChan) (Timestamp, error)
 	getMinTsStatistics() (map[pChan]Timestamp, Timestamp, error)
 	getMinTick() Timestamp
@@ -110,7 +111,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 		} else {
 			if stat.minTs > current {
 				ticker.minTsStatistics[pchan] = stat.minTs - 1
-				next := now + Timestamp(sendTimeTickMsgInterval)
+				next := now + Timestamp(Params.ProxyCfg.TimeTickInterval)
 				if next > stat.maxTs {
 					next = stat.maxTs
 				}

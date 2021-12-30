@@ -40,11 +40,11 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -84,6 +84,7 @@ type QueryCoord struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
+	etcdCli          *clientv3.Client
 	dataCoordClient  types.DataCoord
 	rootCoordClient  types.RootCoord
 	indexCoordClient types.IndexCoord
@@ -106,17 +107,19 @@ func (qc *QueryCoord) Register() error {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		if qc.session.TriggerKill {
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		}
 	})
 	return nil
 }
 
 func (qc *QueryCoord) initSession() error {
-	qc.session = sessionutil.NewSession(qc.loopCtx, Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
+	qc.session = sessionutil.NewSession(qc.loopCtx, Params.QueryCoordCfg.MetaRootPath, qc.etcdCli)
 	if qc.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	qc.session.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true)
+	qc.session.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, true)
 	Params.QueryCoordCfg.NodeID = uint64(qc.session.ServerID)
 	Params.BaseParams.SetLogger(qc.session.ServerID)
 	return nil
@@ -124,17 +127,7 @@ func (qc *QueryCoord) initSession() error {
 
 // Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
-	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.QueryCoordCfg.MetaRootPath),
-		zap.Strings("etcdEndPoints", Params.QueryCoordCfg.EtcdEndpoints), zap.String("address", Params.QueryCoordCfg.Address))
-	//connect etcd
-	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
-		if err != nil {
-			return err
-		}
-		qc.kvClient = etcdKV
-		return nil
-	}
+	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.QueryCoordCfg.MetaRootPath), zap.String("address", Params.QueryCoordCfg.Address))
 	var initError error
 	qc.initOnce.Do(func() {
 		err := qc.initSession()
@@ -144,20 +137,12 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 		log.Debug("queryCoord try to connect etcd")
-		initError = retry.Do(qc.loopCtx, connectEtcdFn, retry.Attempts(300))
-		if initError != nil {
-			log.Debug("query coordinator try to connect etcd failed", zap.Error(initError))
-			return
-		}
+		etcdKV := etcdkv.NewEtcdKV(qc.etcdCli, Params.QueryCoordCfg.MetaRootPath)
+		qc.kvClient = etcdKV
 		log.Debug("query coordinator try to connect etcd success")
 
 		// init id allocator
-		var idAllocatorKV *etcdkv.EtcdKV
-		idAllocatorKV, initError = tsoutil.NewTSOKVBase(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.KvRootPath, "queryCoordTaskID")
-		if initError != nil {
-			log.Debug("query coordinator idAllocatorKV initialize failed", zap.Error(initError))
-			return
-		}
+		idAllocatorKV := tsoutil.NewTSOKVBase(qc.etcdCli, Params.QueryCoordCfg.KvRootPath, "queryCoordTaskID")
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 		initError = idAllocator.Initialize()
 		if initError != nil {
@@ -292,6 +277,11 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
 	log.Debug("query coordinator", zap.Any("queryChannels", queryChannels))
 	return service, nil
+}
+
+// SetRootCoord sets root coordinator's client
+func (qc *QueryCoord) SetEtcdClient(etcdClient *clientv3.Client) {
+	qc.etcdCli = etcdClient
 }
 
 // SetRootCoord sets root coordinator's client

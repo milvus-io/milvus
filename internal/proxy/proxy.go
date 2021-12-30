@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -47,8 +48,8 @@ type UniqueID = typeutil.UniqueID
 // Timestamp is alias of typeutil.Timestamp
 type Timestamp = typeutil.Timestamp
 
-const sendTimeTickMsgInterval = 200 * time.Millisecond
-const channelMgrTickerInterval = 100 * time.Millisecond
+// const sendTimeTickMsgInterval = 200 * time.Millisecond
+// const channelMgrTickerInterval = 100 * time.Millisecond
 
 // make sure Proxy implements types.Proxy
 var _ types.Proxy = (*Proxy)(nil)
@@ -67,6 +68,7 @@ type Proxy struct {
 
 	stateCode atomic.Value
 
+	etcdCli    *clientv3.Client
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
 	dataCoord  types.DataCoord
@@ -116,19 +118,22 @@ func (node *Proxy) Register() error {
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		if node.session.TriggerKill {
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		}
 	})
 	// TODO Reset the logger
 	//Params.initLogCfg()
 	return nil
 }
 
+// initSession initialize the session of Proxy.
 func (node *Proxy) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
+	node.session = sessionutil.NewSession(node.ctx, Params.ProxyCfg.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return errors.New("new session failed, maybe etcd cannot be connected")
 	}
-	node.session.Init(typeutil.ProxyRole, Params.ProxyCfg.NetworkAddress, false)
+	node.session.Init(typeutil.ProxyRole, Params.ProxyCfg.NetworkAddress, false, true)
 	Params.ProxyCfg.ProxyID = node.session.ServerID
 	Params.BaseParams.SetLogger(Params.ProxyCfg.ProxyID)
 	return nil
@@ -233,8 +238,10 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("create task scheduler done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("create channels time ticker", zap.String("role", typeutil.ProxyRole))
-	node.chTicker = newChannelsTimeTicker(node.ctx, channelMgrTickerInterval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
+	syncTimeTickInterval := Params.ProxyCfg.TimeTickInterval / 2
+	log.Debug("create channels time ticker",
+		zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
+	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("create metrics cache manager", zap.String("role", typeutil.ProxyRole))
@@ -257,12 +264,12 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	go func() {
 		defer node.wg.Done()
 
-		// TODO(dragondriver): read this from config
-		timer := time.NewTicker(sendTimeTickMsgInterval)
+		timer := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
 
 		for {
 			select {
 			case <-node.ctx.Done():
+				log.Info("send channels time tick loop exit")
 				return
 			case <-timer.C:
 				stats, ts, err := node.chTicker.getMinTsStatistics()
@@ -422,6 +429,11 @@ func (node *Proxy) lastTick() Timestamp {
 // AddCloseCallback adds a callback in the Close phase.
 func (node *Proxy) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
+}
+
+// SetEtcdClient sets etcd client for proxy.
+func (node *Proxy) SetEtcdClient(client *clientv3.Client) {
+	node.etcdCli = client
 }
 
 // SetRootCoordClient sets RootCoord client for proxy.

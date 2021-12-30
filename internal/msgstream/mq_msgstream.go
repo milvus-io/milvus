@@ -766,6 +766,7 @@ func (ms *MqTtMsgStream) Close() {
 			reader.Close()
 		}
 	}
+	ms.client.Close()
 }
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {

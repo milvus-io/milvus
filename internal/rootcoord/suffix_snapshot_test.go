@@ -23,6 +23,7 @@ import (
 	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -262,8 +263,10 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdkv, err := etcdkv.NewEtcdKV(Params.RootCoordCfg.EtcdEndpoints, rootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	require.Nil(t, err)
+	defer etcdCli.Close()
+	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	defer etcdkv.Close()
 
 	var vtso typeutil.Timestamp
@@ -312,8 +315,10 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
-	etcdkv, err := etcdkv.NewEtcdKV(Params.RootCoordCfg.EtcdEndpoints, rootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	require.Nil(t, err)
+	defer etcdCli.Close()
+	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	defer etcdkv.Close()
 
 	var vtso typeutil.Timestamp
@@ -386,7 +391,10 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdkv, err := etcdkv.NewEtcdKV(Params.RootCoordCfg.EtcdEndpoints, rootPath)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	require.Nil(t, err)
+	defer etcdCli.Close()
+	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	require.Nil(t, err)
 	defer etcdkv.Close()
 

@@ -217,7 +217,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("watchDmChannelsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	log.Debug("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -229,7 +229,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -519,6 +519,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 	}, nil
 }
 
+// isHealthy checks if QueryNode is healthy
 func (node *QueryNode) isHealthy() bool {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	return code == internalpb.StateCode_Healthy
@@ -527,10 +528,6 @@ func (node *QueryNode) isHealthy() bool {
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("QueryNode.GetMetrics",
-		zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
-		zap.String("req", req.Request))
-
 	if !node.isHealthy() {
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
@@ -562,9 +559,6 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		}, nil
 	}
 
-	log.Debug("QueryNode.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 
@@ -572,7 +566,6 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
-			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
 		return metrics, nil

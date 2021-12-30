@@ -36,10 +36,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qc "github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -59,6 +61,8 @@ type Server struct {
 	queryCoord types.QueryCoordComponent
 
 	msFactory msgstream.Factory
+
+	etcdCli *clientv3.Client
 
 	dataCoord  types.DataCoord
 	rootCoord  types.RootCoord
@@ -111,17 +115,25 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("querycoord")
 	s.closer = closer
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
+	if err != nil {
+		log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
+		return err
+	}
+	s.etcdCli = etcdCli
+	s.SetEtcdClient(etcdCli)
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
-	err := <-s.grpcErrChan
+	err = <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
 
 	// --- Master Server Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.QueryCoordCfg.MetaRootPath, qc.Params.QueryCoordCfg.EtcdEndpoints)
+		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.QueryCoordCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
@@ -152,7 +164,7 @@ func (s *Server) init() error {
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
-		s.dataCoord, err = dcc.NewClient(s.loopCtx, qc.Params.QueryCoordCfg.MetaRootPath, qc.Params.QueryCoordCfg.EtcdEndpoints)
+		s.dataCoord, err = dcc.NewClient(s.loopCtx, qc.Params.QueryCoordCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryCoord try to new DataCoord client failed", zap.Error(err))
 			panic(err)
@@ -180,7 +192,7 @@ func (s *Server) init() error {
 
 	// --- IndexCoord ---
 	if s.indexCoord == nil {
-		s.indexCoord, err = icc.NewClient(s.loopCtx, qc.Params.QueryCoordCfg.MetaRootPath, qc.Params.QueryCoordCfg.EtcdEndpoints)
+		s.indexCoord, err = icc.NewClient(s.loopCtx, qc.Params.QueryCoordCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryCoord try to new IndexCoord client failed", zap.Error(err))
 			panic(err)
@@ -273,6 +285,9 @@ func (s *Server) Stop() error {
 			return err
 		}
 	}
+	if s.etcdCli != nil {
+		defer s.etcdCli.Close()
+	}
 	err := s.queryCoord.Stop()
 	s.loopCancel()
 	if s.grpcServer != nil {
@@ -280,6 +295,11 @@ func (s *Server) Stop() error {
 		s.grpcServer.GracefulStop()
 	}
 	return err
+}
+
+// SetRootCoord sets root coordinator's client
+func (s *Server) SetEtcdClient(etcdClient *clientv3.Client) {
+	s.queryCoord.SetEtcdClient(etcdClient)
 }
 
 // SetRootCoord sets the RootCoord's client for QueryCoord component.

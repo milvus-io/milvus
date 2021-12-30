@@ -33,7 +33,7 @@ type ConsumerMessage struct {
 }
 
 // RocksMQ is an interface thatmay be implemented by the application
-// to do message queue operations based ion rocksdb
+// to do message queue operations based on rocksdb
 type RocksMQ interface {
 	CreateTopic(topicName string) error
 	DestroyTopic(topicName string) error

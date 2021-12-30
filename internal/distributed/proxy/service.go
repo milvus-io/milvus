@@ -38,11 +38,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/opentracing/opentracing-go"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -59,6 +61,7 @@ type Server struct {
 
 	grpcErrChan chan error
 
+	etcdCli          *clientv3.Client
 	rootCoordClient  types.RootCoord
 	dataCoordClient  types.DataCoord
 	queryCoordClient types.QueryCoord
@@ -172,6 +175,13 @@ func (s *Server) init() error {
 	s.closer = closer
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 
+	etcdCli, err := etcd.GetEtcdClient(&proxy.Params.BaseParams)
+	if err != nil {
+		log.Debug("Proxy connect to etcd failed", zap.Error(err))
+		return err
+	}
+	s.etcdCli = etcdCli
+	s.proxy.SetEtcdClient(s.etcdCli)
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	log.Debug("waiting for grpc server of Proxy to be started")
@@ -184,7 +194,7 @@ func (s *Server) init() error {
 	if s.rootCoordClient == nil {
 		var err error
 		log.Debug("create RootCoord client for Proxy")
-		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
+		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create RootCoord client for Proxy", zap.Error(err))
 			return err
@@ -213,7 +223,7 @@ func (s *Server) init() error {
 	if s.dataCoordClient == nil {
 		var err error
 		log.Debug("create DataCoord client for Proxy")
-		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
+		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create DataCoord client for Proxy", zap.Error(err))
 			return err
@@ -242,7 +252,7 @@ func (s *Server) init() error {
 	if s.indexCoordClient == nil {
 		var err error
 		log.Debug("create IndexCoord client for Proxy")
-		s.indexCoordClient, err = icc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
+		s.indexCoordClient, err = icc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create IndexCoord client for Proxy", zap.Error(err))
 			return err
@@ -271,7 +281,7 @@ func (s *Server) init() error {
 	if s.queryCoordClient == nil {
 		var err error
 		log.Debug("create QueryCoord client for Proxy")
-		s.queryCoordClient, err = qcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, proxy.Params.ProxyCfg.EtcdEndpoints)
+		s.queryCoordClient, err = qcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create QueryCoord client for Proxy", zap.Error(err))
 			return err
@@ -332,6 +342,10 @@ func (s *Server) Stop() error {
 		if err = s.closer.Close(); err != nil {
 			return err
 		}
+	}
+
+	if s.etcdCli != nil {
+		defer s.etcdCli.Close()
 	}
 
 	if s.grpcServer != nil {

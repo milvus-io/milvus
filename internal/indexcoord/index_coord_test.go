@@ -23,34 +23,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
-
 	"github.com/milvus-io/milvus/internal/indexnode"
-
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
-
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func TestIndexCoord(t *testing.T) {
 	ctx := context.Background()
 	inm0 := &indexnode.Mock{}
-	err := inm0.Init()
+	Params.Init()
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	inm0.SetEtcdClient(etcdCli)
+	err = inm0.Init()
 	assert.Nil(t, err)
 	err = inm0.Register()
 	assert.Nil(t, err)
@@ -62,8 +58,8 @@ func TestIndexCoord(t *testing.T) {
 	ic.durationInterval = time.Second
 	ic.assignTaskInterval = 200 * time.Millisecond
 	ic.taskLimit = 20
-	Params.Init()
 
+	ic.SetEtcdClient(etcdCli)
 	err = ic.Init()
 	assert.Nil(t, err)
 	err = ic.Register()
@@ -81,6 +77,8 @@ func TestIndexCoord(t *testing.T) {
 		Build:   true,
 		Failure: false,
 	}
+
+	inm.SetEtcdClient(etcdCli)
 	err = in.SetClient(inm)
 	assert.Nil(t, err)
 

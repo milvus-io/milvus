@@ -19,10 +19,10 @@ package indexnode
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestMsgIndexNodeIsUnhealthy(t *testing.T) {
