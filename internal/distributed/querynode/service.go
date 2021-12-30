@@ -36,11 +36,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qn "github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -61,6 +63,7 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
+	etcdCli    *clientv3.Client
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
 
@@ -93,17 +96,26 @@ func (s *Server) init() error {
 	s.closer = closer
 
 	log.Debug("QueryNode", zap.Int("port", Params.Port))
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
+	if err != nil {
+		log.Debug("QueryNode connect to etcd failed", zap.Error(err))
+		return err
+	}
+	s.etcdCli = etcdCli
+	s.SetEtcdClient(etcdCli)
+	log.Debug("QueryNode connect to etcd successfully")
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
-	err := <-s.grpcErrChan
+	err = <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
 
 	// --- RootCoord Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, qn.Params.QueryNodeCfg.EtcdEndpoints)
+		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -133,7 +145,7 @@ func (s *Server) init() error {
 
 	// --- IndexCoord ---
 	if s.indexCoord == nil {
-		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, qn.Params.QueryNodeCfg.EtcdEndpoints)
+		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryNode new IndexCoordClient failed", zap.Error(err))
 			panic(err)
@@ -260,6 +272,9 @@ func (s *Server) Stop() error {
 			return err
 		}
 	}
+	if s.etcdCli != nil {
+		defer s.etcdCli.Close()
+	}
 
 	s.cancel()
 	if s.grpcServer != nil {
@@ -273,6 +288,11 @@ func (s *Server) Stop() error {
 	}
 	s.wg.Wait()
 	return nil
+}
+
+// SetEtcdClient sets the etcd client for QueryNode component.
+func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
+	s.querynode.SetEtcdClient(etcdCli)
 }
 
 // SetRootCoord sets the RootCoord's client for QueryNode component.

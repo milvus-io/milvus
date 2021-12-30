@@ -77,17 +77,30 @@ Use \"$0  --help\" for more information about a given command.
   esac
 done
 
+LOG_DIR=${LOG_DIR:-/ci-logs/}
+RELEASE_NAME=${RELEASE_NAME:-milvus-testing}
+RELEASE_LOG_DIR=/${RELEASE_NAME}
+if [[ ! -d ${RELEASE_LOG_DIR} ]] ;then 
+  mkdir -p ${RELEASE_LOG_DIR}
+fi 
 # try to found logs file from mount disk /volume1/ci-logs
-find ${LOG_DIR:-/ci-logs/} -type f  -name "*${RELEASE_NAME:-milvus-testing}*" \
-| xargs tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz -P --remove-files || true
+log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" )
+for log_file in ${log_files}
+do 
+ file_name=$(basename ${log_file})
+  mv  ${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/jenkins.var.log.containers.//g' `
+done 
 
-remain_log_files=$(find ${LOG_DIR:-/ci-logs/} -type f  -name "*${RELEASE_NAME:-milvus-testing}*")
+tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz ${RELEASE_LOG_DIR}/*
+rm -rf ${RELEASE_LOG_DIR}
+
+remain_log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*")
 
 if [ -z "${remain_log_files:-}" ]; then
   echo "No remain log files"
 else
   echo "Still have log files & Remove again"
-  find ${LOG_DIR:-/ci-logs/} -type f  -name "*${RELEASE_NAME:-milvus-testing}*" -exec rm -rf {} +
+  find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" -exec rm -rf {} +
   echo "Check if any remain log files  after using rm to delete again "
-  find ${LOG_DIR:-/ci-logs/} -type f  -name "*${RELEASE_NAME:-milvus-testing}*"
+  find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*"
 fi

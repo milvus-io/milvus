@@ -67,7 +67,7 @@ class TestQueryParams(TestcaseBase):
         expected: query result is correct
         """
         self._connect()
-        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         df[ct.default_int64_field_name] = None
         insert_res, _, = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                                        primary_field=ct.default_int64_field_name,
@@ -702,7 +702,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res2})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/12680")
     def test_query_output_fields_part_vector_wildcard(self):
         """
         target: test query output_fields with part wildcard

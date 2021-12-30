@@ -1,15 +1,12 @@
 
 // -*- c++ -*-
 
-#include <faiss/utils/distances_avx.h>
-#include <faiss/impl/FaissAssert.h>
+#include <faiss/utils/distances_simd_avx.h>
 
 #include <cstdio>
 #include <cassert>
-#include <cstring>
-#include <cmath>
-
 #include <immintrin.h>
+#include <string>
 
 namespace faiss {
 
@@ -80,7 +77,7 @@ uint8_t lookup8bit[256] = {
     /* fc */ 6, /* fd */ 7, /* fe */ 7, /* ff */ 8
 };
 
-#ifdef __SSE__
+
 // reads 0 <= d < 4 floats as __m128
 static inline __m128 masked_read (int d, const float *x) {
     assert (0 <= d && d < 4);
@@ -96,9 +93,7 @@ static inline __m128 masked_read (int d, const float *x) {
     return _mm_load_ps(buf);
     // cannot use AVX2 _mm_mask_set1_epi32
 }
-#endif
 
-#ifdef __AVX__
 
 // reads 0 <= d < 8 floats as __m256
 static inline __m256 masked_read_8 (int d, const float* x) {
@@ -478,34 +473,10 @@ int and_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const siz
 }
 
 float
-jaccard__AVX2(const uint8_t * a, const uint8_t * b, size_t n) {
+jaccard_AVX2(const uint8_t * a, const uint8_t * b, size_t n) {
     int accu_num = and_popcnt_AVX2_lookup(a,b,n);
     int accu_den = or_popcnt_AVX2_lookup(a,b,n);
     return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
 }
-
-#else
-
-float fvec_inner_product_avx(const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-float fvec_L2sqr_avx(const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-float fvec_L1_avx(const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-float fvec_Linf_avx (const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-#endif
 
 } // namespace faiss

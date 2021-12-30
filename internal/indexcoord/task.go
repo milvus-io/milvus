@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 

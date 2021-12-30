@@ -16,7 +16,8 @@
 
 #include <faiss/utils/Heap.h>
 #include <faiss/utils/BitsetView.h>
-#include <faiss/impl/AuxIndexStructures.h>
+#include <faiss/utils/distances_range.h>
+#include <faiss/utils/distances_simd.h>
 
 
 namespace faiss {
@@ -24,28 +25,6 @@ namespace faiss {
  /*********************************************************
  * Optimized distance/norm/inner prod computations
  *********************************************************/
-
-#ifdef __SSE__
-float fvec_L2sqr_sse (
-        const float * x,
-        const float * y,
-        size_t d);
-
-float  fvec_inner_product_sse (
-        const float * x,
-        const float * y,
-        size_t d);
-
-float fvec_L1_sse (
-        const float * x,
-        const float * y,
-        size_t d);
-
-float fvec_Linf_sse (
-        const float * x,
-        const float * y,
-        size_t d);
-#endif
 
 /** Compute pairwise distances between sets of vectors
  *
@@ -69,18 +48,6 @@ void fvec_inner_products_ny (
         const float * x,
         const float * y,
         size_t d, size_t ny);
-
-/* compute ny square L2 distance bewteen x and a set of contiguous y vectors */
-void fvec_L2sqr_ny (
-        float * dis,
-        const float * x,
-        const float * y,
-        size_t d, size_t ny);
-
-
-/** squared norm of a vector */
-float fvec_norm_L2sqr (const float * x,
-                       size_t d);
 
 /** compute the L2 norms for a set of vectors
  *
@@ -213,42 +180,6 @@ void knn_L2sqr_by_idx (const float * x,
                        const int64_t * ids,
                        size_t d, size_t nx, size_t ny,
                        float_maxheap_array_t * res);
-
-/***************************************************************************
- * Range search
- ***************************************************************************/
-
-
-
-/// Forward declaration, see AuxIndexStructures.h
-struct RangeSearchResult;
-
-/** Return the k nearest neighors of each of the nx vectors x among the ny
- *  vector y, w.r.t to max inner product
- *
- * @param x      query vectors, size nx * d
- * @param y      database vectors, size ny * d
- * @param radius search radius around the x vectors
- * @param result result structure
- */
-void range_search_L2sqr (
-        const float * x,
-        const float * y,
-        size_t d, size_t nx, size_t ny,
-        float radius,
-        std::vector<RangeSearchPartialResult*> &result,
-        size_t buffer_size,
-        const BitsetView &bitset = nullptr);
-
-/// same as range_search_L2sqr for the inner product similarity
-void range_search_inner_product (
-    const float * x,
-    const float * y,
-    size_t d, size_t nx, size_t ny,
-    float radius,
-    std::vector<RangeSearchPartialResult*> &result,
-    size_t buffer_size,
-    const BitsetView &bitset = nullptr);
 
 
 /***************************************************************************

@@ -67,6 +67,7 @@ if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
                                --set image.all.pullPolicy="${MILVUS_PULL_POLICY:-Always}" \
                                --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
                                --set service.type="${MILVUS_SERVICE_TYPE}" \
+                               --set pulsar.broker.replicaCount=2 \
                                --namespace "${MILVUS_HELM_NAMESPACE}" \
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"go.uber.org/zap"
 )
@@ -91,7 +92,11 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
 	coord.SetIndexCoord(indexCoord)
-
+	etcd, err := etcd.GetEtcdClient(&Params.BaseParams)
+	if err != nil {
+		return nil, err
+	}
+	coord.SetEtcdClient(etcd)
 	err = coord.Init()
 	if err != nil {
 		return nil, err
@@ -132,7 +137,11 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
-
+	etcd, err := etcd.GetEtcdClient(&Params.BaseParams)
+	if err != nil {
+		return nil, err
+	}
+	coord.SetEtcdClient(etcd)
 	err = coord.Init()
 	if err != nil {
 		return nil, err
@@ -147,11 +156,12 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 func TestWatchNodeLoop(t *testing.T) {
 	baseCtx := context.Background()
-
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
 	t.Run("Test OfflineNodes", func(t *testing.T) {
 		refreshParams()
-		kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
-		assert.Nil(t, err)
+
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 
 		kvs := make(map[string]string)
 		session := &sessionutil.Session{

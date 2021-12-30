@@ -10,6 +10,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/zap"
 )
@@ -27,10 +28,13 @@ var (
 
 func main() {
 	flag.Parse()
-	etcdkv, err := etcdkv.NewEtcdKV([]string{*etcdAddr}, *rootPath)
+
+	etcdCli, err := etcd.GetRemoteEtcdClient([]string{*etcdAddr})
 	if err != nil {
 		log.Fatal("failed to connect to etcd", zap.Error(err))
 	}
+
+	etcdkv := etcdkv.NewEtcdKV(etcdCli, *rootPath)
 
 	keys, values, err := etcdkv.LoadWithPrefix("/")
 	if err != nil {

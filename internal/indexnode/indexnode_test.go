@@ -24,28 +24,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	"github.com/golang/protobuf/proto"
-
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -70,6 +63,11 @@ func TestIndexNode(t *testing.T) {
 	in, err := NewIndexNode(ctx)
 	assert.Nil(t, err)
 	Params.Init()
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
 
 	err = in.Init()
 	assert.Nil(t, err)
@@ -477,6 +475,11 @@ func TestCreateIndexFailed(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+
 	err = in.Init()
 	assert.Nil(t, err)
 
@@ -743,6 +746,11 @@ func TestIndexNode_Error(t *testing.T) {
 	in, err := NewIndexNode(ctx)
 	assert.Nil(t, err)
 	Params.Init()
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
 
 	err = in.Init()
 	assert.Nil(t, err)

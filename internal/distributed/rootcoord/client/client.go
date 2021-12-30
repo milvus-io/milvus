@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -49,8 +50,8 @@ type Client struct {
 // metaRoot is the path in etcd for root coordinator registration
 // etcdEndpoints are the address list for etcd end points
 // timeout is default setting for each grpc call
-func NewClient(ctx context.Context, metaRoot string, etcdEndpoints []string) (*Client, error) {
-	sess := sessionutil.NewSession(ctx, metaRoot, etcdEndpoints)
+func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (*Client, error) {
+	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
 		log.Debug("QueryCoordClient NewClient failed", zap.Error(err))

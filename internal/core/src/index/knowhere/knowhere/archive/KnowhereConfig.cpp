@@ -55,12 +55,9 @@ KnowhereConfig::SetSimdType(const SimdType simd_type) {
     }
 
     std::string cpu_flag;
-    if (faiss::hook_init(cpu_flag)) {
-        LOG_KNOWHERE_DEBUG_ << "FAISS hook " << cpu_flag;
-        return cpu_flag;
-    }
-
-    KNOWHERE_THROW_MSG("FAISS hook fail, CPU not supported!");
+    faiss::hook_init(cpu_flag);
+    LOG_KNOWHERE_DEBUG_ << "FAISS hook " << cpu_flag;
+    return cpu_flag;
 }
 
 void

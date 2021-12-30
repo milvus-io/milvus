@@ -17,6 +17,7 @@
 package rocksdbkv_test
 
 import (
+	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -31,7 +32,7 @@ func TestRocksdbKV(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-
+	defer os.RemoveAll(name)
 	defer rocksdbKV.Close()
 	// Need to call RemoveWithPrefix
 	defer rocksdbKV.RemoveWithPrefix("")
@@ -92,7 +93,7 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-
+	defer os.RemoveAll(name)
 	defer rocksdbKV.Close()
 	// Need to call RemoveWithPrefix
 	defer rocksdbKV.RemoveWithPrefix("")
@@ -150,6 +151,7 @@ func TestRocksdbKV_Goroutines(t *testing.T) {
 	name := "/tmp/rocksdb"
 	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
 	assert.Nil(t, err)
+	defer os.RemoveAll(name)
 	defer rocksdbkv.Close()
 	defer rocksdbkv.RemoveWithPrefix("")
 
@@ -175,6 +177,7 @@ func TestRocksdbKV_DummyDB(t *testing.T) {
 	name := "/tmp/rocksdb_dummy"
 	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
 	assert.Nil(t, err)
+	defer os.RemoveAll(name)
 	defer rocksdbkv.Close()
 	defer rocksdbkv.RemoveWithPrefix("")
 
@@ -209,6 +212,7 @@ func TestRocksdbKV_CornerCase(t *testing.T) {
 	name := "/tmp/rocksdb_corner"
 	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
 	assert.Nil(t, err)
+	defer os.RemoveAll(name)
 	defer rocksdbkv.Close()
 	defer rocksdbkv.RemoveWithPrefix("")
 	_, err = rocksdbkv.Load("")

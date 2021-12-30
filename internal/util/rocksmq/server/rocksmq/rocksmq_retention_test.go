@@ -44,7 +44,7 @@ func TestRmqRetention_Basic(t *testing.T) {
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
-	rocksdbPath := retentionPath + dbPathSuffix
+	rocksdbPath := retentionPath
 	defer os.RemoveAll(rocksdbPath)
 	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
@@ -136,7 +136,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
-	rocksdbPath := retentionPath + dbPathSuffix
+	rocksdbPath := retentionPath
 	defer os.RemoveAll(rocksdbPath)
 	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
@@ -400,7 +400,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := retentionPath + dbPathSuffix + suffix
+	rocksdbPath := retentionPath + suffix
 	defer os.RemoveAll(rocksdbPath)
 	metaPath := retentionPath + metaPathSuffix + suffix
 

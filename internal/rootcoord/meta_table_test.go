@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,9 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
+	"github.com/stretchr/testify/require"
 )
 
 type mockTestKV struct {
@@ -220,13 +222,14 @@ func TestMetaTable(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
-	assert.Nil(t, err)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	require.Nil(t, err)
 	defer etcdCli.Close()
+
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
-	txnKV := etcdkv.NewEtcdKVWithClient(etcdCli, rootPath)
+	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	mt, err := NewMetaTable(txnKV, skv)
 	assert.Nil(t, err)
 
@@ -293,7 +296,10 @@ func TestMetaTable(t *testing.T) {
 		},
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("add collection", func(t *testing.T) {
+		defer wg.Done()
 		ts := ftso()
 		err = mt.AddCollection(collInfo, ts, nil, "")
 		assert.NotNil(t, err)
@@ -321,7 +327,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, "false", flag)
 	})
 
+	wg.Add(1)
 	t.Run("add alias", func(t *testing.T) {
+		defer wg.Done()
 		ts := ftso()
 		exists := mt.IsAlias(aliasName1)
 		assert.False(t, exists)
@@ -332,8 +340,9 @@ func TestMetaTable(t *testing.T) {
 		exists = mt.IsAlias(aliasName1)
 		assert.True(t, exists)
 	})
-
+	wg.Add(1)
 	t.Run("alter alias", func(t *testing.T) {
+		defer wg.Done()
 		ts := ftso()
 		err = mt.AlterAlias(aliasName1, collName, ts)
 		assert.Nil(t, err)
@@ -341,13 +350,17 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("delete alias", func(t *testing.T) {
+		defer wg.Done()
 		ts := ftso()
 		err = mt.DropAlias(aliasName1, ts)
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("add partition", func(t *testing.T) {
+		defer wg.Done()
 		ts := ftso()
 		err = mt.AddPartition(collID, partName, partID, ts, "")
 		assert.Nil(t, err)
@@ -365,7 +378,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, "false", flag)
 	})
 
+	wg.Add(1)
 	t.Run("add segment index", func(t *testing.T) {
+		defer wg.Done()
 		segIdxInfo := pb.SegmentIndexInfo{
 			CollectionID: collID,
 			PartitionID:  partID,
@@ -387,7 +402,9 @@ func TestMetaTable(t *testing.T) {
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d exist", segIdxInfo.IndexID))
 	})
 
+	wg.Add(1)
 	t.Run("get not indexed segments", func(t *testing.T) {
+		defer wg.Done()
 		params := []*commonpb.KeyValuePair{
 			{
 				Key:   "field110-i1",
@@ -442,7 +459,9 @@ func TestMetaTable(t *testing.T) {
 
 	})
 
+	wg.Add(1)
 	t.Run("get index by name", func(t *testing.T) {
+		defer wg.Done()
 		_, idx, err := mt.GetIndexByName(collName, "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(idx))
@@ -464,7 +483,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Zero(t, len(idx))
 	})
 
+	wg.Add(1)
 	t.Run("reload meta", func(t *testing.T) {
+		defer wg.Done()
 		te := pb.TenantMeta{
 			ID: 100,
 		}
@@ -480,7 +501,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("drop index", func(t *testing.T) {
+		defer wg.Done()
 		idx, ok, err := mt.DropIndex(collName, "field110", "field110")
 		assert.Nil(t, err)
 		assert.True(t, ok)
@@ -503,7 +526,9 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("drop partition", func(t *testing.T) {
+		defer wg.Done()
 		ts := ftso()
 		id, err := mt.DeletePartition(collID, partName, ts, "")
 		assert.Nil(t, err)
@@ -515,7 +540,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, "false", flag)
 	})
 
+	wg.Add(1)
 	t.Run("drop collection", func(t *testing.T) {
+		defer wg.Done()
 		ts := ftso()
 		err = mt.DeleteCollection(collIDInvalid, ts, "")
 		assert.NotNil(t, err)
@@ -535,7 +562,7 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	/////////////////////////// these tests should run at last, it only used to hit the error lines ////////////////////////
-	txnkv := etcdkv.NewEtcdKVWithClient(etcdCli, rootPath)
+	txnkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	mockKV := &mockTestKV{}
 	mt.snapshot = mockKV
 	mockTxnKV := &mockTestTxnKV{
@@ -549,7 +576,9 @@ func TestMetaTable(t *testing.T) {
 	}
 	mt.txn = mockTxnKV
 
+	wg.Add(1)
 	t.Run("add collection failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -562,7 +591,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Panics(t, func() { mt.AddCollection(collInfo, 0, idxInfo, "") })
 	})
 
+	wg.Add(1)
 	t.Run("delete collection failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return nil
 		}
@@ -573,7 +604,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Panics(t, func() { mt.DeleteCollection(collInfo.ID, ts, "") })
 	})
 
+	wg.Add(1)
 	t.Run("get collection failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.save = func(key string, value string, ts typeutil.Timestamp) error {
 			return nil
 		}
@@ -592,7 +625,9 @@ func TestMetaTable(t *testing.T) {
 
 	})
 
+	wg.Add(1)
 	t.Run("add partition failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.save = func(key string, value string, ts typeutil.Timestamp) error {
 			return nil
 		}
@@ -653,7 +688,9 @@ func TestMetaTable(t *testing.T) {
 		assert.EqualError(t, err, fmt.Sprintf("partition id = %d already exists", partID))
 	})
 
+	wg.Add(1)
 	t.Run("has partition failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -676,7 +713,9 @@ func TestMetaTable(t *testing.T) {
 		assert.False(t, mt.HasPartition(collInfo.ID, partName, 0))
 	})
 
+	wg.Add(1)
 	t.Run("delete partition failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -714,7 +753,9 @@ func TestMetaTable(t *testing.T) {
 		assert.EqualError(t, err, fmt.Sprintf("can't find collection id = %d", collInfo.ID))
 	})
 
+	wg.Add(1)
 	t.Run("add index failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -768,7 +809,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Panics(t, func() { mt.AddIndex(&segIdxInfo) })
 	})
 
+	wg.Add(1)
 	t.Run("drop index failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -833,7 +876,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Panics(t, func() { mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName) })
 	})
 
+	wg.Add(1)
 	t.Run("get segment index info by id", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -882,7 +927,9 @@ func TestMetaTable(t *testing.T) {
 		assert.EqualError(t, err, fmt.Sprintf("can't find index name = %s on segment = %d, with filed id = 11", idxInfo[0].IndexName, segIdxInfo.SegmentID))
 	})
 
+	wg.Add(1)
 	t.Run("get field schema failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -913,7 +960,9 @@ func TestMetaTable(t *testing.T) {
 		assert.EqualError(t, err, fmt.Sprintf("collection %s not found", collInfo.Schema.Name))
 	})
 
+	wg.Add(1)
 	t.Run("is segment indexed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -935,7 +984,9 @@ func TestMetaTable(t *testing.T) {
 		assert.False(t, mt.IsSegmentIndexed(idx.SegmentID, &field, nil))
 	})
 
+	wg.Add(1)
 	t.Run("get not indexed segments", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -1028,7 +1079,9 @@ func TestMetaTable(t *testing.T) {
 		//assert.EqualError(t, err, "multi save error")
 	})
 
+	wg.Add(1)
 	t.Run("get index by name failed", func(t *testing.T) {
+		defer wg.Done()
 		mockKV.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return nil, nil, nil
 		}
@@ -1064,6 +1117,7 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("cannot find index, id = %d", idxInfo[0].IndexID))
 	})
+	wg.Wait()
 }
 
 func TestMetaWithTimestamp(t *testing.T) {
@@ -1088,15 +1142,14 @@ func TestMetaWithTimestamp(t *testing.T) {
 		vtso++
 		return vtso
 	}
-
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
-	txnKV := etcdkv.NewEtcdKVWithClient(etcdCli, rootPath)
+	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	mt, err := NewMetaTable(txnKV, skv)
 	assert.Nil(t, err)
 
@@ -1246,7 +1299,7 @@ func TestFixIssue10540(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 

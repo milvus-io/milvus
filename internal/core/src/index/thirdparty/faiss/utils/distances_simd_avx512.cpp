@@ -1,19 +1,15 @@
 
 // -*- c++ -*-
-#include <faiss/utils/distances_avx.h>
-#include <faiss/utils/distances_avx512.h>
-#include <faiss/impl/FaissAssert.h>
+
+#include <faiss/utils/distances_simd_avx512.h>
 
 #include <cstdio>
 #include <cassert>
-#include <cstring>
-#include <cmath>
-
 #include <immintrin.h>
+#include <string>
 
 namespace faiss {
 
-#ifdef __SSE__
 // reads 0 <= d < 4 floats as __m128
 static inline __m128 masked_read (int d, const float *x) {
     assert (0 <= d && d < 4);
@@ -29,9 +25,9 @@ static inline __m128 masked_read (int d, const float *x) {
     return _mm_load_ps(buf);
     // cannot use AVX2 _mm_mask_set1_epi32
 }
-#endif
 
-#if (defined(__AVX512F__) && defined(__AVX512DQ__))
+
+extern uint8_t lookup8bit[256];
 
 float
 fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
@@ -424,33 +420,5 @@ jaccard__AVX512(const uint8_t * a, const uint8_t * b, size_t n) {
     int accu_den = or_popcnt_AVX512VBMI_lookup(a,b,n);
     return (accu_den == 0) ? 1.0 : ((float)(accu_den - accu_num) / (float)(accu_den));
 }
-
-#else
-
-float
-fvec_inner_product_avx512(const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-float
-fvec_L2sqr_avx512(const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-float
-fvec_L1_avx512(const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-float
-fvec_Linf_avx512(const float* x, const float* y, size_t d) {
-    FAISS_ASSERT(false);
-    return 0.0;
-}
-
-#endif
 
 } // namespace faiss

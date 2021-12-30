@@ -37,15 +37,18 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
 
+// Params contains parameters for datanode grpc server.
 var Params paramtable.GrpcServerConfig
 
 type Server struct {
@@ -55,14 +58,14 @@ type Server struct {
 	grpcServer  *grpc.Server
 	ctx         context.Context
 	cancel      context.CancelFunc
-
-	msFactory msgstream.Factory
+	etcdCli     *clientv3.Client
+	msFactory   msgstream.Factory
 
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	newRootCoordClient func(string, []string) (types.RootCoord, error)
-	newDataCoordClient func(string, []string) (types.DataCoord, error)
+	newRootCoordClient func(string, *clientv3.Client) (types.RootCoord, error)
+	newDataCoordClient func(string, *clientv3.Client) (types.DataCoord, error)
 
 	closer io.Closer
 }
@@ -75,11 +78,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
-		newRootCoordClient: func(etcdMetaRoot string, etcdEndpoints []string) (types.RootCoord, error) {
-			return rcc.NewClient(ctx1, etcdMetaRoot, etcdEndpoints)
+		newRootCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.RootCoord, error) {
+			return rcc.NewClient(ctx1, etcdMetaRoot, client)
 		},
-		newDataCoordClient: func(etcdMetaRoot string, etcdEndpoints []string) (types.DataCoord, error) {
-			return dcc.NewClient(ctx1, etcdMetaRoot, etcdEndpoints)
+		newDataCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.DataCoord, error) {
+			return dcc.NewClient(ctx1, etcdMetaRoot, client)
 		},
 	}
 
@@ -130,6 +133,10 @@ func (s *Server) startGrpcLoop(listener net.Listener) {
 
 }
 
+func (s *Server) SetEtcdClient(client *clientv3.Client) {
+	s.datanode.SetEtcdClient(client)
+}
+
 func (s *Server) SetRootCoordInterface(ms types.RootCoord) error {
 	return s.datanode.SetRootCoord(ms)
 }
@@ -161,6 +168,9 @@ func (s *Server) Stop() error {
 		}
 	}
 	s.cancel()
+	if s.etcdCli != nil {
+		defer s.etcdCli.Close()
+	}
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")
 		// make graceful stop has a timeout
@@ -197,12 +207,19 @@ func (s *Server) init() error {
 	dn.Params.DataNodeCfg.Port = Params.Port
 	dn.Params.DataNodeCfg.IP = Params.IP
 
+	etcdCli, err := etcd.GetEtcdClient(&dn.Params.BaseParams)
+	if err != nil {
+		log.Debug("DataNode connect to etcd failed", zap.Error(err))
+		return err
+	}
+	s.etcdCli = etcdCli
+	s.SetEtcdClient(s.etcdCli)
 	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))
 
-	err := s.startGrpc()
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}
@@ -210,7 +227,7 @@ func (s *Server) init() error {
 	// --- RootCoord Client ---
 	if s.newRootCoordClient != nil {
 		log.Debug("Init root coord client ...")
-		rootCoordClient, err := s.newRootCoordClient(dn.Params.DataNodeCfg.MetaRootPath, dn.Params.DataNodeCfg.EtcdEndpoints)
+		rootCoordClient, err := s.newRootCoordClient(dn.Params.DataNodeCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("DataNode newRootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -237,7 +254,7 @@ func (s *Server) init() error {
 	// --- Data Server Client ---
 	if s.newDataCoordClient != nil {
 		log.Debug("DataNode Init data service client ...")
-		dataCoordClient, err := s.newDataCoordClient(dn.Params.DataNodeCfg.MetaRootPath, dn.Params.DataNodeCfg.EtcdEndpoints)
+		dataCoordClient, err := s.newDataCoordClient(dn.Params.DataNodeCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("DataNode newDataCoordClient failed", zap.Error(err))
 			panic(err)

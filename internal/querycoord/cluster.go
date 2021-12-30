@@ -360,7 +360,7 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 		return nil
 	}
 
-	return fmt.Errorf("addQueryChannel: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("addQueryChannel: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64, in *querypb.RemoveQueryChannelRequest) error {
 	c.RLock()
@@ -422,7 +422,7 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 		return nil
 	}
 
-	return fmt.Errorf("releasePartitions: can't find query node by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releasePartitions: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error) {
@@ -563,7 +563,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		}
 		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
 		if err != nil {
-			log.Debug("registerNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
+			log.Debug("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
 		node.setState(state)
@@ -571,10 +571,10 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 			go node.start()
 		}
 		c.nodes[id] = node
-		log.Debug("registerNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
+		log.Debug("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
-	return fmt.Errorf("registerNode: node %d alredy exists in cluster", id)
+	return fmt.Errorf("registerNode: QueryNode %d alredy exists in cluster", id)
 }
 
 func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {

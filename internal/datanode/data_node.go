@@ -83,6 +83,7 @@ var Params paramtable.GlobalParamTable
 // services in datanode package.
 //
 // DataNode implements `types.Component`, `types.DataNode` interfaces.
+//  `etcdCli`   is a connection of etcd
 //  `rootCoord` is a grpc client of root coordinator.
 //  `dataCoord` is a grpc client of data service.
 //  `NodeID` is unique to each datanode.
@@ -109,6 +110,7 @@ type DataNode struct {
 	segmentCache       *Cache
 	compactionExecutor *compactionExecutor
 
+	etcdCli   *clientv3.Client
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
@@ -142,6 +144,11 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
+}
+
+// Set etcd client
+func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
+	node.etcdCli = etcdCli
 }
 
 // SetRootCoord sets RootCoord's grpc client, error is returned if repeatedly set.
@@ -182,18 +189,20 @@ func (node *DataNode) Register() error {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
-		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		if node.session.TriggerKill {
+			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+		}
 	})
 
 	return nil
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.DataNodeCfg.MetaRootPath, Params.DataNodeCfg.EtcdEndpoints)
+	node.session = sessionutil.NewSession(node.ctx, Params.DataNodeCfg.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false)
+	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
 	Params.DataNodeCfg.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
 	Params.BaseParams.SetLogger(Params.DataNodeCfg.NodeID)
@@ -411,10 +420,7 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.DataNodeCfg.EtcdEndpoints, Params.DataNodeCfg.MetaRootPath)
-		if err != nil {
-			return err
-		}
+		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.DataNodeCfg.MetaRootPath)
 		node.watchKv = etcdKV
 		return nil
 	}

@@ -26,13 +26,13 @@ Two requests: **Insert Request** and **Search Request** in milvus system are tra
 
 ### Lookup by Trace ID
 
-The use of the search box requires configuration of the log collection system. For example, if the log collection system collects an error log, find the Trace ID. Search in jaeger to quickly locate the error. So as to quickly solve the problem.
+The use of the search box requires the configuration of the log collection system. For example, if the log collection system collects an error log, find the Trace ID. Search in jaeger to quickly locate the error. So as to quickly solve the problem.
 
 ### Search
 
 ### Service
 
-Filter with service name.
+Filter with the service name.
 
 ### Operation
 

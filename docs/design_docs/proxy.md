@@ -92,7 +92,7 @@ requests will get the latest meta information.
 
 For inserts to a collection that is auto_id configured in the collection schema, Proxy assigns a primary key for
 every row of insert requests. For now the only supported data type of auto-generated primary field is `int64`. Proxy 
-applies for a batch of primary keys from Root Coordinator, and caches them for local assignments. When the primary keys in the cache
+applies for a batch of primary keys from Root Coordinator and caches them for local assignments. When the primary keys in the cache
 are not enough, Proxy will continue to apply for another batch of primary keys.
 
 Proxy forwards ReleaseCollection and ReleasePartition to Query Coordinator, Query Coordinator then informs Root
@@ -183,7 +183,7 @@ The semantics of the Release operation is the reverse operation of the Load oper
 data of the Collection or Partition from the memory. For Release operations, Query Coordinator is responsible for
 notifying query nodes to unload the corresponding Collection or Partition in memory, and then sending the
 ReleaseDqlMessageStream command to Root Coordinator, and Root Coordinator is responsible for broadcasting the
-ReleaseDqlMessageStream command to all Proxies, so that all related streams used to send search request and receive
+ReleaseDqlMessageStream command to all Proxies, so that all related streams used to send search requests and receive
 search result in Proxy will be closed.
 
 The other interaction between Proxy and Query Coordinator is that Proxy needs to query from Query Coordinator for statistics
@@ -363,7 +363,7 @@ coroutine reduces the timestamp result and sends the final timestamp result back
 taskScheduler is also responsible for collecting the results of search requests. For each search request, when Proxy
 writes the request to the DqRequestChannel, it will attach the ReqID, and the query nodes will also bring the ReqID back
 when writing the search result back to the DqResultChannel. taskScheduler will start a background coroutine to consume
-search result from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
+search results from DqResultChannel, and then distribute messages according to the ReqID in it. When several results of
 the same ReqID are collected and the termination condition is reached, these results will be passed to the blocking task
 coroutine which is waiting. The waken task will reduce the search results and then send the final search result to
 clients.
@@ -399,7 +399,7 @@ type channelsMgr interface {
 
   getDMLStream returns the dml message stream of a collection;
 
-  Proxy uses these dml message stream to write dml data, such as insert request.
+  Proxy uses these dml message streams to write dml data, such as insert requests.
 
 - createDQLStream and getDQLStream
 
@@ -439,7 +439,7 @@ type channelsTimeTicker interface {
 
 - getLastTick
 
-  getLastTick returns the minimum timestamp which has already been synchronized of physical channel;
+  getLastTick returns the minimum timestamp which has already been synchronized of a physical channel;
 
 channelsTimeTicker will maintain the map minTsStatistics that can be synchronized and the map currents that will be
 synchronized. They are all mappings from pChan to Timestamp. The channelsTimeTicker itself has a background coroutine,

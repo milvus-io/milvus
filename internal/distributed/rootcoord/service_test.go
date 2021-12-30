@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -98,7 +99,7 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	etcdCli, err := initEtcd(rootcoord.Params.RootCoordCfg.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
 	assert.Nil(t, err)
 	sessKey := path.Join(rootcoord.Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
@@ -115,6 +116,7 @@ func TestGrpcService(t *testing.T) {
 
 	rootcoord.Params.RootCoordCfg.Address = Params.GetAddress()
 
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
@@ -214,7 +216,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.RootCoordCfg.MetaRootPath, rootcoord.Params.RootCoordCfg.EtcdEndpoints)
+	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.RootCoordCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -794,6 +796,9 @@ type mockCore struct {
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
 }
 
+func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
+}
+
 func (m *mockCore) SetDataCoord(context.Context, types.DataCoord) error {
 	return nil
 }
@@ -895,13 +900,13 @@ func TestRun(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataCoordClient = func(string, []string) types.DataCoord {
+	svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, []string) types.IndexCoord {
+	svr.newIndexCoordClient = func(string, *clientv3.Client) types.IndexCoord {
 		return &mockIndex{}
 	}
-	svr.newQueryCoordClient = func(string, []string) types.QueryCoord {
+	svr.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
 		return &mockQuery{}
 	}
 
@@ -912,7 +917,7 @@ func TestRun(t *testing.T) {
 	rootcoord.Params.Init()
 	rootcoord.Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
-	etcdCli, err := initEtcd(rootcoord.Params.RootCoordCfg.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
 	assert.Nil(t, err)
 	sessKey := path.Join(rootcoord.Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())

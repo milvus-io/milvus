@@ -103,8 +103,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
-          pip install -r requirements.txt
-          pip install --upgrade protobuf          
+          pip install -r requirements.txt         
       
       - name: First Milvus Deployment
         timeout-minutes: 60

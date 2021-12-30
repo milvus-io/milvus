@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -52,7 +53,10 @@ func TestTimetickSync(t *testing.T) {
 	Params.RootCoordCfg.DeltaChannelName = "rootcoord-delta"
 	ttSync := newTimeTickSync(ctx, session, factory, nil)
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("sendToChannel", func(t *testing.T) {
+		defer wg.Done()
 		ttSync.sendToChannel()
 
 		ttSync.proxyTimeTick[1] = nil
@@ -67,14 +71,18 @@ func TestTimetickSync(t *testing.T) {
 		ttSync.sendToChannel()
 	})
 
+	wg.Add(1)
 	t.Run("RemoveDdlTimeTick", func(t *testing.T) {
+		defer wg.Done()
 		ttSync.addDdlTimeTick(uint64(1), "1")
 		ttSync.addDdlTimeTick(uint64(2), "2")
 		ttSync.removeDdlTimeTick(uint64(1), "1")
 		assert.Equal(t, ttSync.ddlMinTs, uint64(2))
 	})
 
+	wg.Add(1)
 	t.Run("UpdateTimeTick", func(t *testing.T) {
+		defer wg.Done()
 		msg := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
@@ -105,7 +113,9 @@ func TestTimetickSync(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("minTimeTick", func(t *testing.T) {
+		defer wg.Done()
 		tts := make([]uint64, 2)
 		tts[0] = uint64(5)
 		tts[1] = uint64(3)
@@ -113,4 +123,5 @@ func TestTimetickSync(t *testing.T) {
 		ret := minTimeTick(tts...)
 		assert.Equal(t, ret, tts[1])
 	})
+	wg.Wait()
 }
