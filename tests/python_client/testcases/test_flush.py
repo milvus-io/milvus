@@ -66,6 +66,7 @@ class TestFlushBase:
         method: flush collection with no vectors
         expected: no error raised
         """
+        log.debug(f"test_flush_empty_collection collection name: {collection}")
         connect.flush([collection])
         results = connect.insert(collection, default_entities)
         assert len(results.primary_keys) == default_nb
@@ -80,6 +81,7 @@ class TestFlushBase:
         method: add entities into partition in collection, flush several times
         expected: the length of ids and the collection row count
         """
+        log.debug(f"test_add_partition_flush id_collection name: {id_collection}")
         connect.create_partition(id_collection, default_tag)
         result = connect.insert(id_collection, default_entities)
         connect.flush([id_collection])
@@ -97,6 +99,7 @@ class TestFlushBase:
         method: add entities into partitions in collection, flush one
         expected: the length of ids and the collection row count
         """
+        log.debug(f"test_add_partitions_flush id_collection name: {id_collection}")
         tag_new = gen_unique_str()
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(id_collection, tag_new)
@@ -114,6 +117,7 @@ class TestFlushBase:
         method: add entities into collections, flush one
         expected: the length of ids and the collection row count
         """
+        log.debug(f"test_add_collections_flush id_collection name: {id_collection}")
         collection_new = gen_unique_str()
         default_fields = gen_default_fields(False)
         connect.create_collection(collection_new, default_fields)
@@ -135,6 +139,7 @@ class TestFlushBase:
         method: create collection with different fields, and add entities into collections, flush one
         expected: the length of ids and the collection row count
         """
+        log.debug(f"test_add_collections_fields_flush id_collection name: {id_collection}")
         nb_new = 5
         filter_field = get_filter_field
         vector_field = get_vector_field
@@ -144,6 +149,7 @@ class TestFlushBase:
             "segment_row_limit": default_segment_row_limit,
             "auto_id": False
         }
+        log.debug(f"test_add_collections_fields_flush collection_new name: {collection_new}")
         connect.create_collection(collection_new, fields)
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(collection_new, default_tag)
@@ -164,6 +170,7 @@ class TestFlushBase:
         method: add entities, flush several times
         expected: no error raised
         """
+        log.debug(f"test_add_flush_multiable_times collection name: {collection}")
         result = connect.insert(collection, default_entities)
         for i in range(10):
             connect.flush([collection])
