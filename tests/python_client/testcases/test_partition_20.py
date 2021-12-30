@@ -515,7 +515,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_create_and_drop_multi_times(self):
         """
         target: verify create and drop for times
-        method: 1.create a partition with default schema
+        method: 1. create a partition with default schema
                 2. drop the partition
                 3. loop #1 and #2 for times
         expected: create and drop successfully
