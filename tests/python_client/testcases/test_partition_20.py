@@ -238,8 +238,8 @@ class TestPartitionParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partiton_respectively(self):
         """
-        target: test release the partiton after load partiton
-        method: load partiton1 and load other partiton
+        target: test release the partition after load partition
+        method: load partition1 and load other partition
         expected: raise exception
         """
         self._connect()
