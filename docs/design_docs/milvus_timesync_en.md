@@ -40,7 +40,7 @@ It's easy to achieve this in a `single-node` database. But for a `Distributed Sy
 
 ## Timestamp Oracle(TSO)
 
-Like [TiKV](https://github.com/tikv/tikv), Milvus 2.0 provides `TSO` service. All the events must alloc timestamp from `TSO`，not from local clock, so the first problem can be solved.
+Like [TiKV](https://github.com/tikv/tikv), Milvus 2.0 provides `TSO` service. All the events must alloc timestamp from `TSO`, not from local clock, so the first problem can be solved.
 
 `TSO` is provided by the `RootCoord` component. Clients could alloc one or more timestamp in a single request; the `proto` is defined as following.
 
