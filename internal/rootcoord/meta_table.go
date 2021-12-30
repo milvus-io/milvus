@@ -414,7 +414,7 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 	err = mt.txn.MultiSaveAndRemoveWithPrefix(saveMeta, delMetaKeysTxn)
 	if err != nil {
 		log.Warn("TxnKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
-		//Txn kv fail will no panic here, treated as garbage
+		//Txn kV fail will no panic here, treated like garbage
 	}
 
 	return nil
