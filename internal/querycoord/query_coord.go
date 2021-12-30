@@ -423,7 +423,8 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 				}
 				switch event.Type {
 				case mvccpb.PUT:
-					if Params.QueryCoordCfg.AutoHandoff && qc.indexChecker.verifyHandoffReqValid(segmentInfo) {
+					validHandoffReq, _ := qc.indexChecker.verifyHandoffReqValid(segmentInfo)
+					if Params.QueryCoordCfg.AutoHandoff && validHandoffReq {
 						qc.indexChecker.enqueueHandoffReq(segmentInfo)
 						log.Debug("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
 					} else {

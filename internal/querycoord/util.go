@@ -16,6 +16,8 @@
 
 package querycoord
 
+import "github.com/milvus-io/milvus/internal/proto/schemapb"
+
 func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
 	compareMap := make(map[int64]struct{})
 	for _, data := range sliceData {
@@ -23,4 +25,15 @@ func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
 	}
 
 	return compareMap
+}
+
+func getVecFieldIDs(schema *schemapb.CollectionSchema) []int64 {
+	var vecFieldIDs []int64
+	for _, field := range schema.Fields {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+			vecFieldIDs = append(vecFieldIDs, field.FieldID)
+		}
+	}
+
+	return vecFieldIDs
 }

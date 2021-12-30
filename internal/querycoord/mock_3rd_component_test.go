@@ -49,13 +49,14 @@ const (
 	defaultQueryNodeID      = int64(100)
 	defaultChannelNum       = 2
 	defaultNumRowPerSegment = 1000
+	defaultVecFieldID       = 101
 )
 
 func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.CollectionSchema {
 	var fieldVec schemapb.FieldSchema
 	if isBinary {
 		fieldVec = schemapb.FieldSchema{
-			FieldID:      UniqueID(101),
+			FieldID:      UniqueID(defaultVecFieldID),
 			Name:         "vec",
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_BinaryVector,
@@ -74,7 +75,7 @@ func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.Collect
 		}
 	} else {
 		fieldVec = schemapb.FieldSchema{
-			FieldID:      UniqueID(101),
+			FieldID:      UniqueID(defaultVecFieldID),
 			Name:         "vec",
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_FloatVector,

@@ -374,11 +374,10 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
 				CollectionID: collectionID,
 				SegmentID:    segmentID,
-			}, lct.rootCoord, lct.indexCoord)
+			}, lct.Schema, lct.rootCoord, lct.indexCoord)
 
-			if err == nil && indexInfo.enableIndex {
-				segmentLoadInfo.EnableIndex = true
-				segmentLoadInfo.IndexPathInfos = indexInfo.infos
+			if err == nil {
+				segmentLoadInfo.IndexInfos = indexInfo
 			}
 
 			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
@@ -726,11 +725,10 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
 				CollectionID: collectionID,
 				SegmentID:    segmentID,
-			}, lpt.rootCoord, lpt.indexCoord)
+			}, lpt.Schema, lpt.rootCoord, lpt.indexCoord)
 
-			if err == nil && indexInfo.enableIndex {
-				segmentLoadInfo.EnableIndex = true
-				segmentLoadInfo.IndexPathInfos = indexInfo.infos
+			if err == nil {
+				segmentLoadInfo.IndexInfos = indexInfo
 			}
 
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
@@ -1501,8 +1499,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 						BinlogPaths:    segmentBinlogs.FieldBinlogs,
 						NumOfRows:      segmentBinlogs.NumOfRows,
 						CompactionFrom: segmentInfo.CompactionFrom,
-						EnableIndex:    segmentInfo.EnableIndex,
-						IndexPathInfos: segmentInfo.IndexPathInfos,
+						IndexInfos:     segmentInfo.IndexInfos,
 					}
 
 					msgBase := proto.Clone(ht.Base).(*commonpb.MsgBase)
@@ -1697,11 +1694,10 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
 							CollectionID: collectionID,
 							SegmentID:    segmentID,
-						}, lbt.rootCoord, lbt.indexCoord)
+						}, collectionInfo.Schema, lbt.rootCoord, lbt.indexCoord)
 
-						if err == nil && indexInfo.enableIndex {
-							segmentLoadInfo.EnableIndex = true
-							segmentLoadInfo.IndexPathInfos = indexInfo.infos
+						if err == nil {
+							segmentLoadInfo.IndexInfos = indexInfo
 						}
 
 						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
@@ -1869,11 +1865,10 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					indexInfo, err := getIndexInfo(ctx, &querypb.SegmentInfo{
 						CollectionID: collectionID,
 						SegmentID:    segmentID,
-					}, lbt.rootCoord, lbt.indexCoord)
+					}, collectionInfo.Schema, lbt.rootCoord, lbt.indexCoord)
 
-					if err == nil && indexInfo.enableIndex {
-						segmentLoadInfo.EnableIndex = true
-						segmentLoadInfo.IndexPathInfos = indexInfo.infos
+					if err == nil {
+						segmentLoadInfo.IndexInfos = indexInfo
 					}
 
 					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
