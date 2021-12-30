@@ -3526,6 +3526,7 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 	return resp, err
 }
 
+// ManualCompaction invokes compaction on specified collection
 func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	log.Info("received ManualCompaction request", zap.Int64("collectionID", req.GetCollectionID()))
 	resp := &milvuspb.ManualCompactionResponse{}
