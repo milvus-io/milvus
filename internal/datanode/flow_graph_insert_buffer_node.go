@@ -142,7 +142,7 @@ func (bd *BufferData) updateSize(no int64) {
 }
 
 func (ibNode *insertBufferNode) Name() string {
-	return "ibNode"
+	return "ibNode-" + ibNode.channelName
 }
 
 func (ibNode *insertBufferNode) Close() {

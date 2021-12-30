@@ -57,6 +57,7 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 		log.Debug("datanode Seek successfully", zap.String("Channel Name", seekPos.GetChannelName()), zap.Duration("elapse", time.Since(start)))
 	}
 
-	node := flowgraph.NewInputNode(insertStream, "dmInputNode", dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism)
+	name := fmt.Sprintf("dmInputNode-%d-%s", dmNodeConfig.collectionID, dmNodeConfig.vChannelName)
+	node := flowgraph.NewInputNode(insertStream, name, dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism)
 	return node, nil
 }
