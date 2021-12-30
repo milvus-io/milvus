@@ -40,7 +40,7 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 	switch resp := response.(type) {
 	case Response:
-		// note that resp will not be nil here, since it's still a interface
+		// note that resp will not be nil here, since it's still an interface
 		if resp.GetStatus() == nil {
 			return errNilStatusResponse
 		}
