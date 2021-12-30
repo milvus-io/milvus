@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -792,6 +793,8 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("release collection failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
 	r.node.historical.removeGlobalSegmentIDsByCollectionID(r.req.CollectionID)
+
+	debug.FreeOSMemory()
 
 	log.Debug("ReleaseCollection done", zap.Int64("collectionID", r.req.CollectionID))
 	return nil
