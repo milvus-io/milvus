@@ -39,7 +39,7 @@ import (
 type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
-
+	// GetCollectionInfo get collection's information by name, such as collection id, schema, and etc.
 	GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error)
 	GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	GetPartitions(ctx context.Context, collectionName string) (map[string]typeutil.UniqueID, error)
