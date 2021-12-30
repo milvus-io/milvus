@@ -230,7 +230,7 @@ class MilvusClient(object):
 
     def delete_rand(self):
         delete_id_length = random.randint(1, 100)
-        count_before = self.count()
+        # count_before = self.count()
         logger.debug("%s: length to delete: %d" % (self._collection_name, delete_id_length))
         delete_ids = self.get_rand_ids(delete_id_length)
         self.delete(delete_ids)
