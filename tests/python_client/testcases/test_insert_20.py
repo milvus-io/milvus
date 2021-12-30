@@ -657,7 +657,7 @@ class TestInsertOperation(TestcaseBase):
 
         def insert(thread_i):
             log.debug(f'In thread-{thread_i}')
-            mutation_res, _ = collection_w.insert(df)
+            mutation_res, _ = collection_w.insert(df, timeout=40)
             assert mutation_res.insert_count == ct.default_nb
             assert mutation_res.primary_keys == primary_keys
 
@@ -691,7 +691,7 @@ class TestInsertOperation(TestcaseBase):
         collection_w = self.init_collection_general(prefix, dim=dim)[0]
         for _ in range(nb // step):
             df = cf.gen_default_dataframe_data(step, dim)
-            mutation_res, _ = collection_w.insert(data=df)
+            mutation_res, _ = collection_w.insert(data=df, timeout=40)
             assert mutation_res.insert_count == step
             assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
 
