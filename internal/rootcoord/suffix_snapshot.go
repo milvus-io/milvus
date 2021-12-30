@@ -41,7 +41,7 @@ var (
 
 // suffixSnapshot implements SnapshotKV
 // this is a simple replacement for metaSnapshot, which is not available due to etcd compaction
-// suffixSnapshot record timestamp as prefix of a key under the snapshot prefix path
+// suffixSnapshot record timestamp as the prefix of a key under the snapshot prefix path
 type suffixSnapshot struct {
 	// internal kv which suffixSnapshot based on
 	kv.TxnKV
