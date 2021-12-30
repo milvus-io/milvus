@@ -1620,6 +1620,7 @@ class TestCollectionMultiCollections:
             collection_list.append(collection_name)
             connect.create_collection(collection_name, cons.default_fields)
             connect.insert(collection_name, entities)
+        log.debug(f"flush collection_list: {collection_list}")
         connect.flush(collection_list)
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
@@ -1643,6 +1644,7 @@ class TestCollectionMultiCollections:
             collection_list.append(collection_name)
             connect.create_collection(collection_name, cons.default_binary_fields)
             connect.insert(collection_name, entities)
+        log.debug(f"flush collection_list: {collection_list}")
         connect.flush(collection_list)
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
@@ -1669,6 +1671,7 @@ class TestCollectionMultiCollections:
             collection_list.append(collection_name)
             connect.create_collection(collection_name, cons.default_binary_fields)
             res = connect.insert(collection_name, cons.default_binary_entities)
+        log.debug(f"flush collection_list: {collection_list}")
         connect.flush(collection_list)
         for i in range(collection_num):
             stats = connect.get_collection_stats(collection_list[i])
