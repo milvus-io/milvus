@@ -12,7 +12,7 @@ Currently，there are two paths to implement time travel:
 
 ## SealedSegment Time Travel
 
-1. During load, data is placed in a continuous memory area named chunk, with following properties:
+1. During load, data is placed in a continuous memory area named chunk, with the following properties:
    1. Data is divided into multiple segments
    2. Data in one segment is ordered by primary key
    3. Data between Segments is in timestamp order. That is, the timestamp of every entity in the previous segment must be less than the timestamp of the first entity in the next segment
