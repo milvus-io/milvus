@@ -17,19 +17,7 @@
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 
-
 set(FOUND_OPENBLAS "unknown")
-# add_subdirectory(knowhere)
-#set(INDEX_INCLUDE_DIRS ${INDEX_INCLUDE_DIRS} PARENT_SCOPE)
-#foreach (DIR ${INDEX_INCLUDE_DIRS})
-#    include_directories(${DIR})
-#endforeach ()
-
-# add knowhere header files
-include_directories("${CMAKE_BINARY_DIR}/thirdparty/knowhere/knowhere-src/knowhere")
-include_directories("${CMAKE_BINARY_DIR}/thirdparty/knowhere/knowhere-src/thirdparty")
-include_directories("${CMAKE_BINARY_DIR}/thirdparty/knowhere/knowhere-src/thirdparty/NGT/lib")
-
 add_subdirectory( exceptions )
 add_subdirectory( utils )
 add_subdirectory( log )

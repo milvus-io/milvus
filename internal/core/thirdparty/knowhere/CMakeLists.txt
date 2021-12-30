@@ -10,7 +10,6 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
-include(FetchContent)
 
 if(NOT DEFINED KNOWHERE_VERSION)
    set(KNOWHERE_VERSION 1.00)
@@ -33,10 +32,8 @@ FetchContent_Declare(
     )
 
 set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}")
-
 FetchContent_GetProperties(knowhere)
 if ( NOT knowhere_POPULATED )
-
     FetchContent_Populate( knowhere )
     add_subdirectory( ${knowhere_SOURCE_DIR}
                         ${knowhere_BINARY_DIR}
