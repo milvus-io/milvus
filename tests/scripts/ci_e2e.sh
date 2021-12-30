@@ -36,28 +36,28 @@ MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_HELM_NAMESPACE="${MILVUS_HELM_NAMESPACE:-default}"
 PARALLEL_NUM="${PARALLEL_NUM:-6}"
 MILVUS_CLIENT="${MILVUS_CLIENT:-pymilvus}"
-# use service name instead of IP to test
+# Use service name instead of IP to test
 MILVUS_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-milvus.milvus-ci" | tr -d '\n')
 MILVUS_SERVICE_PORT="19530"
 
-# shellcheck source=build/lib.sh
+# Shellcheck source=build/lib.sh
 source "${ROOT}/build/lib.sh"
 
 
-# shellcheck source=ci-util.sh
+# Shellcheck source=ci-util.sh
 source "${ROOT}/tests/scripts/ci-util.sh"
 
 
 cd ${ROOT}/tests/python_client
 
-# print python3 version, python version 3.6.8 is more stable for test
+# Print python3 version, python version 3.6.8 is more stable for test
 python3 -V
 
-# pytest will try to get ${CI_LOG_PATH} from environment variables first,then use default path
+# Pytest will try to get ${CI_LOG_PATH} from environment variables first,then use default path
 export CI_LOG_PATH=/tmp/ci_logs/test
 
 if [ ! -d "${CI_LOG_PATH}" ]; then
-  # create dir for ci log path when it does not exist
+  # Create dir for ci log path when it does not exist
   mkdir -p ${CI_LOG_PATH}
 fi
 trace "prepare e2e test"  install_pytest_requirements  
@@ -65,6 +65,7 @@ trace "prepare e2e test"  install_pytest_requirements
 
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+  
   timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
                                      --html=${CI_LOG_PATH}/report.html  --self-contained-html ${@:-}
 else
