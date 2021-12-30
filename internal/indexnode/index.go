@@ -32,6 +32,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"go.uber.org/zap"
@@ -58,6 +59,7 @@ type Index interface {
 // CIndex is a pointer used to access 'CGO'.
 type CIndex struct {
 	indexPtr C.CIndex
+	close    bool
 }
 
 // Serialize serializes vector data into bytes data so that it can be accessed in 'C'.
@@ -140,6 +142,7 @@ func (index *CIndex) Delete() error {
 		DeleteIndex(CIndex index);
 	*/
 	C.DeleteIndex(index.indexPtr)
+	index.close = true
 	// TODO: check if index.indexPtr will be released by golang, though it occupies little memory
 	// C.free(index.indexPtr)
 	return nil
@@ -182,9 +185,16 @@ func NewCIndex(typeParams, indexParams map[string]string) (Index, error) {
 	}
 	log.Debug("Successfully create index ...")
 
-	return &CIndex{
+	index := &CIndex{
 		indexPtr: indexPtr,
-	}, nil
+		close:    false,
+	}
+	runtime.SetFinalizer(index, func(index *CIndex) {
+		if index != nil && !index.close {
+			log.Error("there is leakage in index object, please check.")
+		}
+	})
+	return index, nil
 }
 
 // HandleCStatus deal with the error returned from CGO
