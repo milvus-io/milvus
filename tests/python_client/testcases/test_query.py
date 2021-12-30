@@ -67,7 +67,7 @@ class TestQueryParams(TestcaseBase):
         expected: query result is correct
         """
         self._connect()
-        df = cf.gen_default_dataframe_data(ct.default_nb)
+        df = cf.gen_default_dataframe_data()
         df[ct.default_int64_field_name] = None
         insert_res, _, = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                                        primary_field=ct.default_int64_field_name,
