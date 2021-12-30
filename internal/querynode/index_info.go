@@ -89,6 +89,7 @@ func (info *indexInfo) getFieldID() UniqueID {
 	return info.fieldID
 }
 
+// getIndexPaths returns indexPaths
 func (info *indexInfo) getIndexPaths() []string {
 	return info.indexPaths
 }
