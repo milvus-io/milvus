@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/naming/resolver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -265,4 +267,68 @@ func (c *ClientBase) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+func Connect(ctx context.Context, etcdAddress string, service string) (*grpc.ClientConn, error) {
+	etcdCli, err := clientv3.NewFromURL(etcdAddress)
+	if err != nil {
+		return nil, err
+	}
+	resolver, err := resolver.NewBuilder(etcdCli)
+	if err != nil {
+		etcdCli.Close()
+		return nil, err
+	}
+	opts := trace.GetInterceptorOpts()
+	dialContext, cancel := context.WithTimeout(ctx, dialTimeout)
+
+	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
+	retryPolicy := `{
+		"methodConfig": [{
+		  "name": [{}],
+		  "waitForReady": false,
+		  "retryPolicy": {
+			  "MaxAttempts": 4,
+			  "InitialBackoff": ".1s",
+			  "MaxBackoff": ".4s",
+			  "BackoffMultiplier": 1.6,
+			  "RetryableStatusCodes": [ "UNAVAILABLE" ]
+		  }
+		}]}`
+
+	conn, err := grpc.DialContext(
+		dialContext,
+		service,
+		grpc.WithInsecure(),
+		grpc.WithBlock(),
+		grpc.WithResolvers(resolver),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(1024),
+			grpc.MaxCallSendMsgSize(1024),
+		),
+		grpc.WithUnaryInterceptor(grpcopentracing.UnaryClientInterceptor(opts...)),
+		grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
+		grpc.WithDefaultServiceConfig(retryPolicy),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                keepAliveTime,
+			Timeout:             keepAliveTimeout,
+			PermitWithoutStream: true,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  100 * time.Millisecond,
+				Multiplier: 1.6,
+				Jitter:     0.2,
+				MaxDelay:   3 * time.Second,
+			},
+			MinConnectTimeout: dialTimeout,
+		}),
+	)
+	cancel()
+	if err != nil {
+		etcdCli.Close()
+		return nil, err
+	}
+
+	return conn, nil
 }
