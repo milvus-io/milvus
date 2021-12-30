@@ -1500,6 +1500,8 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 						CollectionID:   collectionID,
 						BinlogPaths:    segmentBinlogs.FieldBinlogs,
 						NumOfRows:      segmentBinlogs.NumOfRows,
+						Statslogs:      segmentBinlogs.Statslogs,
+						Deltalogs:      segmentBinlogs.Deltalogs,
 						CompactionFrom: segmentInfo.CompactionFrom,
 						EnableIndex:    segmentInfo.EnableIndex,
 						IndexPathInfos: segmentInfo.IndexPathInfos,
