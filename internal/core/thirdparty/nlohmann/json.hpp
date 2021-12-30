@@ -23146,7 +23146,7 @@ class basic_json
     /*!
     @brief deserialize from a pair of character iterators
 
-    The value_type of the iterator must be a integral type with size of 1, 2 or
+    The value_type of the iterator must be an integral type with size of 1, 2 or
     4 bytes, which will be interpreted respectively as UTF-8, UTF-16 and UTF-32.
 
     @param[in] first iterator to start of character range
