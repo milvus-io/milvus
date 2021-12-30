@@ -85,6 +85,7 @@ func (info *indexInfo) getBuildID() UniqueID {
 	return info.buildID
 }
 
+// getFieldID returns filed id of index
 func (info *indexInfo) getFieldID() UniqueID {
 	return info.fieldID
 }
