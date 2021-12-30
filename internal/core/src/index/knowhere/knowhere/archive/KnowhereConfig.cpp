@@ -54,10 +54,10 @@ KnowhereConfig::SetSimdType(const SimdType simd_type) {
         LOG_KNOWHERE_DEBUG_ << "FAISS expect simdType::SSE4_2";
     }
 
-    std::string cpu_flag;
-    faiss::hook_init(cpu_flag);
-    LOG_KNOWHERE_DEBUG_ << "FAISS hook " << cpu_flag;
-    return cpu_flag;
+    std::string simd_str;
+    faiss::hook_init(simd_str);
+    LOG_KNOWHERE_DEBUG_ << "FAISS hook " << simd_str;
+    return simd_str;
 }
 
 void
