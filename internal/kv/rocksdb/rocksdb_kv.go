@@ -118,8 +118,8 @@ func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	defer option.Destroy()
 	iter := kv.DB.NewIterator(option)
 	defer iter.Close()
-	keys := make([]string, 0)
-	values := make([]string, 0)
+
+	var keys, values []string
 	iter.Seek([]byte(prefix))
 	for ; iter.ValidForPrefix([]byte(prefix)); iter.Next() {
 		key := iter.Key()
