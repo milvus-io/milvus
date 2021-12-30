@@ -90,7 +90,7 @@
 ### 2.11 Query collection meta based on timeline
 
 1. Add a new field of `timestamp` to the grpc request of `describe collection`.
-2. `RC` should provide snapshot on the `collection mate`.
+2. `RootCoord` should provide snapshot on the `collection mate`.
 3. Return the `collection meta` at the point of timestamp mentioned in the request.
 
 ### 2.12 Timestamp of `dd operations`
