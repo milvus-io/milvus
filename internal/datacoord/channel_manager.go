@@ -262,7 +262,15 @@ func (c *ChannelManager) Watch(ch *channel) error {
 			c.fillChannelPosition(v)
 		}
 	}
-	return c.store.Update(updates)
+	err := c.store.Update(updates)
+	if err != nil {
+		log.Error("ChannelManager RWChannelStore update failed", zap.Int64("collectionID", ch.CollectionID),
+			zap.String("channelName", ch.Name), zap.Error(err))
+		return err
+	}
+	log.Debug("ChannelManager RWChannelStore update success", zap.Int64("collectionID", ch.CollectionID),
+		zap.String("channelName", ch.Name))
+	return nil
 }
 
 func (c *ChannelManager) fillChannelPosition(update *ChannelOp) {
