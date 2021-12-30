@@ -1218,7 +1218,7 @@ func (p *dataCoordConfig) initCompactionEntityExpiration() {
 			return x
 		}
 		return y
-	}(p.CompactionEntityExpiration, p.CompactionRetentionDuration)
+	}(p.CompactionEntityExpiration, p.RetentionDuration)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
