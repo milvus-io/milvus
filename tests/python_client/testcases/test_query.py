@@ -702,7 +702,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res2})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/12680")
     def test_query_output_fields_part_vector_wildcard(self):
         """
         target: test query output_fields with part wildcard
