@@ -267,7 +267,7 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("watchDeltaChannelsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	log.Debug("watchDeltaChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -279,7 +279,7 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("watchDeltaChannelsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("watchDeltaChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
