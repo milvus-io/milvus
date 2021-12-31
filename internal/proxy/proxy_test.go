@@ -404,7 +404,7 @@ func TestProxy(t *testing.T) {
 	}
 
 	in := runIndexNode(ctx, localMsg, alias)
-	log.Info("running index node ...")
+	log.Info("running IndexNode ...")
 
 	if in != nil {
 		defer func() {
