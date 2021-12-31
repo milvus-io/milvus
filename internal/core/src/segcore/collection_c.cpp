@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <iostream>
+#include <malloc.h>
 #include "segcore/collection_c.h"
 #include "segcore/Collection.h"
 
@@ -24,6 +25,7 @@ void
 DeleteCollection(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
     delete col;
+    malloc_trim(0);
 }
 
 const char*

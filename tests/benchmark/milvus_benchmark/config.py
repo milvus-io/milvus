@@ -49,6 +49,7 @@ MINIO_ACCESS_KEY = "minioadmin"
 MINIO_SECRET_KEY = "minioadmin"
 MINIO_BUCKET_NAME = "test"
 
+# precision of params
 FLUSH_PRECISION = 4
 INDEX_PRECISION = 4
 SEARCH_PRECISION = 4

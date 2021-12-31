@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -652,22 +651,9 @@ func TestGrpcRequest(t *testing.T) {
 
 func TestEstimateSegmentSize(t *testing.T) {
 	refreshParams()
-	baseCtx, cancel := context.WithCancel(context.Background())
-	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
-	}
-
-	dataKV, err := minioKV.NewMinIOKV(baseCtx, option)
-	assert.Nil(t, err)
-	schema := genCollectionSchema(defaultCollectionID, false)
 	binlog := []*datapb.FieldBinlog{
 		{
-			FieldID: simpleConstField.id,
+			FieldID: defaultVecFieldID,
 			Binlogs: []*datapb.Binlog{{LogPath: "by-dev/rand/path", LogSize: 1024}},
 		},
 	}
@@ -681,43 +667,22 @@ func TestEstimateSegmentSize(t *testing.T) {
 	}
 
 	loadReq := &querypb.LoadSegmentsRequest{
-		Schema:       schema,
 		Infos:        []*querypb.SegmentLoadInfo{loadInfo},
 		CollectionID: defaultCollectionID,
 	}
 
-	size, err := estimateSegmentsSize(loadReq, dataKV)
+	size, err := estimateSegmentsSize(loadReq, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1024), size)
 
-	binlog, err = saveSimpleBinLog(baseCtx, schema, dataKV)
-	assert.NoError(t, err)
-
-	loadInfo.BinlogPaths = binlog
-
-	size, err = estimateSegmentsSize(loadReq, dataKV)
-	assert.NoError(t, err)
-	assert.NotEqual(t, int64(1024), size)
-
-	indexPath, err := generateIndex(defaultSegmentID)
-	assert.NoError(t, err)
-
-	indexInfo := &indexpb.IndexFilePathInfo{
-		IndexFilePaths: indexPath,
-		SerializedSize: 1024,
+	indexInfo := &querypb.VecFieldIndexInfo{
+		FieldID:     defaultVecFieldID,
+		EnableIndex: true,
+		IndexSize:   2048,
 	}
-	loadInfo.IndexPathInfos = []*indexpb.IndexFilePathInfo{indexInfo}
-	loadInfo.EnableIndex = true
 
-	size, err = estimateSegmentsSize(loadReq, dataKV)
+	loadInfo.IndexInfos = []*querypb.VecFieldIndexInfo{indexInfo}
+	size, err = estimateSegmentsSize(loadReq, nil)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(1024), size)
-
-	indexInfo.IndexFilePaths = []string{"&*^*(^*(&*%^&*^(&"}
-	indexInfo.SerializedSize = 0
-	size, err = estimateSegmentsSize(loadReq, dataKV)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(0), size)
-
-	cancel()
+	assert.Equal(t, int64(2048), size)
 }

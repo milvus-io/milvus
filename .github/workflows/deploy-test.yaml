@@ -39,7 +39,6 @@ jobs:
         working-directory: tests/python_client/deploy
         run: |
           pip install -r requirements.txt
-          pip install --upgrade protobuf 
       
       - name: Run deploy test
         timeout-minutes: 60

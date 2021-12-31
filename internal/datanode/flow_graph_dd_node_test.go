@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -90,7 +91,7 @@ func TestFlowGraph_DDNode_newDDNode(te *testing.T) {
 			for _, seg := range ddNode.flushedSegments {
 				flushedSegIDs = append(flushedSegIDs, seg.ID)
 			}
-			assert.Equal(t, "ddNode", ddNode.Name())
+			assert.Equal(t, fmt.Sprintf("ddNode-%d-%s", ddNode.collectionID, ddNode.vchannelName), ddNode.Name())
 			assert.Equal(t, test.inCollID, ddNode.collectionID)
 			assert.Equal(t, len(test.inFlushedSegs), len(ddNode.flushedSegments))
 			assert.ElementsMatch(t, test.inFlushedSegs, flushedSegIDs)

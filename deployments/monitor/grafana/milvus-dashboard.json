@@ -1069,7 +1069,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of drop_index requests",
+      "description": "per-minute increasing rate of drop_index requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1378,7 +1378,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of describe_index requests",
+      "description": "per-minute increasing rate of describe_index requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1798,7 +1798,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "List of data nodes which has register with etcd",
+      "description": "List of data nodes which has register with etcd.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []

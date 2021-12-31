@@ -338,18 +338,18 @@ func TestProxy(t *testing.T) {
 	alias := "TestProxy"
 
 	rc := runRootCoord(ctx, localMsg)
-	log.Info("running root coordinator ...")
+	log.Info("running RootCoord ...")
 
 	if rc != nil {
 		defer func() {
 			err := rc.Stop()
 			assert.NoError(t, err)
-			log.Info("stop root coordinator")
+			log.Info("stop RootCoord")
 		}()
 	}
 
 	dc := runDataCoord(ctx, localMsg)
-	log.Info("running data coordinator ...")
+	log.Info("running DataCoord ...")
 
 	if dc != nil {
 		defer func() {

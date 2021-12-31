@@ -478,6 +478,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	}
 }
 
+// definitionLoop schedules the ddl tasks.
 func (sched *taskScheduler) definitionLoop() {
 	defer sched.wg.Done()
 	for {

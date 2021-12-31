@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string>
+#include <malloc.h>
 #include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
@@ -46,6 +47,7 @@ void
 DeleteIndex(CIndex index) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
     delete cIndex;
+    malloc_trim(0);
 }
 
 CStatus

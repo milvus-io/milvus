@@ -83,7 +83,7 @@ func InitRocksMQ() error {
 			if err == nil {
 				atomic.StoreInt64(&RocksmqRetentionTimeInSecs, rawRmqRetentionTimeInMinutes*60)
 			} else {
-				log.Warn("rocksmq.retentionTimeInMinutes is invalid, using default value 3 days")
+				log.Warn("rocksmq.retentionTimeInMinutes is invalid, using default value")
 			}
 		}
 		rawRmqRetentionSizeInMB, err := params.Load("rocksmq.retentionSizeInMB")
