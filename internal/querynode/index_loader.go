@@ -102,6 +102,7 @@ func (loader *indexLoader) loadIndex(segment *Segment, fieldID FieldID) error {
 	return nil
 }
 
+// printIndexParams prints the index params
 func (loader *indexLoader) printIndexParams(index []*commonpb.KeyValuePair) {
 	log.Debug("=================================================")
 	for i := 0; i < len(index); i++ {
