@@ -27,6 +27,7 @@ func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
 		compareMap[data] = struct{}{}
 	}
 
+
 	return compareMap
 }
 
