@@ -12,7 +12,6 @@
 package rocksmq
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,9 +47,8 @@ func TestConsumer_newConsumer(t *testing.T) {
 	assert.Equal(t, InvalidConfiguration, err.(*Error).Result())
 
 	/////////////////////////////////////////////////
-	os.MkdirAll(rmqPath, os.ModePerm)
-	rmqPathTest := rmqPath + "/test_consumer1"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmqPath := rmqPath + "/test_consumer1"
+	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client, err := newClient(ClientOptions{
 		Server: rmq,
@@ -119,9 +117,8 @@ func TestConsumer_Subscription(t *testing.T) {
 }
 
 func TestConsumer_Seek(t *testing.T) {
-	os.MkdirAll(rmqPath, os.ModePerm)
-	rmqPathTest := rmqPath + "/test_consumer2"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmqPath := rmqPath + "/test_consumer2"
+	rmq := newRocksMQ(rmqPath)
 	defer removePath(rmqPath)
 	client, err := newClient(ClientOptions{
 		Server: rmq,

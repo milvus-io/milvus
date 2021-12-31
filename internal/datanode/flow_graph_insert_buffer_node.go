@@ -64,16 +64,15 @@ type insertBufferNode struct {
 	flushManager     flushManager
 
 	timeTickStream msgstream.MsgStream
-	ttLogger       *timeTickLogger
+	ttLogger       timeTickLogger
 	ttMerger       *mergedTimeTickerSender
 
 	lastTimestamp Timestamp
 }
 
 type timeTickLogger struct {
-	start        atomic.Uint64
-	counter      atomic.Int32
-	vChannelName string
+	start   atomic.Uint64
+	counter atomic.Int32
 }
 
 func (l *timeTickLogger) LogTs(ts Timestamp) {
@@ -92,7 +91,7 @@ func (l *timeTickLogger) LogTs(ts Timestamp) {
 func (l *timeTickLogger) printLogs(start, end Timestamp) {
 	t1, _ := tsoutil.ParseTS(start)
 	t2, _ := tsoutil.ParseTS(end)
-	log.Debug("IBN timetick log", zap.Time("from", t1), zap.Time("to", t2), zap.Duration("elapsed", t2.Sub(t1)), zap.Uint64("start", start), zap.Uint64("end", end), zap.String("vChannelName", l.vChannelName))
+	log.Debug("IBN timetick log", zap.Time("from", t1), zap.Time("to", t2), zap.Duration("elapsed", t2.Sub(t1)), zap.Uint64("start", start), zap.Uint64("end", end))
 }
 
 type segmentCheckPoint struct {
@@ -142,7 +141,7 @@ func (bd *BufferData) updateSize(no int64) {
 }
 
 func (ibNode *insertBufferNode) Name() string {
-	return "ibNode-" + ibNode.channelName
+	return "ibNode"
 }
 
 func (ibNode *insertBufferNode) Close() {
@@ -773,6 +772,5 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 		idAllocator: config.allocator,
 		channelName: config.vChannelName,
 		ttMerger:    mt,
-		ttLogger:    &timeTickLogger{vChannelName: config.vChannelName},
 	}, nil
 }

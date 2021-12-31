@@ -42,14 +42,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // ---------- unittest util functions ----------
 // common definitions
 const ctxTimeInMillisecond = 500
-const debugUT = false
+const debug = false
 
 const (
 	dimKey        = "dim"
@@ -371,12 +370,8 @@ func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
 }
 
 func genEtcdKV() (*etcdkv.EtcdKV, error) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	if err != nil {
-		return nil, err
-	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.QueryNodeCfg.MetaRootPath)
-	return etcdKV, nil
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
+	return etcdKV, err
 }
 
 func genFactory() (msgstream.Factory, error) {
@@ -1280,12 +1275,14 @@ func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 
 func saveChangeInfo(key string, value string) error {
 	log.Debug(".. [query node unittest] Saving change info")
+
 	kv, err := genEtcdKV()
 	if err != nil {
 		return err
 	}
 
 	key = util.ChangeInfoMetaPrefix + "/" + key
+
 	return kv.Save(key, value)
 }
 
@@ -1296,17 +1293,16 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node := NewQueryNode(ctx, fac)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	if err != nil {
-		return nil, err
-	}
-	node.etcdCli = etcdCli
 	session := &sessionutil.Session{
 		ServerID: 1,
 	}
 	node.session = session
 
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.QueryNodeCfg.MetaRootPath)
+	etcdKV, err := genEtcdKV()
+	if err != nil {
+		return nil, err
+	}
+
 	node.etcdKV = etcdKV
 
 	node.tSafeReplica = newTSafeReplica()

@@ -2581,7 +2581,7 @@ class TestSearchBase:
         """
         collection_name = gen_unique_str(uid)
         with pytest.raises(Exception) as e:
-            connect.search(collection_name, **default_query)
+            res = connect.search(collection_name, **default_query)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_search_distance_l2(self, connect, collection):
@@ -2781,7 +2781,7 @@ class TestSearchBase:
     def test_search_distance_superstructure_flat_index(self, connect, binary_collection):
         """
         target: search binary_collection, and check the result: distance
-        method: compare the return distance with that computed with Inner product
+        method: compare the return distance value with value computed with Inner product
         expected: the return distance equals to the computed value
         """
         nq = 1

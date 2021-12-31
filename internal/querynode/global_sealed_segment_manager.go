@@ -53,7 +53,6 @@ func (g *globalSealedSegmentManager) addGlobalSegmentInfo(segmentInfo *querypb.S
 	g.globalSealedSegments[segmentInfo.SegmentID] = segmentInfo
 }
 
-// getGlobalSegmentIDs returns globalSealedSegments
 func (g *globalSealedSegmentManager) getGlobalSegmentIDs() []UniqueID {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -87,14 +86,12 @@ func (g *globalSealedSegmentManager) hasGlobalSealedSegment(segmentID UniqueID) 
 	return ok
 }
 
-// removeGlobalSealedSegmentInfo would remove globalSealSegment by segment
 func (g *globalSealedSegmentManager) removeGlobalSealedSegmentInfo(segmentID UniqueID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	delete(g.globalSealedSegments, segmentID)
 }
 
-// removeGlobalSegmentIDsByPartitionIds would remove globalSealedSegments by partitionIDs
 func (g *globalSealedSegmentManager) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -107,7 +104,6 @@ func (g *globalSealedSegmentManager) removeGlobalSegmentIDsByPartitionIds(partit
 	}
 }
 
-// close would free globalSealedSegmentManager
 func (g *globalSealedSegmentManager) close() {
 	g.mu.Lock()
 	defer g.mu.Unlock()

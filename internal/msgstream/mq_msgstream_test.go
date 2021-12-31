@@ -38,7 +38,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -74,12 +73,10 @@ func (f *fixture) setup() []parameters {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	defer etcdCli.Close()
+	f.etcdKV, err = etcdkv.NewEtcdKV(etcdEndpoints, "/etcd/test/root")
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
-	f.etcdKV = etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", f.etcdKV)
 	_ = idAllocator.Initialize()
 	err = rocksmq.InitRmq(rocksdbName, idAllocator)
@@ -1345,11 +1342,10 @@ func initRmq(name string) *etcdkv.EtcdKV {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdKV, err := etcdkv.NewEtcdKV(etcdEndpoints, "/etcd/test/root")
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 

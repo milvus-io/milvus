@@ -40,17 +40,34 @@ type EtcdKV struct {
 }
 
 // NewEtcdKV creates a new etcd kv.
-func NewEtcdKV(client *clientv3.Client, rootPath string) *EtcdKV {
+func NewEtcdKV(etcdEndpoints []string, rootPath string) (*EtcdKV, error) {
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   etcdEndpoints,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	kv := &EtcdKV{
 		client:   client,
 		rootPath: rootPath,
 	}
-	return kv
+
+	return kv, nil
+}
+
+// NewEtcdKVWithClient creates a new etcd kv with a client.
+func NewEtcdKVWithClient(cli *clientv3.Client, rootPath string) *EtcdKV {
+	return &EtcdKV{
+		client:   cli,
+		rootPath: rootPath,
+	}
 }
 
 // Close closes the connection to etcd.
 func (kv *EtcdKV) Close() {
-	log.Debug("etcd kv closed", zap.String("path", kv.rootPath))
+	kv.client.Close()
 }
 
 // GetPath returns the path of the key.

@@ -50,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // make sure IndexCoord implements types.IndexCoord
@@ -80,8 +79,7 @@ type IndexCoord struct {
 
 	idAllocator *allocator.GlobalIDAllocator
 
-	etcdCli *clientv3.Client
-	kv      kv.BaseKV
+	kv kv.BaseKV
 
 	metaTable   *metaTable
 	nodeManager *NodeManager
@@ -131,19 +129,17 @@ func (i *IndexCoord) Register() error {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
-		if i.session.TriggerKill {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-		}
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 	return nil
 }
 
 func (i *IndexCoord) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexCoordCfg.MetaRootPath, i.etcdCli)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexCoordCfg.MetaRootPath, Params.IndexCoordCfg.EtcdEndpoints)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	i.session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true, true)
+	i.session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true)
 	Params.BaseParams.SetLogger(i.session.ServerID)
 	return nil
 }
@@ -164,7 +160,10 @@ func (i *IndexCoord) Init() error {
 		}
 
 		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.IndexCoordCfg.MetaRootPath)
+			etcdKV, err := etcdkv.NewEtcdKV(Params.IndexCoordCfg.EtcdEndpoints, Params.IndexCoordCfg.MetaRootPath)
+			if err != nil {
+				return err
+			}
 			metakv, err := NewMetaTable(etcdKV)
 			if err != nil {
 				return err
@@ -208,7 +207,12 @@ func (i *IndexCoord) Init() error {
 
 		//init idAllocator
 		kvRootPath := Params.IndexCoordCfg.KvRootPath
-		etcdKV := tsoutil.NewTSOKVBase(i.etcdCli, kvRootPath, "index_gid")
+		etcdKV, err := tsoutil.NewTSOKVBase(Params.IndexCoordCfg.EtcdEndpoints, kvRootPath, "index_gid")
+		if err != nil {
+			log.Error("IndexCoord TSOKVBase initialize failed", zap.Error(err))
+			initErr = err
+			return
+		}
 
 		i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
 		if err := i.idAllocator.Initialize(); err != nil {
@@ -300,10 +304,6 @@ func (i *IndexCoord) Stop() error {
 	i.session.Revoke(time.Second)
 
 	return nil
-}
-
-func (i *IndexCoord) SetEtcdClient(etcdClient *clientv3.Client) {
-	i.etcdCli = etcdClient
 }
 
 // UpdateStateCode updates the component state of IndexCoord.
@@ -698,6 +698,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 			return
 		case <-timeTicker.C:
 			metas := i.metaTable.GetUnusedIndexFiles(i.taskLimit)
+			log.Debug("IndexCoord recycleUnusedIndexFiles", zap.Int("Need recycle tasks num", len(metas)))
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
 					unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID))

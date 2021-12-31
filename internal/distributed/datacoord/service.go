@@ -36,18 +36,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
 
-// Params is the parameters for DataCoord grpc server
 var Params paramtable.GrpcServerConfig
 
 // Server is the grpc server of datacoord
@@ -56,9 +53,7 @@ type Server struct {
 	cancel context.CancelFunc
 
 	wg        sync.WaitGroup
-	dataCoord types.DataCoordComponent
-
-	etcdCli *clientv3.Client
+	dataCoord types.DataCoord
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -66,7 +61,8 @@ type Server struct {
 }
 
 // NewServer new data service grpc server
-func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord.Option) *Server {
+func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord.Option) (*Server, error) {
+	var err error
 	ctx1, cancel := context.WithCancel(ctx)
 
 	s := &Server{
@@ -74,8 +70,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory, opts ...datacoord
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	s.dataCoord = datacoord.CreateServer(s.ctx, factory, opts...)
-	return s
+	s.dataCoord, err = datacoord.CreateServer(s.ctx, factory, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Server) init() error {
@@ -89,15 +88,7 @@ func (s *Server) init() error {
 	datacoord.Params.DataCoordCfg.Port = Params.Port
 	datacoord.Params.DataCoordCfg.Address = Params.GetAddress()
 
-	etcdCli, err := etcd.GetEtcdClient(&datacoord.Params.BaseParams)
-	if err != nil {
-		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
-		return err
-	}
-	s.etcdCli = etcdCli
-	s.dataCoord.SetEtcdClient(etcdCli)
-
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		log.Debug("DataCoord startGrpc failed", zap.Error(err))
 		return err
@@ -186,9 +177,6 @@ func (s *Server) Stop() error {
 	}
 	s.cancel()
 
-	if s.etcdCli != nil {
-		defer s.etcdCli.Close()
-	}
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()

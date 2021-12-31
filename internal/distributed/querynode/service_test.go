@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -113,9 +112,6 @@ func (m *MockQueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	return m.metricResp, m.err
 }
 
-func (m *MockQueryNode) SetEtcdClient(client *clientv3.Client) {
-}
-
 func (m *MockQueryNode) UpdateStateCode(code internalpb.StateCode) {
 }
 
@@ -153,9 +149,6 @@ func (m *MockRootCoord) Register() error {
 	return m.regErr
 }
 
-func (m *MockRootCoord) SetEtcdClient(client *clientv3.Client) {
-}
-
 func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{
 		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
@@ -187,9 +180,6 @@ func (m *MockIndexCoord) Stop() error {
 
 func (m *MockIndexCoord) Register() error {
 	return m.regErr
-}
-
-func (m *MockIndexCoord) SetEtcdClient(client *clientv3.Client) {
 }
 
 func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {

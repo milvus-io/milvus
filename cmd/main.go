@@ -26,8 +26,6 @@ import (
 	"strings"
 	"syscall"
 
-	// use auto max procs to set container CPU quota
-	_ "go.uber.org/automaxprocs"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/roles"
@@ -234,7 +232,7 @@ func main() {
 		os.Exit(-1)
 	}
 
-	var local = false
+	var localMsg = false
 	role := roles.MilvusRoles{}
 	switch serverType {
 	case typeutil.RootCoordRole:
@@ -262,7 +260,7 @@ func main() {
 		role.EnableDataNode = true
 		role.EnableIndexCoord = true
 		role.EnableIndexNode = true
-		local = true
+		localMsg = true
 	case roleMixture:
 		role.EnableRootCoord = enableRootCoord
 		role.EnableQueryCoord = enableQueryCoord
@@ -293,7 +291,7 @@ func main() {
 			panic(err)
 		}
 		defer removePidFile(fd)
-		role.Run(local, svrAlias)
+		role.Run(localMsg, svrAlias)
 	case "stop":
 		if err := stopPid(filename, runtimeDir); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n\n", err.Error())

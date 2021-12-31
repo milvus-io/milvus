@@ -21,12 +21,11 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-	"stathat.com/c/consistent"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
+	"stathat.com/c/consistent"
 )
 
 const (
@@ -98,8 +97,8 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 		olds = append(olds, c.NodeID)
 	}
 
-	newOnLines := c.getNewOnlines(nodes, olds)
-	for _, n := range newOnLines {
+	newOnlines := c.getNewOnlines(nodes, olds)
+	for _, n := range newOnlines {
 		if err := c.AddNode(n); err != nil {
 			return err
 		}
@@ -117,8 +116,8 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 	log.Debug("cluster start up",
 		zap.Any("nodes", nodes),
 		zap.Any("olds", olds),
-		zap.Int64s("new onlines", newOnLines),
-		zap.Int64s("offLines", offlines))
+		zap.Int64s("new onlines", newOnlines),
+		zap.Int64s("offlines", offlines))
 	return nil
 }
 
@@ -149,7 +148,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 			c.mu.Lock()
 
 			channels := c.store.GetNodesChannels()
-			reallocates, err := c.bgChecker(channels, time.Now())
+			reallocs, err := c.bgChecker(channels, time.Now())
 			if err != nil {
 				log.Warn("channel manager bg check failed", zap.Error(err))
 
@@ -157,7 +156,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 				continue
 			}
 
-			updates := c.reassignPolicy(c.store, reallocates)
+			updates := c.reassignPolicy(c.store, reallocs)
 			log.Debug("channel manager bg check reassign", zap.Array("updates", updates))
 			for _, update := range updates {
 				if update.Type == Add {

@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -63,7 +62,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		rootcoordpb.RegisterRootCoordServer(grpcServer, rootCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.RootCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.RootCoordRole, "127.0.0.1:9999", true)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			rootCoord, ok := cm.GetRootCoordClient()
@@ -80,7 +79,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		querypb.RegisterQueryCoordServer(grpcServer, queryCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.QueryCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.QueryCoordRole, "127.0.0.1:9999", true)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			queryCoord, ok := cm.GetQueryCoordClient()
@@ -97,7 +96,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		datapb.RegisterDataCoordServer(grpcServer, dataCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.DataCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.DataCoordRole, "127.0.0.1:9999", true)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			dataCoord, ok := cm.GetDataCoordClient()
@@ -114,7 +113,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		indexpb.RegisterIndexCoordServer(grpcServer, indexCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.IndexCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.IndexCoordRole, "127.0.0.1:9999", true)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			indexCoord, ok := cm.GetIndexCoordClient()
@@ -131,7 +130,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		querypb.RegisterQueryNodeServer(grpcServer, queryNode)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.QueryNodeRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.QueryNodeRole, "127.0.0.1:9999", true)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			queryNodes, ok := cm.GetQueryNodeClients()
@@ -148,7 +147,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		datapb.RegisterDataNodeServer(grpcServer, dataNode)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.DataNodeRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.DataNodeRole, "127.0.0.1:9999", true)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			dataNodes, ok := cm.GetDataNodeClients()
@@ -165,7 +164,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		indexpb.RegisterIndexNodeServer(grpcServer, indexNode)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.IndexNodeRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.IndexNodeRole, "127.0.0.1:9999", true)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			indexNodes, ok := cm.GetIndexNodeClients()
@@ -251,10 +250,6 @@ func initSession(ctx context.Context) *sessionutil.Session {
 	log.Debug("metaRootPath", zap.Any("metaRootPath", metaRootPath))
 	log.Debug("etcdPoints", zap.Any("etcdPoints", etcdEndpoints))
 
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	if err != nil {
-		panic(err)
-	}
-	session := sessionutil.NewSession(ctx, metaRootPath, etcdCli)
+	session := sessionutil.NewSession(ctx, metaRootPath, etcdEndpoints)
 	return session
 }

@@ -177,7 +177,7 @@ milvus-tools: print-build-info
 
 rpm-setup: 
 	@echo "Setuping rpm env ...;"
-	@build/rpm/setup-env.sh
+	@ build/rpm/setup-env.sh
 
 rpm: install
 	@echo "Note: run 'make rpm-setup' to setup build env for rpm builder"
@@ -192,4 +192,4 @@ rpm: install
 	@cp -r lib ~/rpmbuild/BUILD/
 	@cp -r configs ~/rpmbuild/BUILD/
 	@cp -r build/rpm/services ~/rpmbuild/BUILD/
-	@QA_RPATHS="$$[ 0x001|0x0002|0x0020 ]" rpmbuild -ba ./build/rpm/milvus.spec
+	@QA_RPATHS="$[ 0x001|0x0002|0x0020 ]" rpmbuild -ba ./build/rpm/milvus.spec

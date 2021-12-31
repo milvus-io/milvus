@@ -360,7 +360,7 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 		return nil
 	}
 
-	return fmt.Errorf("addQueryChannel: can't find QueryNode by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("addQueryChannel: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64, in *querypb.RemoveQueryChannelRequest) error {
 	c.RLock()
@@ -422,7 +422,7 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 		return nil
 	}
 
-	return fmt.Errorf("releasePartitions: can't find QueryNode by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releasePartitions: can't find query node by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error) {
@@ -563,7 +563,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		}
 		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
 		if err != nil {
-			log.Debug("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
+			log.Debug("registerNode: create a new query node failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
 		node.setState(state)
@@ -571,10 +571,10 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 			go node.start()
 		}
 		c.nodes[id] = node
-		log.Debug("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
+		log.Debug("registerNode: create a new query node", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
-	return fmt.Errorf("registerNode: QueryNode %d alredy exists in cluster", id)
+	return fmt.Errorf("registerNode: node %d alredy exists in cluster", id)
 }
 
 func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {
@@ -706,32 +706,32 @@ func defaultSegEstimatePolicy() segEstimatePolicy {
 type segEstimatePolicy func(request *querypb.LoadSegmentsRequest, dataKv kv.DataKV) (int64, error)
 
 func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.DataKV) (int64, error) {
-	requestSize := int64(0)
+	segmentSize := int64(0)
+
+	//TODO:: collection has multi vector field
+	//vecFields := make([]int64, 0)
+	//for _, field := range segments.Schema.Fields {
+	//	if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+	//		vecFields = append(vecFields, field.FieldID)
+	//	}
+	//}
+	// get fields data size, if len(indexFieldIDs) == 0, vector field would be involved in fieldBinLogs
 	for _, loadInfo := range segments.Infos {
-		segmentSize := int64(0)
-		// get which field has index file
-		vecFieldIndexInfo := make(map[int64]*querypb.VecFieldIndexInfo)
-		for _, indexInfo := range loadInfo.IndexInfos {
-			if indexInfo.EnableIndex {
-				fieldID := indexInfo.FieldID
-				vecFieldIndexInfo[fieldID] = indexInfo
+		// get index size
+		if loadInfo.EnableIndex {
+			for _, pathInfo := range loadInfo.IndexPathInfos {
+				segmentSize += int64(pathInfo.GetSerializedSize())
 			}
+			continue
 		}
 
+		// get binlog size
 		for _, binlogPath := range loadInfo.BinlogPaths {
-			fieldID := binlogPath.FieldID
-			// if index node has built index, cal segment size by index file size, or use raw data's binlog size
-			if indexInfo, ok := vecFieldIndexInfo[fieldID]; ok {
-				segmentSize += indexInfo.IndexSize
-			} else {
-				for _, binlog := range binlogPath.Binlogs {
-					segmentSize += binlog.GetLogSize()
-				}
+			for _, binlog := range binlogPath.Binlogs {
+				segmentSize += binlog.GetLogSize()
 			}
 		}
-		loadInfo.SegmentSize = segmentSize
-		requestSize += segmentSize
 	}
 
-	return requestSize, nil
+	return segmentSize, nil
 }

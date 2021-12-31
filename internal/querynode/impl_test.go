@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"math/rand"
-	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
@@ -230,10 +228,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	t.Run("test GetSegmentInfo", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -256,9 +251,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test no collection in historical", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -279,9 +272,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test no collection in streaming", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -302,9 +293,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test different segment type", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -346,9 +335,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test GetSegmentInfo with indexed segment", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -380,9 +367,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test GetSegmentInfo without streaming partition", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -401,9 +386,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test GetSegmentInfo without streaming segment", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -422,9 +405,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test GetSegmentInfo without historical partition", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -443,9 +424,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test GetSegmentInfo without historical segment", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -463,7 +442,6 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
-	wg.Wait()
 }
 
 func TestImpl_isHealthy(t *testing.T) {
@@ -480,17 +458,11 @@ func TestImpl_GetMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.NoError(t, err)
-	defer etcdCli.Close()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
 	t.Run("test GetMetrics", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.QueryNodeCfg.MetaRootPath, etcdCli)
+
+		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.QueryNodeCfg.MetaRootPath, Params.QueryNodeCfg.EtcdEndpoints)
 
 		metricReq := make(map[string]string)
 		metricReq[metricsinfo.MetricTypeKey] = "system_info"
@@ -509,9 +481,7 @@ func TestImpl_GetMetrics(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	wg.Add(1)
 	t.Run("test ParseMetricType failed", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -529,17 +499,13 @@ func TestImpl_GetMetrics(t *testing.T) {
 		_, err = node.GetMetrics(ctx, req)
 		assert.NoError(t, err)
 	})
-	wg.Wait()
 }
 
 func TestImpl_ReleaseSegments(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	t.Run("test valid", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -554,9 +520,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	wg.Add(1)
 	t.Run("test invalid query node", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -572,9 +536,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	wg.Add(1)
 	t.Run("test segment not exists", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
@@ -595,5 +557,4 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
-	wg.Wait()
 }
