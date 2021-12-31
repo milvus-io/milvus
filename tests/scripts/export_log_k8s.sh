@@ -8,7 +8,7 @@ prefix_name=$2
 log_dir=${3:-"k8s_logs"}
 array=($(kubectl get pod -n ${ns_name}|grep ${prefix_name}|awk '{print $1}'))
 echo ${array[@]}
-if [ ! -d $log_dir  ];
+if [ ! -d $log_dir/pod_log ] || [ ! -d $log_dir/pod_describe ];
 then
     mkdir -p $log_dir/pod_log
     mkdir -p $log_dir/pod_describe
