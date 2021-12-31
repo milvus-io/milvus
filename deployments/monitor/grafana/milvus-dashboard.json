@@ -2183,7 +2183,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Pulsar client received bytes by topic",
+      "description": "Pulsar client received bytes by topic.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
