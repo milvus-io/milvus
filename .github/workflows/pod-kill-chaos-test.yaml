@@ -88,6 +88,7 @@ jobs:
           # replace chaos object
           sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/pod_kill\/'/g" constants.py
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_kill.yaml\'/g" constants.py
+          sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${{ env.RELEASE }}\'/g" constants.py
           cat constants.py
           timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
 
