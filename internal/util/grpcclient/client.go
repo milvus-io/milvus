@@ -112,18 +112,17 @@ func (c *ClientBase) resetConnection(client interface{}) {
 func (c *ClientBase) connect(ctx context.Context) error {
 	addr, err := c.getAddrFunc()
 	if err != nil {
-		log.Error("failed to get client address", zap.Error(err))
+		log.Error("failed to get cclient address", zap.Error(err))
 		return err
 	}
 
 	opts := trace.GetInterceptorOpts()
 	dialContext, cancel := context.WithTimeout(ctx, dialTimeout)
 
-	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
 	retryPolicy := `{
 		"methodConfig": [{
 		  "name": [{}],
-		  "waitForReady": false,
+		  "waitForReady": true,
 		  "retryPolicy": {
 			  "MaxAttempts": 4,
 			  "InitialBackoff": ".1s",
@@ -146,9 +145,9 @@ func (c *ClientBase) connect(ctx context.Context) error {
 		grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
 		grpc.WithDefaultServiceConfig(retryPolicy),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                keepAliveTime,
-			Timeout:             keepAliveTimeout,
-			PermitWithoutStream: true,
+			Time:                keepAliveTime,    // send pings every 60 seconds if there is no activity
+			Timeout:             keepAliveTimeout, // wait 6 second for ping ack before considering the connection dead
+			PermitWithoutStream: true,             // send pings even without active streams
 		}),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
@@ -208,7 +207,6 @@ func (c *ClientBase) Call(ctx context.Context, caller func(client interface{}) (
 	return ret, err
 }
 
-// ReCall does the grpc call twice
 func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error) {
 	if !funcutil.CheckCtxValid(ctx) {
 		return nil, ctx.Err()

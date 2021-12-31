@@ -21,12 +21,11 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-	"stathat.com/c/consistent"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
+	"stathat.com/c/consistent"
 )
 
 const (
@@ -105,7 +104,7 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 		}
 	}
 
-	offlines := c.getOffLines(nodes, olds)
+	offlines := c.getOfflines(nodes, olds)
 	for _, n := range offlines {
 		if err := c.DeleteNode(n); err != nil {
 			return err
@@ -118,7 +117,7 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 		zap.Any("nodes", nodes),
 		zap.Any("olds", olds),
 		zap.Int64s("new onlines", newOnlines),
-		zap.Int64s("offLines", offlines))
+		zap.Int64s("offlines", offlines))
 	return nil
 }
 
@@ -188,7 +187,7 @@ func (c *ChannelManager) getNewOnlines(curr []int64, old []int64) []int64 {
 	return ret
 }
 
-func (c *ChannelManager) getOffLines(curr []int64, old []int64) []int64 {
+func (c *ChannelManager) getOfflines(curr []int64, old []int64) []int64 {
 	mcurr := make(map[int64]struct{})
 	ret := make([]int64, 0, len(old))
 	for _, n := range curr {

@@ -98,13 +98,11 @@ func (pc *pulsarClient) Subscribe(options ConsumerOptions) (Consumer, error) {
 	return pConsumer, nil
 }
 
-// EarliestMessageID returns the earliest message id
 func (pc *pulsarClient) EarliestMessageID() MessageID {
 	msgID := pulsar.EarliestMessageID()
 	return &pulsarID{messageID: msgID}
 }
 
-// StringToMsgID converts the string id to MessageID type
 func (pc *pulsarClient) StringToMsgID(id string) (MessageID, error) {
 	pID, err := StringToPulsarMsgID(id)
 	if err != nil {
@@ -113,7 +111,6 @@ func (pc *pulsarClient) StringToMsgID(id string) (MessageID, error) {
 	return &pulsarID{messageID: pID}, nil
 }
 
-// BytesToMsgID converts []byte id to MessageID type
 func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 	pID, err := DeserializePulsarMsgID(id)
 	if err != nil {
@@ -123,6 +120,5 @@ func (pc *pulsarClient) BytesToMsgID(id []byte) (MessageID, error) {
 }
 
 func (pc *pulsarClient) Close() {
-	// FIXME(yukun): pulsar.client is a singleton, so can't invoke this close when server run
-	// pc.client.Close()
+	pc.client.Close()
 }

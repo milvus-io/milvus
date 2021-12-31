@@ -19,7 +19,6 @@ package etcdkv
 import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
@@ -50,10 +49,9 @@ func NewMetaKvFactory(rootPath string, param *paramtable.BaseParamTable) (kv.Met
 		}
 		return metaKv, err
 	}
-	client, err := etcd.GetEtcdClient(param)
+	metaKv, err := NewEtcdKV(param.EtcdEndpoints, rootPath)
 	if err != nil {
 		return nil, err
 	}
-	metaKv := NewEtcdKV(client, rootPath)
 	return metaKv, err
 }

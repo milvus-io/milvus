@@ -83,7 +83,6 @@ var Params paramtable.GlobalParamTable
 // services in datanode package.
 //
 // DataNode implements `types.Component`, `types.DataNode` interfaces.
-//  `etcdCli`   is a connection of etcd
 //  `rootCoord` is a grpc client of root coordinator.
 //  `dataCoord` is a grpc client of data service.
 //  `NodeID` is unique to each datanode.
@@ -110,7 +109,6 @@ type DataNode struct {
 	segmentCache       *Cache
 	compactionExecutor *compactionExecutor
 
-	etcdCli   *clientv3.Client
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
@@ -144,11 +142,6 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
-}
-
-// Set etcd client
-func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
-	node.etcdCli = etcdCli
 }
 
 // SetRootCoord sets RootCoord's grpc client, error is returned if repeatedly set.
@@ -189,20 +182,18 @@ func (node *DataNode) Register() error {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
-		if node.session.TriggerKill {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-		}
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 
 	return nil
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.DataNodeCfg.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx, Params.DataNodeCfg.MetaRootPath, Params.DataNodeCfg.EtcdEndpoints)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
+	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false)
 	Params.DataNodeCfg.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
 	Params.BaseParams.SetLogger(Params.DataNodeCfg.NodeID)
@@ -420,7 +411,10 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.DataNodeCfg.MetaRootPath)
+		etcdKV, err := etcdkv.NewEtcdKV(Params.DataNodeCfg.EtcdEndpoints, Params.DataNodeCfg.MetaRootPath)
+		if err != nil {
+			return err
+		}
 		node.watchKv = etcdKV
 		return nil
 	}
@@ -758,8 +752,6 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	}, nil
 }
 
-// Compaction handles compaction request from DataCoord
-// returns status as long as compaction task enqueued or invalid
 func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,

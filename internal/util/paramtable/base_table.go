@@ -24,7 +24,6 @@ import (
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/spf13/cast"
@@ -452,12 +451,8 @@ func (gp *BaseTable) InitLogCfg() {
 	gp.Log.File.MaxDays = gp.ParseInt("log.file.maxAge")
 }
 
-func (gp *BaseTable) SetLogConfig() {
-	gp.LogCfgFunc = func(cfg log.Config) {
-		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
-		logutil.SetupLogger(&cfg)
-		defer log.Sync()
-	}
+func (gp *BaseTable) SetLogConfig(f func(log.Config)) {
+	gp.LogCfgFunc = f
 }
 
 func (gp *BaseTable) SetLogger(id UniqueID) {

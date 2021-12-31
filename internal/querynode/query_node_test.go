@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
 // mock of query coordinator client
@@ -177,7 +175,7 @@ func newQueryNodeMock() *QueryNode {
 
 	var ctx context.Context
 
-	if debugUT {
+	if debug {
 		ctx = context.Background()
 	} else {
 		var cancel context.CancelFunc
@@ -188,11 +186,11 @@ func newQueryNodeMock() *QueryNode {
 			cancel()
 		}()
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 	if err != nil {
 		panic(err)
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.QueryNodeCfg.MetaRootPath)
 
 	msFactory, err := newMessageStreamFactory()
 	if err != nil {
@@ -272,14 +270,9 @@ func TestQueryNode_register(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.NoError(t, err)
-	defer etcdcli.Close()
-	node.SetEtcdClient(etcdcli)
 	err = node.initSession()
 	assert.NoError(t, err)
 
-	node.session.TriggerKill = false
 	err = node.Register()
 	assert.NoError(t, err)
 }
@@ -290,10 +283,7 @@ func TestQueryNode_init(t *testing.T) {
 
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
-	etcdcli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.NoError(t, err)
-	defer etcdcli.Close()
-	node.SetEtcdClient(etcdcli)
+
 	err = node.Init()
 	assert.Error(t, err)
 }
@@ -332,10 +322,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	t.Run("test cleanup segments", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
@@ -343,9 +330,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	wg.Add(1)
 	t.Run("test cleanup segments no segment", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
@@ -363,16 +348,13 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		err = node.removeSegments(segmentChangeInfos)
 		assert.Error(t, err)
 	})
-	wg.Wait()
 }
 
 func TestQueryNode_watchChangeInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	var wg sync.WaitGroup
-	wg.Add(1)
+
 	t.Run("test watchChangeInfo", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
@@ -387,9 +369,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	})
 
-	wg.Add(1)
 	t.Run("test watchChangeInfo key error", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
@@ -401,9 +381,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	})
 
-	wg.Add(1)
 	t.Run("test watchChangeInfo unmarshal error", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
@@ -415,9 +393,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	})
 
-	wg.Add(1)
 	t.Run("test watchChangeInfo adjustByChangeInfo error", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
@@ -441,5 +417,4 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 	})
-	wg.Wait()
 }

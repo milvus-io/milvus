@@ -13,10 +13,11 @@ package trace
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"testing"
+
+	"errors"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"

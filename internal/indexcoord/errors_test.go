@@ -19,9 +19,8 @@ package indexcoord
 import (
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 func TestErrIndexNodeIsNotOnService(t *testing.T) {

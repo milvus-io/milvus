@@ -299,8 +299,6 @@ func (sched *TaskScheduler) Start() error {
 
 // Close closes the task scheduler of indexing tasks.
 func (sched *TaskScheduler) Close() {
-	if sched.cancel != nil {
-		sched.cancel()
-	}
+	sched.cancel()
 	sched.wg.Wait()
 }

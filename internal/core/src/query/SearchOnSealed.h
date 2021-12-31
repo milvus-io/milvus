@@ -11,17 +11,11 @@
 
 #pragma once
 
-#include <deque>
-#include <boost/dynamic_bitset.hpp>
-
+#include "segcore/SealedIndexingRecord.h"
 #include "query/PlanNode.h"
 #include "query/SearchOnGrowing.h"
-#include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
-
-using BitsetChunk = boost::dynamic_bitset<>;
-using BitsetSimple = std::deque<BitsetChunk>;
 
 aligned_vector<uint8_t>
 AssembleNegBitset(const BitsetSimple& bitmap_simple);

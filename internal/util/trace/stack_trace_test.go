@@ -16,14 +16,6 @@ import (
 	"testing"
 )
 
-func testStackTrace() {
-	fmt.Println(StackTraceMsg(1))
-	fmt.Println(StackTraceMsg(5))
-	fmt.Println(StackTraceMsg(10))
-
-	fmt.Println(StackTrace())
-}
-
 func TestStackTraceMsg(t *testing.T) {
 	fmt.Println(StackTraceMsg(1))
 	fmt.Println(StackTraceMsg(5))
@@ -38,8 +30,6 @@ func TestStackTraceMsg(t *testing.T) {
 			fmt.Println(StackTraceMsg(10))
 		}()
 	}()
-
-	testStackTrace()
 }
 
 func TestStackTrace(t *testing.T) {

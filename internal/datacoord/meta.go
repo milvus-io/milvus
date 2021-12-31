@@ -23,14 +23,13 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"go.uber.org/zap"
 )
 
 const (

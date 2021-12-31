@@ -29,9 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
 	"go.uber.org/zap"
 
@@ -213,9 +211,13 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 		}
 
 		factory := newMsgFactory(localMsg)
-		ds = grpcdatacoordclient.NewServer(ctx, factory)
+		var err error
+		ds, err = grpcdatacoordclient.NewServer(ctx, factory)
+		if err != nil {
+			panic(err)
+		}
 		wg.Done()
-		err := ds.Run()
+		err = ds.Run()
 		if err != nil {
 			panic(err)
 		}
@@ -308,11 +310,6 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			panic(err)
 		}
 		wg.Done()
-		etcd, err := etcd.GetEtcdClient(&indexnode.Params.BaseParams)
-		if err != nil {
-			panic(err)
-		}
-		in.SetEtcdClient(etcd)
 		err = in.Run()
 		if err != nil {
 			panic(err)
@@ -338,46 +335,46 @@ func TestProxy(t *testing.T) {
 	alias := "TestProxy"
 
 	rc := runRootCoord(ctx, localMsg)
-	log.Info("running RootCoord ...")
+	log.Info("running root coordinator ...")
 
 	if rc != nil {
 		defer func() {
 			err := rc.Stop()
 			assert.NoError(t, err)
-			log.Info("stop RootCoord")
+			log.Info("stop root coordinator")
 		}()
 	}
 
 	dc := runDataCoord(ctx, localMsg)
-	log.Info("running DataCoord ...")
+	log.Info("running data coordinator ...")
 
 	if dc != nil {
 		defer func() {
 			err := dc.Stop()
 			assert.NoError(t, err)
-			log.Info("stop DataCoord")
+			log.Info("stop data coordinator")
 		}()
 	}
 
 	dn := runDataNode(ctx, localMsg, alias)
-	log.Info("running DataNode ...")
+	log.Info("running data node ...")
 
 	if dn != nil {
 		defer func() {
 			err := dn.Stop()
 			assert.NoError(t, err)
-			log.Info("stop DataNode")
+			log.Info("stop data node")
 		}()
 	}
 
 	qc := runQueryCoord(ctx, localMsg)
-	log.Info("running QueryCoord ...")
+	log.Info("running query coordinator ...")
 
 	if qc != nil {
 		defer func() {
 			err := qc.Stop()
 			assert.NoError(t, err)
-			log.Info("stop QueryCoord")
+			log.Info("stop query coordinator")
 		}()
 	}
 
@@ -393,24 +390,24 @@ func TestProxy(t *testing.T) {
 	}
 
 	ic := runIndexCoord(ctx, localMsg)
-	log.Info("running IndexCoord ...")
+	log.Info("running index coordinator ...")
 
 	if ic != nil {
 		defer func() {
 			err := ic.Stop()
 			assert.NoError(t, err)
-			log.Info("stop IndexCoord")
+			log.Info("stop index coordinator")
 		}()
 	}
 
 	in := runIndexNode(ctx, localMsg, alias)
-	log.Info("running IndexNode ...")
+	log.Info("running index node ...")
 
 	if in != nil {
 		defer func() {
 			err := in.Stop()
 			assert.NoError(t, err)
-			log.Info("stop IndexNode")
+			log.Info("stop index node")
 		}()
 	}
 
@@ -420,13 +417,9 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
 	Params.Init()
-	log.Info("Initialize parameter table of Proxy")
+	log.Info("Initialize parameter table of proxy")
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	defer etcdcli.Close()
-	assert.NoError(t, err)
-	proxy.SetEtcdClient(etcdcli)
-	rootCoordClient, err := rcc.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	rootCoordClient, err := rcc.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = rootCoordClient.Init()
 	assert.NoError(t, err)
@@ -435,7 +428,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetRootCoordClient(rootCoordClient)
 	log.Info("Proxy set root coordinator client")
 
-	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = dataCoordClient.Init()
 	assert.NoError(t, err)
@@ -444,7 +437,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetDataCoordClient(dataCoordClient)
 	log.Info("Proxy set data coordinator client")
 
-	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = queryCoordClient.Init()
 	assert.NoError(t, err)
@@ -453,7 +446,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetQueryCoordClient(queryCoordClient)
 	log.Info("Proxy set query coordinator client")
 
-	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, Params.ProxyCfg.EtcdEndpoints)
 	assert.NoError(t, err)
 	err = indexCoordClient.Init()
 	assert.NoError(t, err)
@@ -463,6 +456,7 @@ func TestProxy(t *testing.T) {
 	log.Info("Proxy set index coordinator client")
 
 	proxy.UpdateStateCode(internalpb.StateCode_Initializing)
+
 	err = proxy.Init()
 	assert.NoError(t, err)
 
@@ -1258,32 +1252,6 @@ func TestProxy(t *testing.T) {
 		})
 
 		wg.Add(1)
-		t.Run("search_travel", func(t *testing.T) {
-			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration-100) * time.Second)
-			travelTs := tsoutil.ComposeTSByTime(past, 0)
-			req := constructSearchRequest()
-			req.TravelTimestamp = travelTs
-			//resp, err := proxy.Search(ctx, req)
-			res, err := proxy.Search(ctx, req)
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
-		})
-
-		wg.Add(1)
-		t.Run("search_travel_succ", func(t *testing.T) {
-			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration+100) * time.Second)
-			travelTs := tsoutil.ComposeTSByTime(past, 0)
-			req := constructSearchRequest()
-			req.TravelTimestamp = travelTs
-			//resp, err := proxy.Search(ctx, req)
-			res, err := proxy.Search(ctx, req)
-			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
-		})
-
-		wg.Add(1)
 		t.Run("query", func(t *testing.T) {
 			defer wg.Done()
 			//resp, err := proxy.Query(ctx, &milvuspb.QueryRequest{
@@ -1301,46 +1269,6 @@ func TestProxy(t *testing.T) {
 			// FIXME(dragondriver)
 			// assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 			// TODO(dragondriver): compare query result
-		})
-
-		wg.Add(1)
-		t.Run("query_travel", func(t *testing.T) {
-			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration-100) * time.Second)
-			travelTs := tsoutil.ComposeTSByTime(past, 0)
-			queryReq := &milvuspb.QueryRequest{
-				Base:               nil,
-				DbName:             dbName,
-				CollectionName:     collectionName,
-				Expr:               expr,
-				OutputFields:       nil,
-				PartitionNames:     nil,
-				TravelTimestamp:    travelTs,
-				GuaranteeTimestamp: 0,
-			}
-			res, err := proxy.Query(ctx, queryReq)
-			assert.NoError(t, err)
-			assert.NotEqual(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
-		})
-
-		wg.Add(1)
-		t.Run("query_travel_succ", func(t *testing.T) {
-			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration+100) * time.Second)
-			travelTs := tsoutil.ComposeTSByTime(past, 0)
-			queryReq := &milvuspb.QueryRequest{
-				Base:               nil,
-				DbName:             dbName,
-				CollectionName:     collectionName,
-				Expr:               expr,
-				OutputFields:       nil,
-				PartitionNames:     nil,
-				TravelTimestamp:    travelTs,
-				GuaranteeTimestamp: 0,
-			}
-			res, err := proxy.Query(ctx, queryReq)
-			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_EmptyCollection, res.Status.ErrorCode)
 		})
 	}
 

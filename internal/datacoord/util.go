@@ -19,8 +19,10 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
@@ -40,7 +42,7 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 	switch resp := response.(type) {
 	case Response:
-		// note that resp will not be nil here, since it's still an interface
+		// note that resp will not be nil here, since it's still a interface
 		if resp.GetStatus() == nil {
 			return errNilStatusResponse
 		}
@@ -66,6 +68,54 @@ func FailResponse(status *commonpb.Status, reason string) {
 	status.Reason = reason
 }
 
+// LongTermChecker checks we receive at least one msg in d duration. If not, checker
+// will print a warn message.
+type LongTermChecker struct {
+	d    time.Duration
+	t    *time.Ticker
+	ch   chan struct{}
+	warn string
+	name string
+}
+
+// NewLongTermChecker creates a long term checker specified name, checking interval and warning string to print
+func NewLongTermChecker(ctx context.Context, name string, d time.Duration, warn string) *LongTermChecker {
+	c := &LongTermChecker{
+		name: name,
+		d:    d,
+		warn: warn,
+		ch:   make(chan struct{}),
+	}
+	return c
+}
+
+// Start starts the check process
+func (c *LongTermChecker) Start() {
+	c.t = time.NewTicker(c.d)
+	go func() {
+		for {
+			select {
+			case <-c.ch:
+				log.Warn(fmt.Sprintf("long term checker [%s] shutdown", c.name))
+				return
+			case <-c.t.C:
+				log.Warn(c.warn)
+			}
+		}
+	}()
+}
+
+// Check resets the time ticker
+func (c *LongTermChecker) Check() {
+	c.t.Reset(c.d)
+}
+
+// Stop stops the checker
+func (c *LongTermChecker) Stop() {
+	c.t.Stop()
+	close(c.ch)
+}
+
 func getTimetravelReverseTime(ctx context.Context, allocator allocator) (*timetravel, error) {
 	ts, err := allocator.allocTimestamp(ctx)
 	if err != nil {
@@ -73,7 +123,7 @@ func getTimetravelReverseTime(ctx context.Context, allocator allocator) (*timetr
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
-	ttpts := pts.Add(-time.Duration(Params.DataCoordCfg.RetentionDuration) * time.Second)
+	ttpts := pts.Add(-time.Duration(Params.DataCoordCfg.CompactionRetentionDuration) * time.Second)
 	tt := tsoutil.ComposeTS(ttpts.UnixNano()/int64(time.Millisecond), 0)
 	return &timetravel{tt}, nil
 }

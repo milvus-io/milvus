@@ -83,7 +83,7 @@ func (writer *baseBinlogWriter) GetBinlogType() BinlogType {
 	return writer.binlogType
 }
 
-// GetBuffer gets binlog buffer. Return nil if binlog is not finished yet.
+// GetBuffer get binlog buffer. Return nil if binlog is not finished yet.
 func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 	if writer.buffer == nil {
 		return nil, fmt.Errorf("please close binlog before get buffer")
@@ -91,7 +91,7 @@ func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 	return writer.buffer.Bytes(), nil
 }
 
-// Finish allocates buffer and releases resource
+// Finish allocate buffer and release resource
 func (writer *baseBinlogWriter) Finish() error {
 	if writer.buffer != nil {
 		return nil

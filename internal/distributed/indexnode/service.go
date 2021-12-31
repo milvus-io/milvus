@@ -33,12 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -48,7 +46,7 @@ var Params paramtable.GrpcServerConfig
 
 // Server is the grpc wrapper of IndexNode.
 type Server struct {
-	indexnode types.IndexNodeComponent
+	indexnode types.IndexNode
 
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
@@ -57,8 +55,7 @@ type Server struct {
 	loopCancel func()
 	loopWg     sync.WaitGroup
 
-	etcdCli *clientv3.Client
-	closer  io.Closer
+	closer io.Closer
 }
 
 // Run initializes and starts IndexNode's grpc service.
@@ -145,13 +142,6 @@ func (s *Server) init() error {
 		return err
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&indexnode.Params.BaseParams)
-	if err != nil {
-		log.Debug("IndexNode connect to etcd failed", zap.Error(err))
-		return err
-	}
-	s.etcdCli = etcdCli
-	s.indexnode.SetEtcdClient(etcdCli)
 	err = s.indexnode.Init()
 	if err != nil {
 		log.Error("IndexNode Init failed", zap.Error(err))
@@ -188,9 +178,6 @@ func (s *Server) Stop() error {
 	if s.indexnode != nil {
 		s.indexnode.Stop()
 	}
-	if s.etcdCli != nil {
-		defer s.etcdCli.Close()
-	}
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
@@ -201,14 +188,9 @@ func (s *Server) Stop() error {
 }
 
 // SetClient sets the IndexNode's instance.
-func (s *Server) SetClient(indexNodeClient types.IndexNodeComponent) error {
+func (s *Server) SetClient(indexNodeClient types.IndexNode) error {
 	s.indexnode = indexNodeClient
 	return nil
-}
-
-// SetEtcdClient sets the etcd client for QueryNode component.
-func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
-	s.indexnode.SetEtcdClient(etcdCli)
 }
 
 // GetComponentStates gets the component states of IndexNode.

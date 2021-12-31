@@ -144,7 +144,6 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 				SubscriptionName:            subName,
 				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
-				BufSize:                     ms.bufSize,
 			})
 			if err != nil {
 				return err
@@ -715,7 +714,6 @@ func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName strin
 				SubscriptionName:            subName,
 				Type:                        mqclient.Exclusive,
 				SubscriptionInitialPosition: position,
-				BufSize:                     ms.bufSize,
 			})
 			if err != nil {
 				return err
@@ -766,7 +764,6 @@ func (ms *MqTtMsgStream) Close() {
 			reader.Close()
 		}
 	}
-	ms.client.Close()
 }
 
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -33,14 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
-)
-
-var (
-	// TODO: better to be configurable
-	enableTtChecker        = true
-	timeTickSyncTtInterval = 2 * time.Minute
-	ttCheckerName          = "rootTtChecker"
-	ttCheckerWarnMsg       = fmt.Sprintf("RootCoord haven't synchronized the time tick for %f minutes", timeTickSyncTtInterval.Minutes())
 )
 
 type timetickSync struct {
@@ -150,7 +141,7 @@ func (t *timetickSync) sendToChannel() {
 		// give warning every 2 second if not get ttMsg from proxy nodes
 		if maxCnt%10 == 0 {
 			log.Warn("proxy idle for long time", zap.Any("proxy list", idleProxyList),
-				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.Milliseconds()*maxCnt))
+				zap.Int64("idle time", int64(Params.RootCoordCfg.TimeTickInterval)*maxCnt))
 		}
 		return
 	}
@@ -284,14 +275,6 @@ func (t *timetickSync) getProxy(sess []*sessionutil.Session) {
 // StartWatch watch proxy node change and process all channels' timetick msg
 func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	defer wg.Done()
-
-	var checker *timerecord.LongTermChecker
-	if enableTtChecker {
-		checker = timerecord.NewLongTermChecker(t.ctx, ttCheckerName, timeTickSyncTtInterval, ttCheckerWarnMsg)
-		checker.Start()
-		defer checker.Stop()
-	}
-
 	for {
 		select {
 		case <-t.ctx.Done():
@@ -307,10 +290,6 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			local := proxyTimetick[t.session.ServerID]
 			if len(local.chanTs) == 0 {
 				continue
-			}
-
-			if enableTtChecker {
-				checker.Check()
 			}
 
 			hdr := fmt.Sprintf("send ts to %d channels", len(local.chanTs))
@@ -335,7 +314,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			wg.Wait()
 			span := tr.ElapseSpan()
 			// rootcoord send tt msg to all channels every 200ms by default
-			if span > Params.ProxyCfg.TimeTickInterval {
+			if span.Milliseconds() > int64(Params.RootCoordCfg.TimeTickInterval) {
 				log.Warn("rootcoord send tt to all channels too slowly",
 					zap.Int("chanNum", len(local.chanTs)), zap.Int64("span", span.Milliseconds()))
 			}

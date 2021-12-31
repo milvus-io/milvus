@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -132,10 +131,8 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	factory := msgstream.NewPmsFactory()
 	err := factory.SetParams(m)
 	assert.Nil(t, err)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryNodeCfg.EtcdEndpoints, Params.QueryNodeCfg.MetaRootPath)
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.QueryNodeCfg.MetaRootPath)
 
 	schema := genTestCollectionSchema(0, false, 2)
 	historicalReplica := newCollectionReplica(etcdKV)
@@ -692,10 +689,8 @@ func TestQueryCollection_AddPopUnsolvedMsg(t *testing.T) {
 
 func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
-	var wg sync.WaitGroup
-	wg.Add(1)
+
 	t.Run("test adjustByChangeInfo", func(t *testing.T) {
-		defer wg.Done()
 		qc, err := genSimpleQueryCollection(ctx, cancel)
 		assert.Nil(t, err)
 
@@ -715,9 +710,7 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 		assert.Len(t, ids, 0)
 	})
 
-	wg.Add(1)
 	t.Run("test mismatch collectionID when adjustByChangeInfo", func(t *testing.T) {
-		defer wg.Done()
 		qc, err := genSimpleQueryCollection(ctx, cancel)
 		assert.Nil(t, err)
 
@@ -730,9 +723,7 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 		qc.adjustByChangeInfo(segmentChangeInfos)
 	})
 
-	wg.Add(1)
 	t.Run("test no segment when adjustByChangeInfo", func(t *testing.T) {
-		defer wg.Done()
 		qc, err := genSimpleQueryCollection(ctx, cancel)
 		assert.Nil(t, err)
 
@@ -744,17 +735,13 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 
 		qc.adjustByChangeInfo(segmentChangeInfos)
 	})
-	wg.Wait()
 }
 
 func TestQueryCollection_search_while_release(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wgAll sync.WaitGroup
-	wgAll.Add(1)
 	t.Run("test search while release collection", func(t *testing.T) {
-		defer wgAll.Done()
 		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 		assert.NoError(t, err)
 
@@ -791,9 +778,7 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 		wg.Wait()
 	})
 
-	wgAll.Add(1)
 	t.Run("test search while release partition", func(t *testing.T) {
-		defer wgAll.Done()
 		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 		assert.NoError(t, err)
 
@@ -829,5 +814,4 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 		}
 		wg.Wait()
 	})
-	wgAll.Wait()
 }

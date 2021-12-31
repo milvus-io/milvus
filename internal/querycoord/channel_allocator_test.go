@@ -25,7 +25,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -33,13 +32,10 @@ import (
 func TestShuffleChannelsToQueryNode(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	defer etcdCli.Close()
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
-	clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, etcdCli)
-	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, Params.QueryCoordCfg.EtcdEndpoints)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true)
 	clusterSession.Register()
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)

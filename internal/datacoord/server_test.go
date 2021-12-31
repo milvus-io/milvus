@@ -37,8 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -613,7 +613,8 @@ func TestGetFlushedSegments(t *testing.T) {
 
 func TestService_WatchServices(t *testing.T) {
 	factory := msgstream.NewPmsFactory()
-	svr := CreateServer(context.TODO(), factory)
+	svr, err := CreateServer(context.TODO(), factory)
+	assert.Nil(t, err)
 	svr.serverLoopWg.Add(1)
 
 	ech := make(chan *sessionutil.SessionEvent)
@@ -1521,7 +1522,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1564,7 +1565,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1592,7 +1593,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1620,7 +1621,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1698,7 +1699,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
 
@@ -1953,7 +1954,7 @@ func TestOptions(t *testing.T) {
 	t.Run("SetRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoord, error) {
+		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, endpoints []string) (types.RootCoord, error) {
 			return nil, errors.New("dummy")
 		}
 		opt := SetRootCoordCreator(crt)
@@ -1991,7 +1992,8 @@ func TestOptions(t *testing.T) {
 
 		factory := msgstream.NewPmsFactory()
 
-		svr := CreateServer(context.TODO(), factory, opt)
+		svr, err := CreateServer(context.TODO(), factory, opt)
+		assert.Nil(t, err)
 		dn, err := svr.dataNodeCreator(context.Background(), "")
 		assert.Nil(t, dn)
 		assert.Nil(t, err)
@@ -2244,18 +2246,18 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	err = factory.SetParams(m)
 	assert.Nil(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := initEtcd(Params.DataCoordCfg.EtcdEndpoints)
 	assert.Nil(t, err)
 	sessKey := path.Join(Params.DataCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr := CreateServer(context.TODO(), factory, opts...)
-	svr.SetEtcdClient(etcdCli)
+	svr, err := CreateServer(context.TODO(), factory, opts...)
+	assert.Nil(t, err)
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, receiveCh)
 	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdEndpoints []string) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
 	assert.Nil(t, err)
@@ -2273,4 +2275,21 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 	err = svr.CleanMeta()
 	assert.Nil(t, err)
+}
+
+func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
+	var etcdCli *clientv3.Client
+	connectEtcdFn := func() error {
+		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
+		if err != nil {
+			return err
+		}
+		etcdCli = etcd
+		return nil
+	}
+	err := retry.Do(context.TODO(), connectEtcdFn, retry.Attempts(300))
+	if err != nil {
+		return nil, err
+	}
+	return etcdCli, nil
 }

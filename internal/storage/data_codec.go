@@ -105,7 +105,6 @@ func (b Blob) GetValue() []byte {
 	return b.Value
 }
 
-// FieldData defines field data interface
 type FieldData interface {
 	GetMemorySize() int
 	RowNum() int
@@ -198,17 +197,14 @@ func (data *Int8FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
-// GetMemorySize implements FieldData.GetMemorySize
 func (data *Int16FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
-// GetMemorySize implements FieldData.GetMemorySize
 func (data *Int32FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
-// GetMemorySize implements FieldData.GetMemorySize
 func (data *Int64FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }

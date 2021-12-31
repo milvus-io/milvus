@@ -40,6 +40,9 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.NotEqual(t, Params.PulsarAddress, "")
 		t.Logf("pulsar address = %s", Params.PulsarAddress)
 
+		assert.NotZero(t, len(Params.EtcdEndpoints))
+		t.Logf("etcd endpoints = %s", Params.EtcdEndpoints)
+
 		assert.NotEqual(t, Params.MetaRootPath, "")
 		t.Logf("meta root path = %s", Params.MetaRootPath)
 
@@ -76,6 +79,9 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.NotZero(t, Params.Timeout)
 		t.Logf("master timeout = %d", Params.Timeout)
 
+		assert.NotZero(t, Params.TimeTickInterval)
+		t.Logf("master timetickerInterval = %d", Params.TimeTickInterval)
+
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
 		t.Logf("created time: %v", Params.CreatedTime)
@@ -84,6 +90,8 @@ func TestGlobalParamTable(t *testing.T) {
 
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := GlobalParams.ProxyCfg
+
+		t.Logf("EtcdEndPoints: %v", Params.EtcdEndpoints)
 
 		t.Logf("MetaRootPath: %s", Params.MetaRootPath)
 
@@ -295,6 +303,9 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.Equal(t, name, "by-dev-dataNode-2")
 		log.Println("MsgChannelSubName:", name)
 
+		endpoints := Params.EtcdEndpoints
+		log.Println("EtcdEndpoints:", endpoints)
+
 		path1 = Params.MetaRootPath
 		log.Println("MetaRootPath:", path1)
 
@@ -327,6 +338,8 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("Address: %v", Params.Address)
 
 		t.Logf("Port: %v", Params.Port)
+
+		t.Logf("EtcdEndpoints: %v", Params.EtcdEndpoints)
 
 		t.Logf("KvRootPath: %v", Params.KvRootPath)
 
@@ -363,6 +376,8 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("NodeID: %v", Params.NodeID)
 
 		t.Logf("Alias: %v", Params.Alias)
+
+		t.Logf("EtcdEndpoints: %v", Params.EtcdEndpoints)
 
 		t.Logf("MetaRootPath: %v", Params.MetaRootPath)
 

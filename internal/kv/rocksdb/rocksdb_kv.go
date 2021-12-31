@@ -116,12 +116,12 @@ func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	}
 	option := gorocksdb.NewDefaultReadOptions()
 	defer option.Destroy()
-	iter := NewRocksIteratorWithUpperBound(kv.DB, typeutil.AddOne(prefix), option)
+	iter := kv.DB.NewIterator(option)
 	defer iter.Close()
-
-	var keys, values []string
+	keys := make([]string, 0)
+	values := make([]string, 0)
 	iter.Seek([]byte(prefix))
-	for ; iter.Valid(); iter.Next() {
+	for ; iter.ValidForPrefix([]byte(prefix)); iter.Next() {
 		key := iter.Key()
 		value := iter.Value()
 		keys = append(keys, string(key.Data()))
@@ -193,7 +193,7 @@ func (kv *RocksdbKV) RemoveWithPrefix(prefix string) error {
 		// better to use drop column family, but as we use default column family, we just delete ["",lastKey+1)
 		readOpts := gorocksdb.NewDefaultReadOptions()
 		defer readOpts.Destroy()
-		iter := NewRocksIterator(kv.DB, readOpts)
+		iter := kv.DB.NewIterator(readOpts)
 		defer iter.Close()
 		// seek to the last key
 		iter.SeekToLast()

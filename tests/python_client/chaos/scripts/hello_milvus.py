@@ -17,7 +17,7 @@ from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection
 )
-TIMEOUT = 120
+
 
 def hello_milvus(host="127.0.0.1"):
     import time
@@ -54,13 +54,13 @@ def hello_milvus(host="127.0.0.1"):
         ]
     )
     t1 = time.time()
-    print(f"\nInsert {nb} vectors cost {t1 - t0:.4f} seconds")
+    print(f"\nInsert {nb} vectors cost {t1 - t0} seconds")
 
     t0 = time.time()
     print(f"\nGet collection entities...")
     print(collection.num_entities)
     t1 = time.time()
-    print(f"\nGet collection entities cost {t1 - t0:.4f} seconds")
+    print(f"\nGet collection entities cost {t1 - t0} seconds")
 
     # create index and load table
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -68,36 +68,36 @@ def hello_milvus(host="127.0.0.1"):
     t0 = time.time()
     collection.create_index(field_name="float_vector", index_params=default_index)
     t1 = time.time()
-    print(f"\nCreate index cost {t1 - t0:.4f} seconds")
+    print(f"\nCreate index cost {t1 - t0} seconds")
     print(f"\nload collection...")
     t0 = time.time()
     collection.load()
     t1 = time.time()
-    print(f"\nload collection cost {t1 - t0:.4f} seconds")
+    print(f"\nload collection cost {t1 - t0} seconds")
 
     # load and search
     topK = 5
     search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
-    t0 = time.time()
+    start_time = time.time()
     print(f"\nSearch...")
     # define output_fields of search result
     res = collection.search(
         vectors[-2:], "float_vector", search_params, topK,
-        "count > 100", output_fields=["count", "random_value"], timeout=TIMEOUT
+        "count > 100", output_fields=["count", "random_value"]
     )
-    t1 = time.time()
-    print(f"search cost  {t1 - t0:.4f} seconds")
+    end_time = time.time()
+
     # show result
     for hits in res:
         for hit in hits:
             # Get value of the random value field for search result
             print(hit, hit.entity.get("random_value"))
-
+    print("search latency = %.4fs" % (end_time - start_time))
 
     # query
     expr = "count in [2,4,6,8]"
     output_fields = ["count", "random_value"]
-    res = collection.query(expr, output_fields, timeout=TIMEOUT)
+    res = collection.query(expr, output_fields)
     sorted_res = sorted(res, key=lambda k: k['count'])
     for r in sorted_res:
         print(r)

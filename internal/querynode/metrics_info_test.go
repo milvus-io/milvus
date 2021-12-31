@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
@@ -35,10 +34,7 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.NoError(t, err)
-	defer etcdCli.Close()
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.QueryNodeCfg.MetaRootPath, etcdCli)
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.QueryNodeCfg.MetaRootPath, Params.QueryNodeCfg.EtcdEndpoints)
 
 	req := &milvuspb.GetMetricsRequest{
 		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),

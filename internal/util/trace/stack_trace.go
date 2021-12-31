@@ -16,16 +16,13 @@ import (
 	"runtime"
 )
 
-const (
-	numFuncsInStack = 10
-	frameNumToSkip  = 2
-)
+const numFuncsInStack = 10
 
 // StackTraceMsg returns the stack information, which numFuncs means how many functions do you want to show in the stack
 // information.
 func StackTraceMsg(numFuncs uint) string {
 	pc := make([]uintptr, numFuncs)
-	n := runtime.Callers(frameNumToSkip, pc)
+	n := runtime.Callers(0, pc)
 	frames := runtime.CallersFrames(pc[:n])
 
 	ret := ""

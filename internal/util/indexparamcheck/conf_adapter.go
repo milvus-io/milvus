@@ -163,7 +163,6 @@ type IVFPQConfAdapter struct {
 	IVFConfAdapter
 }
 
-// CheckTrain checks if ivf-pq index can be built with the specific index parameters.
 func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !adapter.IVFConfAdapter.CheckTrain(params) {
 		return false
@@ -253,7 +252,6 @@ func newIVFSQConfAdapter() *IVFSQConfAdapter {
 type BinIDMAPConfAdapter struct {
 }
 
-// CheckTrain checks if a binary flat index can be built with the specific parameters.
 func (adapter *BinIDMAPConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
@@ -271,7 +269,6 @@ func newBinIDMAPConfAdapter() *BinIDMAPConfAdapter {
 type BinIVFConfAdapter struct {
 }
 
-// CheckTrain checks if a binary ivf index can be built with specific parameters.
 func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
