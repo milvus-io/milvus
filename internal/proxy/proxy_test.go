@@ -360,7 +360,7 @@ func TestProxy(t *testing.T) {
 	}
 
 	dn := runDataNode(ctx, localMsg, alias)
-	log.Info("running data node ...")
+	log.Info("running DataNode ...")
 
 	if dn != nil {
 		defer func() {
