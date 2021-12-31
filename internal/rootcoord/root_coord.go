@@ -623,16 +623,12 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		if binlog.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return nil, fmt.Errorf("getInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
 		}
-		binlogPaths := make([]string, 0)
 		for i := range binlog.FieldIDs {
 			if binlog.FieldIDs[i] == fieldID {
-				binlogPaths = append(binlogPaths, binlog.Paths[i].Values...)
+				return binlog.Paths[i].Values, nil
 			}
 		}
-		if len(binlogPaths) == 0 {
-			return nil, fmt.Errorf("binlog file does not exist, segment id = %d, field id = %d", segID, fieldID)
-		}
-		return binlogPaths, nil
+		return nil, fmt.Errorf("binlog file does not exist, segment id = %d, field id = %d", segID, fieldID)
 	}
 
 	c.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (retRows int64, retErr error) {
@@ -930,24 +926,17 @@ func (c *Core) Register() error {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
-		if c.session.TriggerKill {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
-		}
+		syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 	})
 	return nil
 }
 
-// SetEtcdClient sets the etcdCli of Core
-func (c *Core) SetEtcdClient(etcdClient *clientv3.Client) {
-	c.etcdCli = etcdClient
-}
-
 func (c *Core) initSession() error {
-	c.session = sessionutil.NewSession(c.ctx, Params.RootCoordCfg.MetaRootPath, c.etcdCli)
+	c.session = sessionutil.NewSession(c.ctx, Params.RootCoordCfg.MetaRootPath, Params.RootCoordCfg.EtcdEndpoints)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	c.session.Init(typeutil.RootCoordRole, Params.RootCoordCfg.Address, true, true)
+	c.session.Init(typeutil.RootCoordRole, Params.RootCoordCfg.Address, true)
 	Params.BaseParams.SetLogger(c.session.ServerID)
 	return nil
 }
@@ -957,7 +946,7 @@ func (c *Core) Init() error {
 	var initError error
 	if c.kvBaseCreate == nil {
 		c.kvBaseCreate = func(root string) (kv.TxnKV, error) {
-			return etcdkv.NewEtcdKV(c.etcdCli, root), nil
+			return etcdkv.NewEtcdKV(Params.RootCoordCfg.EtcdEndpoints, root)
 		}
 	}
 	c.initOnce.Do(func() {
@@ -967,6 +956,10 @@ func (c *Core) Init() error {
 			return
 		}
 		connectEtcdFn := func() error {
+			if c.etcdCli, initError = clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints, DialTimeout: 5 * time.Second}); initError != nil {
+				log.Error("RootCoord failed to new Etcd client", zap.Any("reason", initError))
+				return initError
+			}
 			if c.kvBase, initError = c.kvBaseCreate(Params.RootCoordCfg.KvRootPath); initError != nil {
 				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
@@ -996,7 +989,10 @@ func (c *Core) Init() error {
 		}
 
 		log.Debug("RootCoord, Setting TSO and ID Allocator")
-		kv := tsoutil.NewTSOKVBase(c.etcdCli, Params.RootCoordCfg.KvRootPath, "gid")
+		kv, initError := tsoutil.NewTSOKVBase(Params.RootCoordCfg.EtcdEndpoints, Params.RootCoordCfg.KvRootPath, "gid")
+		if initError != nil {
+			return
+		}
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", kv)
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
@@ -1008,7 +1004,10 @@ func (c *Core) Init() error {
 			return idAllocator.UpdateID()
 		}
 
-		kv = tsoutil.NewTSOKVBase(c.etcdCli, Params.RootCoordCfg.KvRootPath, "tso")
+		kv, initError = tsoutil.NewTSOKVBase(Params.RootCoordCfg.EtcdEndpoints, Params.RootCoordCfg.KvRootPath, "tso")
+		if initError != nil {
+			return
+		}
 		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", kv)
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
@@ -1034,12 +1033,15 @@ func (c *Core) Init() error {
 		c.proxyClientManager = newProxyClientManager(c)
 
 		log.Debug("RootCoord, set proxy manager")
-		c.proxyManager = newProxyManager(
+		c.proxyManager, initError = newProxyManager(
 			c.ctx,
-			c.etcdCli,
+			Params.RootCoordCfg.EtcdEndpoints,
 			c.chanTimeTick.getProxy,
 			c.proxyClientManager.GetProxyClients,
 		)
+		if initError != nil {
+			return
+		}
 		c.proxyManager.AddSession(c.chanTimeTick.addProxy, c.proxyClientManager.AddProxyClient)
 		c.proxyManager.DelSession(c.chanTimeTick.delProxy, c.proxyClientManager.DelProxyClient)
 
@@ -1803,6 +1805,9 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 			Count:  in.Count,
 		}, nil
 	}
+	log.Debug("AllocID success", zap.String("role", typeutil.RootCoordRole),
+		zap.Int64("id start", start), zap.Uint32("count", in.Count), zap.Int64("msgID", in.Base.MsgID))
+
 	return &rootcoordpb.AllocIDResponse{
 		Status: succStatus(),
 		ID:     start,

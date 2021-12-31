@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
 
-// TODO(dragondriver): add more detailed metrics
+// TODO(dragondriver): add more detail metrics
 func getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,

@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -68,9 +67,6 @@ func (m *MockQueryCoord) Register() error {
 }
 
 func (m *MockQueryCoord) UpdateStateCode(code internalpb.StateCode) {
-}
-
-func (m *MockQueryCoord) SetEtcdClient(client *clientv3.Client) {
 }
 
 func (m *MockQueryCoord) SetRootCoord(types.RootCoord) error {

@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
 func successResult() error { return nil }
@@ -64,10 +63,8 @@ func (tk *testKv) Load(key string) (string, error) {
 
 func TestReplica_Release(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdKV, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 	meta, err := newMeta(context.Background(), etcdKV, nil, nil)
 	assert.Nil(t, err)
 	err = meta.addCollection(1, querypb.LoadType_loadCollection, nil)
@@ -96,10 +93,8 @@ func TestReplica_Release(t *testing.T) {
 
 func TestMetaFunc(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 
 	nodeID := defaultQueryNodeID
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
@@ -290,10 +285,8 @@ func TestMetaFunc(t *testing.T) {
 
 func TestReloadMetaFromKV(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	kv, err := etcdkv.NewEtcdKV(Params.QueryCoordCfg.EtcdEndpoints, Params.QueryCoordCfg.MetaRootPath)
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
 	meta := &MetaReplica{
 		client:            kv,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},

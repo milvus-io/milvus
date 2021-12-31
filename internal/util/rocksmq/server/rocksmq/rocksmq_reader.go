@@ -18,19 +18,18 @@ import (
 	"path"
 	"strconv"
 
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 )
 
 type rocksmqReader struct {
 	store      *gorocksdb.DB
 	topic      string
+	prefix     []byte
 	readerName string
 
 	readOpts *gorocksdb.ReadOptions
-	iter     *rocksdbkv.RocksIterator
+	iter     *gorocksdb.Iterator
 
 	currentID          UniqueID
 	messageIDInclusive bool
@@ -78,7 +77,7 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 		iter.Next()
 		rr.currentID = msgID
 	}
-	if iter.Valid() {
+	if iter.ValidForPrefix(rr.prefix) {
 		getMsg()
 		return msg, err
 	}
@@ -93,11 +92,11 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 			return nil, fmt.Errorf("reader Mutex closed")
 		}
 		rr.iter.Close()
-		rr.iter = rocksdbkv.NewRocksIteratorWithUpperBound(rr.store, typeutil.AddOne(rr.topic+"/"), rr.readOpts)
+		rr.iter = rr.store.NewIterator(rr.readOpts)
 		dataKey := path.Join(rr.topic, strconv.FormatInt(rr.currentID+1, 10))
 		iter = rr.iter
 		iter.Seek([]byte(dataKey))
-		if !iter.Valid() {
+		if !iter.ValidForPrefix(rr.prefix) {
 			return nil, errors.New("reader iterater is still invalid after receive mutex")
 		}
 		getMsg()
@@ -106,7 +105,7 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 }
 
 func (rr *rocksmqReader) HasNext() bool {
-	if rr.iter.Valid() {
+	if rr.iter.ValidForPrefix(rr.prefix) {
 		return true
 	}
 
@@ -116,10 +115,10 @@ func (rr *rocksmqReader) HasNext() bool {
 			return false
 		}
 		rr.iter.Close()
-		rr.iter = rocksdbkv.NewRocksIteratorWithUpperBound(rr.store, typeutil.AddOne(rr.topic+"/"), rr.readOpts)
+		rr.iter = rr.store.NewIterator(rr.readOpts)
 		dataKey := path.Join(rr.topic, strconv.FormatInt(rr.currentID+1, 10))
 		rr.iter.Seek([]byte(dataKey))
-		return rr.iter.Valid()
+		return rr.iter.ValidForPrefix(rr.prefix)
 	default:
 		return false
 	}

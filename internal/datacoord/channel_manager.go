@@ -21,12 +21,11 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-	"stathat.com/c/consistent"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
+	"stathat.com/c/consistent"
 )
 
 const (
@@ -118,7 +117,7 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 		zap.Any("nodes", nodes),
 		zap.Any("olds", olds),
 		zap.Int64s("new onlines", newOnlines),
-		zap.Int64s("offLines", offlines))
+		zap.Int64s("offlines", offlines))
 	return nil
 }
 

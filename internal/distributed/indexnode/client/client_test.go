@@ -26,16 +26,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 )
-
-var ParamsGlobal paramtable.GlobalParamTable
 
 func Test_NewClient(t *testing.T) {
 	ClientParams.InitOnce(typeutil.IndexNodeRole)
@@ -127,10 +123,6 @@ func TestIndexNodeClient(t *testing.T) {
 	assert.NotNil(t, ins)
 
 	inm := &indexnode.Mock{}
-	ParamsGlobal.InitOnce()
-	etcdCli, err := etcd.GetEtcdClient(&ParamsGlobal.BaseParams)
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
 	err = ins.SetClient(inm)
 	assert.Nil(t, err)
 

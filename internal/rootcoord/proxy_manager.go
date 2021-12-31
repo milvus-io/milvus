@@ -46,16 +46,20 @@ type proxyManager struct {
 // newProxyManager helper function to create a proxyManager
 // etcdEndpoints is the address list of etcd
 // fns are the custom getSessions function list
-func newProxyManager(ctx context.Context, client *clientv3.Client, fns ...func([]*sessionutil.Session)) *proxyManager {
+func newProxyManager(ctx context.Context, etcdEndpoints []string, fns ...func([]*sessionutil.Session)) (*proxyManager, error) {
+	cli, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints})
+	if err != nil {
+		return nil, err
+	}
 	ctx2, cancel2 := context.WithCancel(ctx)
 	p := &proxyManager{
 		ctx:     ctx2,
 		cancel:  cancel2,
 		lock:    sync.Mutex{},
-		etcdCli: client,
+		etcdCli: cli,
 	}
 	p.getSessions = append(p.getSessions, fns...)
-	return p
+	return p, nil
 }
 
 // AddSession adds functions to addSessions function list

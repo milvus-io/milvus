@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 
@@ -63,11 +62,7 @@ func TestMain(t *testing.M) {
 func TestDataNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	node.SetEtcdClient(etcdCli)
-	err = node.Init()
+	err := node.Init()
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
@@ -169,7 +164,6 @@ func TestDataNode(t *testing.T) {
 		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
 
 		node1 := newIDLEDataNodeMock(context.TODO())
-		node1.SetEtcdClient(etcdCli)
 		err = node1.Init()
 		assert.Nil(t, err)
 		err = node1.Start()
@@ -481,11 +475,7 @@ func TestDataNode(t *testing.T) {
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	node.SetEtcdClient(etcdCli)
-	err = node.Init()
+	err := node.Init()
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
@@ -495,7 +485,8 @@ func TestWatchChannel(t *testing.T) {
 	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.DataNodeCfg.MetaRootPath)
+		kv, err := etcdkv.NewEtcdKV(Params.DataNodeCfg.EtcdEndpoints, Params.DataNodeCfg.MetaRootPath)
+		require.NoError(t, err)
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
 		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))

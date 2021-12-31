@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Mock is an alternative to IndexNode, it will return specific results based on specific parameters.
@@ -47,8 +46,7 @@ type Mock struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	etcdCli *clientv3.Client
-	etcdKV  *etcdkv.EtcdKV
+	etcdKV *etcdkv.EtcdKV
 
 	buildIndex chan *indexpb.CreateIndexRequest
 }
@@ -184,23 +182,14 @@ func (inm *Mock) Register() error {
 		return errors.New("IndexNode register failed")
 	}
 	Params.Init()
-	inm.etcdKV = etcdkv.NewEtcdKV(inm.etcdCli, Params.IndexNodeCfg.MetaRootPath)
+	inm.etcdKV, _ = etcdkv.NewEtcdKV(Params.IndexNodeCfg.EtcdEndpoints, Params.IndexNodeCfg.MetaRootPath)
 	if err := inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole); err != nil {
 		return err
 	}
-	session := sessionutil.NewSession(context.Background(), Params.IndexNodeCfg.MetaRootPath, inm.etcdCli)
-	session.Init(typeutil.IndexNodeRole, "localhost:21121", false, false)
+	session := sessionutil.NewSession(context.Background(), Params.IndexNodeCfg.MetaRootPath, Params.IndexNodeCfg.EtcdEndpoints)
+	session.Init(typeutil.IndexNodeRole, "localhost:21121", false)
 	session.Register()
 	return nil
-}
-
-// SetClient sets the IndexNode's instance.
-func (inm *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
-}
-
-// SetEtcdClient assigns parameter client to its member etcdCli
-func (inm *Mock) SetEtcdClient(client *clientv3.Client) {
-	inm.etcdCli = client
 }
 
 // GetComponentStates gets the component states of the mocked IndexNode, if the internal member `Err` is true, it will return an error,

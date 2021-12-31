@@ -18,7 +18,6 @@ package querynode
 
 import (
 	"context"
-	"fmt"
 
 	"go.uber.org/zap"
 
@@ -38,7 +37,7 @@ type serviceTimeNode struct {
 
 // Name returns the name of serviceTimeNode
 func (stNode *serviceTimeNode) Name() string {
-	return fmt.Sprintf("stNode-%d-%s", stNode.collectionID, stNode.vChannel)
+	return "stNode"
 }
 
 // Close would close serviceTimeNode

@@ -117,7 +117,6 @@ func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueI
 	}
 }
 
-// // retrieve will retrieve from the segments in historical
 func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.ChunkManager,
 	plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 

@@ -27,12 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
-
-var ParamsGlobal paramtable.GlobalParamTable
 
 func TestIndexNodeServer(t *testing.T) {
 	ctx := context.Background()
@@ -41,10 +37,6 @@ func TestIndexNodeServer(t *testing.T) {
 	assert.NotNil(t, server)
 
 	inm := &indexnode.Mock{}
-	ParamsGlobal.InitOnce()
-	etcdCli, err := etcd.GetEtcdClient(&ParamsGlobal.BaseParams)
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
 	err = server.SetClient(inm)
 	assert.Nil(t, err)
 

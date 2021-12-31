@@ -55,7 +55,6 @@ type taskQueue interface {
 	getMaxTaskNum() int64
 }
 
-// baseTaskQueue implements taskQueue.
 type baseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[UniqueID]task
@@ -373,7 +372,6 @@ func newDqTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInte
 	}
 }
 
-// taskScheduler schedules the gRPC tasks.
 type taskScheduler struct {
 	ddQueue *ddTaskQueue
 	dmQueue *dmTaskQueue
@@ -478,7 +476,6 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	}
 }
 
-// definitionLoop schedules the ddl tasks.
 func (sched *taskScheduler) definitionLoop() {
 	defer sched.wg.Done()
 	for {

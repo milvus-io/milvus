@@ -112,7 +112,7 @@ func (c *ClientBase) resetConnection(client interface{}) {
 func (c *ClientBase) connect(ctx context.Context) error {
 	addr, err := c.getAddrFunc()
 	if err != nil {
-		log.Error("failed to get client address", zap.Error(err))
+		log.Error("failed to get cclient address", zap.Error(err))
 		return err
 	}
 
@@ -208,7 +208,6 @@ func (c *ClientBase) Call(ctx context.Context, caller func(client interface{}) (
 	return ret, err
 }
 
-// ReCall does the grpc call twice
 func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error) {
 	if !funcutil.CheckCtxValid(ctx) {
 		return nil, ctx.Err()

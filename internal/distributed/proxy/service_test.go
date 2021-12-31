@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -615,9 +614,6 @@ func (m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoord) {
 
 func (m *MockProxy) UpdateStateCode(stateCode internalpb.StateCode) {
 
-}
-
-func (m *MockProxy) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
 func (m *MockProxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {

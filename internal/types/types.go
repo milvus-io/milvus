@@ -1,18 +1,12 @@
-// Licensed to the LF AI & Data foundation under one
-// or more contributor license agreements. See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership. The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
+// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Unless required by applicable law or agreed to in writing, software distributed under the License
+// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+// or implied. See the License for the specific language governing permissions and limitations under the License.
 
 package types
 
@@ -29,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -80,9 +73,6 @@ type DataNodeComponent interface {
 
 	// GetStateCode return state code of this data node
 	GetStateCode() internalpb.StateCode
-
-	// SetEtcdClient set etcd client for DataNode
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// SetRootCoord set RootCoord for DataNode
 	// `rootCoord` is a client of root coordinator.
@@ -258,15 +248,6 @@ type DataCoord interface {
 	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 }
 
-// DataCoordComponent defines the interface of DataCoord component.
-type DataCoordComponent interface {
-	DataCoord
-
-	// SetEtcdClient set EtcdClient for DataCoord
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
-}
-
 // IndexNode is the interface `indexnode` package implements
 type IndexNode interface {
 	Component
@@ -278,18 +259,6 @@ type IndexNode interface {
 
 	// GetMetrics gets the metrics about IndexNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-}
-
-// IndexNodeComponent is used by grpc server of IndexNode
-type IndexNodeComponent interface {
-	IndexNode
-
-	// SetEtcdClient set etcd client for QueryCoord
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
 // IndexCoord is the interface `indexcoord` package implements
@@ -316,18 +285,6 @@ type IndexCoord interface {
 
 	// GetMetrics gets the metrics about IndexCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-}
-
-// IndexCoordComponent is used by grpc server of IndexCoord
-type IndexCoordComponent interface {
-	IndexCoord
-
-	// SetEtcdClient set etcd client for QueryCoord
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
 // RootCoord is the interface `rootcoord` package implements
@@ -583,10 +540,6 @@ type RootCoord interface {
 type RootCoordComponent interface {
 	RootCoord
 
-	// SetEtcdClient set EtcdClient for RootCoord
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
-
 	// UpdateStateCode updates state code for RootCoord
 	// State includes: Initializing, Healthy and Abnormal
 	UpdateStateCode(internalpb.StateCode)
@@ -652,10 +605,6 @@ type Proxy interface {
 // ProxyComponent defines the interface of proxy component.
 type ProxyComponent interface {
 	Proxy
-
-	// SetEtcdClient set EtcdClient for Proxy
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// SetRootCoord set RootCoord for Proxy
 	// `rootCoord` is a client of root coordinator.
@@ -1072,9 +1021,6 @@ type QueryNodeComponent interface {
 	//  `stateCode` is current statement of this query node, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 
-	// SetEtcdClient set etcd client for QueryNode
-	SetEtcdClient(etcdClient *clientv3.Client)
-
 	// SetRootCoord set RootCoord for QueryNode
 	// `rootCoord` is a client of root coordinator. Pass to segmentLoader.
 	//
@@ -1116,9 +1062,6 @@ type QueryCoord interface {
 // QueryCoordComponent is used by grpc server of QueryCoord
 type QueryCoordComponent interface {
 	QueryCoord
-
-	// SetEtcdClient set etcd client for QueryCoord
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// UpdateStateCode updates state code for QueryCoord
 	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.

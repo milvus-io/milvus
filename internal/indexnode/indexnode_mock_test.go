@@ -21,13 +21,14 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,11 +37,7 @@ func TestIndexNodeMock(t *testing.T) {
 	inm := Mock{
 		Build: true,
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
-	defer etcdCli.Close()
-	err = inm.Register()
+	err := inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)
@@ -154,11 +151,8 @@ func TestIndexNodeMockFiled(t *testing.T) {
 		Build:   true,
 		Err:     false,
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
-	defer etcdCli.Close()
-	err = inm.Register()
+
+	err := inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)

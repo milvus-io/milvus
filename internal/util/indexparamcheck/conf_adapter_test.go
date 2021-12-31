@@ -65,7 +65,6 @@ func TestBaseConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
-// IVFConfAdapter checks if an ivf index can be built.
 func TestIVFConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
@@ -202,7 +201,6 @@ func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
-// BinIVFConfAdapter checks if a bin ivf index can be built.
 func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
@@ -336,7 +334,6 @@ func TestHNSWConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
-// ANNOYConfAdapter checks if an annoy index can be built
 func TestANNOYConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),

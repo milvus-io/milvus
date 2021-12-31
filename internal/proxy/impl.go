@@ -2341,6 +2341,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
+	queryRequest := &milvuspb.QueryRequest{
+		DbName:         request.DbName,
+		CollectionName: request.CollectionName,
+		PartitionNames: request.PartitionNames,
+		Expr:           request.Expr,
+		OutputFields:   request.OutputFields,
+	}
+
 	qt := &queryTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -2352,7 +2360,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			ResultChannelID: strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 		},
 		resultBuf: make(chan []*internalpb.RetrieveResults),
-		query:     request,
+		query:     queryRequest,
 		chMgr:     node.chMgr,
 		qc:        node.queryCoord,
 	}
@@ -2363,9 +2371,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames))
+		zap.String("db", queryRequest.DbName),
+		zap.String("collection", queryRequest.CollectionName),
+		zap.Any("partitions", queryRequest.PartitionNames))
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
 		log.Warn(
@@ -2373,9 +2381,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName),
-			zap.Any("partitions", request.PartitionNames))
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames))
 
 		return &milvuspb.QueryResults{
 			Status: &commonpb.Status{
@@ -2392,9 +2400,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		zap.Int64("MsgID", qt.ID()),
 		zap.Uint64("BeginTs", qt.BeginTs()),
 		zap.Uint64("EndTs", qt.EndTs()),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames))
+		zap.String("db", queryRequest.DbName),
+		zap.String("collection", queryRequest.CollectionName),
+		zap.Any("partitions", queryRequest.PartitionNames))
 
 	if err := qt.WaitToFinish(); err != nil {
 		log.Warn(
@@ -2405,9 +2413,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			zap.Int64("MsgID", qt.ID()),
 			zap.Uint64("BeginTs", qt.BeginTs()),
 			zap.Uint64("EndTs", qt.EndTs()),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName),
-			zap.Any("partitions", request.PartitionNames))
+			zap.String("db", queryRequest.DbName),
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames))
 
 		return &milvuspb.QueryResults{
 			Status: &commonpb.Status{
@@ -2424,9 +2432,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		zap.Int64("MsgID", qt.ID()),
 		zap.Uint64("BeginTs", qt.BeginTs()),
 		zap.Uint64("EndTs", qt.EndTs()),
-		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames))
+		zap.String("db", queryRequest.DbName),
+		zap.String("collection", queryRequest.CollectionName),
+		zap.Any("partitions", queryRequest.PartitionNames))
 
 	return &milvuspb.QueryResults{
 		Status:     qt.result.Status,
@@ -3526,7 +3534,6 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 	return resp, err
 }
 
-// ManualCompaction invokes compaction on specified collection
 func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	log.Info("received ManualCompaction request", zap.Int64("collectionID", req.GetCollectionID()))
 	resp := &milvuspb.ManualCompactionResponse{}

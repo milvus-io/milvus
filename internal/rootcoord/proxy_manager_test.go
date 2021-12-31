@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -32,23 +31,22 @@ import (
 
 func TestProxyManager(t *testing.T) {
 	Params.Init()
-
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	cli, err := clientv3.New(clientv3.Config{Endpoints: Params.RootCoordCfg.EtcdEndpoints})
 	assert.Nil(t, err)
-	defer etcdCli.Close()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	sessKey := path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
-	etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
-	defer etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
+	cli.Delete(ctx, sessKey, clientv3.WithPrefix())
+	defer cli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	s1 := sessionutil.Session{
 		ServerID: 100,
 	}
 	b1, err := json.Marshal(&s1)
 	assert.Nil(t, err)
 	k1 := path.Join(sessKey, typeutil.ProxyRole+"-100")
-	_, err = etcdCli.Put(ctx, k1, string(b1))
+	_, err = cli.Put(ctx, k1, string(b1))
 	assert.Nil(t, err)
 
 	s0 := sessionutil.Session{
@@ -57,7 +55,7 @@ func TestProxyManager(t *testing.T) {
 	b0, err := json.Marshal(&s0)
 	assert.Nil(t, err)
 	k0 := path.Join(sessKey, typeutil.ProxyRole+"-99")
-	_, err = etcdCli.Put(ctx, k0, string(b0))
+	_, err = cli.Put(ctx, k0, string(b0))
 	assert.Nil(t, err)
 
 	f1 := func(sess []*sessionutil.Session) {
@@ -66,7 +64,8 @@ func TestProxyManager(t *testing.T) {
 		assert.Equal(t, int64(99), sess[1].ServerID)
 		t.Log("get sessions", sess[0], sess[1])
 	}
-	pm := newProxyManager(ctx, etcdCli, f1)
+
+	pm, err := newProxyManager(ctx, Params.RootCoordCfg.EtcdEndpoints, f1)
 	assert.Nil(t, err)
 	fa := func(sess *sessionutil.Session) {
 		assert.Equal(t, int64(101), sess.ServerID)
@@ -89,10 +88,10 @@ func TestProxyManager(t *testing.T) {
 	b2, err := json.Marshal(&s2)
 	assert.Nil(t, err)
 	k2 := path.Join(sessKey, typeutil.ProxyRole+"-101")
-	_, err = etcdCli.Put(ctx, k2, string(b2))
+	_, err = cli.Put(ctx, k2, string(b2))
 	assert.Nil(t, err)
 
-	_, err = etcdCli.Delete(ctx, k1)
+	_, err = cli.Delete(ctx, k1)
 	assert.Nil(t, err)
 	time.Sleep(100 * time.Millisecond)
 	pm.Stop()

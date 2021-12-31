@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -108,9 +107,6 @@ func (m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPla
 	return m.status, m.err
 }
 
-func (m *MockDataNode) SetEtcdClient(client *clientv3.Client) {
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockDataCoord struct {
 	types.DataCoord
@@ -178,11 +174,11 @@ func Test_NewServer(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 
-	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoord, error) {
+	server.newRootCoordClient = func(string, []string) (types.RootCoord, error) {
 		return &mockRootCoord{}, nil
 	}
 
-	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoord, error) {
+	server.newDataCoordClient = func(string, []string) (types.DataCoord, error) {
 		return &mockDataCoord{}, nil
 	}
 
@@ -251,11 +247,11 @@ func Test_Run(t *testing.T) {
 		regErr: errors.New("error"),
 	}
 
-	server.newRootCoordClient = func(string, *clientv3.Client) (types.RootCoord, error) {
+	server.newRootCoordClient = func(string, []string) (types.RootCoord, error) {
 		return &mockRootCoord{}, nil
 	}
 
-	server.newDataCoordClient = func(string, *clientv3.Client) (types.DataCoord, error) {
+	server.newDataCoordClient = func(string, []string) (types.DataCoord, error) {
 		return &mockDataCoord{}, nil
 	}
 
