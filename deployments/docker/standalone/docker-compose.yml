@@ -29,7 +29,7 @@ services:
 
   standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v2.0.0-rc8-20211104-d1f4106
+    image: milvusdb/milvus:v2.0.0-pre-ga
     command: ["milvus", "run", "standalone"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
