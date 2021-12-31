@@ -151,6 +151,7 @@ type logKey int
 
 const logCtxKey logKey = iota
 
+// WithField adds given kv field to the logger in ctx
 func WithField(ctx context.Context, key string, value string) context.Context {
 	logger := log.L()
 	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
@@ -160,6 +161,7 @@ func WithField(ctx context.Context, key string, value string) context.Context {
 	return context.WithValue(ctx, logCtxKey, logger.With(zap.String(key, value)))
 }
 
+// WithReqID adds given reqID field to the logger in ctx
 func WithReqID(ctx context.Context, reqID int64) context.Context {
 	logger := log.L()
 	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
@@ -169,6 +171,7 @@ func WithReqID(ctx context.Context, reqID int64) context.Context {
 	return context.WithValue(ctx, logCtxKey, logger.With(zap.Int64("reqID", reqID)))
 }
 
+// WithModule adds given module field to the logger in ctx
 func WithModule(ctx context.Context, module string) context.Context {
 	logger := log.L()
 	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
