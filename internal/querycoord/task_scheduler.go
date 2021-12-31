@@ -381,8 +381,6 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			baseTask:                  baseTask,
 			WatchDeltaChannelsRequest: &loadReq,
 			cluster:                   scheduler.cluster,
-			meta:                      scheduler.meta,
-			excludeNodeIDs:            []int64{},
 		}
 		newTask = watchDeltaChannelTask
 	case commonpb.MsgType_WatchQueryChannels:
@@ -1062,9 +1060,7 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 			watchDeltaTask := &watchDeltaChannelTask{
 				baseTask:                  baseTask,
 				WatchDeltaChannelsRequest: watchDeltaRequest,
-				meta:                      meta,
 				cluster:                   cluster,
-				excludeNodeIDs:            []int64{},
 			}
 			derivedInternalTasks = append(derivedInternalTasks, watchDeltaTask)
 		}
