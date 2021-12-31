@@ -98,8 +98,8 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 		olds = append(olds, c.NodeID)
 	}
 
-	newOnlines := c.getNewOnlines(nodes, olds)
-	for _, n := range newOnlines {
+	newOnLines := c.getNewOnlines(nodes, olds)
+	for _, n := range newOnLines {
 		if err := c.AddNode(n); err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 	log.Debug("cluster start up",
 		zap.Any("nodes", nodes),
 		zap.Any("olds", olds),
-		zap.Int64s("new onlines", newOnlines),
+		zap.Int64s("new onlines", newOnLines),
 		zap.Int64s("offLines", offlines))
 	return nil
 }
