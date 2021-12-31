@@ -937,6 +937,7 @@ func (c *Core) Register() error {
 	return nil
 }
 
+// SetEtcdClient sets the etcdCli of Core
 func (c *Core) SetEtcdClient(etcdClient *clientv3.Client) {
 	c.etcdCli = etcdClient
 }
