@@ -41,7 +41,7 @@ See design details `${milvus_root}/internal/core/src/segcore/SegmentInterface.h`
    - given seg_offsets, calculate `results[i] = FieldData[seg_offsets[i]]`, for GetEntityByIds
    - FieldData is defined by FieldOffset or SystemField
 10. `search_ids(IdArray, timestamp) -> pair<IdArray, SegOffsets>`:
-    1. Find the corresponding segoffset according to the primary key in idarray
+    1. Find the corresponding segment offsets according to the primary key in an id array
     2. The returned order is not guaranteed, but the two returned fields must correspond to each other one by one.
     3. Entities without PKs will not be returned
 11. `check_search(Plan)`: check if the Plan is valid
