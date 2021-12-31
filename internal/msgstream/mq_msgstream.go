@@ -100,7 +100,7 @@ func NewMqMsgStream(ctx context.Context,
 func (ms *mqMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
-			log.Error("MsgStream asProducer's channel is a empty string")
+			log.Error("MsgStream asProducer's channel is an empty string")
 			break
 		}
 		fn := func() error {
