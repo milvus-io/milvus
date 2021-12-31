@@ -159,6 +159,7 @@ pipeline {
                                                     if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                         sh """ 
                                                         MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                        MILVUS_HELM_NAMESPACE="milvus-ci" \
                                                         MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                                         TEST_TIMEOUT="${e2e_timeout_seconds}" \
                                                         ./ci_e2e.sh  "--workers 4 --tags L0 L1 L2 --repeat-scope=session --random-order-bucket=global"
