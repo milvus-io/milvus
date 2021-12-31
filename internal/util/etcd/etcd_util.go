@@ -63,6 +63,7 @@ func StopEtcdServer() {
 	}
 }
 
+// GetEtcdClient returns etcd client
 func GetEtcdClient(pt *paramtable.BaseParamTable) (*clientv3.Client, error) {
 	if pt.UseEmbedEtcd {
 		return GetEmbedEtcdClient()
@@ -70,11 +71,13 @@ func GetEtcdClient(pt *paramtable.BaseParamTable) (*clientv3.Client, error) {
 	return GetRemoteEtcdClient(pt.EtcdEndpoints)
 }
 
+// GetEmbedEtcdClient returns client of embed etcd server
 func GetEmbedEtcdClient() (*clientv3.Client, error) {
 	client := v3client.New(EtcdServer.Server)
 	return client, nil
 }
 
+// GetRemoteEtcdClient returns client of remote etcd by given endpoints
 func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
 	return clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
