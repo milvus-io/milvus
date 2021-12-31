@@ -100,6 +100,7 @@ func (info *indexInfo) getIndexParams() map[string]string {
 	return info.indexParams
 }
 
+// getReadyLoad returns if index is ready to load
 func (info *indexInfo) getReadyLoad() bool {
 	return info.readyLoad
 }
