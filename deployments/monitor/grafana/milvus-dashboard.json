@@ -2087,7 +2087,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "0.95 quantile of Pulsar client producer rpc latency",
+      "description": "0.95 quantile of Pulsar client producer rpc latency.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
