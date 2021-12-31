@@ -24,9 +24,9 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
