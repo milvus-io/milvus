@@ -179,7 +179,10 @@ func (c *ClientBase) callOnce(ctx context.Context, caller func(client interface{
 		return nil, err
 	}
 
+	c.grpcClientMtx.RLock()
 	ret, err2 := caller(client)
+	c.grpcClientMtx.RUnlock()
+
 	if err2 == nil {
 		return ret, nil
 	}
