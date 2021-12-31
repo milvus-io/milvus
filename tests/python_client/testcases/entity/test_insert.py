@@ -120,6 +120,7 @@ class TestInsertBase:
         method: insert entities, sleep, and delete collection
         expected: has_collection false
         """
+        log.debug(f"test_insert_flush_drop_collection collection name: {collection}")
         result = connect.insert(collection, default_entity)
         assert len(result.primary_keys) == 1
         connect.flush([collection])
