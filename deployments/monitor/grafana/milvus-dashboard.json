@@ -2293,7 +2293,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Total cpu usage of all milvus components",
+      "description": "Total cpu usage of all milvus components.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
