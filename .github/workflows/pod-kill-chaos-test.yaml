@@ -177,7 +177,7 @@ jobs:
           kubectl get po -n chaos-testing
           # export k8s log for chaos mesh and milvus
           bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/data-consist-test
-          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon
+          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon k8s_logs/chaos-mesh-daemon
       
       - name: Upload logs
         if: ${{ always() }}

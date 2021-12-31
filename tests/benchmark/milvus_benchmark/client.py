@@ -254,9 +254,9 @@ class MilvusClient(object):
         status = self._milvus.compact(tmp_collection_name)
         self.check_status(status)
 
-    # only support "in" in expr
     @time_wrapper
     def get(self, ids, collection_name=None, timeout=None):
+        """ only support "in" in expr """
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         # res = self._milvus.get(tmp_collection_name, ids, output_fields=None, partition_names=None)
         ids_expr = "id in %s" % (str(ids))

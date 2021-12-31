@@ -117,7 +117,6 @@ def get_image_tag():
         print("Can not get the tag list")
         return "master-latest"
 
-
 def parse_server_tag(server_tag):
     """ paser server tag from server config"""
     # tag format: "8c"/"8c16m"/"8c16m1g"
