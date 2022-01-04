@@ -63,7 +63,7 @@ message AllocTimestampResponse {
 }
 ```
 
-`Timestamp` is of type `uint64`, containing physical and logical parts.
+`Timestamp` is of type `uint64`, and contains physical and logical parts.
 
 This is the format of `Timestamp`
 
