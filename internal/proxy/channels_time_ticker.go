@@ -37,6 +37,7 @@ type channelsTimeTicker interface {
 	getLastTick(pchan pChan) (Timestamp, error)
 	// getMinTsStatistics returns the last write timestamp of all pchans.
 	getMinTsStatistics() (map[pChan]Timestamp, Timestamp, error)
+	// getMinTick returns the minimum last write timestamp between all pchans.
 	getMinTick() Timestamp
 }
 
