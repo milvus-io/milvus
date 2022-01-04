@@ -100,4 +100,4 @@ class TestDataNodeScale:
         time.sleep(300)
         log.debug("Shrink dataNode test finished")
 
-        # mic.uninstall(release_name, namespace=constants.NAMESPACE)
+        mic.uninstall(release_name, namespace=constants.NAMESPACE)
