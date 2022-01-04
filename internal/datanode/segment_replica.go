@@ -471,8 +471,8 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 // listNewSegmentsStartPositions gets all *New Segments* start positions and
 //   transfer segments states from *New* to *Normal*.
 func (replica *SegmentReplica) listNewSegmentsStartPositions() []*datapb.SegmentStartPosition {
-	replica.segMu.RLock()
-	defer replica.segMu.RUnlock()
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
 
 	result := make([]*datapb.SegmentStartPosition, 0, len(replica.newSegments))
 	for id, seg := range replica.newSegments {

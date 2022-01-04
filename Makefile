@@ -122,6 +122,9 @@ test-proxy:
 	@echo "Running go unittests..."
 	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/proxy -v
 
+test-datanode:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/datanode -v
 
 test-querycoord:
 	@echo "Running go unittests..."
