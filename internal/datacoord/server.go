@@ -604,7 +604,7 @@ func (s *Server) watchService(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("watch service shutdown")
+			logutil.Logger(s.ctx).Debug("watch service shutdown")
 			return
 		case event, ok := <-s.eventCh:
 			if !ok {
@@ -614,7 +614,7 @@ func (s *Server) watchService(ctx context.Context) {
 			if err := s.handleSessionEvent(ctx, event); err != nil {
 				go func() {
 					if err := s.Stop(); err != nil {
-						log.Warn("datacoord server stop error", zap.Error(err))
+						logutil.Logger(s.ctx).Warn("failed toserver stop", zap.Error(err))
 					}
 				}()
 				return
