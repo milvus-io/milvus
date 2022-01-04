@@ -25,6 +25,7 @@ type RmqConsumer struct {
 	closeCh    chan struct{}
 	once       sync.Once
 	skip       int32
+	wg         sync.WaitGroup
 }
 
 // Subscription returns the subscription name of this consumer
@@ -37,7 +38,9 @@ func (rc *RmqConsumer) Chan() <-chan Message {
 	if rc.msgChannel == nil {
 		rc.once.Do(func() {
 			rc.msgChannel = make(chan Message, 256)
+			rc.wg.Add(1)
 			go func() {
+				defer rc.wg.Done()
 				for { //nolint:gosimple
 					select {
 					case msg, ok := <-rc.c.Chan():
@@ -78,6 +81,6 @@ func (rc *RmqConsumer) Ack(message Message) {
 
 // Close is used to free the resources of this consumer
 func (rc *RmqConsumer) Close() {
-	rc.c.Close()
 	close(rc.closeCh)
+	rc.wg.Wait()
 }

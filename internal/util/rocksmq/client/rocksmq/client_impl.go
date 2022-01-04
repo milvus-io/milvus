@@ -182,7 +182,6 @@ func (c *client) CreateReader(readerOptions ReaderOptions) (Reader, error) {
 
 // Close close the channel to notify rocksmq to stop operation and close rocksmq server
 func (c *client) Close() {
-	// TODO(yukun): Should call server.close() here?
 	c.closeOnce.Do(func() {
 		close(c.closeCh)
 		c.wg.Wait()

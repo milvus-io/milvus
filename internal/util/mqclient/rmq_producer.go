@@ -38,5 +38,6 @@ func (rp *rmqProducer) Send(ctx context.Context, message *ProducerMessage) (Mess
 
 // Close does nothing currently
 func (rp *rmqProducer) Close() {
-	// TODO(yukun): may need to destroy topic
+	//TODO: close producer. Now it has bug
+	//rp.p.Close()
 }

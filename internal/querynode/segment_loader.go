@@ -462,10 +462,14 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	if err != nil {
 		return err
 	}
+	defer stream.Close()
 	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
 	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
-	stream.SeekReaders([]*internalpb.MsgPosition{position})
+	err = stream.SeekReaders([]*internalpb.MsgPosition{position})
+	if err != nil {
+		return err
+	}
 
 	delData := &deleteData{
 		deleteIDs:        make(map[UniqueID][]int64),
@@ -518,7 +522,6 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		go deletePk(loader.historicalReplica, delData, segmentID, &wg)
 	}
 	wg.Wait()
-	stream.Close()
 	log.Debug("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
 }
