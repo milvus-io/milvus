@@ -186,6 +186,7 @@ func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 	return HandleCStatus(&status, "AddBoolToPayload failed")
 }
 
+// AddByteToPayload adds @msgs into payload
 func (w *PayloadWriter) AddByteToPayload(msgs []byte) error {
 	length := len(msgs)
 	if length <= 0 {
