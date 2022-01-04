@@ -72,7 +72,7 @@ IDENTIFIER := 列名
 Tips:
 
 1. NIL represents an empty string, which means there is no Predicate for Expr.
-2. Gramma is described by EBNF syntax，expressions that may be omitted or repeated are represented through curly braces `{...}`.
+2. Gramma is described by EBNF syntax, expressions that may be omitted or repeated are represented through curly braces `{...}`.
 
 After syntax analysis, the following rules will be applied:
 
