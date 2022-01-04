@@ -183,7 +183,13 @@ func (c *ClientBase) callOnce(ctx context.Context, caller func(client interface{
 	if err2 == nil {
 		return ret, nil
 	}
-	if err2 == context.Canceled || err2 == context.DeadlineExceeded {
+
+	// status.Error(codes.Canceled, context.Canceled.Error()
+	// if err2 == context.Canceled || err2 == context.DeadlineExceeded {
+	// 	return nil, err2
+	// }
+
+	if !funcutil.CheckCtxValid(ctx) {
 		return nil, err2
 	}
 
