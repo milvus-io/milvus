@@ -113,15 +113,6 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 }
 
 func (qn *queryNode) start() error {
-	if err := qn.client.Init(); err != nil {
-		log.Error("start: init queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
-		return err
-	}
-	if err := qn.client.Start(); err != nil {
-		log.Error("start: start queryNode client failed", zap.Int64("nodeID", qn.id), zap.String("error", err.Error()))
-		return err
-	}
-
 	qn.stateLock.Lock()
 	if qn.state < online {
 		qn.state = online
@@ -135,9 +126,6 @@ func (qn *queryNode) stop() {
 	qn.stateLock.Lock()
 	defer qn.stateLock.Unlock()
 	qn.state = offline
-	if qn.client != nil {
-		qn.client.Stop()
-	}
 	qn.cancel()
 }
 

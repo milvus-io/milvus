@@ -71,6 +71,10 @@ func (mc *MockComponent) Register() error {
 	return nil
 }
 
+func (mc *MockComponent) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return nil, nil
+}
+
 func buildMockComponent(code internalpb.StateCode) *MockComponent {
 	mc := &MockComponent{
 		compState: &internalpb.ComponentStates{

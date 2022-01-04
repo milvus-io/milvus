@@ -352,6 +352,7 @@ func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.Compon
 }
 
 // GetTimeTickChannel gets the time tick channel of IndexCoord.
+// TODO: delete this, doesn't need
 func (i *IndexCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.Debug("get IndexCoord time tick channel ...")
 	return &milvuspb.StringResponse{
@@ -364,6 +365,7 @@ func (i *IndexCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRe
 }
 
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
+// TODO: delete this, doesn't need
 func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.Debug("get IndexCoord statistics channel ...")
 	return &milvuspb.StringResponse{

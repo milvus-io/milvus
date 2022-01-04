@@ -219,12 +219,6 @@ func TestGrpcService(t *testing.T) {
 	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.RootCoordCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 
-	err = cli.Init()
-	assert.Nil(t, err)
-
-	err = cli.Start()
-	assert.Nil(t, err)
-
 	t.Run("get component states", func(t *testing.T) {
 		req := &internalpb.GetComponentStatesRequest{}
 		rsp, err := svr.GetComponentStates(ctx, req)
@@ -777,9 +771,6 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, 1, len(dropCollectionArray))
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
-
-	err = cli.Stop()
-	assert.Nil(t, err)
 
 	err = svr.Stop()
 	assert.Nil(t, err)

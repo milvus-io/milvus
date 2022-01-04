@@ -58,26 +58,6 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	return client, nil
 }
 
-// Init initializes IndexNode's grpc client.
-func (c *Client) Init() error {
-	return nil
-}
-
-// Start starts IndexNode's client service. But it does nothing here.
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops IndexNode's grpc client.
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
-}
-
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return indexpb.NewIndexNodeClient(cc)
 }
@@ -100,33 +80,33 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return ret.(*internalpb.ComponentStates), err
 }
 
-// GetTimeTickChannel gets the time tick channel of IndexNode.
-func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexNodeClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
-}
+// // GetTimeTickChannel gets the time tick channel of IndexNode.
+// func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+// 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+// 		if !funcutil.CheckCtxValid(ctx) {
+// 			return nil, ctx.Err()
+// 		}
+// 		return client.(indexpb.IndexNodeClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+// 	})
+// 	if err != nil || ret == nil {
+// 		return nil, err
+// 	}
+// 	return ret.(*milvuspb.StringResponse), err
+// }
 
-// GetStatisticsChannel gets the statistics channel of IndexNode.
-func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexNodeClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
-}
+// // GetStatisticsChannel gets the statistics channel of IndexNode.
+// func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+// 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+// 		if !funcutil.CheckCtxValid(ctx) {
+// 			return nil, ctx.Err()
+// 		}
+// 		return client.(indexpb.IndexNodeClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+// 	})
+// 	if err != nil || ret == nil {
+// 		return nil, err
+// 	}
+// 	return ret.(*milvuspb.StringResponse), err
+// }
 
 // CreateIndex sends the build index request to IndexNode.
 func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {

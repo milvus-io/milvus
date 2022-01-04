@@ -86,26 +86,6 @@ func (c *Client) getDataCoordAddr() (string, error) {
 	return ms.Address, nil
 }
 
-// Init initializes the client
-func (c *Client) Init() error {
-	return nil
-}
-
-// Start enables the client
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops the client
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
-}
-
 // GetComponentStates calls DataCoord GetComponentStates services
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

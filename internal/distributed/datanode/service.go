@@ -232,14 +232,6 @@ func (s *Server) init() error {
 			log.Debug("DataNode newRootCoordClient failed", zap.Error(err))
 			panic(err)
 		}
-		if err = rootCoordClient.Init(); err != nil {
-			log.Debug("DataNode rootCoordClient Init failed", zap.Error(err))
-			panic(err)
-		}
-		if err = rootCoordClient.Start(); err != nil {
-			log.Debug("DataNode rootCoordClient Start failed", zap.Error(err))
-			panic(err)
-		}
 		err = funcutil.WaitForComponentHealthy(ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200)
 		if err != nil {
 			log.Debug("DataNode wait rootCoord ready failed", zap.Error(err))
@@ -257,14 +249,6 @@ func (s *Server) init() error {
 		dataCoordClient, err := s.newDataCoordClient(dn.Params.DataNodeCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("DataNode newDataCoordClient failed", zap.Error(err))
-			panic(err)
-		}
-		if err = dataCoordClient.Init(); err != nil {
-			log.Debug("DataNode newDataCoord failed", zap.Error(err))
-			panic(err)
-		}
-		if err = dataCoordClient.Start(); err != nil {
-			log.Debug("DataNode dataCoordClient Start failed", zap.Error(err))
 			panic(err)
 		}
 		err = funcutil.WaitForComponentInitOrHealthy(ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200)

@@ -50,7 +50,7 @@ func GetLocalIP() string {
 }
 
 // WaitForComponentStates wait for component's state to be one of the specific states
-func WaitForComponentStates(ctx context.Context, service types.Component, serviceName string, states []internalpb.StateCode, attempts uint, sleep time.Duration) error {
+func WaitForComponentStates(ctx context.Context, service types.ComponentClient, serviceName string, states []internalpb.StateCode, attempts uint, sleep time.Duration) error {
 	checkFunc := func() error {
 		resp, err := service.GetComponentStates(ctx)
 		if err != nil {
@@ -80,17 +80,17 @@ func WaitForComponentStates(ctx context.Context, service types.Component, servic
 }
 
 // WaitForComponentInitOrHealthy wait for component's state to be initializing or healthy
-func WaitForComponentInitOrHealthy(ctx context.Context, service types.Component, serviceName string, attempts uint, sleep time.Duration) error {
+func WaitForComponentInitOrHealthy(ctx context.Context, service types.ComponentClient, serviceName string, attempts uint, sleep time.Duration) error {
 	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy}, attempts, sleep)
 }
 
 // WaitForComponentInit wait for component's state to be initializing
-func WaitForComponentInit(ctx context.Context, service types.Component, serviceName string, attempts uint, sleep time.Duration) error {
+func WaitForComponentInit(ctx context.Context, service types.ComponentClient, serviceName string, attempts uint, sleep time.Duration) error {
 	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Initializing}, attempts, sleep)
 }
 
 // WaitForComponentHealthy wait for component's state to be healthy
-func WaitForComponentHealthy(ctx context.Context, service types.Component, serviceName string, attempts uint, sleep time.Duration) error {
+func WaitForComponentHealthy(ctx context.Context, service types.ComponentClient, serviceName string, attempts uint, sleep time.Duration) error {
 	return WaitForComponentStates(ctx, service, serviceName, []internalpb.StateCode{internalpb.StateCode_Healthy}, attempts, sleep)
 }
 

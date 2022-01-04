@@ -202,13 +202,6 @@ func (s *Server) init() error {
 		log.Debug("create RootCoord client for Proxy done")
 	}
 
-	log.Debug("init RootCoord client for Proxy")
-	if err := s.rootCoordClient.Init(); err != nil {
-		log.Warn("failed to init RootCoord client for Proxy", zap.Error(err))
-		return err
-	}
-	log.Debug("init RootCoord client for Proxy done")
-
 	log.Debug("Proxy wait for RootCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for RootCoord to be healthy", zap.Error(err))
@@ -230,13 +223,6 @@ func (s *Server) init() error {
 		}
 		log.Debug("create DataCoord client for Proxy done")
 	}
-
-	log.Debug("init DataCoord client for Proxy")
-	if err := s.dataCoordClient.Init(); err != nil {
-		log.Warn("failed to init DataCoord client for Proxy", zap.Error(err))
-		return err
-	}
-	log.Debug("init DataCoord client for Proxy done")
 
 	log.Debug("Proxy wait for DataCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
@@ -260,13 +246,6 @@ func (s *Server) init() error {
 		log.Debug("create IndexCoord client for Proxy done")
 	}
 
-	log.Debug("init IndexCoord client for Proxy")
-	if err := s.indexCoordClient.Init(); err != nil {
-		log.Warn("failed to init IndexCoord client for Proxy", zap.Error(err))
-		return err
-	}
-	log.Debug("init IndexCoord client for Proxy done")
-
 	log.Debug("Proxy wait for IndexCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.indexCoordClient, "IndexCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for IndexCoord to be healthy", zap.Error(err))
@@ -288,13 +267,6 @@ func (s *Server) init() error {
 		}
 		log.Debug("create QueryCoord client for Proxy done")
 	}
-
-	log.Debug("init QueryCoord client for Proxy")
-	if err := s.queryCoordClient.Init(); err != nil {
-		log.Warn("failed to init QueryCoord client for Proxy", zap.Error(err))
-		return err
-	}
-	log.Debug("init QueryCoord client for Proxy done")
 
 	log.Debug("Proxy wait for QueryCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.queryCoordClient, "QueryCoord", 1000000, time.Millisecond*200); err != nil {

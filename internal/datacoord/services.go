@@ -745,7 +745,8 @@ func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 		return resp, nil
 	}
 
-	log.Debug("success to complete compaction", zap.Int64("planID", req.PlanID))
+	log.Debug("success to complete compaction", zap.Int64("planID", req.PlanID), zap.Int64("segID", req.SegmentID),
+		zap.Any("binlog", req.InsertLogs))
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

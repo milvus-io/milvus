@@ -67,26 +67,6 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	return client, nil
 }
 
-// Init initializes IndexCoord's grpc client.
-func (c *Client) Init() error {
-	return nil
-}
-
-// Start starts IndexCoord's client service. But it does nothing here.
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops IndexCoord's grpc client.
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
-}
-
 func (c *Client) getIndexCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
@@ -121,33 +101,35 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return ret.(*internalpb.ComponentStates), err
 }
 
+// TODO: unnecessary, delete it.
 // GetTimeTickChannel gets the time tick channel of IndexCoord.
-func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexCoordClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
-}
+// func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+// 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+// 		if !funcutil.CheckCtxValid(ctx) {
+// 			return nil, ctx.Err()
+// 		}
+// 		return client.(indexpb.IndexCoordClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+// 	})
+// 	if err != nil || ret == nil {
+// 		return nil, err
+// 	}
+// 	return ret.(*milvuspb.StringResponse), err
+// }
 
+// TODO: unnecessary, delete it.
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
-func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexCoordClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
-}
+// func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+// 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+// 		if !funcutil.CheckCtxValid(ctx) {
+// 			return nil, ctx.Err()
+// 		}
+// 		return client.(indexpb.IndexCoordClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+// 	})
+// 	if err != nil || ret == nil {
+// 		return nil, err
+// 	}
+// 	return ret.(*milvuspb.StringResponse), err
+// }
 
 // BuildIndex sends the build index request to IndexCoord.
 func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {

@@ -181,12 +181,6 @@ func (s *Server) init() error {
 			if err != nil {
 				return nil, err
 			}
-			if err := cli.Init(); err != nil {
-				return nil, err
-			}
-			if err := cli.Start(); err != nil {
-				return nil, err
-			}
 			return cli, nil
 		},
 	)
@@ -288,21 +282,21 @@ func (s *Server) Stop() error {
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
-	if s.indexCoord != nil {
-		if err := s.indexCoord.Stop(); err != nil {
-			log.Error("Failed to close indexCoord client", zap.Error(err))
-		}
-	}
-	if s.dataCoord != nil {
-		if err := s.dataCoord.Stop(); err != nil {
-			log.Error("Failed to close dataCoord client", zap.Error(err))
-		}
-	}
-	if s.queryCoord != nil {
-		if err := s.queryCoord.Stop(); err != nil {
-			log.Error("Failed to close queryCoord client", zap.Error(err))
-		}
-	}
+	// if s.indexCoord != nil {
+	// 	if err := s.indexCoord.Stop(); err != nil {
+	// 		log.Error("Failed to close indexCoord client", zap.Error(err))
+	// 	}
+	// }
+	// if s.dataCoord != nil {
+	// 	if err := s.dataCoord.Stop(); err != nil {
+	// 		log.Error("Failed to close dataCoord client", zap.Error(err))
+	// 	}
+	// }
+	// if s.queryCoord != nil {
+	// 	if err := s.queryCoord.Stop(); err != nil {
+	// 		log.Error("Failed to close queryCoord client", zap.Error(err))
+	// 	}
+	// }
 	if s.rootCoord != nil {
 		if err := s.rootCoord.Stop(); err != nil {
 			log.Error("Failed to close close rootCoord", zap.Error(err))

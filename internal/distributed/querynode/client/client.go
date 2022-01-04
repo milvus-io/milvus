@@ -59,26 +59,6 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	return client, nil
 }
 
-// Init initializes QueryNode's grpc client.
-func (c *Client) Init() error {
-	return nil
-}
-
-// Start starts QueryNode's client service. But it does nothing here.
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops QueryNode's grpc client server.
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
-}
-
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return querypb.NewQueryNodeClient(cc)
 }

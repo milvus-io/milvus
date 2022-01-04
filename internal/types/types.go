@@ -37,20 +37,76 @@ type TimeTickProvider interface {
 	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
-// Component is the interface all services implement
+// Component is the interface all services implement, corresponding the internal directory.
 type Component interface {
 	Init() error
 	Start() error
-	Stop() error
-	GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error)
-	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	Register() error
+	Stop() error
+
+	// SetEtcdClient set etcd client for Coordinator.
+	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// UpdateStateCode updates state code for DataNode
+	//  `stateCode` is current statement of this data node, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
+
+	// GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
-// DataNode is the interface `datanode` package implements
-type DataNode interface {
-	Component
+// ComponentClient record the public grpc interface for all interface.
+type ComponentClient interface {
+	GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error)
+	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+}
 
+// IndexCoord just for grpc client, corresponding the distributed client and internal.
+type IndexCoord interface {
+	ComponentClient
+
+	// BuildIndex receives request from RootCoordinator to build an index.
+	// Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
+	// the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
+	// execution.
+	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+
+	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
+	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
+	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
+	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+
+	// GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
+	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
+
+	// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
+	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
+}
+
+// IndexCoordComponent is the interface `indexcoord` package implements.
+type IndexCoordComponent interface {
+	Component
+	IndexCoord
+}
+
+// IndexNode just for grpc client, corresponding the distributed client and internal.
+type IndexNode interface {
+	ComponentClient
+
+	// CreateIndex receives request from IndexCoordinator to build an index.
+	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
+	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+}
+
+// IndexNodeComponent is the interface `indexnode` package implements.
+type IndexNodeComponent interface {
+	Component
+	IndexNode
+}
+
+type DataNode interface {
+	ComponentClient
+
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	// Deprecated
 	WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error)
 
@@ -64,25 +120,16 @@ type DataNode interface {
 	//     Log an info log if a segment is under flushing
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 
-	// GetMetrics gets the metrics about DataNode.
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	// Compaction will add a compaction task according to the request plan
 	Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error)
 }
 
-// DataNodeComponent is used by grpc server of DataNode
 type DataNodeComponent interface {
+	Component
 	DataNode
-
-	// UpdateStateCode updates state code for DataNode
-	//  `stateCode` is current statement of this data node, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
 
 	// GetStateCode return state code of this data node
 	GetStateCode() internalpb.StateCode
-
-	// SetEtcdClient set etcd client for DataNode
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// SetRootCoord set RootCoord for DataNode
 	// `rootCoord` is a client of root coordinator.
@@ -108,8 +155,10 @@ type DataNodeComponent interface {
 
 // DataCoord is the interface `datacoord` package implements
 type DataCoord interface {
-	Component
+	ComponentClient
 	TimeTickProvider
+
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 
 	// Flush notifies DataCoord to flush all current growing segments of specified Collection
 	// ctx is the context to control request deadline and cancellation
@@ -230,8 +279,6 @@ type DataCoord interface {
 	// error is returned only when some communication issue occurs
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
 
-	// GetMetrics gets the metrics about DataCoord.
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	// CompleteCompaction completes a compaction with the result
 	CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error)
 	// ManualCompaction triggers a compaction for a collection
@@ -260,79 +307,13 @@ type DataCoord interface {
 
 // DataCoordComponent defines the interface of DataCoord component.
 type DataCoordComponent interface {
+	Component
 	DataCoord
-
-	// SetEtcdClient set EtcdClient for DataCoord
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
-}
-
-// IndexNode is the interface `indexnode` package implements
-type IndexNode interface {
-	Component
-	TimeTickProvider
-
-	// CreateIndex receives request from IndexCoordinator to build an index.
-	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
-
-	// GetMetrics gets the metrics about IndexNode.
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-}
-
-// IndexNodeComponent is used by grpc server of IndexNode
-type IndexNodeComponent interface {
-	IndexNode
-
-	// SetEtcdClient set etcd client for QueryCoord
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
-}
-
-// IndexCoord is the interface `indexcoord` package implements
-type IndexCoord interface {
-	Component
-	TimeTickProvider
-
-	// BuildIndex receives request from RootCoordinator to build an index.
-	// Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
-	// the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
-	// execution.
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
-
-	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
-	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
-	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
-	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
-
-	// GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
-	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
-
-	// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
-	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
-
-	// GetMetrics gets the metrics about IndexCoord.
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-}
-
-// IndexCoordComponent is used by grpc server of IndexCoord
-type IndexCoordComponent interface {
-	IndexCoord
-
-	// SetEtcdClient set etcd client for QueryCoord
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
 // RootCoord is the interface `rootcoord` package implements
 type RootCoord interface {
-	Component
+	ComponentClient
 	TimeTickProvider
 
 	// CreateCollection notifies RootCoord to create a collection
@@ -575,21 +556,15 @@ type RootCoord interface {
 	// to build index for this segment.
 	SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
 
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	// GetMetrics notifies RootCoord to collect metrics for specified component
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	// GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 // RootCoordComponent is used by grpc server of RootCoord
 type RootCoordComponent interface {
+	Component
 	RootCoord
-
-	// SetEtcdClient set EtcdClient for RootCoord
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// UpdateStateCode updates state code for RootCoord
-	// State includes: Initializing, Healthy and Abnormal
-	UpdateStateCode(internalpb.StateCode)
 
 	// SetDataCoord set DataCoord for RootCoord
 	// `dataCoord` is a client of data coordinator.
@@ -612,14 +587,11 @@ type RootCoordComponent interface {
 
 	// SetNewProxyClient set Proxy client creator func for RootCoord
 	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
-
-	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 // Proxy is the interface `proxy` package implements
 type Proxy interface {
-	Component
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 
 	// InvalidateCollectionMetaCache notifies Proxy to clear all the meta cache of specific collection.
 	//
@@ -651,31 +623,9 @@ type Proxy interface {
 
 // ProxyComponent defines the interface of proxy component.
 type ProxyComponent interface {
+	Component
+	ComponentClient
 	Proxy
-
-	// SetEtcdClient set EtcdClient for Proxy
-	// `etcdClient` is a client of etcd
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	//SetRootCoordClient set RootCoord for Proxy
-	// `rootCoord` is a client of root coordinator.
-	SetRootCoordClient(rootCoord RootCoord)
-
-	// SetDataCoordClient set DataCoord for Proxy
-	// `dataCoord` is a client of data coordinator.
-	SetDataCoordClient(dataCoord DataCoord)
-
-	// SetIndexCoordClient set IndexCoord for Proxy
-	//  `indexCoord` is a client of index coordinator.
-	SetIndexCoordClient(indexCoord IndexCoord)
-
-	// SetQueryCoord set QueryCoord for Proxy
-	//  `queryCoord` is a client of query coordinator.
-	SetQueryCoordClient(queryCoord QueryCoord)
-
-	// UpdateStateCode updates state code for Proxy
-	//  `stateCode` is current statement of this proxy node, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
 
 	// CreateCollection notifies Proxy to create a collection
 	//
@@ -1022,17 +972,39 @@ type ProxyComponent interface {
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
 	AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
+
 	GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error)
+
 	ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error)
+
 	GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error)
+
 	// GetFlushState gets the flush state of multiple segments
 	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
+
+	// SetRootCoordClient set RootCoord for Proxy
+	// `rootCoord` is a client of root coordinator.
+	SetRootCoordClient(rootCoord RootCoord)
+
+	// SetDataCoordClient set DataCoord for Proxy
+	// `dataCoord` is a client of data coordinator.
+	SetDataCoordClient(dataCoord DataCoord)
+
+	// SetIndexCoordClient set IndexCoord for Proxy
+	//  `indexCoord` is a client of index coordinator.
+	SetIndexCoordClient(indexCoord IndexCoord)
+
+	// SetQueryCoordClient set QueryCoord for Proxy
+	//  `queryCoord` is a client of query coordinator.
+	SetQueryCoordClient(queryCoord QueryCoord)
 }
 
 // QueryNode is the interface `querynode` package implements
 type QueryNode interface {
-	Component
+	ComponentClient
 	TimeTickProvider
+
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 
 	// AddQueryChannel notifies QueryNode to subscribe a query channel and be a producer of a query result channel.
 	// `ctx` is the context to control request deadline and cancellation.
@@ -1061,19 +1033,13 @@ type QueryNode interface {
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 
 	// GetMetrics gets the metrics about QueryNode.
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	// GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 // QueryNodeComponent is used by grpc server of QueryNode
 type QueryNodeComponent interface {
+	Component
 	QueryNode
-
-	// UpdateStateCode updates state code for QueryNode
-	//  `stateCode` is current statement of this query node, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
-
-	// SetEtcdClient set etcd client for QueryNode
-	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// SetRootCoord set RootCoord for QueryNode
 	// `rootCoord` is a client of root coordinator. Pass to segmentLoader.
@@ -1096,9 +1062,10 @@ type QueryNodeComponent interface {
 
 // QueryCoord is the interface `querycoord` package implements
 type QueryCoord interface {
-	Component
+	ComponentClient
 	TimeTickProvider
 
+	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error)
 	LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error)
 	ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error)
@@ -1109,20 +1076,12 @@ type QueryCoord interface {
 	GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 	LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error)
-
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 // QueryCoordComponent is used by grpc server of QueryCoord
 type QueryCoordComponent interface {
+	Component
 	QueryCoord
-
-	// SetEtcdClient set etcd client for QueryCoord
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
 
 	// SetDataCoord set DataCoord for QueryCoord
 	// `dataCoord` is a client of data coordinator.

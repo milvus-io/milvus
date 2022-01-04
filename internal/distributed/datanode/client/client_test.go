@@ -39,15 +39,6 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
-	err = client.Init()
-	assert.Nil(t, err)
-
-	err = client.Start()
-	assert.Nil(t, err)
-
-	err = client.Register()
-	assert.Nil(t, err)
-
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
@@ -111,7 +102,4 @@ func Test_NewClient(t *testing.T) {
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 
 	checkFunc(true)
-
-	err = client.Stop()
-	assert.Nil(t, err)
 }

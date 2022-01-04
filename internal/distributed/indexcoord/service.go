@@ -163,15 +163,17 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.indexcoord.GetComponentStates(ctx)
 }
 
+// TODO: unnecessary, delete it.
 // GetTimeTickChannel gets the time tick channel of IndexCoord.
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexcoord.GetTimeTickChannel(ctx)
-}
+// func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return s.indexcoord.GetTimeTickChannel(ctx)
+// }
 
+// TODO: unnecessary, delete it.
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
-func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexcoord.GetStatisticsChannel(ctx)
-}
+// func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return s.indexcoord.GetStatisticsChannel(ctx)
+// }
 
 // BuildIndex sends the build index request to IndexCoord.
 func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {

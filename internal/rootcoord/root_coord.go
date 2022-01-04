@@ -584,26 +584,26 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.Proxy,
 
 // SetDataCoord set datacoord
 func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
-	initCh := make(chan struct{})
-	go func() {
-		for {
-			if err := s.Init(); err == nil {
-				if err := s.Start(); err == nil {
-					close(initCh)
-					log.Debug("RootCoord connected to DataCoord")
-					return
-				}
-			}
-			log.Debug("Retrying RootCoord connection to DataCoord")
-		}
-	}()
+	// initCh := make(chan struct{})
+	// go func() {
+	// 	for {
+	// 		if err := s.Init(); err == nil {
+	// 			if err := s.Start(); err == nil {
+	// 				close(initCh)
+	// 				log.Debug("RootCoord connected to DataCoord")
+	// 				return
+	// 			}
+	// 		}
+	// 		log.Debug("Retrying RootCoord connection to DataCoord")
+	// 	}
+	// }()
 	c.CallGetBinlogFilePathsService = func(ctx context.Context, segID typeutil.UniqueID, fieldID typeutil.UniqueID) (retFiles []string, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("get bin log file paths panic, msg = %v", err)
 			}
 		}()
-		<-initCh //wait connect to data coord
+		// <-initCh //wait connect to data coord
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return nil, err
@@ -641,7 +641,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 				retErr = fmt.Errorf("get num rows panic, msg = %v", err)
 			}
 		}()
-		<-initCh
+		// <-initCh
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return retRows, err
@@ -678,7 +678,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 				retErr = fmt.Errorf("get flushed segments from data coord panic, msg = %v", err)
 			}
 		}()
-		<-initCh
+		// <-initCh
 		req := &datapb.GetFlushedSegmentsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO,msg type
@@ -705,7 +705,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 				retErr = fmt.Errorf("watch channels panic, msg = %v", err)
 			}
 		}()
-		<-initCh
+		// <-initCh
 		req := &datapb.WatchChannelsRequest{
 			CollectionID: collectionID,
 			ChannelNames: channelNames,
@@ -724,19 +724,19 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 
 // SetIndexCoord set indexcoord
 func (c *Core) SetIndexCoord(s types.IndexCoord) error {
-	initCh := make(chan struct{})
-	go func() {
-		for {
-			if err := s.Init(); err == nil {
-				if err := s.Start(); err == nil {
-					close(initCh)
-					log.Debug("RootCoord connected to IndexCoord")
-					return
-				}
-			}
-			log.Debug("Retrying RootCoord connection to IndexCoord")
-		}
-	}()
+	// initCh := make(chan struct{})
+	// go func() {
+	// 	for {
+	// 		if err := s.Init(); err == nil {
+	// 			if err := s.Start(); err == nil {
+	// 				close(initCh)
+	// 				log.Debug("RootCoord connected to IndexCoord")
+	// 				return
+	// 			}
+	// 		}
+	// 		log.Debug("Retrying RootCoord connection to IndexCoord")
+	// 	}
+	// }()
 
 	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
@@ -744,7 +744,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 				retErr = fmt.Errorf("build index panic, msg = %v", err)
 			}
 		}()
-		<-initCh
+		// <-initCh
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
 			DataPaths:   binlog,
 			TypeParams:  field.TypeParams,
@@ -769,7 +769,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 				retErr = fmt.Errorf("drop index from index service panic, msg = %v", err)
 			}
 		}()
-		<-initCh
+		// <-initCh
 		rsp, err := s.DropIndex(ctx, &indexpb.DropIndexRequest{
 			IndexID: indexID,
 		})
@@ -787,26 +787,26 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 
 // SetQueryCoord set querycoord
 func (c *Core) SetQueryCoord(s types.QueryCoord) error {
-	initCh := make(chan struct{})
-	go func() {
-		for {
-			if err := s.Init(); err == nil {
-				if err := s.Start(); err == nil {
-					close(initCh)
-					log.Debug("RootCoord connected to QueryCoord")
-					return
-				}
-			}
-			log.Debug("Retrying RootCoord connection to QueryCoord")
-		}
-	}()
+	// initCh := make(chan struct{})
+	// go func() {
+	// 	for {
+	// 		if err := s.Init(); err == nil {
+	// 			if err := s.Start(); err == nil {
+	// 				close(initCh)
+	// 				log.Debug("RootCoord connected to QueryCoord")
+	// 				return
+	// 			}
+	// 		}
+	// 		log.Debug("Retrying RootCoord connection to QueryCoord")
+	// 	}
+	// }()
 	c.CallReleaseCollectionService = func(ctx context.Context, ts typeutil.Timestamp, dbID typeutil.UniqueID, collectionID typeutil.UniqueID) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("release collection from query service panic, msg = %v", err)
 			}
 		}()
-		<-initCh
+		// <-initCh
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ReleaseCollection,
@@ -832,7 +832,7 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 				retErr = fmt.Errorf("release partition from query service panic, msg = %v", err)
 			}
 		}()
-		<-initCh
+		// <-initCh
 		req := &querypb.ReleasePartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ReleasePartitions,

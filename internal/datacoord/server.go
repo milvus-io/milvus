@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -337,6 +338,10 @@ func (s *Server) createCompactionTrigger() {
 
 func (s *Server) stopCompactionTrigger() {
 	s.compactionTrigger.stop()
+}
+
+func (s *Server) UpdateStateCode(stateCode internalpb.StateCode) {
+
 }
 
 func (s *Server) initGarbageCollection() error {
@@ -730,14 +735,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 }
 
 func (s *Server) initRootCoordClient() error {
-	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli); err != nil {
-		return err
-	}
-	if err = s.rootCoordClient.Init(); err != nil {
-		return err
-	}
-	return s.rootCoordClient.Start()
+	return nil
 }
 
 // Stop do the Server finalize processes

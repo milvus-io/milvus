@@ -38,15 +38,6 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
-	err = client.Init()
-	assert.Nil(t, err)
-
-	err = client.Start()
-	assert.Nil(t, err)
-
-	err = client.Register()
-	assert.Nil(t, err)
-
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
@@ -164,8 +155,5 @@ func Test_NewClient(t *testing.T) {
 	// special case since this method didn't use recall()
 	ret, err = client.SaveBinlogPaths(ctx, nil)
 	assert.NotNil(t, ret)
-	assert.Nil(t, err)
-
-	err = client.Stop()
 	assert.Nil(t, err)
 }

@@ -51,19 +51,19 @@ func TestIndexCoordinateServer(t *testing.T) {
 		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
 	})
 
-	t.Run("GetTimeTickChannel", func(t *testing.T) {
-		req := &internalpb.GetTimeTickChannelRequest{}
-		resp, err := server.GetTimeTickChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+	// t.Run("GetTimeTickChannel", func(t *testing.T) {
+	// 	req := &internalpb.GetTimeTickChannelRequest{}
+	// 	resp, err := server.GetTimeTickChannel(ctx, req)
+	// 	assert.Nil(t, err)
+	// 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	// })
 
-	t.Run("GetStatisticsChannel", func(t *testing.T) {
-		req := &internalpb.GetStatisticsChannelRequest{}
-		resp, err := server.GetStatisticsChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+	// t.Run("GetStatisticsChannel", func(t *testing.T) {
+	// 	req := &internalpb.GetStatisticsChannelRequest{}
+	// 	resp, err := server.GetStatisticsChannel(ctx, req)
+	// 	assert.Nil(t, err)
+	// 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	// })
 
 	t.Run("BuildIndex", func(t *testing.T) {
 		req := &indexpb.BuildIndexRequest{

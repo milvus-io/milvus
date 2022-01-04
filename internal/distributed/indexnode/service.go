@@ -217,15 +217,16 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.indexnode.GetComponentStates(ctx)
 }
 
+// TODO: unnecessary, delete it.
 // GetTimeTickChannel gets the time tick channel of IndexNode.
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexnode.GetTimeTickChannel(ctx)
-}
+// func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return s.indexnode.GetTimeTickChannel(ctx)
+// }
 
 // GetStatisticsChannel gets the statistics channel of IndexNode.
-func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexnode.GetStatisticsChannel(ctx)
-}
+// func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+// 	return s.indexnode.GetStatisticsChannel(ctx)
+// }
 
 // CreateIndex sends the create index request to IndexNode.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {

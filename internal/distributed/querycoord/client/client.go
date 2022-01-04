@@ -66,11 +66,6 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	return client, nil
 }
 
-// Init initializes QueryCoord's grpc client.
-func (c *Client) Init() error {
-	return nil
-}
-
 func (c *Client) getQueryCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
@@ -88,21 +83,6 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return querypb.NewQueryCoordClient(cc)
-}
-
-// Start starts QueryCoordinator's client service. But it does nothing here.
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops QueryCoordinator's grpc client server.
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
 }
 
 // GetComponentStates gets the component states of QueryCoord.

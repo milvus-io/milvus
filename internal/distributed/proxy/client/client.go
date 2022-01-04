@@ -58,32 +58,12 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	return client, nil
 }
 
-// Init initializes Proxy's grpc client.
-func (c *Client) Init() error {
-	return nil
-}
-
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return proxypb.NewProxyClient(cc)
 }
 
 func (c *Client) getAddr() (string, error) {
 	return c.addr, nil
-}
-
-// Start dummy
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops the client, closes the connection
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
 }
 
 // GetComponentStates get the component state.

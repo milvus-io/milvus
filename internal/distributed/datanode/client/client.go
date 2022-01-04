@@ -59,28 +59,6 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	return client, nil
 }
 
-// Init initializes the client.
-func (c *Client) Init() error {
-	return nil
-}
-
-// Start starts the client.
-// Currently, it does nothing.
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop stops the client.
-// Currently, it closes the grpc connection with the DataNode.
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register does nothing.
-func (c *Client) Register() error {
-	return nil
-}
-
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return datapb.NewDataNodeClient(cc)
 }

@@ -48,15 +48,6 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
-	err = client.Init()
-	assert.Nil(t, err)
-
-	err = client.Start()
-	assert.Nil(t, err)
-
-	err = client.Register()
-	assert.Nil(t, err)
-
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
@@ -71,11 +62,11 @@ func Test_NewClient(t *testing.T) {
 		r1, err := client.GetComponentStates(ctx)
 		retCheck(retNotNil, r1, err)
 
-		r2, err := client.GetTimeTickChannel(ctx)
-		retCheck(retNotNil, r2, err)
+		// r2, err := client.GetTimeTickChannel(ctx)
+		// retCheck(retNotNil, r2, err)
 
-		r3, err := client.GetStatisticsChannel(ctx)
-		retCheck(retNotNil, r3, err)
+		// r3, err := client.GetStatisticsChannel(ctx)
+		// retCheck(retNotNil, r3, err)
 
 		r4, err := client.CreateIndex(ctx, nil)
 		retCheck(retNotNil, r4, err)
@@ -114,9 +105,6 @@ func Test_NewClient(t *testing.T) {
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 	checkFunc(true)
-
-	err = client.Stop()
-	assert.Nil(t, err)
 }
 
 func TestIndexNodeClient(t *testing.T) {
@@ -141,12 +129,6 @@ func TestIndexNodeClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, inc)
 
-	err = inc.Init()
-	assert.Nil(t, err)
-
-	err = inc.Start()
-	assert.Nil(t, err)
-
 	t.Run("GetComponentStates", func(t *testing.T) {
 		states, err := inc.GetComponentStates(ctx)
 		assert.Nil(t, err)
@@ -154,17 +136,17 @@ func TestIndexNodeClient(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 	})
 
-	t.Run("GetTimeTickChannel", func(t *testing.T) {
-		resp, err := inc.GetTimeTickChannel(ctx)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+	// t.Run("GetTimeTickChannel", func(t *testing.T) {
+	// 	resp, err := inc.GetTimeTickChannel(ctx)
+	// 	assert.Nil(t, err)
+	// 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	// })
 
-	t.Run("GetStatisticsChannel", func(t *testing.T) {
-		resp, err := inc.GetStatisticsChannel(ctx)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+	// t.Run("GetStatisticsChannel", func(t *testing.T) {
+	// 	resp, err := inc.GetStatisticsChannel(ctx)
+	// 	assert.Nil(t, err)
+	// 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	// })
 
 	t.Run("CreateIndex", func(t *testing.T) {
 		req := &indexpb.CreateIndexRequest{
@@ -185,8 +167,5 @@ func TestIndexNodeClient(t *testing.T) {
 	})
 
 	err = ins.Stop()
-	assert.Nil(t, err)
-
-	err = inc.Stop()
 	assert.Nil(t, err)
 }

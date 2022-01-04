@@ -140,15 +140,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	if err = s.rootCoord.Init(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err = s.rootCoord.Start(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
 	// wait for master init or healthy
 	log.Debug("QueryCoord try to wait for RootCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
@@ -171,14 +162,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	if err = s.dataCoord.Init(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-	if err = s.dataCoord.Start(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
 	log.Debug("QueryCoord try to wait for DataCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
@@ -199,15 +182,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	if err := s.indexCoord.Init(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err := s.indexCoord.Start(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
 	// wait IndexCoord healthy
 	log.Debug("QueryCoord try to wait for IndexCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)

@@ -73,12 +73,9 @@ func (n *Session) GetOrCreateClient(ctx context.Context) (types.DataNode, error)
 
 func (n *Session) initClient(ctx context.Context) (err error) {
 	if n.client, err = n.clientCreator(ctx, n.info.Address); err != nil {
-		return
+		return err
 	}
-	if err = n.client.Init(); err != nil {
-		return
-	}
-	return n.client.Start()
+	return nil
 }
 
 // Dispose releases client connection
@@ -87,7 +84,6 @@ func (n *Session) Dispose() {
 	defer n.Unlock()
 
 	if n.client != nil {
-		n.client.Stop()
 		n.client = nil
 	}
 	n.isDisposed = true

@@ -72,11 +72,6 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	return client, nil
 }
 
-// Init initialize grpc parameters
-func (c *Client) Init() error {
-	return nil
-}
-
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return rootcoordpb.NewRootCoordClient(cc)
 }
@@ -95,21 +90,6 @@ func (c *Client) getRootCoordAddr() (string, error) {
 		return "", fmt.Errorf("number of RootCoord is incorrect, %d", len(msess))
 	}
 	return ms.Address, nil
-}
-
-// Start dummy
-func (c *Client) Start() error {
-	return nil
-}
-
-// Stop terminate grpc connection
-func (c *Client) Stop() error {
-	return c.grpcClient.Close()
-}
-
-// Register dummy
-func (c *Client) Register() error {
-	return nil
 }
 
 // GetComponentStates TODO: timeout need to be propagated through ctx

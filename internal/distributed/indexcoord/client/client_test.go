@@ -49,15 +49,6 @@ func TestIndexCoordClient(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, icc)
 
-	err = icc.Init()
-	assert.Nil(t, err)
-
-	err = icc.Register()
-	assert.Nil(t, err)
-
-	err = icc.Start()
-	assert.Nil(t, err)
-
 	t.Run("GetComponentStates", func(t *testing.T) {
 		states, err := icc.GetComponentStates(ctx)
 		assert.Nil(t, err)
@@ -65,17 +56,17 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 	})
 
-	t.Run("GetTimeTickChannel", func(t *testing.T) {
-		resp, err := icc.GetTimeTickChannel(ctx)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+	// t.Run("GetTimeTickChannel", func(t *testing.T) {
+	// 	resp, err := icc.GetTimeTickChannel(ctx)
+	// 	assert.Nil(t, err)
+	// 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	// })
 
-	t.Run("GetStatisticsChannel", func(t *testing.T) {
-		resp, err := icc.GetStatisticsChannel(ctx)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+	// t.Run("GetStatisticsChannel", func(t *testing.T) {
+	// 	resp, err := icc.GetStatisticsChannel(ctx)
+	// 	assert.Nil(t, err)
+	// 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	// })
 
 	t.Run("BuildIndex", func(t *testing.T) {
 		req := &indexpb.BuildIndexRequest{
@@ -125,8 +116,5 @@ func TestIndexCoordClient(t *testing.T) {
 	})
 
 	err = server.Stop()
-	assert.Nil(t, err)
-
-	err = icc.Stop()
 	assert.Nil(t, err)
 }

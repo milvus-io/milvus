@@ -89,11 +89,6 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
 	}
-	err = nodeClient.Init()
-	if err != nil {
-		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
-		return err
-	}
 	return nm.setClient(nodeID, nodeClient)
 }
 
