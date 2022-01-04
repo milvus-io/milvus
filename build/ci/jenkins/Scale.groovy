@@ -48,7 +48,7 @@ pipeline {
                 container('milvus-test') {
                     dir ('tests/python_client/scale') {
                         script {
-                            sh 'pytest test_data_node_scale.py::TestDataNodeScale::test_scale_data_node -v -s'
+                            sh 'pytest . -n 5 -v -s'
                         }
                     }
                 }
