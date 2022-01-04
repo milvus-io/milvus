@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1640743735973,
+  "iteration": 1641283799623,
   "links": [],
   "panels": [
     {
@@ -4139,7 +4139,7 @@
         "allValue": null,
         "current": {
           "isNone": true,
-          "selected": true,
+          "selected": false,
           "text": "None",
           "value": ""
         },
@@ -4267,5 +4267,5 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 215
+  "version": 218
 }
