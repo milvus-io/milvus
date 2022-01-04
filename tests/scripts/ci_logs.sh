@@ -83,7 +83,7 @@ RELEASE_LOG_DIR=/${RELEASE_NAME}
 if [[ ! -d ${RELEASE_LOG_DIR} ]] ;then 
   mkdir -p ${RELEASE_LOG_DIR}
 fi 
-# try to found logs file from mount disk /volume1/ci-logs
+# Try to found logs file from mount disk /volume1/ci-logs
 log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" )
 for log_file in ${log_files}
 do 
