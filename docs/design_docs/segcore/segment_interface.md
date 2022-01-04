@@ -34,7 +34,7 @@ See design details `${milvus_root}/internal/core/src/segcore/SegmentInterface.h`
 8. `vector_search (vec_count, query..., timestamp, bitset, output)`: Search the vector column
    1. `vec_count`: specifies how many entities participated in the vector search calculation, the rest of the segments are filtered out because it's timestamp is larger than specified timestamp. This function is mainly used in growing segment as multi version control(MVCC)
    2. `query...`: multiple variables jointly specify the parameters and search vector
-   3. `timestamp`: timestamp is used for time travelling, filter out data with timestamp. Mainly for sealed segment
+   3. `timestamp`: timestamp is used for time traveling, filter out data with timestamp. Mainly for sealed segment
    4. `bitset`: calculated bit mask value as an output
    5. `output`: output QueryResult
 9. `bulk_subscript(FieldOffset|SystemField, seg_offsets..., output)`:
