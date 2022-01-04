@@ -291,9 +291,18 @@ func (i *IndexCoord) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 
-	i.loopCancel()
-	i.sched.Close()
+	if i.loopCancel != nil {
+		i.loopCancel()
+		log.Info("cancel the loop of IndexCoord")
+	}
+
+	if i.sched != nil {
+		i.sched.Close()
+		log.Info("close the task scheduler of IndexCoord")
+	}
+
 	i.loopWg.Wait()
+
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
