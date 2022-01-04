@@ -677,7 +677,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Debug("flush loop shutdown")
+				logutil.Logger(s.ctx).Debug("flush loop shutdown")
 				return
 			case segmentID := <-s.flushCh:
 				//Ignore return error
