@@ -298,6 +298,7 @@ func newBinIVFConfAdapter() *BinIVFConfAdapter {
 type NSGConfAdapter struct {
 }
 
+// CheckTrain checks if a nsg index can be built with specific parameters.
 func (adapter *NSGConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckStrByValues(params, Metric, METRICS) {
 		return false
