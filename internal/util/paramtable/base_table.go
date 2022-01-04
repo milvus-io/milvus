@@ -34,7 +34,10 @@ import (
 // UniqueID is type alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
 
-const envPrefix string = "milvus"
+const (
+	MilvusConfEnvKey string = "MILVUSCONF"
+	envPrefix        string = "milvus"
+)
 
 // Base abstracts BaseTable
 // TODO: it's never used, consider to substitute BaseTable or to remove it
@@ -89,7 +92,7 @@ func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
 
 func (gp *BaseTable) initConfPath() string {
 	// check if user set conf dir through env
-	configDir, find := syscall.Getenv("MILVUSCONF")
+	configDir, find := syscall.Getenv(MilvusConfEnvKey)
 	if !find {
 		runPath, err := os.Getwd()
 		if err != nil {

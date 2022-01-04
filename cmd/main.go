@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -47,6 +48,9 @@ var (
 	GitCommit = "unknown"
 	GoVersion = "unknown"
 )
+
+// conf dir path for milvus
+var milvusConf = ""
 
 func printBanner() {
 	fmt.Println()
@@ -90,6 +94,15 @@ func injectVariablesToEnv() {
 	if err != nil {
 		log.Warn(fmt.Sprintf("failed to inject %s to environment variable", metricsinfo.MilvusUsedGoVersion),
 			zap.Error(err))
+	}
+
+	// the `MILVUSCONF` will be overwritten if --config is provided
+	if milvusConf != "" {
+		err = os.Setenv(paramtable.MilvusConfEnvKey, milvusConf)
+		if err != nil {
+			log.Warn(fmt.Sprintf("failed to inject %s to environment variable", paramtable.MilvusConfEnvKey),
+				zap.Error(err))
+		}
 	}
 }
 
@@ -206,6 +219,7 @@ func main() {
 
 	var svrAlias string
 	flags.StringVar(&svrAlias, "alias", "", "set alias")
+	flags.StringVar(&milvusConf, "config", "", "set conf path")
 
 	var enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord bool
 	flags.BoolVar(&enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
