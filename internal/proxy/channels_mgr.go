@@ -507,6 +507,7 @@ func (mgr *channelsMgrImpl) removeAllDMLStream() error {
 	return mgr.dmlChannelsMgr.removeAllStream()
 }
 
+// newChannelsMgrImpl constructs a channels manager.
 func newChannelsMgrImpl(
 	getDmlChannelsFunc getChannelsFuncType,
 	dmlRepackFunc repackFuncType,
