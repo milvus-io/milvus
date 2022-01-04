@@ -101,6 +101,7 @@ func (m *meta) GetCollection(collectionID UniqueID) *datapb.CollectionInfo {
 	return collection
 }
 
+// chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName
 type chanPartSegments struct {
 	collecionID UniqueID
 	partitionID UniqueID
