@@ -328,6 +328,7 @@ func newNSGConfAdapter() *NSGConfAdapter {
 	return &NSGConfAdapter{}
 }
 
+// HNSWConfAdapter checks if a hsnw index can be built.
 type HNSWConfAdapter struct {
 	BaseConfAdapter
 }
