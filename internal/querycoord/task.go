@@ -1294,9 +1294,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 type watchDeltaChannelTask struct {
 	*baseTask
 	*querypb.WatchDeltaChannelsRequest
-	meta           Meta
-	cluster        Cluster
-	excludeNodeIDs []int64
+	cluster Cluster
 }
 
 func (wdt *watchDeltaChannelTask) msgBase() *commonpb.MsgBase {
