@@ -177,6 +177,7 @@ func (loader *indexLoader) estimateIndexBinlogSize(segment *Segment, fieldID Fie
 	return indexSize, nil
 }
 
+// getIndexInfo gets indexInfo from RootCoord and IndexCoord
 func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segment *Segment) (*indexInfo, error) {
 	if loader.indexCoord == nil || loader.rootCoord == nil {
 		return nil, errors.New("null indexcoord client or rootcoord client, collectionID = " +
