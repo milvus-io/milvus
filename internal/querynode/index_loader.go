@@ -154,6 +154,7 @@ func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexPa
 	return index, indexParams, indexName, nil
 }
 
+// estimateIndexBinlogSize returns estimated index size
 func (loader *indexLoader) estimateIndexBinlogSize(segment *Segment, fieldID FieldID) (int64, error) {
 	indexSize := int64(0)
 	indexPaths := segment.getIndexPaths(fieldID)
