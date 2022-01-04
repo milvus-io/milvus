@@ -694,7 +694,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	segment := s.meta.GetSegment(segmentID)
 	if segment == nil {
-		log.Warn("failed to get flused segment", zap.Int64("id", segmentID))
+		logutil.Logger(s.ctx).Warn("failed to get flused segment", zap.Int64("ID", segmentID))
 		return errors.New("segment not found")
 	}
 	// Notify RootCoord segment is flushed
@@ -706,15 +706,15 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	}
 	resp, err := s.rootCoordClient.SegmentFlushCompleted(ctx, req)
 	if err = VerifyResponse(resp, err); err != nil {
-		log.Warn("failed to call SegmentFlushComplete", zap.Int64("segmentID", segmentID), zap.Error(err))
+		logutil.Logger(s.ctx).Warn("failed to call SegmentFlushComplete", zap.Int64("segmentID", segmentID), zap.Error(err))
 		return err
 	}
 	// set segment to SegmentState_Flushed
 	if err = s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {
-		log.Error("flush segment complete failed", zap.Error(err))
+		logutil.Logger(s.ctx).Error("failed to complete segment flush ", zap.Error(err))
 		return err
 	}
-	log.Debug("flush segment complete", zap.Int64("id", segmentID))
+	logutil.Logger(s.ctx).Debug("flush segment complete", zap.Int64("ID", segmentID))
 	return nil
 }
 
