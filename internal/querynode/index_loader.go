@@ -110,6 +110,7 @@ func (loader *indexLoader) printIndexParams(index []*commonpb.KeyValuePair) {
 	}
 }
 
+// getIndexBinlog would load index and index params from storage
 func (loader *indexLoader) getIndexBinlog(indexPath []string) ([][]byte, indexParam, string, error) {
 	index := make([][]byte, 0)
 
