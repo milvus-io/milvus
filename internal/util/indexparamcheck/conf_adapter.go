@@ -294,7 +294,7 @@ func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) bool {
 func newBinIVFConfAdapter() *BinIVFConfAdapter {
 	return &BinIVFConfAdapter{}
 }
-
+// NSGConfAdapter checks if a nsg index can be built.
 type NSGConfAdapter struct {
 }
 
