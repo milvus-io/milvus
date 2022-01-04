@@ -854,7 +854,7 @@ func (scheduler *TaskScheduler) processActivateTaskLoop() {
 			}
 
 			if t.getState() != taskDone {
-				log.Debug("processActivateTaskLoop: pop a active task from activateChan", zap.Int64("taskID", t.getTaskID()))
+				log.Debug("processActivateTaskLoop: pop an active task from activateChan", zap.Int64("taskID", t.getTaskID()))
 				go func() {
 					err := scheduler.processTask(t)
 					t.notify(err)
