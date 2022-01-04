@@ -3666,7 +3666,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Number of allocated heap objects",
+      "description": "Number of allocated heap objects.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
