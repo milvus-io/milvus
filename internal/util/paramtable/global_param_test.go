@@ -169,7 +169,7 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("query coord search result channel = %s", Params.SearchResultChannelPrefix)
 
 		assert.Equal(t, Params.StatsChannelName, "by-dev-query-node-stats")
-		t.Logf("query coord stats channel = %s", Params.StatsChannelName)
+		t.Logf("QueryCoord stats channel = %s", Params.StatsChannelName)
 
 		assert.Equal(t, Params.TimeTickChannelName, "by-dev-queryTimeTick")
 		t.Logf("query coord  time tick channel = %s", Params.TimeTickChannelName)
