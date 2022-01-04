@@ -9,15 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "query/Plan.h"
 #include <utility>
-#include "query/generated/ShowExprVisitor.h"
+
 #include "query/ExprImpl.h"
+#include "query/Plan.h"
+#include "query/generated/ShowExprVisitor.h"
 
 namespace milvus::query {
 using Json = nlohmann::json;
 
-#if 1
 // THIS CONTAINS EXTRA BODY FOR VISITOR
 // WILL BE USED BY GENERATOR
 namespace impl {
@@ -55,7 +55,6 @@ class ShowExprNodeVisitor : ExprVisitor {
     std::optional<RetType> ret_;
 };
 }  // namespace impl
-#endif
 
 void
 ShowExprVisitor::visit(LogicalUnaryExpr& expr) {
@@ -248,4 +247,5 @@ ShowExprVisitor::visit(CompareExpr& expr) {
              {"op", OpType_Name(static_cast<OpType>(expr.op_type_))}};
     ret_ = res;
 }
+
 }  // namespace milvus::query
