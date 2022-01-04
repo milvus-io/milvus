@@ -63,7 +63,7 @@ fi
 trace "prepare e2e test"  install_pytest_requirements  
 
 
-
+# Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
   
   timeout  "${TEST_TIMEOUT}" pytest --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
