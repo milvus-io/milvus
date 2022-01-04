@@ -95,4 +95,4 @@
 
 ### 2.12 Timestamp of `dd operations`
 
-1. `RC` response is to set the timestamp of `dd operations`, create collection, create partition, drop collection, drop partition, and send this timestamp into `dml msgstream`.
+1. `RootCoord` response is to set the timestamp of `dd operations`, create collection, create partition, drop collection, drop partition, and send this timestamp into `dml msgstream`.
