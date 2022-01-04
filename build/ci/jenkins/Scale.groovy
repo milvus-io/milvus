@@ -1,6 +1,6 @@
 
 String cron_timezone = 'TZ=Asia/Shanghai'
-String cron_string = BRANCH_NAME == "master" ? "30 20 * * * " : ""
+String cron_string = BRANCH_NAME == "master" ? "05 21 * * * " : ""
 
 int total_timeout_minutes = 60
 
@@ -56,6 +56,17 @@ pipeline {
         }
     }
     post {
+        unsuccessful {
+            container ('jnlp') {
+                script {
+                    emailext subject: '$DEFAULT_SUBJECT',
+                    body: '$DEFAULT_CONTENT',
+//                     recipientProviders: [requestor()],
+//                     replyTo: '$DEFAULT_REPLYTO',
+                    to: 'qa@zilliz.com'
+                }
+            }
+        }
         always {
             container('milvus-test') {
                 dir ('tests/scripts') {
