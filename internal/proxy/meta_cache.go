@@ -71,6 +71,7 @@ type MetaCache struct {
 	mu       sync.RWMutex
 }
 
+// globalMetaCache is singleton instance of Cache
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
@@ -91,6 +92,7 @@ func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	}, nil
 }
 
+// GetCollectionID returns the corresponding collection id for provided collection name
 func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
 	m.mu.RLock()
 	collInfo, ok := m.collInfo[collectionName]
