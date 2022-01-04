@@ -16,8 +16,9 @@ DELTA_PER_INS = 10  # entities per insert
 ENTITIES_FOR_SEARCH = 3000  # entities for search_collection
 
 CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'  # env variables for chao path
-TESTS_CONFIG_LOCATION = 'chaos_objects/pod_kill/'  # path to the chaos CRD
-ALL_CHAOS_YAMLS = 'chaos_datanode*.yaml'  # chaos file name(s) to be run against
+TESTS_CONFIG_LOCATION = 'chaos_objects/pod_kill/'
+ALL_CHAOS_YAMLS = 'chaos_querynode_pod_kill.yaml'
+RELEASE_NAME = 'test-querynode-pod-kill-17-33-50'
 WAIT_PER_OP = 10  # time to wait in seconds between operations
 CHAOS_DURATION = 120  # chaos duration time in seconds
 DEFAULT_INDEX_PARAM = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
