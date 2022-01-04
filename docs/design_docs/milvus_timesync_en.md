@@ -73,7 +73,7 @@ In an `AllocTimestamp` request, if `AllocTimestampRequest.count` is greater than
 
 ## Time Synchronization
 
-To understand the `Time Synchronization` better, let's introduce the data operation of Milvus 2.0 briefly.
+To better understand `Time Synchronization`, let's introduce the data operation of Milvus 2.0 briefly.
 Take `Insert Operation` as an example.
 
 - User can configure lots of `Proxy` to achieve load balancing, in `Milvus 2.0`
