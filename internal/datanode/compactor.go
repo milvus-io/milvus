@@ -664,7 +664,7 @@ func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {
 }
 
 func (t *compactionTask) isExpiredEntity(ts, now Timestamp) bool {
-	const MaxEntityExpiration = 9223372036 // math.MaxInt64 / time.Second
+	const MaxEntityExpiration = 9223372036 // the value was setup by math.MaxInt64 / time.Second
 	// Check calculable range of milvus config value
 	if Params.DataCoordCfg.CompactionEntityExpiration > MaxEntityExpiration {
 		return false

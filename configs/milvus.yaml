@@ -165,7 +165,7 @@ dataCoord:
 
   compaction:
     enableAutoCompaction: true
-    entityExpiration: 864000 # 10 days in seconds, CAUTION make sure entityExpiration >= retentionDuration and entityExpiration < 9223372036
+    entityExpiration: 9223372037 # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and 9223372037 is the maximum value of entityExpiration
 
   gc:
     interval: 3600 # gc interval in seconds
