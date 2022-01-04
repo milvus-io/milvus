@@ -19,5 +19,5 @@ Currently，there are two paths to implement time travel:
 
 2. The Algorithm for time travel is:
    1. Use get_active_count interface, find the last segment containing a legal ts, and return the last element position of this segment as vec_count
-   2. Calculate the bitset mask with timestamp. Due to the above properties, all the entities of the previous segment meet the conditions, and all the subsequent segments do not meet the conditions. Only the "last segment" needs to be calculated.
+   2. Calculate the bitset mask with a timestamp. Due to the above properties, all the entities of the previous segment meet the conditions, and all the subsequent segments do not meet the conditions. Only the "last segment" needs to be calculated.
    3. the calculated results of Bitset and DSL are combined and sent to vector search interface
