@@ -799,7 +799,7 @@ class TestUtilityBase(TestcaseBase):
     @pytest.mark.tag(CaseLabel.L2)
     def test_loading_progress_empty_collection(self):
         """
-        target: test loading_progress on a empty collection
+        target: test loading_progress on an empty collection
         method: 1.create collection and no insert 2.loading_progress
         expected: 0 entities is loaded
         """
