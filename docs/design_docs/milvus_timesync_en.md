@@ -96,7 +96,7 @@ The 3 `InsertMsg` from `Proxy1` are incremented in timestamp, and the 2 `InsertM
 
 ![msgstream](./graphs/timesync_msgstream.png)
 
-So the second problem has turned into this: after reading a message from `MsgStream`, how to make sure that all the messages with smaller timestamp have been consumed?
+So the second problem has turned into this: After reading a message from `MsgStream`, how to make sure that all the messages with smaller timestamp have been consumed?
 
 For example, when reading a message with timestamp `110` produced by `Proxy2`, but the message with timestamp `80` produced by `Proxy1`, is still in the `MsgStream`. How can this situation be handled?
 
