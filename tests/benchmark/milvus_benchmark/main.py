@@ -212,11 +212,11 @@ def main():
                         "image_tag": image_tag,
                         "image_type": image_type
                     }
-                    env_params = {
-                        "deploy_mode": deploy_mode,
-                        "helm_path": helm_path,
-                        "helm_params": helm_params
-                    }
+                    # env_params = {
+                    #     "deploy_mode": deploy_mode,
+                    #     "helm_path": helm_path,
+                    #     "helm_params": helm_params
+                    # }
                     # job = back_scheduler.add_job(run_suite, args=[run_type, suite, env_mode, env_params],
                     #                              misfire_grace_time=36000)
                     # logger.info(job.id)
