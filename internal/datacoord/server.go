@@ -526,7 +526,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		return nil
 	}
 
-	log.Debug("flush segments", zap.Int64s("segmentIDs", flushableIDs), zap.Int("markSegments count", len(staleSegments)))
+	logutil.Logger(s.ctx).Debug("flush segments", zap.Int64s("segmentIDs", flushableIDs), zap.Int("mark segments count", len(staleSegments)))
 
 	s.setLastFlushTime(flushableSegments)
 	s.setLastFlushTime(staleSegments)
@@ -553,7 +553,7 @@ func (s *Server) getFlushableSegmentsInfo(flushableIDs []int64) []*SegmentInfo {
 	for _, id := range flushableIDs {
 		sinfo := s.meta.GetSegment(id)
 		if sinfo == nil {
-			log.Error("get segment from meta error", zap.Int64("id", id))
+			logutil.Logger(s.ctx).Error("failed to get segment from meta", zap.Int64("ID", id))
 			continue
 		}
 		res = append(res, sinfo)
