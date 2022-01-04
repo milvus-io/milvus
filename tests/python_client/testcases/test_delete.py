@@ -867,7 +867,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, 1]}',
                            check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.xfail(reason='Issue #14610')
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_query_after_handoff(self):
         """
