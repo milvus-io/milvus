@@ -1895,7 +1895,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
 		case <-st.TraceCtx().Done():
-			log.Debug("Proxy", zap.Int64("searchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
+			log.Debug("Proxy searchTask PostExecute Loop exit caused by ctx.Done", zap.Int64("taskID", st.ID()))
 			return fmt.Errorf("searchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
