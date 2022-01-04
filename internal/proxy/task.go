@@ -92,6 +92,7 @@ const (
 	DropAliasTaskName               = "DropAliasTask"
 	AlterAliasTaskName              = "AlterAliasTask"
 
+	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
 )
 
