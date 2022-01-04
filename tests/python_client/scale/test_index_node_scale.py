@@ -161,4 +161,4 @@ class TestIndexNodeScale:
         log.debug(t1 / t0)
         assert round(t1 / t0) == 2
 
-        # mic.uninstall(release_name, namespace=constants.NAMESPACE)
+        mic.uninstall(release_name, namespace=constants.NAMESPACE)
