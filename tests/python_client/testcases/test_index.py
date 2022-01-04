@@ -405,14 +405,14 @@ class TestIndexBase:
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        result = connect.insert(collection, default_entities)
+        connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
             index = connect.describe_index(collection, "")
