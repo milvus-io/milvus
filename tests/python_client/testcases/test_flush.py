@@ -100,7 +100,6 @@ class TestFlushBase:
         tag_new = gen_unique_str()
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(id_collection, tag_new)
-        ids = [i for i in range(default_nb)]
         connect.insert(id_collection, default_entities, partition_name=default_tag)
         connect.flush([id_collection])
         connect.insert(id_collection, default_entities, partition_name=tag_new)
