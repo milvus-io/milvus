@@ -222,6 +222,10 @@ MemTable::ApplyDeletes() {
 
     for (auto& file : files) {
         LOG_ENGINE_DEBUG_ << "Applying deletes in segment: " << file.segment_id_;
+        if (file.row_count_ == 0) {
+            LOG_ENGINE_DEBUG_ << "Applying deletes in segment: segment is empty, skip";
+            continue;
+        }
 
         segment::IdBloomFilterPtr id_bloom_filter_ptr = nullptr;
         segment::UidsPtr uids_ptr = nullptr;
