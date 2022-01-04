@@ -326,13 +326,13 @@ func (node *DataNode) handleWatchInfo(key string, data []byte) {
 		log.Warn("found ChannelWatchInfo with nil VChannelInfo", zap.String("key", key))
 		return
 	}
-	log.Warn("DataNode handleWatchInfo try to NewDataSyncService", zap.String("key", key))
+	log.Debug("DataNode handleWatchInfo try to NewDataSyncService", zap.String("key", key))
 	err = node.NewDataSyncService(watchInfo.Vchan)
 	if err != nil {
 		log.Warn("fail to create DataSyncService", zap.String("key", key), zap.Error(err))
 		return
 	}
-	log.Warn("DataNode handleWatchInfo NewDataSyncService success", zap.String("key", key))
+	log.Debug("DataNode handleWatchInfo NewDataSyncService success", zap.String("key", key))
 
 	watchInfo.State = datapb.ChannelWatchState_Complete
 	v, err := proto.Marshal(&watchInfo)
@@ -341,13 +341,13 @@ func (node *DataNode) handleWatchInfo(key string, data []byte) {
 		return
 	}
 	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), watchInfo.GetVchan().GetChannelName())
-	log.Warn("DataNode handleWatchInfo try to Save", zap.String("key", key),
+	log.Debug("DataNode handleWatchInfo call watchKv.Save", zap.String("key", key),
 		zap.String("k", k),
 		zap.String("v", string(v)))
 
 	err = node.watchKv.Save(k, string(v))
 	if err != nil {
-		log.Warn("DataNode handleWatchInfo fail to change WatchState to complete", zap.String("key", key), zap.Error(err))
+		log.Warn("DataNode handleWatchInfo call watchKv.Save failed", zap.String("key", key), zap.Error(err))
 		node.ReleaseDataSyncService(key)
 	}
 }

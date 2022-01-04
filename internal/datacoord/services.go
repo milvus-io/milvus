@@ -125,12 +125,19 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			}
 		}
 
-		s.cluster.Watch(r.ChannelName, r.CollectionID)
-
-		allocations, err := s.segmentManager.AllocSegment(ctx,
-			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
+		err := s.cluster.Watch(r.ChannelName, r.CollectionID)
 		if err != nil {
-			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
+			log.Error("DataCoord Server AssignSegmentID watch channel failed ", zap.Int64("collectionID", r.CollectionID),
+				zap.String("channelName", r.ChannelName), zap.Error(err))
+		} else {
+			log.Debug("DataCoord Server AssignSegmentID watch channel success", zap.Int64("collectionID", r.CollectionID),
+				zap.String("channelName", r.ChannelName))
+		}
+
+		allocations, err2 := s.segmentManager.AllocSegment(ctx,
+			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
+		if err2 != nil {
+			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err2))
 			continue
 		}
 
@@ -917,10 +924,13 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}
 		err := s.channelManager.Watch(ch)
 		if err != nil {
-			log.Warn("fail to watch channelName", zap.String("channelName", channelName), zap.Error(err))
+			log.Warn("DataCoord Server watch channel failed", zap.Int64("collectionID", ch.CollectionID),
+				zap.String("channelName", channelName), zap.Error(err))
 			resp.Status.Reason = err.Error()
 			return resp, nil
 		}
+		log.Debug("DataCoord Server watch channel success", zap.Int64("collectionID", ch.CollectionID),
+			zap.String("channelName", ch.Name))
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 
