@@ -67,6 +67,7 @@ var _ types.IndexNode = (*IndexNode)(nil)
 // make sure IndexNode implements types.IndexNodeComponent
 var _ types.IndexNodeComponent = (*IndexNode)(nil)
 
+// Params is a GlobalParamTable singleton of indexnode
 var Params paramtable.GlobalParamTable
 
 // IndexNode is a component that executes the task of building indexes.
