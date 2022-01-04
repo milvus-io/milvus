@@ -134,7 +134,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			continue
 		}
 
-		log.Debug("success to assign segments", zap.Any("assignments", allocations))
+		log.Debug("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", allocations))
 
 		for _, allocation := range allocations {
 			result := &datapb.SegmentIDAssignment{

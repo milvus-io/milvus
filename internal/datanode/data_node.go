@@ -344,11 +344,12 @@ func (node *DataNode) handleWatchInfo(key string, data []byte) {
 
 // NewDataSyncService adds a new dataSyncService for new dmlVchannel and starts dataSyncService.
 func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
-	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
+	node.chanMut.RLock()
 	if _, ok := node.vchan2SyncService[vchan.GetChannelName()]; ok {
+		node.chanMut.RUnlock()
 		return nil
 	}
+	node.chanMut.RUnlock()
 
 	replica, err := newReplica(node.ctx, node.rootCoord, vchan.CollectionID)
 	if err != nil {
@@ -373,8 +374,10 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 		return err
 	}
 
+	node.chanMut.Lock()
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushChs[vchan.GetChannelName()] = flushCh
+	node.chanMut.Unlock()
 
 	log.Info("DataNode NewDataSyncService success",
 		zap.Int64("Collection ID", vchan.GetCollectionID()),
@@ -405,14 +408,15 @@ func (node *DataNode) ReleaseDataSyncService(vchanName string) {
 	log.Info("Release flowgraph resources begin", zap.String("Vchannel", vchanName))
 
 	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
-	if dss, ok := node.vchan2SyncService[vchanName]; ok {
-		dss.close()
-	}
-
+	dss, ok := node.vchan2SyncService[vchanName]
 	delete(node.vchan2SyncService, vchanName)
 	delete(node.vchan2FlushChs, vchanName)
+	node.chanMut.Unlock()
 
+	if ok {
+		// This is a time-consuming process, better to put outside of the lock
+		dss.close()
+	}
 	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
 

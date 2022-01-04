@@ -231,9 +231,6 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID, channelName string,
 	startPos, endPos *internalpb.MsgPosition) error {
 
-	replica.segMu.Lock()
-	defer replica.segMu.Unlock()
-
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
@@ -266,13 +263,15 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	seg.isNew.Store(true)
 	seg.isFlushed.Store(false)
 
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
 	replica.newSegments[segID] = seg
 	return nil
 }
 
 func (replica *SegmentReplica) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
-	replica.segMu.Lock()
-	defer replica.segMu.Unlock()
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
 
 	compactedTo2From := make(map[UniqueID][]UniqueID)
 
@@ -293,8 +292,8 @@ func (replica *SegmentReplica) listCompactedSegmentIDs() map[UniqueID][]UniqueID
 // filterSegments return segments with same channelName and partition ID
 // get all segments
 func (replica *SegmentReplica) filterSegments(channelName string, partitionID UniqueID) []*Segment {
-	replica.segMu.Lock()
-	defer replica.segMu.Unlock()
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
 	results := make([]*Segment, 0)
 
 	isMatched := func(segment *Segment, chanName string, partID UniqueID) bool {
@@ -472,8 +471,8 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 // listNewSegmentsStartPositions gets all *New Segments* start positions and
 //   transfer segments states from *New* to *Normal*.
 func (replica *SegmentReplica) listNewSegmentsStartPositions() []*datapb.SegmentStartPosition {
-	replica.segMu.Lock()
-	defer replica.segMu.Unlock()
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
 
 	result := make([]*datapb.SegmentStartPosition, 0, len(replica.newSegments))
 	for id, seg := range replica.newSegments {
@@ -617,8 +616,8 @@ func (replica *SegmentReplica) updateStatistics(segID UniqueID, numRows int64) {
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.
 func (replica *SegmentReplica) getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error) {
-	replica.segMu.Lock()
-	defer replica.segMu.Unlock()
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
 	updates := &datapb.SegmentStats{SegmentID: segID}
 
 	if seg, ok := replica.newSegments[segID]; ok {
@@ -780,8 +779,8 @@ func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID Un
 }
 
 func (replica *SegmentReplica) listAllSegmentIDs() []UniqueID {
-	replica.segMu.Lock()
-	defer replica.segMu.Unlock()
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
 
 	var segIDs []UniqueID
 
