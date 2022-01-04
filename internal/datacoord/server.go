@@ -749,7 +749,7 @@ func (s *Server) Stop() error {
 	if !atomic.CompareAndSwapInt64(&s.isServing, ServerStateHealthy, ServerStateStopped) {
 		return nil
 	}
-	log.Debug("dataCoord server shutdown")
+	logutil.Logger(s.ctx).Debug("server shutdown")
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
