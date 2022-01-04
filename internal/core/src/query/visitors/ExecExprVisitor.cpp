@@ -9,17 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <deque>
 #include <optional>
+#include <utility>
 #include <boost/dynamic_bitset.hpp>
 #include <boost/variant.hpp>
-#include <utility>
-#include <deque>
-#include "segcore/SegmentGrowingImpl.h"
+
 #include "query/ExprImpl.h"
 #include "query/generated/ExecExprVisitor.h"
+#include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {
-#if 1
 // THIS CONTAINS EXTRA BODY FOR VISITOR
 // WILL BE USED BY GENERATOR
 namespace impl {
@@ -67,7 +67,6 @@ class ExecExprVisitor : ExprVisitor {
     Timestamp timestamp_;
 };
 }  // namespace impl
-#endif
 
 void
 ExecExprVisitor::visit(LogicalUnaryExpr& expr) {
