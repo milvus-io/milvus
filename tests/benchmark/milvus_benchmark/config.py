@@ -12,7 +12,7 @@ SERVER_HOST_DEFAULT = "127.0.0.1"
 SERVER_PORT_DEFAULT = 19530
 
 # milvus version, should be changed by manual
-SERVER_VERSION = "2.0.0-RC8"
+SERVER_VERSION = "2.0.0-RC9"
 DEFUALT_DEPLOY_MODE = "single"
 
 
