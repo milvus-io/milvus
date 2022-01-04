@@ -640,25 +640,25 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 	}
 	switch event.EventType {
 	case sessionutil.SessionAddEvent:
-		log.Info("received datanode register",
+		logutil.Logger(s.ctx).Info("received datanode register",
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
 		if err := s.cluster.Register(node); err != nil {
-			log.Warn("failed to regisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			logutil.Logger(s.ctx).Warn("failed to regisger node", zap.Int64("ID", node.NodeID), zap.String("address", node.Address), zap.Error(err))
 			return err
 		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	case sessionutil.SessionDelEvent:
-		log.Info("received datanode unregister",
+		logutil.Logger(s.ctx).Info("received datanode unregister",
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
 		if err := s.cluster.UnRegister(node); err != nil {
-			log.Warn("failed to deregisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			logutil.Logger(s.ctx).Warn("failed to deregisger node", zap.Int64("ID", node.NodeID), zap.String("address", node.Address), zap.Error(err))
 			return err
 		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	default:
-		log.Warn("receive unknown service event type",
+		logutil.Logger(s.ctx).Warn("received unknown service event type",
 			zap.Any("type", event.EventType))
 	}
 	return nil
