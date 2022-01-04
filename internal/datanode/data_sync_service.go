@@ -115,16 +115,19 @@ func newParallelConfig() parallelConfig {
 // start starts the flowgraph in datasyncservice
 func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
-		log.Debug("Data Sync Service starting flowgraph")
+		log.Debug("dataSyncService starting flowgraph", zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vChanName", dsService.vchannelName))
 		dsService.fg.Start()
 	} else {
-		log.Debug("Data Sync Service flowgraph nil")
+		log.Warn("dataSyncService starting flowgraph is nil", zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vChanName", dsService.vchannelName))
 	}
 }
 
 func (dsService *dataSyncService) close() {
 	if dsService.fg != nil {
-		log.Debug("Data Sync Service closing flowgraph")
+		log.Debug("dataSyncService closing flowgraph", zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vChanName", dsService.vchannelName))
 		dsService.fg.Close()
 	}
 
