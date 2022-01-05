@@ -238,6 +238,7 @@ func (loader *indexLoader) getIndexInfo(collectionID UniqueID, segment *Segment)
 	}, nil
 }
 
+// setIndexInfo sets indexInfo for segment
 func (loader *indexLoader) setIndexInfo(segment *Segment, info *indexInfo) {
 	segment.setEnableIndex(true)
 	segment.setIndexInfo(info.fieldID, info)
