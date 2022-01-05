@@ -11,11 +11,11 @@ To test deployment by docker-compose(Both standalone and cluster)
     5. Stop Milvus
     6. Repeat from step #1
 * upgrade milvus to check data compatibility
-    1. Deploy Milvus （Previous RC)
+    1. Deploy Milvus (Previous Release)
     2. Insert data
     3. Search
     4. Stop Milvus
-    5. Deploy Milvus  (Latest RC)
+    5. Deploy Milvus  (Latest Release/Build)
     6. Build index
     7. Search
 
