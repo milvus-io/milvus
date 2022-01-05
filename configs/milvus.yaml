@@ -71,13 +71,6 @@ proxy:
 
   timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
   msgStream:
-    insert:
-      bufSize: 1024 # msgPack chan buffer size
-    search:
-      bufSize: 512 # msgPack chan buffer size
-    searchResult:
-      recvBufSize: 1024 # msgPack chan buffer size
-      pulsarBufSize: 1024 # pulsar chan buffer size
     timeTick:
       bufSize: 512
   maxNameLength: 255  # Maximum length of name for a collection or alias
