@@ -14,10 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "common/SystemProperty.h"
-#include "exceptions/EasyAssert.h"
 #include <yaml-cpp/yaml.h>
-#include "common/Types.h"
+
+#include "SystemProperty.h"
+#include "Types.h"
+#include "exceptions/EasyAssert.h"
 
 namespace milvus {
 class SystemPropertyImpl : public SystemProperty {
