@@ -178,7 +178,7 @@ message DropCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The name of the collection whcih to be dropped. (Required)
+  // The name of the collection which to be dropped. (Required)
   string collection_name = 3;
 }
 ```
