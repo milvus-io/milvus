@@ -244,6 +244,7 @@ func (loader *indexLoader) setIndexInfo(segment *Segment, info *indexInfo) {
 	segment.setIndexInfo(info.fieldID, info)
 }
 
+// newIndexLoader returns a new indexLoader
 func newIndexLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface) *indexLoader {
 	option := &minioKV.Option{
 		Address:           Params.QueryNodeCfg.MinioEndPoint,
