@@ -91,7 +91,7 @@ class TestIndexNodeScale:
         log.debug(f't1: {t1}')
         assert round(t0 / t1) == 2
 
-        # mic.uninstall(release_name, namespace=constants.NAMESPACE)
+        mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_index_node(self):
