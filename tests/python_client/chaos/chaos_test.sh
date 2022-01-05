@@ -36,13 +36,13 @@ echo "install milvus"
 if [ ${pod} != "standalone" ];
 then
     echo "insatll cluster"
-    helm install --wait --timeout 360s ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
+    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.tag=${image_tag:-"master-latest"} --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
 fi
 
 if [ ${pod} == "standalone" ];
 then
     echo "install standalone"
-    helm install --wait --timeout 360s ${release} milvus/milvus -f ../standalone-values.yaml -n=${ns}
+    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.tag=${image_tag:-"master-latest"} -f ../standalone-values.yaml -n=${ns}
 fi
 
 # wait all pod ready
