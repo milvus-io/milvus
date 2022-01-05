@@ -80,6 +80,7 @@ func (bt *BaseTask) ID() UniqueID {
 	return bt.id
 }
 
+// setID set the ID for the task.
 func (bt *BaseTask) setID(id UniqueID) {
 	bt.id = id
 }
