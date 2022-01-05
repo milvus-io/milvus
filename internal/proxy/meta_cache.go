@@ -114,6 +114,8 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 	return collInfo.collID, nil
 }
 
+// GetCollectionInfo returns the collection information related to provided collection name
+// If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo
