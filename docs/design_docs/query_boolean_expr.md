@@ -76,7 +76,7 @@ Tips:
 
 After syntax analysis, the following rules will be applied:
 
-1. non-vector column must exist in Schema.
+1. Non-vector column must exist in Schema.
 2. CompareExpr/TermExpr requires operand type matching.
 3. CompareExpr between non-vector columns of different types is available.
 4. The modulo operation requires all operands to be integers.
