@@ -21,7 +21,7 @@
 #include "InsertRecord.h"
 #include "common/Schema.h"
 #include "knowhere/index/structured_index_simple/StructuredIndexSort.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "segcore/SegcoreConfig.h"
 
 namespace milvus::segcore {
@@ -36,6 +36,7 @@ class FieldIndexing {
     FieldIndexing(const FieldIndexing&) = delete;
     FieldIndexing&
     operator=(const FieldIndexing&) = delete;
+    virtual ~FieldIndexing() = default;
 
     // Do this in parallel
     virtual void

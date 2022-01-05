@@ -19,7 +19,6 @@
 #include "ConfigKnowhere.h"
 #include "exceptions/EasyAssert.h"
 #include "easyloggingpp/easylogging++.h"
-#include "faiss/FaissHook.h"
 #include "log/Log.h"
 #include "knowhere/archive/KnowhereConfig.h"
 

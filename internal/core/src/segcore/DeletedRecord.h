@@ -16,7 +16,6 @@
 
 #include "AckResponder.h"
 #include "common/Schema.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "segcore/Record.h"
 
 namespace milvus::segcore {
