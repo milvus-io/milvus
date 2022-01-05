@@ -40,8 +40,6 @@ MILVUS_CLIENT="${MILVUS_CLIENT:-pymilvus}"
 MILVUS_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-milvus.${MILVUS_HELM_NAMESPACE}" | tr -d '\n')
 MILVUS_SERVICE_PORT="19530"
 
-# Shellcheck source=build/lib.sh
-source "${ROOT}/build/lib.sh"
 
 
 # Shellcheck source=ci-util.sh
@@ -60,7 +58,9 @@ if [ ! -d "${CI_LOG_PATH}" ]; then
   # Create dir for ci log path when it does not exist
   mkdir -p ${CI_LOG_PATH}
 fi
-trace "prepare e2e test"  install_pytest_requirements  
+
+echo "prepare e2e test"  
+install_pytest_requirements  
 
 
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
