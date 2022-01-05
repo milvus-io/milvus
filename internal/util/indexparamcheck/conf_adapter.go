@@ -355,6 +355,7 @@ type ANNOYConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if an annoy index can be built with specific parameters.
 func (adapter *ANNOYConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, NTREES, MinNTrees, MaxNTrees) {
 		return false
