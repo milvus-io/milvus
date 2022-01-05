@@ -143,6 +143,7 @@ class TestFlushBase:
             "segment_row_limit": default_segment_row_limit,
             "auto_id": False
         }
+        log.debug(f"test_add_collections_fields_flush: fields: {fields}, collection_new:{collection_new}")
         connect.create_collection(collection_new, fields)
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(collection_new, default_tag)
