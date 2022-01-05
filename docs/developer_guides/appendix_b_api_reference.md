@@ -155,7 +155,7 @@ message Status {
 }
 ```
 
-**Status** represents the server error code. It doesn't contain grpc error but contains the server error code. We can get the executing result in common status. **error_code** is an enum type to distinguish the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describe the detailed error.
+**Status** represents the server error code. It doesn't contain grpc error but the server error code. We can get the executing result in common status. **error_code** is an enum type to distinguish the executing error type. The total Errorcode is shown in the last of this code. And the **reason** field is a string to describe the detailed error.
 
 ###### 3.1.3 HasCollection
 
