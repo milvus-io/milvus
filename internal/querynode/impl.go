@@ -417,7 +417,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("releasePartitionsTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	log.Debug("releasePartitionsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
 
 	func() {
 		err = dct.WaitToFinish()
@@ -425,7 +425,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 			log.Error(err.Error())
 			return
 		}
-		log.Debug("releasePartitionsTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("releasePartitionsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
 	}()
 
 	status := &commonpb.Status{
