@@ -308,8 +308,6 @@ type rootCoordConfig struct {
 	DefaultIndexName            string
 	MinSegmentSizeToEnableIndex int64
 
-	Timeout int
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -334,8 +332,6 @@ func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.initMinSegmentSizeToEnableIndex()
 	p.initDefaultPartitionName()
 	p.initDefaultIndexName()
-
-	p.initTimeout()
 }
 
 func (p *rootCoordConfig) initPulsarAddress() {
@@ -443,10 +439,6 @@ func (p *rootCoordConfig) initDefaultPartitionName() {
 func (p *rootCoordConfig) initDefaultIndexName() {
 	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
 	p.DefaultIndexName = name
-}
-
-func (p *rootCoordConfig) initTimeout() {
-	p.Timeout = p.BaseParams.ParseIntWithDefault("rootCoord.timeout", 3600)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
