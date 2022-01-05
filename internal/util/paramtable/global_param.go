@@ -1267,11 +1267,9 @@ type dataCoordConfig struct {
 	Address string
 
 	// --- ETCD ---
-	MetaRootPath            string
-	KvRootPath              string
-	SegmentBinlogSubPath    string
-	CollectionBinlogSubPath string
-	ChannelWatchSubPath     string
+	MetaRootPath        string
+	KvRootPath          string
+	ChannelWatchSubPath string
 
 	// --- MinIO ---
 	MinioAddress         string
@@ -1286,9 +1284,6 @@ type dataCoordConfig struct {
 
 	// --- Rocksmq ---
 	RocksmqPath string
-
-	FlushStreamPosSubPath string
-	StatsStreamPosSubPath string
 
 	// --- SEGMENTS ---
 	SegmentMaxSize          float64
@@ -1322,8 +1317,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 
 	p.initMetaRootPath()
 	p.initKvRootPath()
-	p.initSegmentBinlogSubPath()
-	p.initCollectionBinlogSubPath()
 	p.initChannelWatchPrefix()
 
 	p.initPulsarAddress()
@@ -1339,9 +1332,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initTimeTickChannelName()
 	p.initSegmentInfoChannelName()
 	p.initDataCoordSubscriptionName()
-
-	p.initFlushStreamPosSubPath()
-	p.initStatsStreamPosSubPath()
 
 	p.initEnableCompaction()
 
@@ -1401,22 +1391,6 @@ func (p *dataCoordConfig) initKvRootPath() {
 	p.KvRootPath = rootPath + "/" + subPath
 }
 
-func (p *dataCoordConfig) initSegmentBinlogSubPath() {
-	subPath, err := p.BaseParams.Load("etcd.segmentBinlogSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.SegmentBinlogSubPath = subPath
-}
-
-func (p *dataCoordConfig) initCollectionBinlogSubPath() {
-	subPath, err := p.BaseParams.Load("etcd.collectionBinlogSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.CollectionBinlogSubPath = subPath
-}
-
 func (p *dataCoordConfig) initSegmentMaxSize() {
 	p.SegmentMaxSize = p.BaseParams.ParseFloatWithDefault("dataCoord.segment.maxSize", 512.0)
 }
@@ -1471,22 +1445,6 @@ func (p *dataCoordConfig) initDataCoordSubscriptionName() {
 	}
 	s := []string{p.ClusterChannelPrefix, config}
 	p.DataCoordSubscriptionName = strings.Join(s, "-")
-}
-
-func (p *dataCoordConfig) initFlushStreamPosSubPath() {
-	subPath, err := p.BaseParams.Load("etcd.flushStreamPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.FlushStreamPosSubPath = subPath
-}
-
-func (p *dataCoordConfig) initStatsStreamPosSubPath() {
-	subPath, err := p.BaseParams.Load("etcd.statsStreamPosSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.StatsStreamPosSubPath = subPath
 }
 
 func (p *dataCoordConfig) initChannelWatchPrefix() {
