@@ -14,12 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "common/Schema.h"
-#include <google/protobuf/text_format.h>
-#include <boost/algorithm/string/case_conv.hpp>
-#include <boost/lexical_cast.hpp>
-#include "common/SystemProperty.h"
 #include <optional>
+#include <string>
+#include <boost/lexical_cast.hpp>
+#include <google/protobuf/text_format.h>
+
+#include "Schema.h"
+#include "SystemProperty.h"
 
 namespace milvus {
 
