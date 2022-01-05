@@ -73,9 +73,8 @@ else
 fi
 pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no
 python scripts/hello_milvus.py --host "$host"
-# chaos test
-export ENABLE_TRACEBACK=False
 
+# chaos test
 if [ "$chaos_task" == "chaos-test" ];
 then
     pytest -s -v test_chaos.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
