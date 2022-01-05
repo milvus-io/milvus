@@ -3074,7 +3074,7 @@ class TestReleaseAdvanced:
         connect.insert(collection, cons.default_entities, partition_name=default_tag)
         connect.flush([collection])
         connect.load_partitions(collection, [default_tag])
-        res = connect.search(collection, **query, _async=True)
+        connect.search(collection, **query, _async=True)
         connect.release_collection(collection)
         with pytest.raises(Exception):
             connect.search(collection, **default_single_query)
