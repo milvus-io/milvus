@@ -69,8 +69,8 @@ proxy:
   port: 19530
 
   grpc:
-    serverMaxRecvSize: 536870912 # 512 MB, 100 * 1024 * 1024
-    serverMaxSendSize: 536870912 # 512 MB, 100 * 1024 * 1024
+    serverMaxRecvSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
+    serverMaxSendSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
