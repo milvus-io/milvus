@@ -23,7 +23,7 @@
 namespace milvus {
 class SystemPropertyImpl : public SystemProperty {
  public:
-    [[nodiscard]] bool
+    bool
     SystemFieldVerify(const FieldName& field_name, FieldId field_id) const override {
         if (!IsSystem(field_name)) {
             return false;
