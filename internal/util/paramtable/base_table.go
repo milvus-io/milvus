@@ -36,6 +36,8 @@ type UniqueID = typeutil.UniqueID
 
 const envPrefix string = "milvus"
 
+// Base abstracts BaseTable
+// TODO: it's never used, consider to substitute BaseTable or to remove it
 type Base interface {
 	Load(key string) (string, error)
 	LoadRange(key, endKey string, limit int) ([]string, []string, error)
@@ -45,6 +47,7 @@ type Base interface {
 	Init()
 }
 
+// BaseTable the basics of paramtable
 type BaseTable struct {
 	params    *memkv.MemoryKV
 	configDir string
