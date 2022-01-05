@@ -239,7 +239,7 @@ class TestChaosData:
         chaos_res.create(chaos_config)
         log.info("Chaos injected")
 
-        # convert string duration time to a int number in seconds
+        # convert string duration time to an int number in seconds
         if isinstance(duration, str):
             duration = duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
         else:
