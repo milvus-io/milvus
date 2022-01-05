@@ -178,7 +178,7 @@ type DataCoord interface {
 	// error is returned only when some communication issue occurs
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
 
-	// GetParititonStatistics requests partition statistics
+	// GetPartitionStatistics requests partition statistics
 	//
 	// ctx is the context to control request deadline and cancellation
 	// req contains the collection and partition id to query
