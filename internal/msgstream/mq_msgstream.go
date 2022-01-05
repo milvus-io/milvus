@@ -171,7 +171,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 func (ms *mqMsgStream) AsReader(channels []string, subName string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
-			log.Error("MsgStream asProducer's channel is a empty string")
+			log.Error("MsgStream asProducer's channel is an empty string")
 			break
 		}
 		fn := func() error {
