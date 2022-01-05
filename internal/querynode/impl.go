@@ -462,6 +462,8 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 			status.Reason = err.Error()
 		}
 	}
+
+	log.Debug("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))
 	return status, nil
 }
 
