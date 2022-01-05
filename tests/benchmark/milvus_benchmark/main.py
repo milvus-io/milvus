@@ -204,14 +204,14 @@ def main():
                     server_config = suite["server"] if "server" in suite else None
                     logger.debug(milvus_config)
                     logger.debug(server_config)
-                    helm_params = {
-                        "server_name": server_host,
-                        "server_tag": server_tag,
-                        "server_config": server_config,
-                        "milvus_config": milvus_config,
-                        "image_tag": image_tag,
-                        "image_type": image_type
-                    }
+                    # helm_params = {
+                    #     "server_name": server_host,
+                    #     "server_tag": server_tag,
+                    #     "server_config": server_config,
+                    #     "milvus_config": milvus_config,
+                    #     "image_tag": image_tag,
+                    #     "image_type": image_type
+                    # }
                     # env_params = {
                     #     "deploy_mode": deploy_mode,
                     #     "helm_path": helm_path,
