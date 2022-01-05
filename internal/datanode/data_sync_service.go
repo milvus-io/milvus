@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-
 	"go.uber.org/zap"
 )
 
