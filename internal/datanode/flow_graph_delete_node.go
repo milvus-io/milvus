@@ -202,6 +202,7 @@ func (dn *deleteNode) showDelBuf() {
 	}
 }
 
+// Operate implementing flowgraph.Node, performs delete data process
 func (dn *deleteNode) Operate(in []Msg) []Msg {
 	//log.Debug("deleteNode Operating")
 
@@ -245,20 +246,21 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		for _, segmentToFlush := range fgMsg.segmentsToFlush {
 			buf, ok := dn.delBuf.Load(segmentToFlush)
 			if !ok {
-				// send signal
+				// no related delta data to flush, send empty buf to complete flush life-cycle
 				dn.flushManager.flushDelData(nil, segmentToFlush, fgMsg.endPositions[0])
 			} else {
 				err := dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
 				if err != nil {
 					log.Warn("Failed to flush delete data", zap.Error(err))
 				} else {
-					// clean up
+					// remove delete buf
 					dn.delBuf.Delete(segmentToFlush)
 				}
 			}
 		}
 	}
 
+	// drop collection signal, delete node shall notify flush manager all data are cleared and send signal to DataSyncService cleaner
 	if fgMsg.dropCollection {
 		dn.flushManager.notifyAllFlushed()
 		log.Debug("DeleteNode notifies BackgroundGC to release vchannel", zap.String("vChannelName", dn.channelName))
