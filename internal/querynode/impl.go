@@ -371,7 +371,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("releaseCollectionTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	log.Debug("releaseCollectionTask Enqueue done", zap.Int64("collectionID", in.CollectionID))
 
 	func() {
 		err = dct.WaitToFinish()
@@ -379,7 +379,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 			log.Error(err.Error())
 			return
 		}
-		log.Debug("releaseCollectionTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("releaseCollectionTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID))
 	}()
 
 	status := &commonpb.Status{
