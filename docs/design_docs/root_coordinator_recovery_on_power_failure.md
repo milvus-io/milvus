@@ -80,7 +80,7 @@
 ### 2.9 Register service in etcd
 
 1. `RootCoord` needs to register itself with etcd when it starts.
-2. The registration should include IP address, port, its own id, global incremental timestamp.
+2. The registration should include IP address, port, its own id and global incremental timestamp.
 
 ### 2.10 Remove the code related to Proxy service
 
