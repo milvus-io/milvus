@@ -1166,7 +1166,7 @@ def init_data(connect, collection, nb=ut.default_nb, partition_names=None, auto_
     """
     Generate entities and add it in collection
     """
-    if nb == 3000:
+    if nb == ct.default_nb:
         insert_entities = default_entities
     else:
         insert_entities = ut.gen_entities(nb, is_normal=True)
