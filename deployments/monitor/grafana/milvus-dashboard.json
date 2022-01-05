@@ -2681,7 +2681,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "prometheus",
-      "description": "Process memory of milvus pod",
+      "description": "Process memory of milvus pod.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
