@@ -38,6 +38,7 @@ type LoadIndexInfo struct {
 	cLoadIndexInfo C.CLoadIndexInfo
 }
 
+// newLoadIndexInfo returns a new LoadIndexInfo and error
 func newLoadIndexInfo() (*LoadIndexInfo, error) {
 	var cLoadIndexInfo C.CLoadIndexInfo
 	status := C.NewLoadIndexInfo(&cLoadIndexInfo)
