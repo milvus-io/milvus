@@ -28,7 +28,7 @@ class TestIndexNodeScale:
                 4.create index with one indexNode
         expected: The cost of one indexNode is about twice that of two indexNodes
         """
-        release_name = "scale-index"
+        release_name = "expand-index"
         image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
@@ -103,7 +103,7 @@ class TestIndexNodeScale:
                 4.create index with 1 indexNode
         expected: The cost of one indexNode is about twice that of two indexNodes
         """
-        release_name = "scale-index"
+        release_name = "shrink-index"
         image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
