@@ -200,6 +200,7 @@ func (ticker *channelsTimeTickerImpl) getMinTick() Timestamp {
 	return ticker.minTimestamp
 }
 
+// newChannelsTimeTicker returns a channels time ticker.
 func newChannelsTimeTicker(
 	ctx context.Context,
 	interval time.Duration,
