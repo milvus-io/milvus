@@ -35,7 +35,6 @@ pipeline {
                 container('milvus-test') {
                     dir ('tests/python_client'){
                         sh """
-                        printenv
                         pip install -r requirements.txt
                         pip install --upgrade protobuf
                         """
