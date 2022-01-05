@@ -138,9 +138,9 @@ func (ia *IDAllocator) pickCanDoFunc() {
 	}
 	ia.ToDoReqs = ia.ToDoReqs[idx:]
 	log.Debug("IDAllocator pickCanDoFunc",
-		zap.Any("need", need),
-		zap.Any("total", total),
-		zap.Any("remainReqCnt", len(ia.ToDoReqs)))
+		zap.Uint32("need", need),
+		zap.Uint32("total", total),
+		zap.Int("remainReqCnt", len(ia.ToDoReqs)))
 }
 
 func (ia *IDAllocator) processFunc(req Request) error {
