@@ -66,8 +66,6 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
-  port: 19530
-
   grpc:
     serverMaxRecvSize: 536870912 # 512 MB, 100 * 1024 * 1024
     serverMaxSendSize: 536870912 # 512 MB, 100 * 1024 * 1024
