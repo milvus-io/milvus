@@ -20,16 +20,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
 	"time"
+	"unsafe"
 
 	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -560,4 +563,102 @@ func TestPulsarClient_BytesToMsgID(t *testing.T) {
 	res, err = client.BytesToMsgID(invalidBin)
 	assert.Nil(t, res)
 	assert.NotNil(t, err)
+}
+
+type mPulsarError struct {
+	msg    string
+	result pulsar.Result
+}
+
+func hackPulsarError(result pulsar.Result) *pulsar.Error {
+	pe := &pulsar.Error{}
+	// use unsafe to generate test case
+	/* #nosec G103 */
+	mpe := (*mPulsarError)(unsafe.Pointer(pe))
+	mpe.result = result
+	return pe
+}
+
+func TestIsPulsarError(t *testing.T) {
+	type testCase struct {
+		err      error
+		results  []pulsar.Result
+		expected bool
+	}
+	cases := []testCase{
+		{
+			err:      errors.New(""),
+			results:  []pulsar.Result{},
+			expected: false,
+		},
+		{
+			err:      errors.New(""),
+			results:  []pulsar.Result{pulsar.ConnectError},
+			expected: false,
+		},
+		{
+			err:      hackPulsarError(pulsar.ConsumerBusy),
+			results:  []pulsar.Result{pulsar.ConnectError},
+			expected: false,
+		},
+		{
+			err:      hackPulsarError(pulsar.ConsumerBusy),
+			results:  []pulsar.Result{pulsar.ConnectError, pulsar.ConsumerBusy},
+			expected: true,
+		},
+	}
+
+	for _, tc := range cases {
+		assert.Equal(t, tc.expected, isPulsarError(tc.err, tc.results...))
+	}
+}
+
+type mockPulsarClient struct{}
+
+// CreateProducer Creates the producer instance
+// This method will block until the producer is created successfully
+func (c *mockPulsarClient) CreateProducer(_ pulsar.ProducerOptions) (pulsar.Producer, error) {
+	return nil, hackPulsarError(pulsar.ConnectError)
+}
+
+// Subscribe Creates a `Consumer` by subscribing to a topic.
+//
+// If the subscription does not exist, a new subscription will be created and all messages published after the
+// creation will be retained until acknowledged, even if the consumer is not connected
+func (c *mockPulsarClient) Subscribe(_ pulsar.ConsumerOptions) (pulsar.Consumer, error) {
+	return nil, hackPulsarError(pulsar.ConsumerBusy)
+}
+
+// CreateReader Creates a Reader instance.
+// This method will block until the reader is created successfully.
+func (c *mockPulsarClient) CreateReader(_ pulsar.ReaderOptions) (pulsar.Reader, error) {
+	return nil, hackPulsarError(pulsar.ConnectError)
+}
+
+// TopicPartitions Fetches the list of partitions for a given topic
+//
+// If the topic is partitioned, this will return a list of partition names.
+// If the topic is not partitioned, the returned list will contain the topic
+// name itself.
+//
+// This can be used to discover the partitions and create {@link Reader},
+// {@link Consumer} or {@link Producer} instances directly on a particular partition.
+func (c *mockPulsarClient) TopicPartitions(topic string) ([]string, error) {
+	return nil, hackPulsarError(pulsar.ConnectError)
+}
+
+// Close Closes the Client and free associated resources
+func (c *mockPulsarClient) Close() {
+}
+
+func TestPulsarClient_SubscribeExclusiveFail(t *testing.T) {
+	t.Run("exclusive pulsar consumer failure", func(t *testing.T) {
+		pc := &pulsarClient{
+			client: &mockPulsarClient{},
+		}
+
+		_, err := pc.Subscribe(ConsumerOptions{})
+		assert.Error(t, err)
+		assert.True(t, retry.IsUncoverable(err))
+	})
 }
