@@ -20,6 +20,24 @@ add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
 
+project(core LANGUAGES C CXX)
+include(CheckCXXCompilerFlag)
+if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    message(STATUS "==============Darwin Environment==============")
+    set(MACOS TRUE)
+    set(CMAKE_CXX_COMPILER "/usr/local/opt/llvm/bin/clang++")
+    set(CMAKE_CXX_FLAGS "-I/usr/local/opt/llvm/include -I/usr/local/include -I/usr/local/opt/openblas/include -I/usr/local/opt/libomp/include  -DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1")
+    check_cxx_compiler_flag(-std=c++11 HAS_STD_CPP11_FLAG)
+    if(HAS_STD_CPP11_FLAG)
+        add_compile_options(-std=c++11)
+    endif()
+elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    message(STATUS "==============Linux Environment===============")
+    set(LINUX TRUE)
+else ()
+    message(FATAL_ERROR "Unsupported platform!" )
+endif ()
+
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
 
@@ -205,7 +223,7 @@ set( GPU_ENABLE "false" )
 # Install segcore
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
-        DESTINATION include/segcore/
+        DESTINATION include/segcore
         FILES_MATCHING PATTERN "*_c.h"
 )
 
@@ -217,7 +235,7 @@ install(
 # Install indexbuilder
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
-        DESTINATION include/indexbuilder/
+        DESTINATION include/indexbuilder
         FILES_MATCHING PATTERN "*_c.h"
 )
 
@@ -228,6 +246,6 @@ install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder${CMAKE
 # Install common
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
-        DESTINATION include/common/
+        DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
 )

@@ -23,8 +23,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-
-BUILD_OUTPUT_DIR="${SCRIPTS_DIR}/../../cmake_build"
+BUILD_OUTPUT_DIR="./cmake_build"
 BUILD_TYPE="Release"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="${SCRIPTS_DIR}/output"

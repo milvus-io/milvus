@@ -13,8 +13,7 @@
 #include <string>
 #include <exception>
 #include <stdexcept>
-
-#include "faiss/MetricType.h"
+#include <knowhere/common/MetricType.h>
 
 namespace milvus::segcore {
 

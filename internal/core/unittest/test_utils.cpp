@@ -12,7 +12,7 @@
 #include <gtest/gtest.h>
 #include <string.h>
 
-#include "index/thirdparty/faiss/MetricType.h"
+#include <knowhere/common/MetricType.h>
 #include "segcore/Utils.h"
 
 TEST(Util, FaissMetricTypeToString) {
