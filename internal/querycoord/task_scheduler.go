@@ -578,7 +578,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		log.Debug("scheduleLoop: num of child task", zap.Int("num child task", len(activateTasks)))
 		for _, childTask := range activateTasks {
 			if childTask != nil {
-				log.Debug("scheduleLoop: add a activate task to activateChan", zap.Int64("taskID", childTask.getTaskID()))
+				log.Debug("scheduleLoop: add an activate task to activateChan", zap.Int64("taskID", childTask.getTaskID()))
 				scheduler.activateTaskChan <- childTask
 				activeTaskWg.Add(1)
 				go scheduler.waitActivateTaskDone(activeTaskWg, childTask, triggerTask)
