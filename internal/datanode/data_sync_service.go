@@ -138,18 +138,6 @@ func (dsService *dataSyncService) close() {
 // initNodes inits a TimetickedFlowGraph
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
-
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.DataNodeCfg.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024,
-	}
-
-	err := dsService.msFactory.SetParams(m)
-	if err != nil {
-		return err
-	}
-
 	// initialize flush manager for DataSync Service
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica,
 		flushNotifyFunc(dsService), dropVirtualChannelFunc(dsService))
@@ -217,6 +205,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		parallelConfig: newParallelConfig(),
 	}
 
+	var err error
 	var dmStreamNode Node
 	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), c)
 	if err != nil {
