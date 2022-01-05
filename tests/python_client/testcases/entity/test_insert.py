@@ -9,7 +9,7 @@ from common.constants import default_entity, default_entities, default_binary_en
 from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 
-ADD_TIMEOUT = 60
+# ADD_TIMEOUT = 60
 uid = "test_insert"
 field_name = ut.default_float_vec_field_name
 binary_field_name = ut.default_binary_vec_field_name
@@ -77,7 +77,7 @@ class TestInsertBase:
         with pytest.raises(Exception) as e:
             connect.insert(collection, entity)
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_collection_not_existed(self, connect):
         """
@@ -100,7 +100,7 @@ class TestInsertBase:
             dis_connect.insert(collection, default_entities)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_drop_collection(self, connect, collection):
         """
         target: test delete collection after insert entities
@@ -112,7 +112,7 @@ class TestInsertBase:
         connect.drop_collection(collection)
         assert connect.has_collection(collection) == False
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_flush_drop_collection(self, connect, collection):
         """
@@ -128,7 +128,7 @@ class TestInsertBase:
         assert connect.has_collection(collection) == False
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_create_index(self, connect, collection, get_simple_index):
         """
         target: test build index insert after entities
@@ -144,7 +144,7 @@ class TestInsertBase:
             ut.create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_after_create_index(self, connect, collection, get_simple_index):
         """
@@ -160,7 +160,7 @@ class TestInsertBase:
             ut.create_target_index(get_simple_index, field_name)
             assert index == get_simple_index
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_search(self, connect, collection):
         """
@@ -195,7 +195,7 @@ class TestInsertBase:
     def insert_count(self, request):
         yield request.param
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_ids(self, connect, id_collection, insert_count):
         """
@@ -216,7 +216,7 @@ class TestInsertBase:
         assert stats[row_count] == nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_the_same_ids(self, connect, id_collection, insert_count):
         """
         target: test insert vectors in collection, use customize the same ids
@@ -235,7 +235,7 @@ class TestInsertBase:
         stats = connect.get_collection_stats(id_collection)
         assert stats[row_count] == nb
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_ids_fields(self, connect, get_filter_field, get_vector_field):
         """
@@ -262,7 +262,7 @@ class TestInsertBase:
         assert stats[row_count] == nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_not_match(self, connect, id_collection, insert_count):
         """
         target: test insert entities in collection without ids
@@ -276,7 +276,7 @@ class TestInsertBase:
             connect.insert(id_collection, entities)
 
     # TODO
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_twice_ids_no_ids(self, connect, id_collection):
         """
@@ -293,7 +293,7 @@ class TestInsertBase:
             connect.insert(id_collection, entities)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_not_ids(self, connect, id_collection):
         """
         target: check the result of insert, with params ids and no ids
@@ -305,7 +305,7 @@ class TestInsertBase:
         with pytest.raises(Exception) as e:
             connect.insert(id_collection, entities)
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_ids_length_not_match_batch(self, connect, id_collection):
         """
@@ -321,7 +321,7 @@ class TestInsertBase:
             connect.insert(id_collection, entities)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     def test_insert_ids_length_not_match_single(self, connect, id_collection):
         """
         target: test insert vectors in collection, use customize ids, len(ids) != len(vectors)
@@ -335,7 +335,7 @@ class TestInsertBase:
         with pytest.raises(Exception) as e:
             connect.insert(id_collection, entity)
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_partition(self, connect, collection):
         """
@@ -351,7 +351,7 @@ class TestInsertBase:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_partition_with_ids(self, connect, id_collection):
         """
@@ -367,7 +367,7 @@ class TestInsertBase:
         assert result.primary_keys == ids
         log.info(connect.describe_collection(id_collection))
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_default_partition(self, connect, collection):
         """
@@ -381,7 +381,7 @@ class TestInsertBase:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == default_nb
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_partition_not_existed(self, connect, collection):
         """
@@ -393,7 +393,7 @@ class TestInsertBase:
         with pytest.raises(Exception) as e:
             connect.insert(collection, default_entities, partition_name=tag)
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_partition_repeatedly(self, connect, collection):
         """
@@ -535,7 +535,7 @@ class TestInsertBase:
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.timeout(30)
+    # @pytest.mark.timeout(30)
     def test_collection_insert_rows_count_multi_threading(self, args, collection):
         """
         target: test collection rows_count is correct or not with multi threading
@@ -646,7 +646,7 @@ class TestInsertBinary:
         ut.create_target_index(get_binary_index, binary_field_name)
         assert index == get_binary_index
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_create_index(self, connect, binary_collection, get_binary_index):
         """
@@ -836,7 +836,7 @@ class TestInsertMultiCollections:
         for i in range(collection_num):
             connect.drop_collection(collection_list[i])
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_collection_insert_entity_another(self, connect, collection):
         """
@@ -851,7 +851,7 @@ class TestInsertMultiCollections:
         connect.flush([collection_name])
         assert len(result.primary_keys) == 1
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_index_insert_entity_another(self, connect, collection, get_simple_index):
         """
@@ -870,7 +870,7 @@ class TestInsertMultiCollections:
             assert index == get_simple_index
         connect.drop_collection(collection_name)
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_entity_create_index_another(self, connect, collection, get_simple_index):
         """
@@ -890,7 +890,7 @@ class TestInsertMultiCollections:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == 1
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_entity_sleep_create_index_another(self, connect, collection, get_simple_index):
         """
@@ -906,7 +906,7 @@ class TestInsertMultiCollections:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == 1
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_entity_insert_entity_another(self, connect, collection):
         """
@@ -924,7 +924,7 @@ class TestInsertMultiCollections:
         stats = connect.get_collection_stats(collection_name)
         assert stats[row_count] == 1
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_entity_search_entity_another(self, connect, collection):
         """
@@ -941,7 +941,7 @@ class TestInsertMultiCollections:
         stats = connect.get_collection_stats(collection)
         assert stats[row_count] == 1
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_entity_sleep_search_entity_another(self, connect, collection):
         """
@@ -957,7 +957,7 @@ class TestInsertMultiCollections:
         res = connect.search(collection_name, **default_single_query)
         assert len(res[0]) == 0
 
-    @pytest.mark.timeout(ADD_TIMEOUT)
+    # @pytest.mark.timeout(ADD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def _test_insert_entity_during_release_collection(self, connect, collection):
         """

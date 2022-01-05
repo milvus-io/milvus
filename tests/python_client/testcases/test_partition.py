@@ -7,7 +7,7 @@ from common.constants import default_entities, default_fields
 from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 
-TIMEOUT = 120
+# TIMEOUT = 120
 default_nb = ut.default_nb
 default_tag = ut.default_tag
 
@@ -29,7 +29,7 @@ class TestCreateBase:
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="skip temporarily for debug")
-    @pytest.mark.timeout(600)
+    # @pytest.mark.timeout(600)
     def test_create_partition_limit(self, connect, collection, args):
         """
         target: test create partitions, check status returned
