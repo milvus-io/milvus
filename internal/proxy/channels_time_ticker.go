@@ -31,7 +31,9 @@ type getPChanStatisticsFuncType func() (map[pChan]*pChanStatistics, error)
 
 // channelsTimeTicker manages the timestamp statistics
 type channelsTimeTicker interface {
+	// start starts the channels time ticker.
 	start() error
+	// close closes the channels time ticker.
 	close() error
 	// getLastTick returns the last write timestamp of specific pchan.
 	getLastTick(pchan pChan) (Timestamp, error)
