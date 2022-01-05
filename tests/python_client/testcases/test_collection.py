@@ -2965,46 +2965,6 @@ class TestLoadCollection:
         """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
-    def test_load_collection_release_part_partitions(self, connect, collection):
-        """
-        target: test release part partitions after load collection
-        method: load collection and release part partitions
-        expected: released partitions search empty
-        """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_collection(collection)
-        connect.release_partitions(collection, [default_tag])
-        with pytest.raises(Exception) as e:
-            connect.search(collection, **default_single_query, partition_names=[default_tag])
-        res = connect.search(collection, **default_single_query, partition_names=[default_partition_name])
-        assert len(res[0]) == default_top_k
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/13118")
-    def test_load_collection_release_all_partitions(self, connect, collection):
-        """
-        target: test release all partitions after load collection
-        method: load collection and release all partitions
-        expected: search empty
-        """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_collection(collection)
-        connect.release_partitions(collection, [default_partition_name, default_tag])
-        res = connect.search(collection, **default_single_query)
-        assert len(res[0]) == 0
-
-    @pytest.mark.tags(CaseLabel.L0)
     def test_load_partitions_release_collection(self, connect, collection):
         """
         target: test release collection after load partitions
