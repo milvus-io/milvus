@@ -510,7 +510,8 @@ class TestInsertOperation(TestcaseBase):
     def test_insert_auto_id_create_index(self):
         """
         target: test create index in auto_id=True collection
-        method: 1.create auto_id=True collection and insert 2.create index
+        method: 1.create auto_id=True collection and insert
+                2.create index
         expected: index correct
         """
         schema = cf.gen_default_collection_schema(auto_id=True)
