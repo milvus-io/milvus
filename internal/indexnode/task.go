@@ -138,6 +138,7 @@ func (it *IndexBuildTask) OnEnqueue() error {
 	return nil
 }
 
+// checkIndexMeta load meta from etcd to determine whether the task should continue execution.
 func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 	fn := func() error {
 		//TODO error handling need to be optimized, return Unrecoverable to avoid retry
