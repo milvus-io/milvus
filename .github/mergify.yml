@@ -76,7 +76,9 @@ pull_request_rules:
 
   - name: Test passed for title skip e2e
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base=knowhere
       - title~=\[skip e2e\]
       - label=kind/improvement
       - files~=^(?!.*\.(go|h|cpp)).*$
