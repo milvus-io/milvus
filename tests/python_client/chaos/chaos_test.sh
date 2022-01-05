@@ -60,7 +60,7 @@ then
 else
     sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
     sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_${chaos_type}.yaml\'/g" constants.py
-    sed -i "" "s/RELEASE_NAME =.*/RELEASE_NAME = \'${release}\'/g" constants.py
+    sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${release}\'/g" constants.py
 fi
 
 # run chaos testing
