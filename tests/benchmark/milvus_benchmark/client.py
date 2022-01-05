@@ -330,9 +330,9 @@ class MilvusClient(object):
             "params": search_param}
         }}
         must_params = [vector_query]
-        query = {
-            "bool": {"must": must_params}
-        }
+        # query = {
+        #     "bool": {"must": must_params}
+        # }
         logger.debug("Start warm up query")
         for i in range(times):
             params = util.search_param_analysis(vector_query, None)
