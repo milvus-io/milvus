@@ -3274,7 +3274,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Number of process opened fds",
+      "description": "Number of process opened fds.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
