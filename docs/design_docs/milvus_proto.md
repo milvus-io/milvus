@@ -272,7 +272,7 @@ message DescribeCollectionRequest {
   // The collection ID you want to describe
   int64 collectionID = 4;
 
-  // If time_stamp is not zero, will describe collection success when time_stamp >= created collection timestamp, otherwise will throw error.
+  // If time_stamp is not zero, will describe collection success when time_stamp >= created collection timestamp, otherwise will throw an error.
   uint64 time_stamp = 5;
 }
 ```
