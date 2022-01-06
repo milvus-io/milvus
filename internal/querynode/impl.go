@@ -330,7 +330,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	for _, info := range in.Infos {
 		segmentIDs = append(segmentIDs, info.SegmentID)
 	}
-	log.Debug("loadSegmentsTask Enqueue done", zap.Int64s("segmentIDs", segmentIDs))
+	log.Debug("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -342,7 +342,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64s("segmentIDs", segmentIDs))
+		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
