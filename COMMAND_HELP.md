@@ -9,4 +9,4 @@
 |  Command                 |    Description                                                             |
 | -------------------------|----------------------------------------------------------------------------|
 |  /run-checks             |  Trigger Jenkins Job for e2e test                                          |
-| rerun ut    |  Trigger failed github workflow jobs, including code checker & unit test.  |
+| rerun ut    |  Trigger failed github workflow jobs, including code checker & unit tests.  |
