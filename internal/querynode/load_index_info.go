@@ -53,6 +53,7 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
 
+// appendIndexParam append indexParam to index
 func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) error {
 	cIndexKey := C.CString(indexKey)
 	defer C.free(unsafe.Pointer(cIndexKey))
