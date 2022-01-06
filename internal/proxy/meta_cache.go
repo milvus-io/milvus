@@ -43,6 +43,7 @@ type Cache interface {
 	GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error)
+	// GetPartitions get all partitions' id of specific collection.
 	GetPartitions(ctx context.Context, collectionName string) (map[string]typeutil.UniqueID, error)
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
