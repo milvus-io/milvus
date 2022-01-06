@@ -153,7 +153,7 @@ func IsVectorType(dataType schemapb.DataType) bool {
 	}
 }
 
-// IsIntegerType returns true if input is a integer type, otherwise false
+// IsIntegerType returns true if input is an integer type, otherwise false
 func IsIntegerType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
