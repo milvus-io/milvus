@@ -40,6 +40,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// ConnectionManager handles connection to other components of the system
 type ConnectionManager struct {
 	session *sessionutil.Session
 
