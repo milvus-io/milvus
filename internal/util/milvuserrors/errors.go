@@ -19,7 +19,7 @@ import (
 const (
 	// MsgRootCoordNotServing means that root coordinator not serving
 	MsgRootCoordNotServing = "root coordinator is not serving"
-	// MsgQueryCoordNotServing means that query coordinator not serving
+	// MsgQueryCoordNotServing means that QueryCoord not serving
 	MsgQueryCoordNotServing = "query coordinator is not serving"
 	// MsgDataCoordNotServing means that data coordinator not serving
 	MsgDataCoordNotServing = "data coordinator is not serving"
