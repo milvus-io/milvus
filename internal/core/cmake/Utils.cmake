@@ -72,21 +72,6 @@ MACRO(get_milvus_version)
     endif()
 ENDMACRO(get_milvus_version)
 
-# get knowhere version
-MACRO(get_knowhere_version)
-    cmake_parse_arguments(VER "" "TARGET;DEFAULT" "" ${ARGN})
-
-    # Step 1: get branch name
-    get_git_branch_name(GIT_BRANCH_NAME)
-    message(DEBUG ${GIT_BRANCH_NAME})
-
-    # Step 2: match MAJOR.MINOR.PATCH format or set DEFAULT value
-    string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" ${VER_TARGET} ${GIT_BRANCH_NAME})
-    if (NOT ${VER_TARGET})
-        set(${VER_TARGET} ${VER_DEFAULT})
-    endif()
-ENDMACRO(get_knowhere_version)
-
 # set definition
 MACRO(set_milvus_definition DEF_PASS_CMAKE MILVUS_DEF)
     if (${${DEF_PASS_CMAKE}})
