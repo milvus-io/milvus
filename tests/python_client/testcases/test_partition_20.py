@@ -239,7 +239,7 @@ class TestPartitionParams(TestcaseBase):
     def test_load_partiton_respectively(self):
         """
         target: test release the partition after load partition
-        method: load partition1 and load other partition
+        method: load partition1 and load another partition
         expected: raise exception
         """
         self._connect()
