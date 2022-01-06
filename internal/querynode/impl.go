@@ -116,7 +116,11 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("addQueryChannelTask Enqueue done", zap.Any("collectionID", in.CollectionID))
+	log.Debug("addQueryChannelTask Enqueue done",
+		zap.Int64("collectionID", in.CollectionID),
+		zap.String("queryChannel", in.QueryChannel),
+		zap.String("queryResultChannel", in.QueryResultChannel),
+	)
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -128,7 +132,12 @@ func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQuery
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("addQueryChannelTask WaitToFinish done", zap.Any("collectionID", in.CollectionID))
+		log.Debug("addQueryChannelTask WaitToFinish done",
+			zap.Int64("collectionID", in.CollectionID),
+			zap.String("queryChannel", in.QueryChannel),
+			zap.String("queryResultChannel", in.QueryResultChannel),
+		)
+
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
