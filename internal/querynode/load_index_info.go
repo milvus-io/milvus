@@ -61,6 +61,7 @@ func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) er
 	return HandleCStatus(&status, "AppendIndexParam failed")
 }
 
+// appendFieldInfo appends fieldID to index
 func (li *LoadIndexInfo) appendFieldInfo(fieldID FieldID) error {
 	cFieldID := C.long(fieldID)
 	status := C.AppendFieldInfo(li.cLoadIndexInfo, cFieldID)
