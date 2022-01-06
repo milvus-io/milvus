@@ -48,6 +48,7 @@ func newLoadIndexInfo() (*LoadIndexInfo, error) {
 	return &LoadIndexInfo{cLoadIndexInfo: cLoadIndexInfo}, nil
 }
 
+// deleteLoadIndexInfo would delete C.CLoadIndexInfo
 func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
