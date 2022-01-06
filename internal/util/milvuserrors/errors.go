@@ -25,7 +25,7 @@ const (
 	MsgDataCoordNotServing = "data coordinator is not serving"
 	// MsgIndexCoordNotServing means that IndexCoord not serving
 	MsgIndexCoordNotServing = "index coordinator is not serving"
-	// MsgProxyNotServing means that proxy node not serving
+	// MsgProxyNotServing means that ProxyNode not serving
 	MsgProxyNotServing = "proxy node is not serving"
 )
 
