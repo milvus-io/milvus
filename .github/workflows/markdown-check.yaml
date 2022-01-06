@@ -1,0 +1,24 @@
+name: Markdown Links Check
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 20 * * *"
+
+jobs:
+  check-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        # checks all markdown files from /docs including all subfolders
+        with:
+          use-quiet-mode: 'yes'
+          use-verbose-mode: 'yes'
+          folder-path: 'docs/'
+      - uses: actions/checkout@master
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        # checks all markdown files from root but ignores subfolders
+        with:
+          use-quiet-mode: 'yes'
+          use-verbose-mode: 'yes'
+          max-depth: 0
