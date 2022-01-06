@@ -220,9 +220,19 @@ func (node *DataNode) Init() error {
 	}
 	Params.DataNodeCfg.Refresh()
 
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.DataNodeCfg.PulsarAddress,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024,
+	}
+
+	if err := node.msFactory.SetParams(m); err != nil {
+		log.Warn("DataNode Init msFactory SetParams failed, use default",
+			zap.Error(err))
+		return err
+	}
 	log.Debug("DataNode Init",
-		zap.String("MsgChannelSubName", Params.DataNodeCfg.MsgChannelSubName),
-	)
+		zap.String("MsgChannelSubName", Params.DataNodeCfg.MsgChannelSubName))
 
 	return nil
 }

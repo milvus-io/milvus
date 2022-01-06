@@ -96,7 +96,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 	ctx := context.Background()
 
 	tests := []*testInfo{
-		{false, false, &mockMsgStreamFactory{false, true},
+		{true, false, &mockMsgStreamFactory{false, true},
 			0, "by-dev-rootcoord-dml-test_v0",
 			0, 0, "", 0,
 			0, 0, "", 0,
