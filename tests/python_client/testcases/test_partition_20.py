@@ -251,7 +251,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w1.load()
         error = {ct.err_code: 1, ct.err_msg: f'load the partition after load collection is not supported'}
         partition_w2.load(check_task=CheckTasks.err_res,
-                             check_items=error)
+                          check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partitons_after_release(self):
