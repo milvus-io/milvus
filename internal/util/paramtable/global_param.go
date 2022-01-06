@@ -476,7 +476,7 @@ type proxyConfig struct {
 	ProxyTimeTickChannelNames []string
 	ProxySubName              string
 
-	// required from query coord
+	// required from QueryCoord
 	SearchResultChannelNames   []string
 	RetrieveResultChannelNames []string
 
