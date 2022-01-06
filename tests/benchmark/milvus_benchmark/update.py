@@ -88,8 +88,6 @@ def update_values(src_values_file, deploy_params_file):
             },
             "requests": {
                 "cpu": str(int(cpus) // 2 + 1) + ".0"
-                # "cpu": "4.0"
-                # "cpu": str(int(cpus) - 1) + ".0"
             }
         }
     if cpus and mems:
