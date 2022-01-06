@@ -43,6 +43,9 @@ type channelsTimeTicker interface {
 	getMinTick() Timestamp
 }
 
+// make sure channelsTimeTickerImpl implements channelsTimeTicker.
+var _ channelsTimeTicker = (*channelsTimeTickerImpl)(nil)
+
 // channelsTimeTickerImpl implements channelsTimeTicker.
 type channelsTimeTickerImpl struct {
 	interval          time.Duration       // interval to synchronize
