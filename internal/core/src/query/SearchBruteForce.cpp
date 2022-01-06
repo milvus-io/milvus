@@ -111,6 +111,11 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
     auto topk = dataset.topk;
     auto dim = dataset.dim;
     auto round_decimal = dataset.round_decimal;
+#ifdef __APPLE__
+    //TODO
+    SubSearchResult final_result(num_queries, topk, metric_type, round_decimal);
+    return final_result;
+#elif __linux__
     SubSearchResult sub_qr(num_queries, topk, metric_type, round_decimal);
     auto query_data = reinterpret_cast<const float*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
