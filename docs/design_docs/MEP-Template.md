@@ -23,7 +23,7 @@ Briefly list any new interfaces that will be introduced as part of this proposal
 
 ## Design Details(required)
 
-Describe the new thing you want to do appropriate detail. This may be fairly extensive and have large subsections of its own. Or it may be a few sentences. Use judgment based on the scope of the change.
+Describe the new thing you want to do in appropriate detail. This may be fairly extensive and have large subsections of its own. Or it may be a few sentences. Use judgment based on the scope of the change.
 
 ## Compatibility, Deprecation, and Migration Plan(optional)
 - What impact (if any) will there be on existing users?
