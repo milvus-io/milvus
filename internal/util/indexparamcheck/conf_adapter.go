@@ -369,6 +369,7 @@ func newANNOYConfAdapter() *ANNOYConfAdapter {
 	return &ANNOYConfAdapter{}
 }
 
+// RHNSWFlatConfAdapter checks if a rhnsw flat index can be built.
 type RHNSWFlatConfAdapter struct {
 	BaseConfAdapter
 }
