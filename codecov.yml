@@ -17,7 +17,7 @@ coverage:
           - master
     patch:
       default:
-        target: 80%
+        target: 80%   #target of patch diff
         threshold: 0%
         branches:
           - master
