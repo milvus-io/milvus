@@ -29,6 +29,7 @@ type pulsarProducer struct {
 	p pulsar.Producer
 }
 
+// Topic returns the topic name of pulsar producer
 func (pp *pulsarProducer) Topic() string {
 	return pp.p.Topic()
 }
