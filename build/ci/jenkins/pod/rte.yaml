@@ -23,8 +23,8 @@ spec:
         cpu: "6"
         memory: 12Gi
       requests:
-        cpu: "2"
-        memory: 10Gi
+        cpu: "0.5"
+        memory: 5Gi
     volumeMounts:
     - mountPath: /docker-graph
       name: docker-graph
@@ -47,8 +47,11 @@ spec:
         cpu: "6"
         memory: 12Gi
       requests:
-        cpu: "2"
-        memory: 10Gi
+        cpu: "0.5"
+        memory: 5Gi
+    volumeMounts:
+    - mountPath: /ci-logs
+      name: ci-logs
   volumes:
   - emptyDir: {}
     name: docker-graph
