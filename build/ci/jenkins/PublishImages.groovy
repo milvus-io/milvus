@@ -3,7 +3,7 @@
 pipeline {
     agent {
         kubernetes {
-            label "milvus-e2e-test"
+            label "milvus-publish-image"
             defaultContainer 'main'
             yamlFile "build/ci/jenkins/pod/rte.yaml"
             customWorkspace '/home/jenkins/agent/workspace'

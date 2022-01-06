@@ -139,7 +139,7 @@ pipeline {
                     stage('E2E Test'){
                         agent {
                                 kubernetes {
-                                    label 'milvus-e2e-test'
+                                    label 'milvus-e2e-test-pr'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
                                     yamlFile 'build/ci/jenkins/pod/rte.yaml'
