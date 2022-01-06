@@ -36,10 +36,20 @@ function milvus_ci_release_name(){
         name+="-${CHANGE_ID:-}"
     fi 
 
-
+    
     # Add Jenkins BUILD_ID into Name
     if [[ -n ${JENKINS_BUILD_ID:-} ]]; then 
             name+="-${JENKINS_BUILD_ID}"
+    fi 
+
+
+    if [[ "${CI_MODE:-}" == "nightly" ]]; then
+        # Nightly CI
+       name+="-n"
+    else 
+       # Pull Request CI    
+        name+="-pr"
+
     fi 
 
     export MILVUS_HELM_RELEASE_NAME=${name}
