@@ -204,7 +204,7 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 	defer colReplica.mu.Unlock()
 
 	if ok := colReplica.hasCollectionPrivate(collectionID); ok {
-		return errors.New("collection has been loaded, id %d" + strconv.FormatInt(collectionID, 10))
+		return fmt.Errorf("collection has been loaded, id %d", collectionID)
 	}
 
 	var newCollection = newCollection(collectionID, schema)
