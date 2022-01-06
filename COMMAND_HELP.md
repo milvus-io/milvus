@@ -2,7 +2,7 @@
 
 ## Guide
 
-1. The job  will be triggered  when your comments on pull request matched command.
+1. The job will be triggered when your comments on pull request matched command.
 
 ## Commands
 
