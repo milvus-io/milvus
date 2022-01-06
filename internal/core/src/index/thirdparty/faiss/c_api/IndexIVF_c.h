@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-/** Index based on a inverted file (IVF)
+/** Index based on an inverted file (IVF)
  *
  * In the inverted file, the quantizer (an Index instance) provides a
  * quantization index for each vector to be added. The quantization
