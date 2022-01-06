@@ -3372,7 +3372,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "The fraction of this program's available CPU time used by the GC since the program started",
+      "description": "The fraction of this program's available CPU time used by the GC since the program started.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
