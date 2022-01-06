@@ -665,7 +665,7 @@ type ProxyComponent interface {
 	// `dataCoord` is a client of data coordinator.
 	SetDataCoordClient(dataCoord DataCoord)
 
-	// SetIndexCoord set IndexCoord for Proxy
+	// SetIndexCoordClient set IndexCoord for Proxy
 	//  `indexCoord` is a client of index coordinator.
 	SetIndexCoordClient(indexCoord IndexCoord)
 
