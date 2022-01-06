@@ -13,13 +13,14 @@
 #include <gtest/gtest.h>
 #include <map>
 #include <tuple>
+#include <knowhere/index/vector_index/helpers/IndexParameter.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/ConfAdapterMgr.h>
+#include <knowhere/archive/KnowhereConfig.h>
 
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/utils.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "index/knowhere/knowhere/archive/KnowhereConfig.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"

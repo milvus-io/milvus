@@ -15,13 +15,13 @@
 #include <cstring>
 #include <memory>
 #include <random>
+#include <knowhere/index/vector_index/VecIndex.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <knowhere/index/vector_index/IndexIVF.h>
 
 #include "Constants.h"
 #include "common/Schema.h"
-#include "knowhere/index/vector_index/VecIndex.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "query/SearchOnIndex.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
@@ -298,7 +298,7 @@ SearchResultToJson(const SearchResult& sr) {
 };
 
 inline void
-SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
+SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {z
     // TODO
     auto row_count = dataset.row_ids_.size();
     {
