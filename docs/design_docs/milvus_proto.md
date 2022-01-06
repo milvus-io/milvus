@@ -209,7 +209,7 @@ message HasCollectionRequest {
 
 ## LoadCollection
 Load a collection data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
-Note: this interface only send a request to server ask to load collection, it returns at once after the request is consumed. Collection loading progress is asynchronously.
+Note: this interface only sends a request to server ask to load collection, it returns at once after the request is consumed. Collection loading progress is asynchronously.
 ```
 rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
 ```
