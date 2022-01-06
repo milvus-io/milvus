@@ -42,7 +42,6 @@ def time_wrapper(func):
         rps: Specify the rps of the return interface
         """
         start = time.time()
-        # logger.debug("Milvus {} start".format(func.__name__))
         log = kwargs.get("log", True)
         kwargs.pop("log", None)
         rps = kwargs.get("rps", False)
