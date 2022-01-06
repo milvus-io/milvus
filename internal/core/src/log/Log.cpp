@@ -43,7 +43,13 @@ LogOut(const char* pattern, ...) {
 void
 SetThreadName(const std::string& name) {
     // Note: the name cannot exceed 16 bytes
+#ifdef __APPLE__
+    pthread_setname_np(name.c_str());
+#elif __linux__
     pthread_setname_np(pthread_self(), name.c_str());
+#else
+#error "Unsupported SetThreadName";
+#endif
 }
 
 std::string
@@ -79,17 +85,26 @@ get_system_boottime() {
 
 int64_t
 get_thread_starttime() {
+#ifdef __APPLE__
+    uint64_t tid;
+    pthread_threadid_np(NULL, &tid);
+#elif __linux__
     int64_t tid = gettid();
+#else
+#error "Unsupported SetThreadName";
+#endif
+
     int64_t pid = getpid();
     char filename[256];
-    snprintf(filename, sizeof(filename), "/proc/%ld/task/%ld/stat", pid, tid);
+    snprintf(filename, sizeof(filename), "/proc/%lld/task/%lld/stat", (long long)pid, (long long)tid);
 
     int64_t val = 0;
     char comm[16], state;
     FILE* thread_stat = fopen(filename, "r");
-    auto ret = fscanf(thread_stat, "%ld %s %s ", &val, comm, &state);
+    auto ret = fscanf(thread_stat, "%lld %s %s ", (long long*)&val, comm, &state);
+
     for (auto i = 4; i < 23; i++) {
-        ret = fscanf(thread_stat, "%ld ", &val);
+            ret = fscanf(thread_stat, "%lld ", (long long*)&val);
         if (i == 22) {
             break;
         }

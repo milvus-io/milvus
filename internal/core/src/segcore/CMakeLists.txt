@@ -32,11 +32,12 @@ add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}
         )
 
+find_library(TBB NAMES tbb)
 target_link_libraries(milvus_segcore
         dl
         log
         pthread
-        tbb
+        ${TBB}
         ${OpenMP_CXX_FLAGS}
         knowhere
         milvus_common

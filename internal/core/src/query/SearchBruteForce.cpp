@@ -12,9 +12,15 @@
 #include <string>
 #include <vector>
 
-#include <faiss/utils/distances.h>
-#include <faiss/utils/BinaryDistance.h>
-
+#ifdef __APPLE__
+    //TODO
+#elif __linux__
+    #include <faiss/utils/BinaryDistance.h>
+    #include <faiss/utils/distances.h>
+    #include <faiss/utils/BinaryDistance.h>
+#else
+#error "Unsupported OS environment.";
+#endif
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"
 #include "common/Types.h"
@@ -35,7 +41,10 @@ raw_search(MetricType metric_type,
            float* D,
            idx_t* labels,
            const BitsetView bitset) {
-    using namespace faiss;  // NOLINT
+#ifdef __APPLE__
+        //TODO
+#elif __linux__
+        using namespace faiss;  // NOLINT
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float_maxheap_array_t res = {size_t(n), size_t(k), labels, D};
         binary_distance_knn_hc(METRIC_Jaccard, &res, x, xb, ntotal, code_size, bitset);
@@ -62,6 +71,9 @@ raw_search(MetricType metric_type,
             std::string("binary search not support metric type: ") + segcore::MetricTypeToString(metric_type);
         PanicInfo(msg);
     }
+#else
+#error "Unsupported OS environment.";
+#endif
 }
 
 SubSearchResult
@@ -97,6 +109,11 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
     auto topk = dataset.topk;
     auto dim = dataset.dim;
     auto round_decimal = dataset.round_decimal;
+#ifdef __APPLE__
+    //TODO
+    SubSearchResult final_result(num_queries, topk, metric_type, round_decimal);
+    return final_result;
+#elif __linux__
     SubSearchResult sub_qr(num_queries, topk, metric_type, round_decimal);
     auto query_data = reinterpret_cast<const float*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
@@ -112,6 +129,9 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
         sub_qr.round_values();
         return sub_qr;
     }
+#else
+#error "Unsupported OS environment.";
+#endif
 }
 
 SubSearchResult

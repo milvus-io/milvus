@@ -119,7 +119,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         enable_small_index_ = false;
     }
 
-    ssize_t
+    int64_t
     get_row_count() const override {
         return record_.ack_responder_.GetAck();
     }

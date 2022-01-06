@@ -19,6 +19,8 @@ add_library(milvus_indexbuilder SHARED
         ${INDEXBUILDER_FILES}
         )
 
+find_library(TBB NAMES tbb)
+
 # link order matters
 target_link_libraries(milvus_indexbuilder
         knowhere
@@ -26,7 +28,7 @@ target_link_libraries(milvus_indexbuilder
         milvus_common
         milvus_utils
         milvus_proto
-        tbb
+        ${TBB}
         log
         dl
         pthread
