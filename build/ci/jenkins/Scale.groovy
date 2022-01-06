@@ -17,7 +17,11 @@ pipeline {
 
     agent {
         kubernetes {
-            inheritFrom 'milvus-test'
+            label 'milvus-scale-test'
+//             inheritFrom 'milvus-test'
+            defaultContainer 'milvus-test'
+            yamlFile "build/ci/jenkins/pod/scale-test.yaml"
+            customWorkspace "/home/jenkins/agent"
             // idle 5 minutes to wait clean up tasks
             idleMinutes 5
         }
