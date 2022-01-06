@@ -97,7 +97,7 @@ type orderFlushQueue struct {
 	postInjection postInjectionFunc
 }
 
-// newOrderFlushQueue creates a orderFlushQueue
+// newOrderFlushQueue creates an orderFlushQueue
 func newOrderFlushQueue(segID UniqueID, f notifyMetaFunc) *orderFlushQueue {
 	q := &orderFlushQueue{
 		segmentID:  segID,
