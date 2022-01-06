@@ -28,7 +28,7 @@ When `metric type` is specified in the schema, the default parameters will build
 2. InsertRecord: inserted data put to here
 3. DeleteRecord: wait for delete implementation
 4. IndexingRecord: contains data with small index
-5. SealedIndexing: Record not used any more
+5. SealedIndexing: Record not used anymore
 
 ### SegcoreConfig
 
