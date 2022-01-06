@@ -17,7 +17,6 @@
 package flowgraph
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -75,15 +74,14 @@ func (nodeCtx *nodeCtx) Start(wg *sync.WaitGroup) {
 // 2. invoke node.Operate
 // 3. deliver the Operate result to downstream nodes
 func (nodeCtx *nodeCtx) work() {
-	// TODO: necessary to check every node?
 	name := fmt.Sprintf("nodeCtxTtChecker-%s", nodeCtx.node.Name())
-	warn := fmt.Sprintf("node %s haven't received input for %f minutes",
-		nodeCtx.node.Name(), nodeCtxTtInterval.Minutes())
-	var checker *timerecord.LongTermChecker
+	var checker *timerecord.GroupChecker
 	if enableTtChecker {
-		checker = timerecord.NewLongTermChecker(context.Background(), name, nodeCtxTtInterval, warn)
-		checker.Start()
-		defer checker.Stop()
+		checker = timerecord.GetGroupChecker("fgNode", nodeCtxTtInterval, func(list []string) {
+			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", nodeCtxTtInterval))
+		})
+		checker.Check(name)
+		defer checker.Remove(name)
 	}
 
 	for {
@@ -102,7 +100,7 @@ func (nodeCtx *nodeCtx) work() {
 			res = n.Operate(inputs)
 
 			if enableTtChecker {
-				checker.Check()
+				checker.Check(name)
 			}
 
 			downstreamLength := len(nodeCtx.downstreamInputChanIdx)
