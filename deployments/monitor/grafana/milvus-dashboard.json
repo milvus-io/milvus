@@ -16,7 +16,7 @@
   "gnetId": null,
   "graphTooltip": 0,
   "id": 27,
-  "iteration": 1641283799623,
+  "iteration": 1641454553924,
   "links": [],
   "panels": [
     {
@@ -3274,7 +3274,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Number of process opened fds.",
+      "description": "Number of process opened fds",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -3666,7 +3666,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Number of allocated heap objects.",
+      "description": "Number of allocated heap objects",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -3764,7 +3764,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Rate of bytes allocated, even if freed.",
+      "description": "Rate of bytes allocated, even if freed",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
