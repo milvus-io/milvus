@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// ClientParams is the parameters of client singleton
 var ClientParams paramtable.GrpcClientConfig
 
 // Client is the datacoord grpc client
