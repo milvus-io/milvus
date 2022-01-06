@@ -20,7 +20,6 @@ default_dim = 128
 default_nb = 3000
 default_top_k = 10
 max_top_k = 16384
-# max_partition_num = 256
 max_partition_num = 4096
 default_segment_row_limit = 1000
 default_server_segment_row_limit = 1024 * 512
