@@ -372,6 +372,7 @@ type RHNSWFlatConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a rhnsw flat index can be built with specific parameters.
 func (adapter *RHNSWFlatConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false
