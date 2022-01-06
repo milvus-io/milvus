@@ -74,6 +74,7 @@ func (p *GlobalParamTable) InitOnce() {
 	})
 }
 
+// Init initialize the global param table
 func (p *GlobalParamTable) Init() {
 	p.BaseParams.Init()
 
@@ -91,11 +92,13 @@ func (p *GlobalParamTable) Init() {
 	p.IndexNodeCfg.init(&p.BaseParams)
 }
 
+// SetLogConfig set log config with given role
 func (p *GlobalParamTable) SetLogConfig(role string) {
 	p.BaseParams.RoleName = role
 	p.BaseParams.SetLogConfig()
 }
 
+// TODO: considering remove it: comment a large block of code is not a good practice, old code can be found with git
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
 //type commonConfig struct {
