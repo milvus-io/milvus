@@ -351,6 +351,7 @@ func newHNSWConfAdapter() *HNSWConfAdapter {
 	return &HNSWConfAdapter{}
 }
 
+// ANNOYConfAdapter checks if an ANNOY index can be built.
 type ANNOYConfAdapter struct {
 	BaseConfAdapter
 }
