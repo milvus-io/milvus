@@ -657,7 +657,7 @@ type ProxyComponent interface {
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// SetRootCoord set RootCoord for Proxy
+	//SetRootCoordClient set RootCoord for Proxy
 	// `rootCoord` is a client of root coordinator.
 	SetRootCoordClient(rootCoord RootCoord)
 
