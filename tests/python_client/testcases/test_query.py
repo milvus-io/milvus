@@ -114,7 +114,8 @@ class TestQueryParams(TestcaseBase):
     def test_query_auto_id_not_existed_primary_values(self):
         """
         target: test query on auto_id true collection
-        method: 1.create auto_id true collection 2.query with not existed primary keys
+        method: 1.create auto_id true collection
+                2.query with not existed primary keys
         expected: query result is empty
         """
         schema = cf.gen_default_collection_schema(auto_id=True)
