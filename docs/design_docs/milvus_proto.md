@@ -486,7 +486,7 @@ message LoadPartitionsRequest {
   // The collection name in milvus. (Required)
   string collection_name = 3;
 
-  // A name array of the partitions whcih you want to load. (Required)
+  // A name array of the partitions which you want to load. (Required)
   repeated string partition_names = 4;
 }
 ```
