@@ -97,7 +97,7 @@ IndexCoord adds or deletes the corresponding IndexNode information in NodeManage
 `watchMetaLoop` is used to monitor whether the Meta in etcd has been changed. When the Meta in etcd is monitored,
 the result of the Meta update is obtained from etcd, and the `Event.Kv.Version` of the update event is compared
 with the `revision` in the MetaTable. If the `Event.Kv.Version` is greater than the `revision` in the MetaTable,
-it means that this update is initiated by IndexNode, and then update the MetaTable in IndexCoord. Since this update
+it means that this update is initiated by IndexNode, and then updates the MetaTable in IndexCoord. Since this update
 is initiated by IndexNode, it indicates that this IndexNode has completed this task, so update the load of this
 IndexNode in NodeManager, and the task amount is reduced by one.
 
