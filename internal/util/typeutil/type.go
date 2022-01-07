@@ -40,3 +40,5 @@ const (
 	// DataNodeRole is a constant represent DataNode
 	DataNodeRole = "datanode"
 )
+
+const InvalidUniqueID = UniqueID(-1)
