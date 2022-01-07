@@ -37,7 +37,7 @@ all Approvers are listed under OWNERS_ALIASES file.
 
 - Do unit tests cover all the important code branches?
 
-- What about the edge cases and failure handling path?
+- What about the edge cases and failure handling paths?
 
 - Do we need better layering and abstraction?
 
