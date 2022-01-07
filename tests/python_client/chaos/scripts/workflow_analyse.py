@@ -1,14 +1,15 @@
 import requests
-requests.packages.urllib3.disable_warnings()
+requests.packages.urllib3.disable_warnings() # noqa
 url = "https://api.github.com/repos/milvus-io/milvus/actions/workflows"
 
-payload={}
-token = "" # your token
+payload = {}
+token = ""  # your token
 headers = {
     "Authorization": f"token {token}",
 }
 
 response = requests.request("GET", url, headers=headers, data=payload)
+
 
 def analysis_workflow(workflow_name, workflow_response):
     workflow_id = [w["id"] for w in workflow_response.json()["workflows"] if workflow_name in w["name"]][0]    
@@ -26,10 +27,11 @@ def analysis_workflow(workflow_name, workflow_response):
             elif r["status"] == "completed" and r["conclusion"] != "success":
                 results[r["name"]]["failure"] += 1
     return results
-    
+
+
 for workflow in ["Pod Kill"]:
     result = analysis_workflow(workflow, response)
     print(f"{workflow}:")
-    for k,v in result.items():
+    for k, v in result.items():
         print(f"{k} success: {v['success']}, failure: {v['failure']}")    
     print("\n")
