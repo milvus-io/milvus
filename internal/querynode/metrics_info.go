@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// getSystemInfoMetrics returns metrics info of QueryNode
 func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *QueryNode) (*milvuspb.GetMetricsResponse, error) {
 	usedMem := metricsinfo.GetUsedMemoryCount()
 	totalMem := metricsinfo.GetMemoryCount()
