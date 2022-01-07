@@ -391,6 +391,7 @@ func newRHNSWFlatConfAdapter() *RHNSWFlatConfAdapter {
 	return &RHNSWFlatConfAdapter{}
 }
 
+// RHNSWPQConfAdapter checks if a rhnsw pq index can be built.
 type RHNSWPQConfAdapter struct {
 	BaseConfAdapter
 	IVFPQConfAdapter
