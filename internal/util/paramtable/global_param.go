@@ -2065,6 +2065,7 @@ func (p *grpcConfig) initListener() {
 	}
 }
 
+// GrpcServerConfig is configuration for grpc server.
 type GrpcServerConfig struct {
 	grpcConfig
 
@@ -2132,6 +2133,7 @@ func (p *GrpcServerConfig) initServerMaxRecvSize() {
 		zap.String("role", p.Domain), zap.Int("grpc.serverMaxRecvSize", p.ServerMaxRecvSize))
 }
 
+// GrpcClientConfig is configuration for grpc client.
 type GrpcClientConfig struct {
 	grpcConfig
 
