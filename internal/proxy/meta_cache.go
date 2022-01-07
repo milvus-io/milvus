@@ -66,6 +66,8 @@ type partitionInfo struct {
 	createdUtcTimestamp uint64
 }
 
+var _ Cache = (*MetaCache)(nil)
+
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
 	client types.RootCoord
