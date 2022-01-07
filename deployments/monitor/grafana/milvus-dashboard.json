@@ -3622,7 +3622,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Go Memory mallocs rate",
+      "title": "Go Memory mallocs rate.",
       "tooltip": {
         "shared": true,
         "sort": 0,
