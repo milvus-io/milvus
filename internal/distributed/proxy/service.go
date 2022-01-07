@@ -194,7 +194,7 @@ func (s *Server) init() error {
 	if s.rootCoordClient == nil {
 		var err error
 		log.Debug("create RootCoord client for Proxy")
-		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
+		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.BaseParams.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create RootCoord client for Proxy", zap.Error(err))
 			return err
@@ -223,7 +223,7 @@ func (s *Server) init() error {
 	if s.dataCoordClient == nil {
 		var err error
 		log.Debug("create DataCoord client for Proxy")
-		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
+		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.BaseParams.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create DataCoord client for Proxy", zap.Error(err))
 			return err
@@ -252,7 +252,7 @@ func (s *Server) init() error {
 	if s.indexCoordClient == nil {
 		var err error
 		log.Debug("create IndexCoord client for Proxy")
-		s.indexCoordClient, err = icc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
+		s.indexCoordClient, err = icc.NewClient(s.ctx, proxy.Params.BaseParams.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create IndexCoord client for Proxy", zap.Error(err))
 			return err
@@ -281,7 +281,7 @@ func (s *Server) init() error {
 	if s.queryCoordClient == nil {
 		var err error
 		log.Debug("create QueryCoord client for Proxy")
-		s.queryCoordClient, err = qcc.NewClient(s.ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
+		s.queryCoordClient, err = qcc.NewClient(s.ctx, proxy.Params.BaseParams.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create QueryCoord client for Proxy", zap.Error(err))
 			return err

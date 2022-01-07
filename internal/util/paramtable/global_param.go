@@ -295,8 +295,6 @@ type rootCoordConfig struct {
 	Port    int
 
 	PulsarAddress string
-	MetaRootPath  string
-	KvRootPath    string
 
 	ClusterChannelPrefix string
 	MsgChannelSubName    string
@@ -319,8 +317,6 @@ func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
 	p.initPulsarAddress()
-	p.initMetaRootPath()
-	p.initKvRootPath()
 
 	// Has to init global msgchannel prefix before other channel names
 	p.initClusterMsgChannelPrefix()
@@ -343,30 +339,6 @@ func (p *rootCoordConfig) initPulsarAddress() {
 		panic(err)
 	}
 	p.PulsarAddress = addr
-}
-
-func (p *rootCoordConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = rootPath + "/" + subPath
-}
-
-func (p *rootCoordConfig) initKvRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.kvSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.KvRootPath = rootPath + "/" + subPath
 }
 
 func (p *rootCoordConfig) initClusterMsgChannelPrefix() {
@@ -457,7 +429,6 @@ type proxyConfig struct {
 
 	Alias string
 
-	MetaRootPath  string
 	PulsarAddress string
 
 	RocksmqPath string // not used in Proxy
@@ -496,7 +467,6 @@ type proxyConfig struct {
 func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initMetaRootPath()
 	p.initPulsarAddress()
 	p.initRocksmqPath()
 	p.initTimeTickInterval()
@@ -643,18 +613,6 @@ func (p *proxyConfig) initPulsarMaxMessageSize() {
 	}
 }
 
-func (p *proxyConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = path.Join(rootPath, subPath)
-}
-
 func (p *proxyConfig) initMaxTaskNum() {
 	p.MaxTaskNum = p.BaseParams.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
 }
@@ -695,10 +653,6 @@ type queryCoordConfig struct {
 	SearchChannelPrefix       string
 	SearchResultChannelPrefix string
 
-	// --- etcd ---
-	MetaRootPath string
-	KvRootPath   string
-
 	//--- Minio ---
 	MinioEndPoint        string
 	MinioAccessKeyID     string
@@ -734,10 +688,6 @@ func (p *queryCoordConfig) init(bp *BaseParamTable) {
 	p.initSearchResultChannelPrefix()
 	p.initStatsChannelName()
 	p.initTimeTickChannelName()
-
-	// --- etcd ---
-	p.initMetaRootPath()
-	p.initKvRootPath()
 
 	//--- Minio ----
 	p.initMinioEndPoint()
@@ -805,30 +755,6 @@ func (p *queryCoordConfig) initTimeTickChannelName() {
 	}
 	s := []string{p.ClusterChannelPrefix, config}
 	p.TimeTickChannelName = strings.Join(s, "-")
-}
-
-func (p *queryCoordConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = path.Join(rootPath, subPath)
-}
-
-func (p *queryCoordConfig) initKvRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.kvSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.KvRootPath = path.Join(rootPath, subPath)
 }
 
 func (p *queryCoordConfig) initMinioEndPoint() {
@@ -955,7 +881,6 @@ type queryNodeConfig struct {
 
 	PulsarAddress string
 	RocksmqPath   string
-	MetaRootPath  string
 
 	Alias         string
 	QueryNodeIP   string
@@ -1027,7 +952,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 
 	p.initPulsarAddress()
 	p.initRocksmqPath()
-	p.initMetaRootPath()
 
 	p.initGracefulTime()
 
@@ -1210,18 +1134,6 @@ func (p *queryNodeConfig) initStatsChannelName() {
 	p.StatsChannelName = strings.Join(s, "-")
 }
 
-func (p *queryNodeConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = rootPath + "/" + subPath
-}
-
 func (p *queryNodeConfig) initGracefulTime() {
 	p.GracefulTime = p.BaseParams.ParseInt64("queryNode.gracefulTime")
 	log.Debug("query node init gracefulTime", zap.Any("gracefulTime", p.GracefulTime))
@@ -1262,8 +1174,6 @@ type dataCoordConfig struct {
 	Address string
 
 	// --- ETCD ---
-	MetaRootPath        string
-	KvRootPath          string
 	ChannelWatchSubPath string
 
 	// --- MinIO ---
@@ -1310,8 +1220,6 @@ type dataCoordConfig struct {
 func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initMetaRootPath()
-	p.initKvRootPath()
 	p.initChannelWatchPrefix()
 
 	p.initPulsarAddress()
@@ -1360,30 +1268,6 @@ func (p *dataCoordConfig) initRocksmqPath() {
 		panic(err)
 	}
 	p.RocksmqPath = path
-}
-
-func (p *dataCoordConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = rootPath + "/" + subPath
-}
-
-func (p *dataCoordConfig) initKvRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.kvSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.KvRootPath = rootPath + "/" + subPath
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
@@ -1568,7 +1452,6 @@ type dataNodeConfig struct {
 	MsgChannelSubName string
 
 	// etcd
-	MetaRootPath        string
 	ChannelWatchSubPath string
 
 	// MinIO
@@ -1600,7 +1483,6 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.initTimeTickChannelName()
 	p.initMsgChannelSubName()
 
-	p.initMetaRootPath()
 	p.initChannelWatchPath()
 
 	p.initMinioAddress()
@@ -1702,18 +1584,6 @@ func (p *dataNodeConfig) initMsgChannelSubName() {
 	p.MsgChannelSubName = strings.Join(s, "-")
 }
 
-func (p *dataNodeConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = path.Join(rootPath, subPath)
-}
-
 func (p *dataNodeConfig) initChannelWatchPath() {
 	p.ChannelWatchSubPath = "channelwatch"
 }
@@ -1785,8 +1655,6 @@ type indexCoordConfig struct {
 	Address string
 	Port    int
 
-	KvRootPath           string
-	MetaRootPath         string
 	IndexStorageRootPath string
 
 	MinIOAddress         string
@@ -1802,38 +1670,12 @@ type indexCoordConfig struct {
 func (p *indexCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initMetaRootPath()
-	p.initKvRootPath()
 	p.initMinIOAddress()
 	p.initMinIOAccessKeyID()
 	p.initMinIOSecretAccessKey()
 	p.initMinIOUseSSL()
 	p.initMinioBucketName()
 	p.initIndexStorageRootPath()
-}
-
-func (p *indexCoordConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = rootPath + "/" + subPath
-}
-
-func (p *indexCoordConfig) initKvRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.kvSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.KvRootPath = rootPath + "/" + subPath
 }
 
 // initMinIOAddress initializes init the minio address of configuration items.
@@ -1905,7 +1747,6 @@ type indexNodeConfig struct {
 	NodeID int64
 	Alias  string
 
-	MetaRootPath         string
 	IndexStorageRootPath string
 
 	MinIOAddress         string
@@ -1928,7 +1769,6 @@ func (p *indexNodeConfig) init(bp *BaseParamTable) {
 	p.initMinIOSecretAccessKey()
 	p.initMinIOUseSSL()
 	p.initMinioBucketName()
-	p.initMetaRootPath()
 	p.initIndexStorageRootPath()
 	p.initKnowhereSimdType()
 }
@@ -1971,18 +1811,6 @@ func (p *indexNodeConfig) initMinIOUseSSL() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func (p *indexNodeConfig) initMetaRootPath() {
-	rootPath, err := p.BaseParams.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	subPath, err := p.BaseParams.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MetaRootPath = path.Join(rootPath, subPath)
 }
 
 func (p *indexNodeConfig) initIndexStorageRootPath() {

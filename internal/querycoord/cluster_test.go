@@ -396,8 +396,8 @@ func TestReloadClusterFromKV(t *testing.T) {
 	t.Run("Test LoadOnlineNodes", func(t *testing.T) {
 		refreshParams()
 		baseCtx := context.Background()
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, etcdCli)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+		clusterSession := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, etcdCli)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
@@ -424,8 +424,8 @@ func TestReloadClusterFromKV(t *testing.T) {
 
 	t.Run("Test LoadOfflineNodes", func(t *testing.T) {
 		refreshParams()
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, etcdCli)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+		clusterSession := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, etcdCli)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
@@ -463,8 +463,8 @@ func TestGrpcRequest(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
-	clusterSession := sessionutil.NewSession(context.Background(), Params.QueryCoordCfg.MetaRootPath, etcdCli)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 	clusterSession.Register()
 	factory := msgstream.NewPmsFactory()

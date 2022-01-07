@@ -80,8 +80,8 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 
 	rootcoord.Params.Init()
-	rootcoord.Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
-	rootcoord.Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
+	rootcoord.Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
 	rootcoord.Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
 	rootcoord.Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
 	rootcoord.Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
@@ -101,7 +101,7 @@ func TestGrpcService(t *testing.T) {
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
 	assert.Nil(t, err)
-	sessKey := path.Join(rootcoord.Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
@@ -216,7 +216,7 @@ func TestGrpcService(t *testing.T) {
 
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.RootCoordCfg.MetaRootPath, etcdCli)
+	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.BaseParams.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -915,11 +915,11 @@ func TestRun(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	rootcoord.Params.Init()
-	rootcoord.Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
 	assert.Nil(t, err)
-	sessKey := path.Join(rootcoord.Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	err = svr.Run()

@@ -48,7 +48,7 @@ func refreshParams() {
 	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
 	Params.QueryCoordCfg.StatsChannelName = Params.QueryCoordCfg.StatsChannelName + suffix
 	Params.QueryCoordCfg.TimeTickChannelName = Params.QueryCoordCfg.TimeTickChannelName + suffix
-	Params.QueryCoordCfg.MetaRootPath = Params.QueryCoordCfg.MetaRootPath + suffix
+	Params.BaseParams.MetaRootPath = Params.BaseParams.MetaRootPath + suffix
 	Params.QueryCoordCfg.DmlChannelPrefix = "Dml"
 	Params.QueryCoordCfg.DeltaChannelPrefix = "delta"
 	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
@@ -161,7 +161,7 @@ func TestWatchNodeLoop(t *testing.T) {
 	t.Run("Test OfflineNodes", func(t *testing.T) {
 		refreshParams()
 
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 
 		kvs := make(map[string]string)
 		session := &sessionutil.Session{

@@ -146,7 +146,7 @@ func (i *IndexNode) initKnowhere() {
 }
 
 func (i *IndexNode) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexNodeCfg.MetaRootPath, i.etcdCli)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.BaseParams.MetaRootPath, i.etcdCli)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -172,7 +172,7 @@ func (i *IndexNode) Init() error {
 		}
 		log.Debug("IndexNode init session successful", zap.Int64("serverID", i.session.ServerID))
 
-		etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.IndexNodeCfg.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.BaseParams.MetaRootPath)
 		i.etcdKV = etcdKV
 
 		option := &miniokv.Option{

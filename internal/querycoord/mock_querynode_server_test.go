@@ -101,12 +101,12 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 }
 
 func (qs *queryNodeServerMock) Register() error {
-	log.Debug("query node session info", zap.String("metaPath", Params.QueryCoordCfg.MetaRootPath))
+	log.Debug("query node session info", zap.String("metaPath", Params.BaseParams.MetaRootPath))
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	if err != nil {
 		return err
 	}
-	qs.session = sessionutil.NewSession(qs.ctx, Params.QueryCoordCfg.MetaRootPath, etcdCli)
+	qs.session = sessionutil.NewSession(qs.ctx, Params.BaseParams.MetaRootPath, etcdCli)
 	qs.session.Init(typeutil.QueryNodeRole, qs.queryNodeIP+":"+strconv.FormatInt(qs.queryNodePort, 10), false, false)
 	qs.queryNodeID = qs.session.ServerID
 	log.Debug("query nodeID", zap.Int64("nodeID", qs.queryNodeID))

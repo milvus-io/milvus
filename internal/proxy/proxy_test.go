@@ -426,7 +426,7 @@ func TestProxy(t *testing.T) {
 	defer etcdcli.Close()
 	assert.NoError(t, err)
 	proxy.SetEtcdClient(etcdcli)
-	rootCoordClient, err := rcc.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	rootCoordClient, err := rcc.NewClient(ctx, Params.BaseParams.MetaRootPath, etcdcli)
 	assert.NoError(t, err)
 	err = rootCoordClient.Init()
 	assert.NoError(t, err)
@@ -435,7 +435,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetRootCoordClient(rootCoordClient)
 	log.Info("Proxy set root coordinator client")
 
-	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	dataCoordClient, err := grpcdatacoordclient2.NewClient(ctx, Params.BaseParams.MetaRootPath, etcdcli)
 	assert.NoError(t, err)
 	err = dataCoordClient.Init()
 	assert.NoError(t, err)
@@ -444,7 +444,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetDataCoordClient(dataCoordClient)
 	log.Info("Proxy set data coordinator client")
 
-	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	queryCoordClient, err := grpcquerycoordclient.NewClient(ctx, Params.BaseParams.MetaRootPath, etcdcli)
 	assert.NoError(t, err)
 	err = queryCoordClient.Init()
 	assert.NoError(t, err)
@@ -453,7 +453,7 @@ func TestProxy(t *testing.T) {
 	proxy.SetQueryCoordClient(queryCoordClient)
 	log.Info("Proxy set query coordinator client")
 
-	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.ProxyCfg.MetaRootPath, etcdcli)
+	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.BaseParams.MetaRootPath, etcdcli)
 	assert.NoError(t, err)
 	err = indexCoordClient.Init()
 	assert.NoError(t, err)

@@ -230,7 +230,7 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) initSession() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli)
+	s.session = sessionutil.NewSession(s.ctx, Params.BaseParams.MetaRootPath, s.etcdCli)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -417,7 +417,7 @@ func (s *Server) startSegmentManager() {
 }
 
 func (s *Server) initMeta() error {
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.DataCoordCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.BaseParams.MetaRootPath)
 	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
 		var err error
@@ -731,7 +731,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli); err != nil {
+	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.BaseParams.MetaRootPath, s.etcdCli); err != nil {
 		return err
 	}
 	if err = s.rootCoordClient.Init(); err != nil {

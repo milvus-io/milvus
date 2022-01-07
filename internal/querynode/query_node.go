@@ -133,7 +133,7 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
 }
 
 func (node *QueryNode) initSession() error {
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.QueryNodeCfg.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.BaseParams.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
@@ -185,7 +185,7 @@ func (node *QueryNode) Init() error {
 	var initError error = nil
 	node.initOnce.Do(func() {
 		//ctx := context.Background()
-		log.Debug("QueryNode session info", zap.String("metaPath", Params.QueryNodeCfg.MetaRootPath))
+		log.Debug("QueryNode session info", zap.String("metaPath", Params.BaseParams.MetaRootPath))
 		err := node.initSession()
 		if err != nil {
 			log.Error("QueryNode init session failed", zap.Error(err))
@@ -194,8 +194,8 @@ func (node *QueryNode) Init() error {
 		}
 		Params.QueryNodeCfg.Refresh()
 
-		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.QueryNodeCfg.MetaRootPath)
-		log.Debug("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.QueryNodeCfg.MetaRootPath))
+		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.BaseParams.MetaRootPath)
+		log.Debug("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.BaseParams.MetaRootPath))
 		node.tSafeReplica = newTSafeReplica()
 
 		streamingReplica := newCollectionReplica(node.etcdKV)
