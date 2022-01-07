@@ -53,6 +53,7 @@ type GlobalParamTable struct {
 	once       sync.Once
 	BaseParams BaseParamTable
 
+	PulsarCfg pulsarConfig
 	//CommonCfg     commonConfig
 	//KnowhereCfg   knowhereConfig
 	//MsgChannelCfg msgChannelConfig
@@ -78,6 +79,7 @@ func (p *GlobalParamTable) InitOnce() {
 func (p *GlobalParamTable) Init() {
 	p.BaseParams.Init()
 
+	p.PulsarCfg.init(&p.BaseParams)
 	//p.CommonCfg.init(&p.BaseParams)
 	//p.KnowhereCfg.init(&p.BaseParams)
 	//p.MsgChannelCfg.init(&p.BaseParams)
@@ -100,6 +102,43 @@ func (p *GlobalParamTable) SetLogConfig(role string) {
 
 // TODO: considering remove it: comment a large block of code is not a good practice, old code can be found with git
 ///////////////////////////////////////////////////////////////////////////////
+// --- pulsar ---
+type pulsarConfig struct {
+	BaseParams *BaseParamTable
+
+	Address        string
+	MaxMessageSize int
+}
+
+func (p *pulsarConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initAddress()
+	p.initMaxMessageSize()
+}
+
+func (p *pulsarConfig) initAddress() {
+	addr, err := p.BaseParams.Load("_PulsarAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.Address = addr
+}
+
+func (p *pulsarConfig) initMaxMessageSize() {
+	maxMessageSizeStr, err := p.BaseParams.Load("pulsar.maxMessageSize")
+	if err != nil {
+		p.MaxMessageSize = SuggestPulsarMaxMessageSize
+	} else {
+		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
+		if err != nil {
+			p.MaxMessageSize = SuggestPulsarMaxMessageSize
+		} else {
+			p.MaxMessageSize = maxMessageSize
+		}
+	}
+}
+
 // --- common ---
 //type commonConfig struct {
 //	BaseParams *BaseParamTable
@@ -294,8 +333,6 @@ type rootCoordConfig struct {
 	Address string
 	Port    int
 
-	PulsarAddress string
-
 	ClusterChannelPrefix string
 	MsgChannelSubName    string
 	TimeTickChannel      string
@@ -316,8 +353,6 @@ type rootCoordConfig struct {
 func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initPulsarAddress()
-
 	// Has to init global msgchannel prefix before other channel names
 	p.initClusterMsgChannelPrefix()
 	p.initMsgChannelSubName()
@@ -331,14 +366,6 @@ func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.initMinSegmentSizeToEnableIndex()
 	p.initDefaultPartitionName()
 	p.initDefaultIndexName()
-}
-
-func (p *rootCoordConfig) initPulsarAddress() {
-	addr, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.PulsarAddress = addr
 }
 
 func (p *rootCoordConfig) initClusterMsgChannelPrefix() {
@@ -429,8 +456,6 @@ type proxyConfig struct {
 
 	Alias string
 
-	PulsarAddress string
-
 	RocksmqPath string // not used in Proxy
 
 	ProxyID                  UniqueID
@@ -456,8 +481,6 @@ type proxyConfig struct {
 
 	MaxTaskNum int64
 
-	PulsarMaxMessageSize int
-
 	RetentionDuration int64
 
 	CreatedTime time.Time
@@ -467,7 +490,6 @@ type proxyConfig struct {
 func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initPulsarAddress()
 	p.initRocksmqPath()
 	p.initTimeTickInterval()
 
@@ -483,8 +505,6 @@ func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.initDefaultPartitionName()
 	p.initDefaultIndexName()
 
-	p.initPulsarMaxMessageSize()
-
 	p.initMaxTaskNum()
 	p.initBufFlagExpireTime()
 	p.initBufFlagCleanupInterval()
@@ -499,14 +519,6 @@ func (p *proxyConfig) Refresh() {
 // InitAlias initialize Alias member.
 func (p *proxyConfig) InitAlias(alias string) {
 	p.Alias = alias
-}
-
-func (p *proxyConfig) initPulsarAddress() {
-	ret, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.PulsarAddress = ret
 }
 
 func (p *proxyConfig) initRocksmqPath() {
@@ -599,20 +611,6 @@ func (p *proxyConfig) initDefaultIndexName() {
 	p.DefaultIndexName = name
 }
 
-func (p *proxyConfig) initPulsarMaxMessageSize() {
-	maxMessageSizeStr, err := p.BaseParams.Load("pulsar.maxMessageSize")
-	if err != nil {
-		p.PulsarMaxMessageSize = SuggestPulsarMaxMessageSize
-	} else {
-		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
-		if err != nil {
-			p.PulsarMaxMessageSize = SuggestPulsarMaxMessageSize
-		} else {
-			p.PulsarMaxMessageSize = maxMessageSize
-		}
-	}
-}
-
 func (p *proxyConfig) initMaxTaskNum() {
 	p.MaxTaskNum = p.BaseParams.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
 }
@@ -666,9 +664,6 @@ type queryCoordConfig struct {
 	DmlChannelPrefix   string
 	DeltaChannelPrefix string
 
-	// --- Pulsar ---
-	PulsarAddress string
-
 	//---- Handoff ---
 	AutoHandoff bool
 
@@ -695,9 +690,6 @@ func (p *queryCoordConfig) init(bp *BaseParamTable) {
 	p.initMinioSecretAccessKey()
 	p.initMinioUseSSLStr()
 	p.initMinioBucketName()
-
-	//--- Pulsar ----
-	p.initPulsarAddress()
 
 	//---- Handoff ---
 	p.initAutoHandoff()
@@ -801,14 +793,6 @@ func (p *queryCoordConfig) initMinioBucketName() {
 	p.MinioBucketName = bucketName
 }
 
-func (p *queryCoordConfig) initPulsarAddress() {
-	addr, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.PulsarAddress = addr
-}
-
 func (p *queryCoordConfig) initAutoHandoff() {
 	handoff, err := p.BaseParams.Load("queryCoord.autoHandoff")
 	if err != nil {
@@ -879,8 +863,7 @@ func (p *queryCoordConfig) initDeltaChannelName() {
 type queryNodeConfig struct {
 	BaseParams *BaseParamTable
 
-	PulsarAddress string
-	RocksmqPath   string
+	RocksmqPath string
 
 	Alias         string
 	QueryNodeIP   string
@@ -950,7 +933,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 	p.initMinioUseSSLStr()
 	p.initMinioBucketName()
 
-	p.initPulsarAddress()
 	p.initRocksmqPath()
 
 	p.initGracefulTime()
@@ -1051,14 +1033,6 @@ func (p *queryNodeConfig) initMinioBucketName() {
 		panic(err)
 	}
 	p.MinioBucketName = bucketName
-}
-
-func (p *queryNodeConfig) initPulsarAddress() {
-	url, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.PulsarAddress = url
 }
 
 func (p *queryNodeConfig) initRocksmqPath() {
@@ -1184,9 +1158,6 @@ type dataCoordConfig struct {
 	MinioBucketName      string
 	MinioRootPath        string
 
-	// --- Pulsar ---
-	PulsarAddress string
-
 	// --- Rocksmq ---
 	RocksmqPath string
 
@@ -1222,7 +1193,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 
 	p.initChannelWatchPrefix()
 
-	p.initPulsarAddress()
 	p.initRocksmqPath()
 
 	p.initSegmentMaxSize()
@@ -1252,14 +1222,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initGCInterval()
 	p.initGCMissingTolerance()
 	p.initGCDropTolerance()
-}
-
-func (p *dataCoordConfig) initPulsarAddress() {
-	addr, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.PulsarAddress = addr
 }
 
 func (p *dataCoordConfig) initRocksmqPath() {
@@ -1436,9 +1398,6 @@ type dataNodeConfig struct {
 	DmlChannelName   string
 	DeltaChannelName string
 
-	// Pulsar address
-	PulsarAddress string
-
 	// Rocksmq path
 	RocksmqPath string
 
@@ -1475,7 +1434,6 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.initStatsBinlogRootPath()
 	p.initDeleteBinlogRootPath()
 
-	p.initPulsarAddress()
 	p.initRocksmqPath()
 
 	// Must init global msgchannel prefix before other channel names
@@ -1540,14 +1498,6 @@ func (p *dataNodeConfig) initDeleteBinlogRootPath() {
 		panic(err)
 	}
 	p.DeleteBinlogRootPath = path.Join(rootPath, "delta_log")
-}
-
-func (p *dataNodeConfig) initPulsarAddress() {
-	url, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.PulsarAddress = url
 }
 
 func (p *dataNodeConfig) initRocksmqPath() {

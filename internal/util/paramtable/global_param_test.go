@@ -15,7 +15,6 @@ import (
 	"log"
 	"os"
 	"path"
-	"strings"
 	"testing"
 	"time"
 
@@ -33,11 +32,17 @@ func TestGlobalParamTable(t *testing.T) {
 	var GlobalParams GlobalParamTable
 	GlobalParams.Init()
 
+	t.Run("test pulsarConfig", func(t *testing.T) {
+		Params := GlobalParams.PulsarCfg
+
+		assert.NotEqual(t, Params.Address, "")
+		t.Logf("pulsar address = %s", Params.Address)
+
+		assert.Equal(t, Params.MaxMessageSize, SuggestPulsarMaxMessageSize)
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
-
-		assert.NotEqual(t, Params.PulsarAddress, "")
-		t.Logf("pulsar address = %s", Params.PulsarAddress)
 
 		assert.Equal(t, Params.MsgChannelSubName, "by-dev-rootCoord")
 		t.Logf("msg channel sub name = %s", Params.MsgChannelSubName)
@@ -75,8 +80,6 @@ func TestGlobalParamTable(t *testing.T) {
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := GlobalParams.ProxyCfg
 
-		t.Logf("PulsarAddress: %s", Params.PulsarAddress)
-
 		t.Logf("RocksmqPath: %s", Params.RocksmqPath)
 
 		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
@@ -100,8 +103,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("DefaultPartitionName: %s", Params.DefaultPartitionName)
 
 		t.Logf("DefaultIndexName: %s", Params.DefaultIndexName)
-
-		t.Logf("PulsarMaxMessageSize: %d", Params.PulsarMaxMessageSize)
 
 		//t.Logf("RoleName: %s", typeutil.ProxyRole)
 
@@ -165,11 +166,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
 		Params := GlobalParams.QueryNodeCfg
-
-		address := Params.PulsarAddress
-		split := strings.Split(address, ":")
-		assert.Equal(t, "pulsar", split[0])
-		assert.Equal(t, "6650", split[len(split)-1])
 
 		cacheSize := Params.CacheSize
 		assert.Equal(t, int64(32), cacheSize)
@@ -264,9 +260,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		path1 := Params.InsertBinlogRootPath
 		log.Println("InsertBinlogRootPath:", path1)
-
-		address := Params.PulsarAddress
-		log.Println("PulsarAddress:", address)
 
 		path1 = Params.ClusterChannelPrefix
 		assert.Equal(t, path1, "by-dev")

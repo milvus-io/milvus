@@ -221,7 +221,7 @@ func (node *DataNode) Init() error {
 	Params.DataNodeCfg.Refresh()
 
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.DataNodeCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024,
 	}

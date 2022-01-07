@@ -443,8 +443,8 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 }
 
 func (c *Core) setMsgStreams() error {
-	if Params.RootCoordCfg.PulsarAddress == "" {
-		return fmt.Errorf("pulsarAddress is empty")
+	if Params.PulsarCfg.Address == "" {
+		return fmt.Errorf("pulsar address is empty")
 	}
 	if Params.RootCoordCfg.MsgChannelSubName == "" {
 		return fmt.Errorf("msgChannelSubName is empty")
@@ -1021,7 +1021,7 @@ func (c *Core) Init() error {
 		}
 
 		m := map[string]interface{}{
-			"PulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+			"PulsarAddress":  Params.PulsarCfg.Address,
 			"ReceiveBufSize": 1024,
 			"PulsarBufSize":  1024}
 		if initError = c.msFactory.SetParams(m); initError != nil {
