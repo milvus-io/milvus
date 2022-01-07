@@ -669,7 +669,7 @@ type ProxyComponent interface {
 	//  `indexCoord` is a client of index coordinator.
 	SetIndexCoordClient(indexCoord IndexCoord)
 
-	// SetQueryCoord set QueryCoord for Proxy
+	// SetQueryCoordClient set QueryCoord for Proxy
 	//  `queryCoord` is a client of query coordinator.
 	SetQueryCoordClient(queryCoord QueryCoord)
 
