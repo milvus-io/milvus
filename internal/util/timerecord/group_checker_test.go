@@ -38,12 +38,12 @@ func TestGroupChecker(t *testing.T) {
 	assert.Equal(t, 10*time.Millisecond, gc2.d)
 
 	list := <-signal
-	assert.Equal(t, []string{"1", "2"}, list)
+	assert.ElementsMatch(t, []string{"1", "2"}, list)
 
 	gc2.Remove("2")
 
 	list = <-signal
-	assert.Equal(t, []string{"1"}, list)
+	assert.ElementsMatch(t, []string{"1"}, list)
 
 	assert.NotPanics(t, func() {
 		gc1.Stop()
