@@ -11,13 +11,15 @@
 
 
 import random
-
+import time
+import argparse
 from pymilvus import (
     connections, list_collections,
     FieldSchema, CollectionSchema, DataType,
     Collection
 )
 TIMEOUT = 120
+
 
 def hello_milvus(host="127.0.0.1"):
     import time
@@ -93,7 +95,6 @@ def hello_milvus(host="127.0.0.1"):
             # Get value of the random value field for search result
             print(hit, hit.entity.get("random_value"))
 
-
     # query
     expr = "count in [2,4,6,8]"
     output_fields = ["count", "random_value"]
@@ -104,14 +105,9 @@ def hello_milvus(host="127.0.0.1"):
     # collection.release()
 
 
-import argparse
-
 parser = argparse.ArgumentParser(description='host ip')
 parser.add_argument('--host', type=str, default='127.0.0.1', help='host ip')
 args = parser.parse_args()
-
 # add time stamp
-import time
-
 print(f"\nStart time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
 hello_milvus(args.host)
