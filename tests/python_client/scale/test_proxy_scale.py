@@ -7,6 +7,7 @@ from common.common_type import CaseLabel
 from scale import scale_common as sc, constants
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready
+from utils.util_pymilvus import get_latest_tag
 
 prefix = "proxy_scale"
 
@@ -36,7 +37,8 @@ class TestProxyScale:
         """
         # deploy milvus cluster with one proxy
         release_name = "scale-proxy"
-        image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
+        image_tag = get_latest_tag()
+        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,
