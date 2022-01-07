@@ -371,3 +371,20 @@ def get_image_tag():
     except:
         print("Can not get the tag list")
         return "master-latest"
+
+
+def dict_recursive_key(_dict, key=None):
+    if isinstance(_dict, dict):
+        key_list = list(_dict.keys())
+
+        for k in key_list:
+            if isinstance(_dict[k], dict):
+                dict_recursive_key(_dict[k], key)
+
+            if key is None:
+                if _dict[k] is key:
+                    del _dict[k]
+            else:
+                if _dict[k] == key:
+                    del _dict[k]
+    return _dict
