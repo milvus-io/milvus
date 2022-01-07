@@ -19,6 +19,7 @@ package funcutil
 import (
 	"reflect"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -56,10 +57,20 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 		return b
 	}
 	routineNum := 0
+	var wg sync.WaitGroup
 	for begin := 0; begin < total; begin = begin + nPerBatch {
 		j := begin
 
+		wg.Add(1)
 		go func(begin int) {
+			defer wg.Done()
+
+			select {
+			case <-quit:
+				return
+			default:
+			}
+
 			err := error(nil)
 
 			end := getMin(total, begin+nPerBatch)
@@ -98,10 +109,12 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 		select {
 		case err := <-errc:
 			close(quit)
+			wg.Wait()
 			return err
 		case <-done:
 			count++
 			if count == routineNum {
+				wg.Wait()
 				return nil
 			}
 		}
