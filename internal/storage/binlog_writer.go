@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"runtime"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -263,7 +265,8 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
 	descriptorEvent.FieldID = FieldID
-	return &InsertBinlogWriter{
+
+	w := &InsertBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -272,6 +275,13 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			buffer:          nil,
 		},
 	}
+
+	runtime.SetFinalizer(w, func(writer *InsertBinlogWriter) {
+		if !w.isClosed() {
+			log.Error("insert binlog writer is leaking.. please check")
+		}
+	})
+	return w
 }
 
 // NewDeleteBinlogWriter creates DeleteBinlogWriter to write binlog file.
@@ -281,7 +291,7 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	descriptorEvent.CollectionID = collectionID
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
-	return &DeleteBinlogWriter{
+	w := &DeleteBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -290,6 +300,12 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			buffer:          nil,
 		},
 	}
+	runtime.SetFinalizer(w, func(writer *DeleteBinlogWriter) {
+		if !w.isClosed() {
+			log.Error("delete binlog writer is leaking.. please check")
+		}
+	})
+	return w
 }
 
 // NewDDLBinlogWriter creates DDLBinlogWriter to write binlog file.
@@ -297,7 +313,7 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
-	return &DDLBinlogWriter{
+	w := &DDLBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -306,6 +322,12 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 			buffer:          nil,
 		},
 	}
+	runtime.SetFinalizer(w, func(writer *DDLBinlogWriter) {
+		if !w.isClosed() {
+			log.Error("ddl binlog writer is leaking.. please check")
+		}
+	})
+	return w
 }
 
 // NewIndexFileBinlogWriter returns a new IndexFileBinlogWriter with provided parameters
@@ -331,7 +353,7 @@ func NewIndexFileBinlogWriter(
 	descriptorEvent.AddExtra("indexName", indexName)
 	descriptorEvent.AddExtra("indexID", fmt.Sprintf("%d", indexID))
 	descriptorEvent.AddExtra("key", key)
-	return &IndexFileBinlogWriter{
+	w := &IndexFileBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -340,4 +362,10 @@ func NewIndexFileBinlogWriter(
 			buffer:          nil,
 		},
 	}
+	runtime.SetFinalizer(w, func(writer *IndexFileBinlogWriter) {
+		if !w.isClosed() {
+			log.Error("index file binlog writer is leaking.. please check")
+		}
+	})
+	return w
 }
