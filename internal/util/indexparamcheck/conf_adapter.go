@@ -396,6 +396,7 @@ type RHNSWPQConfAdapter struct {
 	IVFPQConfAdapter
 }
 
+// CheckTrain checks if a rhnsw pq index can be built with specific parameters.
 func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !adapter.BaseConfAdapter.CheckTrain(params) {
 		return false
