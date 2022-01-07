@@ -579,7 +579,7 @@ func (colReplica *collectionReplica) getSegmentByID(segmentID UniqueID) (*Segmen
 func (colReplica *collectionReplica) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
 	segment, ok := colReplica.segments[segmentID]
 	if !ok {
-		return nil, errors.New("cannot find segment in QueryNode, id = " + strconv.FormatInt(segmentID, 10))
+		return nil, fmt.Errorf("cannot find segment %d in QueryNode", segmentID)
 	}
 
 	return segment, nil
