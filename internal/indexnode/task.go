@@ -340,7 +340,10 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		return nil
 	}
-	err = funcutil.ProcessFuncParallel(len(toLoadDataPaths), runtime.NumCPU(), loadKey, "loadKey")
+	// Use runtime.GOMAXPROCS(0) instead of runtime.NumCPU()
+	// to respect CPU quota of container/pod
+	// gomaxproc will be set by `automaxproc`, passing 0 will just retrieve the value
+	err = funcutil.ProcessFuncParallel(len(toLoadDataPaths), runtime.GOMAXPROCS(0), loadKey, "loadKey")
 	if err != nil {
 		log.Warn("loadKey from minio failed", zap.Error(err))
 		it.internalErr = err
