@@ -431,6 +431,7 @@ type RHNSWSQConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a rhnsw sq index can be built with specific parameters.
 func (adapter *RHNSWSQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false
