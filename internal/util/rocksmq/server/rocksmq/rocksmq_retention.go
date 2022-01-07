@@ -355,7 +355,7 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 		return err
 	}
 
-	log.Debug("Delete message for topic: "+topic, zap.Any("startID", startID), zap.Any("endID", endID))
+	log.Debug("Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
 	return nil
 }
 
