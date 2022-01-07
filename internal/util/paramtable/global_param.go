@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path"
@@ -43,6 +44,9 @@ const (
 
 	// DefaultRetentionDuration defines the default duration for retention which is 5 days in seconds.
 	DefaultRetentionDuration = 3600 * 24 * 5
+
+	// Minimum tolerance time for missing and dropped files in seconds
+	MinimumTolerance = 3600
 )
 
 // GlobalParamTable is a derived struct of BaseParamTable.
@@ -1205,10 +1209,18 @@ func (p *dataCoordConfig) initGCInterval() {
 
 func (p *dataCoordConfig) initGCMissingTolerance() {
 	p.GCMissingTolerance = time.Duration(p.BaseParams.ParseInt64WithDefault("dataCoord.gc.missingTolerance", 24*60*60)) * time.Second
+	if p.GCMissingTolerance < MinimumTolerance {
+		errMsg := fmt.Sprintf("GCMissingTolerance must larger than or equal to %d", MinimumTolerance)
+		log.Fatal(errMsg)
+	}
 }
 
 func (p *dataCoordConfig) initGCDropTolerance() {
 	p.GCDropTolerance = time.Duration(p.BaseParams.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 24*60*60)) * time.Second
+	if p.GCDropTolerance < MinimumTolerance {
+		errMsg := fmt.Sprintf("GCDropTolerance must larger than or equal to %d", MinimumTolerance)
+		log.Fatal(errMsg)
+	}
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
