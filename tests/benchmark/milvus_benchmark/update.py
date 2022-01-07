@@ -150,13 +150,6 @@ def update_values(src_values_file, deploy_params_file):
             # values_dict['pulsarStandalone']['resources'] = resources
         if mems:
             logging.debug("TODO: Update mem resources")
-        # # pulsar distributed mode
-        # values_dict['pulsar']["enabled"] = True
-        # values_dict['pulsar']['autoRecovery']['nodeSelector'] = node_config
-        # values_dict['pulsar']['proxy']['nodeSelector'] = node_config
-        # values_dict['pulsar']['broker']['nodeSelector'] = node_config
-        # values_dict['pulsar']['bookkeeper']['nodeSelector'] = node_config
-        # values_dict['pulsar']['zookeeper']['nodeSelector'] = node_config
         
         logging.debug("Add tolerations into cluster server")
         values_dict['proxy']['tolerations'] = perf_tolerations
