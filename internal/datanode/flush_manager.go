@@ -247,7 +247,7 @@ type rendezvousFlushManager struct {
 	dropHandler dropHandler
 }
 
-// getFlushQueue gets or creates a orderFlushQueue for segment id if not found
+// getFlushQueue gets or creates an orderFlushQueue for segment id if not found
 func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQueue {
 	newQueue := newOrderFlushQueue(segmentID, m.notifyFunc)
 	actual, _ := m.dispatcher.LoadOrStore(segmentID, newQueue)
