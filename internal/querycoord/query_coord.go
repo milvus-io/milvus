@@ -63,6 +63,7 @@ type queryChannelInfo struct {
 	responseChannel string
 }
 
+// Params is param table of query coordinator
 var Params paramtable.GlobalParamTable
 
 // QueryCoord is the coordinator of queryNodes
