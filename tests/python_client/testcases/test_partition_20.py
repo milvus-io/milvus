@@ -262,11 +262,11 @@ class TestPartitionParams(TestcaseBase):
         """
         self._connect()
         collection_w = self.init_collection_wrap()
-        partition_w1 = self.init_partition_wrap(collection_w,name="partition_w1")
-        partition_w2 = self.init_partition_wrap(collection_w,name="partition_w2")
+        partition_w1 = self.init_partition_wrap(collection_w, name="partition_w1")
+        partition_w2 = self.init_partition_wrap(collection_w, name="partition_w2")
         partition_w1.insert(cf.gen_default_list_data())
         partition_w2.insert(cf.gen_default_list_data())
-        partition_names=["partition_w1","partition_w2"]
+        partition_names = ["partition_w1", "partition_w2"]
         collection_w.load(partition_names)
         collection_w.release(partition_names)
 
