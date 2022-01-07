@@ -750,7 +750,7 @@ message DescribeIndexResponse {
   // Response status
   common.Status status = 1;
 
-  // All index informations, for now only return tha latest index you created for the collection.
+  // All index informations, for now only return the latest index you created for the collection.
   repeated IndexDescription index_descriptions = 2;
 }
 ```
