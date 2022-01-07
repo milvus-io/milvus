@@ -83,7 +83,7 @@ class CustomResourceOperations(object):
             api_response = api_instance.get_namespaced_custom_object(self.group, self.version,
                                                                      self.namespace, self.plural,
                                                                      name=metadata_name)
-            log.debug(f"get custom resource response: {api_response}")
+            # log.debug(f"get custom resource response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->get_namespaced_custom_object: %s\n" % e)
             raise Exception(str(e))
