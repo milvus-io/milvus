@@ -39,7 +39,7 @@ func TestProxyManager(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sessKey := path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot)
 	etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	defer etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	s1 := sessionutil.Session{

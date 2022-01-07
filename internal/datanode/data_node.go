@@ -198,7 +198,7 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.DataNodeCfg.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx, Params.BaseParams.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -451,7 +451,7 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.DataNodeCfg.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.BaseParams.MetaRootPath)
 		node.watchKv = etcdKV
 		return nil
 	}

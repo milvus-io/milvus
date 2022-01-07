@@ -139,7 +139,7 @@ func (i *IndexCoord) Register() error {
 }
 
 func (i *IndexCoord) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexCoordCfg.MetaRootPath, i.etcdCli)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.BaseParams.MetaRootPath, i.etcdCli)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -164,7 +164,7 @@ func (i *IndexCoord) Init() error {
 		}
 
 		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.IndexCoordCfg.MetaRootPath)
+			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.BaseParams.MetaRootPath)
 			metakv, err := NewMetaTable(etcdKV)
 			if err != nil {
 				return err
@@ -207,7 +207,7 @@ func (i *IndexCoord) Init() error {
 		}
 
 		//init idAllocator
-		kvRootPath := Params.IndexCoordCfg.KvRootPath
+		kvRootPath := Params.BaseParams.KvRootPath
 		etcdKV := tsoutil.NewTSOKVBase(i.etcdCli, kvRootPath, "index_gid")
 
 		i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)

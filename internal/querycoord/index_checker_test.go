@@ -38,7 +38,7 @@ func TestReloadFromKV(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	defer etcdCli.Close()
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 
@@ -94,7 +94,7 @@ func TestCheckIndexLoop(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	defer etcdCli.Close()
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 
@@ -161,7 +161,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.QueryCoordCfg.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 	taskScheduler := &TaskScheduler{
@@ -170,7 +170,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		client:           kv,
 		triggerTaskQueue: NewTaskQueue(),
 	}
-	idAllocatorKV := tsoutil.NewTSOKVBase(etcdCli, Params.QueryCoordCfg.KvRootPath, "queryCoordTaskID")
+	idAllocatorKV := tsoutil.NewTSOKVBase(etcdCli, Params.BaseParams.KvRootPath, "queryCoordTaskID")
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 	err = idAllocator.Initialize()
 	assert.Nil(t, err)

@@ -495,7 +495,7 @@ func TestWatchChannel(t *testing.T) {
 	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.DataNodeCfg.MetaRootPath)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
 		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))

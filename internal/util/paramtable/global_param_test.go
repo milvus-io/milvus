@@ -12,7 +12,6 @@
 package paramtable
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path"
@@ -39,12 +38,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		assert.NotEqual(t, Params.PulsarAddress, "")
 		t.Logf("pulsar address = %s", Params.PulsarAddress)
-
-		assert.NotEqual(t, Params.MetaRootPath, "")
-		t.Logf("meta root path = %s", Params.MetaRootPath)
-
-		assert.NotEqual(t, Params.KvRootPath, "")
-		t.Logf("kv root path = %s", Params.KvRootPath)
 
 		assert.Equal(t, Params.MsgChannelSubName, "by-dev-rootCoord")
 		t.Logf("msg channel sub name = %s", Params.MsgChannelSubName)
@@ -81,8 +74,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := GlobalParams.ProxyCfg
-
-		t.Logf("MetaRootPath: %s", Params.MetaRootPath)
 
 		t.Logf("PulsarAddress: %s", Params.PulsarAddress)
 
@@ -232,9 +223,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		ch := Params.QueryTimeTickChannelName
 		assert.Equal(t, ch, "by-dev-queryTimeTick")
-
-		path := Params.MetaRootPath
-		fmt.Println(path)
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -292,9 +280,6 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.Equal(t, name, "by-dev-dataNode-2")
 		log.Println("MsgChannelSubName:", name)
 
-		path1 = Params.MetaRootPath
-		log.Println("MetaRootPath:", path1)
-
 		id1 := Params.MinioAccessKeyID
 		log.Println("MinioAccessKeyID:", id1)
 
@@ -324,10 +309,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("Address: %v", Params.Address)
 
 		t.Logf("Port: %v", Params.Port)
-
-		t.Logf("KvRootPath: %v", Params.KvRootPath)
-
-		t.Logf("MetaRootPath: %v", Params.MetaRootPath)
 
 		t.Logf("MinIOAddress: %v", Params.MinIOAddress)
 
@@ -360,8 +341,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("NodeID: %v", Params.NodeID)
 
 		t.Logf("Alias: %v", Params.Alias)
-
-		t.Logf("MetaRootPath: %v", Params.MetaRootPath)
 
 		t.Logf("MinIOAddress: %v", Params.MinIOAddress)
 
