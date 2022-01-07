@@ -19,6 +19,9 @@ package storage
 import (
 	"bytes"
 	"errors"
+	"runtime"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 // BinlogReader is an object to read binlog file. Binlog file's format can be
@@ -88,5 +91,10 @@ func NewBinlogReader(data []byte) (*BinlogReader, error) {
 	if _, err := reader.readDescriptorEvent(); err != nil {
 		return nil, err
 	}
+	runtime.SetFinalizer(reader, func(reader *BinlogReader) {
+		if !reader.isClose {
+			log.Error("binlog reader is leaking.. please check")
+		}
+	})
 	return reader, nil
 }
