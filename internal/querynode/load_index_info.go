@@ -70,6 +70,7 @@ func (li *LoadIndexInfo) appendFieldInfo(fieldID FieldID) error {
 	return HandleCStatus(&status, "AppendFieldInfo failed")
 }
 
+// appendIndex appends binarySet index to cLoadIndexInfo
 func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) error {
 	var cBinarySet C.CBinarySet
 	status := C.NewBinarySet(&cBinarySet)
