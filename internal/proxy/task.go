@@ -2114,7 +2114,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(showResp.Status.Reason)
 	}
-	log.Debug("query coordinator show collections",
+	log.Debug("QueryCoord show collections",
 		zap.Any("collections", showResp.CollectionIDs),
 		zap.Any("collID", collectionID))
 
