@@ -551,7 +551,7 @@ message GetPartitionStatisticsResponse {
 ```
 
 ## ShowPartitions
-Get all partitions name in db, or get in-memory state for each partition.
+Get all partitions' names in db, or get in-memory state for each partition.
 ```
 rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
 ```
