@@ -3764,7 +3764,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "Rate of bytes allocated, even if freed",
+      "description": "Rate of bytes allocated, even if freed.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
