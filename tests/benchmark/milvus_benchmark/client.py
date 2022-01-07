@@ -1,7 +1,7 @@
 import random
 import logging
 import time
-import traceback
+# import traceback
 from multiprocessing import Process
 from pymilvus import Milvus, DataType
 import utils as util
