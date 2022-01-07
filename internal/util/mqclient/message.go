@@ -16,7 +16,7 @@
 
 package mqclient
 
-// ConsumerMessage is the interface that provides operations of a consumer
+// Message is the interface that provides operations of a consumer
 type Message interface {
 	// Topic get the topic from which this message originated from
 	Topic() string
