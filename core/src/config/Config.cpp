@@ -58,6 +58,8 @@ const char* CONFIG_GENERAL_METAURI_DEFAULT = "sqlite://:@:/";
 const char* CONFIG_GENERAL_META_SSL_CA = "meta_ssl_ca";
 const char* CONFIG_GENERAL_META_SSL_KEY = "meta_ssl_key";
 const char* CONFIG_GENERAL_META_SSL_CERT = "meta_ssl_cert";
+const char* CONFIG_GENERAL_SEARCH_RAW_ENABLE = "search_raw_enable";
+const char* CONFIG_GENERAL_SEARCH_RAW_ENABLE_DEFAULT = "true";
 
 /* network config */
 const char* CONFIG_NETWORK = "network";
@@ -320,6 +322,9 @@ Config::ValidateConfig() {
     std::string general_metauri;
     STATUS_CHECK(GetGeneralConfigMetaURI(general_metauri));
 
+    bool is_search_row;
+    STATUS_CHECK(GetGeneralConfigSearchRawEnable(is_search_row));
+
     /* network config */
     std::string bind_address;
     STATUS_CHECK(GetNetworkConfigBindAddress(bind_address));
@@ -506,6 +511,7 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetGeneralConfigMetaSslCa(""));
     STATUS_CHECK(SetGeneralConfigMetaSslKey(""));
     STATUS_CHECK(SetGeneralConfigMetaSslCert(""));
+    STATUS_CHECK(SetGeneralConfigSearchRawEnable(CONFIG_GENERAL_SEARCH_RAW_ENABLE_DEFAULT));
 
     /* network config */
     STATUS_CHECK(SetNetworkConfigBindAddress(CONFIG_NETWORK_BIND_ADDRESS_DEFAULT));
@@ -629,6 +635,8 @@ Config::SetConfigCli(const std::string& parent_key, const std::string& child_key
             status = SetGeneralConfigMetaSslKey(value);
         } else if (child_key == CONFIG_GENERAL_META_SSL_CERT) {
             status = SetGeneralConfigMetaSslCert(value);
+        } else if (child_key == CONFIG_GENERAL_SEARCH_RAW_ENABLE) {
+            status = SetGeneralConfigSearchRawEnable(value);
         } else {
             status = Status(SERVER_UNEXPECTED_ERROR, invalid_node_str);
         }
@@ -2222,6 +2230,17 @@ Config::GetGeneralConfigMetaSslCert(std::string& value) {
     return CheckGeneralConfigMetaSslCert(value);
 }
 
+Status
+Config::GetGeneralConfigSearchRawEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_SEARCH_RAW_ENABLE, CONFIG_GENERAL_SEARCH_RAW_ENABLE_DEFAULT);
+    Status s = ValidationUtil::ValidateStringIsBool(str);
+    if (!s.ok()) {
+        return s;
+    }
+
+    return StringHelpFunctions::ConvertToBoolean(str, value);
+}
+
 #ifdef MILVUS_FPGA_VERSION
 Status
 Config::GetFpgaResourceConfigEnable(bool& value) {
@@ -2841,6 +2860,15 @@ Status
 Config::SetGeneralConfigMetaSslCert(const std::string& value) {
     STATUS_CHECK(CheckGeneralConfigMetaSslCert(value));
     return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_META_SSL_CERT, value);
+}
+
+Status
+Config::SetGeneralConfigSearchRawEnable(const std::string& value) {
+    Status s = ValidationUtil::ValidateStringIsBool(value);
+    if (!s.ok()) {
+        return s;
+    }
+    return SetConfigValueInMem(CONFIG_GENERAL, CONFIG_GENERAL_SEARCH_RAW_ENABLE, value);
 }
 
 /* network config */

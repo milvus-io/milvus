@@ -1595,7 +1595,8 @@ MySQLMetaImpl::GetPartitionName(const std::string& collection_id, const std::str
 }
 
 Status
-MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& files_holder) {
+MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& files_holder, 
+                             bool is_all_search_file) {
     try {
         server::MetricCollector metric;
         mysqlpp::StoreQueryResult res;
@@ -1618,10 +1619,14 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& file
                       << " FROM " << META_TABLEFILES << " WHERE table_id = " << mysqlpp::quote << collection_id;
 
             // End
-            statement << " AND"
-                      << " (file_type = " << std::to_string(SegmentSchema::RAW)
-                      << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
-                      << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+            if (is_all_search_file) {
+                statement << " AND"
+                          << " (file_type = " << std::to_string(SegmentSchema::RAW)
+                          << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                          << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+            } else {
+                statement << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
+            }
 
             LOG_ENGINE_DEBUG_ << "FilesToSearch: " << statement.str();
 
@@ -1679,7 +1684,7 @@ MySQLMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& file
 
 Status
 MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,
-                               FilesHolder& files_holder) {
+                               FilesHolder& files_holder, bool is_all_search_file) {
     try {
         server::MetricCollector metric;
 
@@ -1726,10 +1731,14 @@ MySQLMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::se
                 statement << ")";
 
                 // End
-                statement << " AND"
-                          << " (file_type = " << std::to_string(SegmentSchema::RAW)
-                          << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
-                          << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+                if (is_all_search_file) {
+                    statement << " AND"
+                            << " (file_type = " << std::to_string(SegmentSchema::RAW)
+                            << " OR file_type = " << std::to_string(SegmentSchema::TO_INDEX)
+                            << " OR file_type = " << std::to_string(SegmentSchema::INDEX) << ");";
+                } else {
+                    statement << " AND file_type = " << std::to_string(SegmentSchema::INDEX) << ";";
+                }
 
                 LOG_ENGINE_DEBUG_ << "FilesToSearchEx: " << statement.str();
 

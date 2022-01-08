@@ -1309,6 +1309,34 @@ TEST_F(ConfigTest, SERVER_CONFIG_OTHER_CONFIGS_FAIL_TEST) {
 #endif
 }
 
+TEST_F(ConfigTest, SEARCH_ROW_CONFIG_TEST) {
+    std::string conf_file = std::string(CONFIG_PATH) + VALID_CONFIG_FILE;
+    milvus::server::Config& config = milvus::server::Config::GetInstance();
+
+    config.ClearCache();
+    auto status = config.LoadConfigFile(conf_file);
+    ASSERT_TRUE(status.ok()) << status.message();
+
+    std::string config_json_str;
+    config.GetConfigJsonStr(config_json_str);
+    std::cout << config_json_str << std::endl;
+
+    bool  is_search_row;
+    config.GetGeneralConfigSearchRawEnable(is_search_row);
+    ASSERT_FALSE(is_search_row);
+
+    // ÉèÖÃ
+    config.SetGeneralConfigSearchRawEnable("true");
+    config.GetGeneralConfigSearchRawEnable(is_search_row);
+    ASSERT_TRUE(is_search_row);
+
+     // ÄÃµ½Ä¬ÈÏ
+    status = config.ResetDefaultConfig();
+    ASSERT_TRUE(status.ok()) << status.message();
+    config.GetGeneralConfigSearchRawEnable(is_search_row);
+    ASSERT_TRUE(is_search_row); 
+}
+
 TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {
     std::string conf_file = std::string(CONFIG_PATH) + VALID_CONFIG_FILE;
     std::string yaml_value;

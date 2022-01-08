@@ -41,12 +41,15 @@ cluster:
 # meta_ssl_cert        | The path of the client SSL public key certificate file in  | String     |                 |
 #                      | PEM format.                                                |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# search_raw_enable    | The query has no indexed vectors or not                    | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 general:
   timezone: UTC+8
   meta_uri: sqlite://:@:/
   meta_ssl_ca: 
   meta_ssl_key: 
   meta_ssl_cert: 
+  search_raw_enable: true
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Network Config       | Description                                                | Type       | Default         |

@@ -33,9 +33,12 @@ cluster:
 #                      | Keep 'dialect://:@:/', 'dialect' can be either 'sqlite' or |            |                 |
 #                      | 'mysql', replace other texts with real values.             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# search_raw_enable    | The query has no indexed vectors or not                    | Boolean    | true            |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 general:
   timezone: UTC+8
   meta_uri: sqlite://:@:/
+  search_raw_enable: true
 
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # Network Config       | Description                                                | Type       | Default         |

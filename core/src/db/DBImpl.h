@@ -259,7 +259,8 @@ class DBImpl : public DB, public server::CacheConfigHandler, public server::Engi
     ResumeIfLast();
 
     Status
-    CollectFilesToSearch(const std::string& collection_id, const std::vector<std::string>& partition_tags,
+    CollectFilesToSearch(const std::string& collection_id, const std::vector<std::string>& partition_tags, 
+                         bool is_all_search_file,
                          meta::FilesHolder& files_holder);
 
  private:

@@ -44,6 +44,8 @@ extern const char* CONFIG_GENERAL_METAURI_DEFAULT;
 extern const char* CONFIG_GENERAL_META_SSL_CA;
 extern const char* CONFIG_GENERAL_META_SSL_KEY;
 extern const char* CONFIG_GENERAL_META_SSL_CERT;
+extern const char* CONFIG_GENERAL_SEARCH_RAW_ENABLE;
+extern const char* CONFIG_GENERAL_SEARCH_ROW_ENABLE_DEFAULT;
 
 /* network config */
 extern const char* CONFIG_NETWORK;
@@ -403,6 +405,8 @@ class Config {
     GetGeneralConfigMetaSslKey(std::string& value);
     Status
     GetGeneralConfigMetaSslCert(std::string& value);
+    Status
+    GetGeneralConfigSearchRawEnable(bool& value);
 
     /* network config */
     Status
@@ -564,6 +568,8 @@ class Config {
     SetGeneralConfigMetaSslKey(const std::string& value);
     Status
     SetGeneralConfigMetaSslCert(const std::string& value);
+    Status
+    SetGeneralConfigSearchRawEnable(const std::string& value);
 
     /* network config */
     Status
@@ -687,6 +693,12 @@ class Config {
     SetLogsLogToStdout(const std::string& value);
     Status
     SetLogsLogToFile(const std::string& value);
+
+    void
+    ClearCache() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        config_map_.clear();
+    }
 
  private:
     bool restart_required_ = false;
