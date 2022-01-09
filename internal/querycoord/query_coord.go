@@ -191,7 +191,7 @@ func (qc *QueryCoord) Init() error {
 // Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.QueryCoordCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err := qc.msFactory.SetParams(m)

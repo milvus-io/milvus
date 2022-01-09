@@ -619,7 +619,7 @@ func TestRootCoord(t *testing.T) {
 	tmpFactory := msgstream.NewPmsFactory()
 
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err = tmpFactory.SetParams(m)
@@ -2355,7 +2355,7 @@ func TestRootCoord2(t *testing.T) {
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -2636,7 +2636,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
@@ -2803,7 +2803,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)

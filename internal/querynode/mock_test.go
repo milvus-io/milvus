@@ -382,7 +382,7 @@ func genEtcdKV() (*etcdkv.EtcdKV, error) {
 func genFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
-	pulsarURL := Params.QueryNodeCfg.PulsarAddress
+	pulsarURL := Params.PulsarCfg.Address
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,

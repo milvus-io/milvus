@@ -2237,7 +2237,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.DataCoordCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024,
 	}

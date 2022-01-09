@@ -177,7 +177,7 @@ func (node *Proxy) Init() error {
 	}
 
 	m := map[string]interface{}{
-		"PulsarAddress": Params.ProxyCfg.PulsarAddress,
+		"PulsarAddress": Params.PulsarCfg.Address,
 		"PulsarBufSize": 1024}
 	log.Debug("set parameters for ms factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", m))
 	if err := node.msFactory.SetParams(m); err != nil {

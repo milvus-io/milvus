@@ -126,7 +126,7 @@ func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 func TestQueryCollection_withoutVChannel(t *testing.T) {
 	ctx := context.Background()
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	factory := msgstream.NewPmsFactory()

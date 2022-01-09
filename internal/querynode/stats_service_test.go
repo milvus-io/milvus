@@ -31,7 +31,7 @@ func TestStatsService_start(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	msFactory.SetParams(m)
@@ -55,7 +55,7 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)

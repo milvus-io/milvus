@@ -469,7 +469,7 @@ func TestGrpcRequest(t *testing.T) {
 	clusterSession.Register()
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.QueryCoordCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err = factory.SetParams(m)

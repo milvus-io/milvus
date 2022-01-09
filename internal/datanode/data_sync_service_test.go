@@ -177,7 +177,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	defer cancel()
 
 	// init data node
-	pulsarURL := Params.DataNodeCfg.PulsarAddress
+	pulsarURL := Params.PulsarCfg.Address
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
