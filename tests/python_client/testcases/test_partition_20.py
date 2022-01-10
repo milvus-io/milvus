@@ -567,7 +567,7 @@ class TestPartitionOperations(TestcaseBase):
         method: 1. create a partition
                 2. insert same data
                 3. create an index
-                5. drop the partition
+                4. drop the partition
         expected: drop successfully
         """
         # create collection
