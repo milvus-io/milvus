@@ -288,3 +288,9 @@ class AccAccuracyRunner(AccuracyRunner):
         # Return accuracy results for reporting
         return tmp_result
 
+
+class AsyncThroughputRunner(AccuracyRunner):
+    name = "async_accuracy"
+
+    def __init__(self, env, metric):
+        super(AsyncThroughputRunner, self).__init__(env, metric)
