@@ -53,7 +53,8 @@ type GlobalParamTable struct {
 	once       sync.Once
 	BaseParams BaseParamTable
 
-	PulsarCfg pulsarConfig
+	PulsarCfg  pulsarConfig
+	RocksmqCfg rocksmqConfig
 	//CommonCfg     commonConfig
 	//KnowhereCfg   knowhereConfig
 	//MsgChannelCfg msgChannelConfig
@@ -80,6 +81,7 @@ func (p *GlobalParamTable) Init() {
 	p.BaseParams.Init()
 
 	p.PulsarCfg.init(&p.BaseParams)
+	p.RocksmqCfg.init(&p.BaseParams)
 	//p.CommonCfg.init(&p.BaseParams)
 	//p.KnowhereCfg.init(&p.BaseParams)
 	//p.MsgChannelCfg.init(&p.BaseParams)
@@ -139,6 +141,29 @@ func (p *pulsarConfig) initMaxMessageSize() {
 	}
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// --- rocksmq ---
+type rocksmqConfig struct {
+	BaseParams *BaseParamTable
+
+	Path string
+}
+
+func (p *rocksmqConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initPath()
+}
+
+func (p *rocksmqConfig) initPath() {
+	path, err := p.BaseParams.Load("_RocksmqPath")
+	if err != nil {
+		panic(err)
+	}
+	p.Path = path
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // --- common ---
 //type commonConfig struct {
 //	BaseParams *BaseParamTable
@@ -449,14 +474,11 @@ type proxyConfig struct {
 	BaseParams *BaseParamTable
 
 	// NetworkPort & IP are not used
-	NetworkPort int
-	IP          string
-
+	NetworkPort    int
+	IP             string
 	NetworkAddress string
 
 	Alias string
-
-	RocksmqPath string // not used in Proxy
 
 	ProxyID                  UniqueID
 	TimeTickInterval         time.Duration
@@ -490,7 +512,6 @@ type proxyConfig struct {
 func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initRocksmqPath()
 	p.initTimeTickInterval()
 
 	// Has to init global msgchannel prefix before other channel names
@@ -519,14 +540,6 @@ func (p *proxyConfig) Refresh() {
 // InitAlias initialize Alias member.
 func (p *proxyConfig) InitAlias(alias string) {
 	p.Alias = alias
-}
-
-func (p *proxyConfig) initRocksmqPath() {
-	path, err := p.BaseParams.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RocksmqPath = path
 }
 
 func (p *proxyConfig) initTimeTickInterval() {
@@ -863,8 +876,6 @@ func (p *queryCoordConfig) initDeltaChannelName() {
 type queryNodeConfig struct {
 	BaseParams *BaseParamTable
 
-	RocksmqPath string
-
 	Alias         string
 	QueryNodeIP   string
 	QueryNodePort int64
@@ -932,8 +943,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 	p.initMinioSecretAccessKey()
 	p.initMinioUseSSLStr()
 	p.initMinioBucketName()
-
-	p.initRocksmqPath()
 
 	p.initGracefulTime()
 
@@ -1033,14 +1042,6 @@ func (p *queryNodeConfig) initMinioBucketName() {
 		panic(err)
 	}
 	p.MinioBucketName = bucketName
-}
-
-func (p *queryNodeConfig) initRocksmqPath() {
-	path, err := p.BaseParams.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RocksmqPath = path
 }
 
 // advanced params
@@ -1158,9 +1159,6 @@ type dataCoordConfig struct {
 	MinioBucketName      string
 	MinioRootPath        string
 
-	// --- Rocksmq ---
-	RocksmqPath string
-
 	// --- SEGMENTS ---
 	SegmentMaxSize          float64
 	SegmentSealProportion   float64
@@ -1193,8 +1191,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 
 	p.initChannelWatchPrefix()
 
-	p.initRocksmqPath()
-
 	p.initSegmentMaxSize()
 	p.initSegmentSealProportion()
 	p.initSegAssignmentExpiration()
@@ -1222,14 +1218,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initGCInterval()
 	p.initGCMissingTolerance()
 	p.initGCDropTolerance()
-}
-
-func (p *dataCoordConfig) initRocksmqPath() {
-	path, err := p.BaseParams.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RocksmqPath = path
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
@@ -1398,9 +1386,6 @@ type dataNodeConfig struct {
 	DmlChannelName   string
 	DeltaChannelName string
 
-	// Rocksmq path
-	RocksmqPath string
-
 	// Cluster channels
 	ClusterChannelPrefix string
 
@@ -1433,8 +1418,6 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.initInsertBinlogRootPath()
 	p.initStatsBinlogRootPath()
 	p.initDeleteBinlogRootPath()
-
-	p.initRocksmqPath()
 
 	// Must init global msgchannel prefix before other channel names
 	p.initClusterMsgChannelPrefix()
@@ -1498,14 +1481,6 @@ func (p *dataNodeConfig) initDeleteBinlogRootPath() {
 		panic(err)
 	}
 	p.DeleteBinlogRootPath = path.Join(rootPath, "delta_log")
-}
-
-func (p *dataNodeConfig) initRocksmqPath() {
-	path, err := p.BaseParams.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RocksmqPath = path
 }
 
 func (p *dataNodeConfig) initClusterMsgChannelPrefix() {
