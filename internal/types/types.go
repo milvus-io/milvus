@@ -326,7 +326,7 @@ type IndexCoordComponent interface {
 	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
+	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
