@@ -217,11 +217,11 @@ func (i *IndexCoord) Init() error {
 		}
 
 		option := &miniokv.Option{
-			Address:           Params.IndexCoordCfg.MinIOAddress,
-			AccessKeyID:       Params.IndexCoordCfg.MinIOAccessKeyID,
-			SecretAccessKeyID: Params.IndexCoordCfg.MinIOSecretAccessKey,
-			UseSSL:            Params.IndexCoordCfg.MinIOUseSSL,
-			BucketName:        Params.IndexCoordCfg.MinioBucketName,
+			Address:           Params.MinioCfg.Address,
+			AccessKeyID:       Params.MinioCfg.AccessKeyID,
+			SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+			UseSSL:            Params.MinioCfg.UseSSL,
+			BucketName:        Params.MinioCfg.BucketName,
 			CreateBucket:      true,
 		}
 

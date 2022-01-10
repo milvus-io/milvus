@@ -67,12 +67,12 @@ func newQueryService(ctx context.Context,
 	localChunkManager := storage.NewLocalChunkManager(path)
 
 	option := &miniokv.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 	}
 
 	client, err := miniokv.NewMinIOKV(ctx, option)

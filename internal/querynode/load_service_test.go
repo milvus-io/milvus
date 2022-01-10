@@ -815,13 +815,12 @@ func generateInsertBinLog(collectionID UniqueID, partitionID UniqueID, segmentID
 	}
 
 	// create minio client
-	bucketName := Params.QueryNodeCfg.MinioBucketName
 	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		BucketName:        bucketName,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
 	}
 	kv, err := minioKV.NewMinIOKV(context.Background(), option)

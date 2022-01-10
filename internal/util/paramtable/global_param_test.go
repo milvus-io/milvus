@@ -48,6 +48,25 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("rocksmq path = %s", Params.Path)
 	})
 
+	t.Run("test minioConfig", func(t *testing.T) {
+		Params := GlobalParams.MinioCfg
+
+		addr := Params.Address
+		equal := addr == "localhost:9000" || addr == "minio:9000"
+		assert.Equal(t, equal, true)
+		t.Logf("minio address = %s", Params.Address)
+
+		assert.Equal(t, Params.AccessKeyID, "minioadmin")
+
+		assert.Equal(t, Params.SecretAccessKey, "minioadmin")
+
+		assert.Equal(t, Params.UseSSL, false)
+
+		t.Logf("Minio BucketName = %s", Params.BucketName)
+
+		t.Logf("Minio rootpath = %s", Params.RootPath)
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
 
@@ -183,19 +202,6 @@ func TestGlobalParamTable(t *testing.T) {
 		Params.initCacheSize()
 		assert.Equal(t, int64(32), Params.CacheSize)
 
-		endPoint := Params.MinioEndPoint
-		equal := endPoint == "localhost:9000" || endPoint == "minio:9000"
-		assert.Equal(t, equal, true)
-
-		accessKeyID := Params.MinioAccessKeyID
-		assert.Equal(t, accessKeyID, "minioadmin")
-
-		secretAccessKey := Params.MinioSecretAccessKey
-		assert.Equal(t, secretAccessKey, "minioadmin")
-
-		useSSL := Params.MinioUseSSLStr
-		assert.Equal(t, useSSL, false)
-
 		interval := Params.StatsPublishInterval
 		assert.Equal(t, 1000, interval)
 
@@ -278,18 +284,6 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.Equal(t, name, "by-dev-dataNode-2")
 		log.Println("MsgChannelSubName:", name)
 
-		id1 := Params.MinioAccessKeyID
-		log.Println("MinioAccessKeyID:", id1)
-
-		key := Params.MinioSecretAccessKey
-		log.Println("MinioSecretAccessKey:", key)
-
-		useSSL := Params.MinioUseSSL
-		log.Println("MinioUseSSL:", useSSL)
-
-		name = Params.MinioBucketName
-		log.Println("MinioBucketName:", name)
-
 		Params.CreatedTime = time.Now()
 		log.Println("CreatedTime: ", Params.CreatedTime)
 
@@ -307,16 +301,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("Address: %v", Params.Address)
 
 		t.Logf("Port: %v", Params.Port)
-
-		t.Logf("MinIOAddress: %v", Params.MinIOAddress)
-
-		t.Logf("MinIOAccessKeyID: %v", Params.MinIOAccessKeyID)
-
-		t.Logf("MinIOSecretAccessKey: %v", Params.MinIOSecretAccessKey)
-
-		t.Logf("MinIOUseSSL: %v", Params.MinIOUseSSL)
-
-		t.Logf("MinioBucketName: %v", Params.MinioBucketName)
 
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)
@@ -339,16 +323,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("NodeID: %v", Params.NodeID)
 
 		t.Logf("Alias: %v", Params.Alias)
-
-		t.Logf("MinIOAddress: %v", Params.MinIOAddress)
-
-		t.Logf("MinIOAccessKeyID: %v", Params.MinIOAccessKeyID)
-
-		t.Logf("MinIOSecretAccessKey: %v", Params.MinIOSecretAccessKey)
-
-		t.Logf("MinIOUseSSL: %v", Params.MinIOUseSSL)
-
-		t.Logf("MinioBucketName: %v", Params.MinioBucketName)
 
 		t.Logf("SimdType: %v", Params.SimdType)
 
