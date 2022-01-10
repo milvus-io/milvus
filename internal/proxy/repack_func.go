@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
+// insertRepackFunc deprecated, use defaultInsertRepackFunc instead.
 func insertRepackFunc(
 	tsMsgs []msgstream.TsMsg,
 	hashKeys [][]int32,
