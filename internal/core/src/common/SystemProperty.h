@@ -15,9 +15,11 @@
 // limitations under the License.
 
 #pragma once
-#include "common/Types.h"
-#include "utils/Json.h"
+
 #include <string>
+
+#include "Types.h"
+#include "utils/Json.h"
 
 namespace milvus {
 
@@ -60,8 +62,5 @@ class SystemProperty {
     virtual bool
     IsSystem(FieldName field_name) const = 0;
 };
-
-void
-InitalizeSegcore(const std::string& segcore_yaml_path);
 
 }  // namespace milvus

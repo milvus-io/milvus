@@ -27,8 +27,10 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 )
 
+// EtcdServer is the singleton of embedded etcd server
 var EtcdServer *embed.Etcd
 
+// InitEtcdServer initializes embedded etcd server singleton.
 func InitEtcdServer(pt *paramtable.BaseParamTable) error {
 	if pt.UseEmbedEtcd {
 		path := pt.EtcdConfigPath
@@ -54,12 +56,14 @@ func InitEtcdServer(pt *paramtable.BaseParamTable) error {
 	return nil
 }
 
+// StopEtcdServer stops embedded etcd server singleton.
 func StopEtcdServer() {
 	if EtcdServer != nil {
 		EtcdServer.Close()
 	}
 }
 
+// GetEtcdClient returns etcd client
 func GetEtcdClient(pt *paramtable.BaseParamTable) (*clientv3.Client, error) {
 	if pt.UseEmbedEtcd {
 		return GetEmbedEtcdClient()
@@ -67,11 +71,13 @@ func GetEtcdClient(pt *paramtable.BaseParamTable) (*clientv3.Client, error) {
 	return GetRemoteEtcdClient(pt.EtcdEndpoints)
 }
 
+// GetEmbedEtcdClient returns client of embed etcd server
 func GetEmbedEtcdClient() (*clientv3.Client, error) {
 	client := v3client.New(EtcdServer.Server)
 	return client, nil
 }
 
+// GetRemoteEtcdClient returns client of remote etcd by given endpoints
 func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
 	return clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,

@@ -18,10 +18,9 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
-
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -68,7 +68,7 @@ type ddNode struct {
 
 // Name returns node name, implementing flowgraph.Node
 func (ddn *ddNode) Name() string {
-	return "ddNode"
+	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vchannelName)
 }
 
 // Operate handles input messages, implementing flowgrpah.Node

@@ -263,7 +263,8 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
 	descriptorEvent.FieldID = FieldID
-	return &InsertBinlogWriter{
+
+	w := &InsertBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -272,6 +273,8 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			buffer:          nil,
 		},
 	}
+
+	return w
 }
 
 // NewDeleteBinlogWriter creates DeleteBinlogWriter to write binlog file.
@@ -281,7 +284,7 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	descriptorEvent.CollectionID = collectionID
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
-	return &DeleteBinlogWriter{
+	w := &DeleteBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -290,6 +293,7 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			buffer:          nil,
 		},
 	}
+	return w
 }
 
 // NewDDLBinlogWriter creates DDLBinlogWriter to write binlog file.
@@ -297,7 +301,7 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
-	return &DDLBinlogWriter{
+	w := &DDLBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -306,6 +310,7 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 			buffer:          nil,
 		},
 	}
+	return w
 }
 
 // NewIndexFileBinlogWriter returns a new IndexFileBinlogWriter with provided parameters
@@ -331,7 +336,7 @@ func NewIndexFileBinlogWriter(
 	descriptorEvent.AddExtra("indexName", indexName)
 	descriptorEvent.AddExtra("indexID", fmt.Sprintf("%d", indexID))
 	descriptorEvent.AddExtra("key", key)
-	return &IndexFileBinlogWriter{
+	w := &IndexFileBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -340,4 +345,5 @@ func NewIndexFileBinlogWriter(
 			buffer:          nil,
 		},
 	}
+	return w
 }

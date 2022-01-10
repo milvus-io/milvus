@@ -100,7 +100,7 @@ func NewMqMsgStream(ctx context.Context,
 func (ms *mqMsgStream) AsProducer(channels []string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
-			log.Error("MsgStream asProducer's channel is a empty string")
+			log.Error("MsgStream asProducer's channel is an empty string")
 			break
 		}
 		fn := func() error {
@@ -171,7 +171,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 func (ms *mqMsgStream) AsReader(channels []string, subName string) {
 	for _, channel := range channels {
 		if len(channel) == 0 {
-			log.Error("MsgStream asProducer's channel is a empty string")
+			log.Error("MsgStream asProducer's channel is an empty string")
 			break
 		}
 		fn := func() error {
@@ -226,6 +226,13 @@ func (ms *mqMsgStream) Close() {
 			consumer.Close()
 		}
 	}
+
+	for _, reader := range ms.readers {
+		if reader != nil {
+			reader.Close()
+		}
+	}
+	ms.client.Close()
 }
 
 func (ms *mqMsgStream) ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32 {

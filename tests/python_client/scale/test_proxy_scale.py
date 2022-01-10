@@ -72,4 +72,4 @@ class TestProxyScale:
         self.e2e_milvus_parallel(2, host, c_name)
         log.info('Milvus test after shrink')
 
-        # mic.uninstall(release_name, namespace=constants.NAMESPACE)
+        mic.uninstall(release_name, namespace=constants.NAMESPACE)

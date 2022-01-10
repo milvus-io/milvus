@@ -41,7 +41,8 @@ class TestInsertParams(TestcaseBase):
     def test_insert_dataframe_data(self):
         """
         target: test insert DataFrame data
-        method: 1.create 2.insert dataframe data
+        method: 1.create collection
+                2.insert dataframe data
         expected: assert num entities
         """
         c_name = cf.gen_unique_str(prefix)
@@ -510,7 +511,8 @@ class TestInsertOperation(TestcaseBase):
     def test_insert_auto_id_create_index(self):
         """
         target: test create index in auto_id=True collection
-        method: 1.create auto_id=True collection and insert 2.create index
+        method: 1.create auto_id=True collection and insert
+                2.create index
         expected: index correct
         """
         schema = cf.gen_default_collection_schema(auto_id=True)

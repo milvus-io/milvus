@@ -20,14 +20,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	"github.com/milvus-io/milvus/internal/indexnode"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )

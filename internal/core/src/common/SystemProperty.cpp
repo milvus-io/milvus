@@ -14,15 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "common/SystemProperty.h"
-#include "exceptions/EasyAssert.h"
 #include <yaml-cpp/yaml.h>
-#include "common/Types.h"
+
+#include "SystemProperty.h"
+#include "Types.h"
+#include "exceptions/EasyAssert.h"
 
 namespace milvus {
 class SystemPropertyImpl : public SystemProperty {
  public:
-    [[nodiscard]] bool
+    bool
     SystemFieldVerify(const FieldName& field_name, FieldId field_id) const override {
         if (!IsSystem(field_name)) {
             return false;

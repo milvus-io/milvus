@@ -19,13 +19,13 @@ import (
 const (
 	// MsgRootCoordNotServing means that root coordinator not serving
 	MsgRootCoordNotServing = "root coordinator is not serving"
-	// MsgQueryCoordNotServing means that query coordinator not serving
+	// MsgQueryCoordNotServing means that QueryCoord not serving
 	MsgQueryCoordNotServing = "query coordinator is not serving"
-	// MsgDataCoordNotServing means that data coordinator not serving
+	// MsgDataCoordNotServing means that DataCoord not serving
 	MsgDataCoordNotServing = "data coordinator is not serving"
-	// MsgIndexCoordNotServing means that index coordinator not serving
+	// MsgIndexCoordNotServing means that IndexCoord not serving
 	MsgIndexCoordNotServing = "index coordinator is not serving"
-	// MsgProxyNotServing means that proxy node not serving
+	// MsgProxyNotServing means that ProxyNode not serving
 	MsgProxyNotServing = "proxy node is not serving"
 )
 

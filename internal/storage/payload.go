@@ -75,11 +75,13 @@ type PayloadReaderInterface interface {
 	Close()
 }
 
+// PayloadWriter writes data into payload
 type PayloadWriter struct {
 	payloadWriterPtr C.CPayloadWriter
 	colType          schemapb.DataType
 }
 
+// PayloadReader reads data from payload
 type PayloadReader struct {
 	payloadReaderPtr C.CPayloadReader
 	colType          schemapb.DataType
@@ -186,6 +188,7 @@ func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 	return HandleCStatus(&status, "AddBoolToPayload failed")
 }
 
+// AddByteToPayload adds @msgs into payload
 func (w *PayloadWriter) AddByteToPayload(msgs []byte) error {
 	length := len(msgs)
 	if length <= 0 {

@@ -72,11 +72,11 @@ IDENTIFIER := 列名
 Tips:
 
 1. NIL represents an empty string, which means there is no Predicate for Expr.
-2. Gramma is described by EBNF syntax，expressions that may be omitted or repeated are represented through curly braces `{...}`.
+2. Gramma is described by EBNF syntax, expressions that may be omitted or repeated are represented through curly braces `{...}`.
 
 After syntax analysis, the following rules will be applied:
 
-1. non-vector column must exist in Schema.
+1. Non-vector column must exist in Schema.
 2. CompareExpr/TermExpr requires operand type matching.
 3. CompareExpr between non-vector columns of different types is available.
 4. The modulo operation requires all operands to be integers.

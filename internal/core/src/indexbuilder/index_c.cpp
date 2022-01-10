@@ -10,7 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string>
+#ifndef __APPLE__
+#include <malloc.h>
+#endif
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
 
@@ -46,7 +50,9 @@ void
 DeleteIndex(CIndex index) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
     delete cIndex;
-}
+#ifndef __APPLE__
+    malloc_trim(0);
+#endif}
 
 CStatus
 BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors) {

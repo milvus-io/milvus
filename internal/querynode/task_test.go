@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/msgstream"
@@ -452,8 +453,8 @@ func TestTask_watchDeltaChannelsTask(t *testing.T) {
 				CollectionID: defaultCollectionID,
 				ChannelName:  defaultDeltaChannel,
 				SeekPosition: &internalpb.MsgPosition{
-					ChannelName: defaultDeltaChannel,
-					MsgID:       []byte{1, 2, 3},
+					ChannelName: defaultDMLChannel,
+					MsgID:       pulsar.EarliestMessageID().Serialize(),
 					MsgGroup:    defaultSubName,
 					Timestamp:   0,
 				},

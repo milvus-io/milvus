@@ -173,7 +173,7 @@ type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 // Interface
 type UnmarshalFunc func(interface{}) (TsMsg, error)
 
-// UnmarshalDispatcher is an interface contains method Unmarshal
+// UnmarshalDispatcher is an interface that contains method Unmarshal
 type UnmarshalDispatcher interface {
 	Unmarshal(input interface{}, msgType commonpb.MsgType) (TsMsg, error)
 	AddMsgTemplate(msgType commonpb.MsgType, unmarshalFunc UnmarshalFunc)

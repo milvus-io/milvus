@@ -39,10 +39,13 @@ import (
 type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
-
+	// GetCollectionInfo get collection's information by name, such as collection id, schema, and etc.
 	GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error)
+	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error)
+	// GetPartitions get all partitions' id of specific collection.
 	GetPartitions(ctx context.Context, collectionName string) (map[string]typeutil.UniqueID, error)
+	// GetPartitionInfo get partition's info.
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	RemoveCollection(ctx context.Context, collectionName string)
@@ -63,6 +66,8 @@ type partitionInfo struct {
 	createdUtcTimestamp uint64
 }
 
+var _ Cache = (*MetaCache)(nil)
+
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
 	client types.RootCoord
@@ -71,6 +76,7 @@ type MetaCache struct {
 	mu       sync.RWMutex
 }
 
+// globalMetaCache is singleton instance of Cache
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
@@ -91,6 +97,7 @@ func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	}, nil
 }
 
+// GetCollectionID returns the corresponding collection id for provided collection name
 func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
 	m.mu.RLock()
 	collInfo, ok := m.collInfo[collectionName]
@@ -112,6 +119,8 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 	return collInfo.collID, nil
 }
 
+// GetCollectionInfo returns the collection information related to provided collection name
+// If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo

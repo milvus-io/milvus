@@ -108,13 +108,13 @@ func StartSpanFromContextWithSkip(ctx context.Context, skip int, opts ...opentra
 	return span, opentracing.ContextWithSpan(ctx, span)
 }
 
-// StartSpanFromContextWithOperationName starts a opentracing span with specific operation name.
+// StartSpanFromContextWithOperationName starts an opentracing span with specific operation name.
 // And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationName(ctx context.Context, operationName string, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	return StartSpanFromContextWithOperationNameWithSkip(ctx, operationName, 3, opts...)
 }
 
-// StartSpanFromContextWithOperationNameWithSkip starts a opentracing span with specific operation name.
+// StartSpanFromContextWithOperationNameWithSkip starts an opentracing span with specific operation name.
 // And will log print the current call line number and file name.
 func StartSpanFromContextWithOperationNameWithSkip(ctx context.Context, operationName string, skip int, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
 	if ctx == nil {

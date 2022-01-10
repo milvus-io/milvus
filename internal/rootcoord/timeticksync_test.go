@@ -38,7 +38,7 @@ func TestTimetickSync(t *testing.T) {
 
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
-		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"receiveBufSize": 1024,
 		"pulsarBufSize":  1024}
 	err := factory.SetParams(m)

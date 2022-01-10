@@ -204,9 +204,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 // initialize unit test sso env
 func initUtOSSEnv(bucket, root string, n int) (cli *minio.Client, inserts []string, stats []string, delta []string, other []string, err error) {
 	Params.Init()
-	cli, err = minio.New(Params.DataCoordCfg.MinioAddress, &minio.Options{
-		Creds:  credentials.NewStaticV4(Params.DataCoordCfg.MinioAccessKeyID, Params.DataCoordCfg.MinioSecretAccessKey, ""),
-		Secure: Params.DataCoordCfg.MinioUseSSL,
+	cli, err = minio.New(Params.MinioCfg.Address, &minio.Options{
+		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, ""),
+		Secure: Params.MinioCfg.UseSSL,
 	})
 	if err != nil {
 		return nil, nil, nil, nil, nil, err

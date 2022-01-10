@@ -381,8 +381,6 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			baseTask:                  baseTask,
 			WatchDeltaChannelsRequest: &loadReq,
 			cluster:                   scheduler.cluster,
-			meta:                      scheduler.meta,
-			excludeNodeIDs:            []int64{},
 		}
 		newTask = watchDeltaChannelTask
 	case commonpb.MsgType_WatchQueryChannels:
@@ -580,7 +578,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		log.Debug("scheduleLoop: num of child task", zap.Int("num child task", len(activateTasks)))
 		for _, childTask := range activateTasks {
 			if childTask != nil {
-				log.Debug("scheduleLoop: add a activate task to activateChan", zap.Int64("taskID", childTask.getTaskID()))
+				log.Debug("scheduleLoop: add an activate task to activateChan", zap.Int64("taskID", childTask.getTaskID()))
 				scheduler.activateTaskChan <- childTask
 				activeTaskWg.Add(1)
 				go scheduler.waitActivateTaskDone(activeTaskWg, childTask, triggerTask)
@@ -854,7 +852,7 @@ func (scheduler *TaskScheduler) processActivateTaskLoop() {
 			}
 
 			if t.getState() != taskDone {
-				log.Debug("processActivateTaskLoop: pop a active task from activateChan", zap.Int64("taskID", t.getTaskID()))
+				log.Debug("processActivateTaskLoop: pop an active task from activateChan", zap.Int64("taskID", t.getTaskID()))
 				go func() {
 					err := scheduler.processTask(t)
 					t.notify(err)
@@ -1062,9 +1060,7 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 			watchDeltaTask := &watchDeltaChannelTask{
 				baseTask:                  baseTask,
 				WatchDeltaChannelsRequest: watchDeltaRequest,
-				meta:                      meta,
 				cluster:                   cluster,
-				excludeNodeIDs:            []int64{},
 			}
 			derivedInternalTasks = append(derivedInternalTasks, watchDeltaTask)
 		}

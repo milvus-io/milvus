@@ -79,20 +79,20 @@
 
 ### 2.9 Register service in etcd
 
-1. `RC` needs to register itself with etcd when it starts.
-2. The registration should include IP address, port, its own id, global incremental timestamp.
+1. `RootCoord` needs to register itself with etcd when it starts.
+2. The registration should include IP address, port, its own id and global incremental timestamp.
 
 ### 2.10 Remove the code related to Proxy service
 
 1. `Proxy service` related code will be removed.
-2. The job of time synchronization which is done by `Proxy service` is partially simplified and handed over to the `RC` (subsection 2.8).
+2. The job of time synchronization which is done by `Proxy service` is partially simplified and handed over to the `RootCoord` (subsection 2.8).
 
 ### 2.11 Query collection meta based on timeline
 
 1. Add a new field of `timestamp` to the grpc request of `describe collection`.
-2. `RC` should provide snapshot on the `collection mate`.
+2. `RootCoord` should provide snapshot on the `collection mate`.
 3. Return the `collection meta` at the point of timestamp mentioned in the request.
 
 ### 2.12 Timestamp of `dd operations`
 
-1. `RC` response is to set the timestamp of `dd operations`, create collection, create partition, drop collection, drop partition, and send this timestamp into `dml msgstream`.
+1. `RootCoord` response is to set the timestamp of `dd operations`, create collection, create partition, drop collection, drop partition, and send this timestamp into `dml msgstream`.

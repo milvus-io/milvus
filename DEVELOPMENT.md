@@ -26,7 +26,7 @@ Table of contents
 
 ## Building Milvus with Docker
 
-Official releases are built using Docker containers. To build Milvus using Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
+Official releases are built with Docker containers. To build Milvus with Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
 
 ## Building Milvus on a local OS/shell environment
 

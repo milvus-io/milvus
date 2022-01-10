@@ -46,6 +46,7 @@ func (p *Partition) ID() UniqueID {
 	return p.partitionID
 }
 
+// addSegmentID add segmentID to segmentIDs
 func (p *Partition) addSegmentID(segmentID UniqueID) {
 	p.segmentIDs = append(p.segmentIDs, segmentID)
 	log.Debug("add a segment to replica", zap.Int64("collectionID", p.collectionID), zap.Int64("partitionID", p.partitionID), zap.Int64("segmentID", segmentID))

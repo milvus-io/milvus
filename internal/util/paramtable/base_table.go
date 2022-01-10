@@ -36,6 +36,8 @@ type UniqueID = typeutil.UniqueID
 
 const envPrefix string = "milvus"
 
+// Base abstracts BaseTable
+// TODO: it's never used, consider to substitute BaseTable or to remove it
 type Base interface {
 	Load(key string) (string, error)
 	LoadRange(key, endKey string, limit int) ([]string, []string, error)
@@ -45,6 +47,7 @@ type Base interface {
 	Init()
 }
 
+// BaseTable the basics of paramtable
 type BaseTable struct {
 	params    *memkv.MemoryKV
 	configDir string
@@ -54,6 +57,7 @@ type BaseTable struct {
 	LogCfgFunc func(log.Config)
 }
 
+// Init initializes the paramtable
 func (gp *BaseTable) Init() {
 	gp.params = memkv.NewMemoryKV()
 
@@ -71,10 +75,12 @@ func (gp *BaseTable) Init() {
 	gp.InitLogCfg()
 }
 
+// GetConfigDir returns the config directory
 func (gp *BaseTable) GetConfigDir() string {
 	return gp.configDir
 }
 
+// LoadFromKVPair saves given kv pair to paramtable
 func (gp *BaseTable) LoadFromKVPair(kvPairs []*commonpb.KeyValuePair) error {
 	for _, pair := range kvPairs {
 		err := gp.Save(pair.Key, pair.Value)
@@ -425,6 +431,7 @@ func ConvertRangeToIntRange(rangeStr, sep string) []int {
 	return []int{start, end}
 }
 
+// ConvertRangeToIntSlice convert given @rangeStr & @sep to a slice of ints.
 func ConvertRangeToIntSlice(rangeStr, sep string) []int {
 	rangeSlice := ConvertRangeToIntRange(rangeStr, sep)
 	start, end := rangeSlice[0], rangeSlice[1]
@@ -435,6 +442,7 @@ func ConvertRangeToIntSlice(rangeStr, sep string) []int {
 	return ret
 }
 
+// InitLogCfg init log of the base table
 func (gp *BaseTable) InitLogCfg() {
 	gp.Log = log.Config{}
 	format, err := gp.Load("log.format")
@@ -452,6 +460,7 @@ func (gp *BaseTable) InitLogCfg() {
 	gp.Log.File.MaxDays = gp.ParseInt("log.file.maxAge")
 }
 
+// SetLogConfig set log config of the base table
 func (gp *BaseTable) SetLogConfig() {
 	gp.LogCfgFunc = func(cfg log.Config) {
 		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
@@ -460,6 +469,7 @@ func (gp *BaseTable) SetLogConfig() {
 	}
 }
 
+// SetLogger sets the logger file by given id
 func (gp *BaseTable) SetLogger(id UniqueID) {
 	rootPath, err := gp.Load("log.file.rootPath")
 	if err != nil {

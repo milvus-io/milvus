@@ -115,7 +115,7 @@ func (s *Server) init() error {
 
 	// --- RootCoord Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, s.etcdCli)
+		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.BaseParams.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -145,7 +145,7 @@ func (s *Server) init() error {
 
 	// --- IndexCoord ---
 	if s.indexCoord == nil {
-		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.QueryNodeCfg.MetaRootPath, s.etcdCli)
+		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.BaseParams.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryNode new IndexCoordClient failed", zap.Error(err))
 			panic(err)

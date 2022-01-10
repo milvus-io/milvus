@@ -28,7 +28,7 @@ When `metric type` is specified in the schema, the default parameters will build
 2. InsertRecord: inserted data put to here
 3. DeleteRecord: wait for delete implementation
 4. IndexingRecord: contains data with small index
-5. SealedIndexing: Record not used any more
+5. SealedIndexing: Record not used anymore
 
 ### SegcoreConfig
 
@@ -42,8 +42,8 @@ When `metric type` is specified in the schema, the default parameters will build
 Used to manage concurrent inserted data, including:
 
 1. `atomic<int64_t> reserved` reserved space calculation
-2. `AckResponder` calculate which segment to insert，returns current segment offset
-3. `ConcurrentVector` store data columns, each column has one concurrent vector
+2. `AckResponder` calculate which segment to insert, returns current segment offset
+3. `ConcurrentVector` stores data columns, each column has one concurrent vector
 
 The following steps are executed when insert,
 

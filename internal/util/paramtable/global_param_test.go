@@ -12,11 +12,9 @@
 package paramtable
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path"
-	"strings"
 	"testing"
 	"time"
 
@@ -34,17 +32,43 @@ func TestGlobalParamTable(t *testing.T) {
 	var GlobalParams GlobalParamTable
 	GlobalParams.Init()
 
+	t.Run("test pulsarConfig", func(t *testing.T) {
+		Params := GlobalParams.PulsarCfg
+
+		assert.NotEqual(t, Params.Address, "")
+		t.Logf("pulsar address = %s", Params.Address)
+
+		assert.Equal(t, Params.MaxMessageSize, SuggestPulsarMaxMessageSize)
+	})
+
+	t.Run("test rocksmqConfig", func(t *testing.T) {
+		Params := GlobalParams.RocksmqCfg
+
+		assert.NotEqual(t, Params.Path, "")
+		t.Logf("rocksmq path = %s", Params.Path)
+	})
+
+	t.Run("test minioConfig", func(t *testing.T) {
+		Params := GlobalParams.MinioCfg
+
+		addr := Params.Address
+		equal := addr == "localhost:9000" || addr == "minio:9000"
+		assert.Equal(t, equal, true)
+		t.Logf("minio address = %s", Params.Address)
+
+		assert.Equal(t, Params.AccessKeyID, "minioadmin")
+
+		assert.Equal(t, Params.SecretAccessKey, "minioadmin")
+
+		assert.Equal(t, Params.UseSSL, false)
+
+		t.Logf("Minio BucketName = %s", Params.BucketName)
+
+		t.Logf("Minio rootpath = %s", Params.RootPath)
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
-
-		assert.NotEqual(t, Params.PulsarAddress, "")
-		t.Logf("pulsar address = %s", Params.PulsarAddress)
-
-		assert.NotEqual(t, Params.MetaRootPath, "")
-		t.Logf("meta root path = %s", Params.MetaRootPath)
-
-		assert.NotEqual(t, Params.KvRootPath, "")
-		t.Logf("kv root path = %s", Params.KvRootPath)
 
 		assert.Equal(t, Params.MsgChannelSubName, "by-dev-rootCoord")
 		t.Logf("msg channel sub name = %s", Params.MsgChannelSubName)
@@ -73,9 +97,6 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.NotEqual(t, Params.DefaultIndexName, "")
 		t.Logf("default index name = %s", Params.DefaultIndexName)
 
-		assert.NotZero(t, Params.Timeout)
-		t.Logf("master timeout = %d", Params.Timeout)
-
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
 		t.Logf("created time: %v", Params.CreatedTime)
@@ -84,12 +105,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := GlobalParams.ProxyCfg
-
-		t.Logf("MetaRootPath: %s", Params.MetaRootPath)
-
-		t.Logf("PulsarAddress: %s", Params.PulsarAddress)
-
-		t.Logf("RocksmqPath: %s", Params.RocksmqPath)
 
 		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
 
@@ -112,8 +127,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("DefaultPartitionName: %s", Params.DefaultPartitionName)
 
 		t.Logf("DefaultIndexName: %s", Params.DefaultIndexName)
-
-		t.Logf("PulsarMaxMessageSize: %d", Params.PulsarMaxMessageSize)
 
 		//t.Logf("RoleName: %s", typeutil.ProxyRole)
 
@@ -163,25 +176,20 @@ func TestGlobalParamTable(t *testing.T) {
 		Params := GlobalParams.QueryCoordCfg
 
 		assert.Equal(t, Params.SearchChannelPrefix, "by-dev-search")
-		t.Logf("query coord search channel = %s", Params.SearchChannelPrefix)
+		t.Logf("QueryCoord search channel = %s", Params.SearchChannelPrefix)
 
 		assert.Equal(t, Params.SearchResultChannelPrefix, "by-dev-searchResult")
-		t.Logf("query coord search result channel = %s", Params.SearchResultChannelPrefix)
+		t.Logf("QueryCoord search result channel = %s", Params.SearchResultChannelPrefix)
 
 		assert.Equal(t, Params.StatsChannelName, "by-dev-query-node-stats")
-		t.Logf("query coord stats channel = %s", Params.StatsChannelName)
+		t.Logf("QueryCoord stats channel = %s", Params.StatsChannelName)
 
 		assert.Equal(t, Params.TimeTickChannelName, "by-dev-queryTimeTick")
-		t.Logf("query coord  time tick channel = %s", Params.TimeTickChannelName)
+		t.Logf("QueryCoord  time tick channel = %s", Params.TimeTickChannelName)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
 		Params := GlobalParams.QueryNodeCfg
-
-		address := Params.PulsarAddress
-		split := strings.Split(address, ":")
-		assert.Equal(t, "pulsar", split[0])
-		assert.Equal(t, "6650", split[len(split)-1])
 
 		cacheSize := Params.CacheSize
 		assert.Equal(t, int64(32), cacheSize)
@@ -193,19 +201,6 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.NoError(t, err)
 		Params.initCacheSize()
 		assert.Equal(t, int64(32), Params.CacheSize)
-
-		endPoint := Params.MinioEndPoint
-		equal := endPoint == "localhost:9000" || endPoint == "minio:9000"
-		assert.Equal(t, equal, true)
-
-		accessKeyID := Params.MinioAccessKeyID
-		assert.Equal(t, accessKeyID, "minioadmin")
-
-		secretAccessKey := Params.MinioSecretAccessKey
-		assert.Equal(t, secretAccessKey, "minioadmin")
-
-		useSSL := Params.MinioUseSSLStr
-		assert.Equal(t, useSSL, false)
 
 		interval := Params.StatsPublishInterval
 		assert.Equal(t, 1000, interval)
@@ -235,9 +230,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		ch := Params.QueryTimeTickChannelName
 		assert.Equal(t, ch, "by-dev-queryTimeTick")
-
-		path := Params.MetaRootPath
-		fmt.Println(path)
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -280,9 +272,6 @@ func TestGlobalParamTable(t *testing.T) {
 		path1 := Params.InsertBinlogRootPath
 		log.Println("InsertBinlogRootPath:", path1)
 
-		address := Params.PulsarAddress
-		log.Println("PulsarAddress:", address)
-
 		path1 = Params.ClusterChannelPrefix
 		assert.Equal(t, path1, "by-dev")
 		log.Println("ClusterChannelPrefix:", Params.ClusterChannelPrefix)
@@ -294,21 +283,6 @@ func TestGlobalParamTable(t *testing.T) {
 		name = Params.MsgChannelSubName
 		assert.Equal(t, name, "by-dev-dataNode-2")
 		log.Println("MsgChannelSubName:", name)
-
-		path1 = Params.MetaRootPath
-		log.Println("MetaRootPath:", path1)
-
-		id1 := Params.MinioAccessKeyID
-		log.Println("MinioAccessKeyID:", id1)
-
-		key := Params.MinioSecretAccessKey
-		log.Println("MinioSecretAccessKey:", key)
-
-		useSSL := Params.MinioUseSSL
-		log.Println("MinioUseSSL:", useSSL)
-
-		name = Params.MinioBucketName
-		log.Println("MinioBucketName:", name)
 
 		Params.CreatedTime = time.Now()
 		log.Println("CreatedTime: ", Params.CreatedTime)
@@ -327,20 +301,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("Address: %v", Params.Address)
 
 		t.Logf("Port: %v", Params.Port)
-
-		t.Logf("KvRootPath: %v", Params.KvRootPath)
-
-		t.Logf("MetaRootPath: %v", Params.MetaRootPath)
-
-		t.Logf("MinIOAddress: %v", Params.MinIOAddress)
-
-		t.Logf("MinIOAccessKeyID: %v", Params.MinIOAccessKeyID)
-
-		t.Logf("MinIOSecretAccessKey: %v", Params.MinIOSecretAccessKey)
-
-		t.Logf("MinIOUseSSL: %v", Params.MinIOUseSSL)
-
-		t.Logf("MinioBucketName: %v", Params.MinioBucketName)
 
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)
@@ -363,18 +323,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("NodeID: %v", Params.NodeID)
 
 		t.Logf("Alias: %v", Params.Alias)
-
-		t.Logf("MetaRootPath: %v", Params.MetaRootPath)
-
-		t.Logf("MinIOAddress: %v", Params.MinIOAddress)
-
-		t.Logf("MinIOAccessKeyID: %v", Params.MinIOAccessKeyID)
-
-		t.Logf("MinIOSecretAccessKey: %v", Params.MinIOSecretAccessKey)
-
-		t.Logf("MinIOUseSSL: %v", Params.MinIOUseSSL)
-
-		t.Logf("MinioBucketName: %v", Params.MinioBucketName)
 
 		t.Logf("SimdType: %v", Params.SimdType)
 

@@ -178,13 +178,13 @@ message DropCollectionRequest {
   // Not useful for now
   string db_name = 2;
 
-  // The name of the collection whcih to be dropped. (Required)
+  // The name of the collection to be dropped. (Required)
   string collection_name = 3;
 }
 ```
 
 ## HasCollection
-To test existence of a collection by name. Return [BoolResponse](#boolresponse) to tell client whether the collection is exist.
+To test the existence of a collection by name. Return [BoolResponse](#boolresponse) to tell client whether the collection is exist.
 ```
 rpc HasCollection(HasCollectionRequest) returns (BoolResponse) {}
 ```
@@ -209,7 +209,7 @@ message HasCollectionRequest {
 
 ## LoadCollection
 Load a collection data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
-Note: this interface only send a request to server ask to load collection, it returns at once after the request is consumed. Collection loading progress is asynchronously.
+Note: this interface only sends a request to server ask to load collection, it returns at once after the request is consumed. Collection loading progress is asynchronously.
 ```
 rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
 ```
@@ -272,7 +272,7 @@ message DescribeCollectionRequest {
   // The collection ID you want to describe
   int64 collectionID = 4;
 
-  // If time_stamp is not zero, will describe collection success when time_stamp >= created collection timestamp, otherwise will throw error.
+  // If time_stamp is not zero, will describe collection success when time_stamp >= created collection timestamp, otherwise will throw an error.
   uint64 time_stamp = 5;
 }
 ```
@@ -467,7 +467,7 @@ message HasPartitionRequest {
 ```
 
 ## LoadPartitions
-Load multiple partitions data into cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Load multiple partitions data into cache of QueryNode. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
 Note: this interface only send a request to server ask to load partitions, it returns at once after the request is consumed. Loading progress is asynchronously.
 ```
 rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {}
@@ -486,13 +486,13 @@ message LoadPartitionsRequest {
   // The collection name in milvus. (Required)
   string collection_name = 3;
 
-  // A name array of the partitions whcih you want to load. (Required)
+  // A name array of the partitions which you want to load. (Required)
   repeated string partition_names = 4;
 }
 ```
 
 ## ReleasePartitions
-Release partitions data from cache of query node. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
+Release partitions data from cache of QueryNode. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
 ```
 rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
 ```
@@ -510,7 +510,7 @@ message ReleasePartitionsRequest {
   // The collection name in milvus. (Required)
   string collection_name = 3;
 
-  // A name array of the partitions whcih you want to release. (Required)
+  // A name array of the partitions which you want to release. (Required)
   repeated string partition_names = 4;
 }
 ```
@@ -551,7 +551,7 @@ message GetPartitionStatisticsResponse {
 ```
 
 ## ShowPartitions
-Get all partitions name in db, or get in-memory state for each partition.
+Get all partitions' names in db, or get in-memory state for each partition.
 ```
 rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
 ```
@@ -750,7 +750,7 @@ message DescribeIndexResponse {
   // Response status
   common.Status status = 1;
 
-  // All index informations, for now only return tha latest index you created for the collection.
+  // All index informations, for now only return the latest index you created for the collection.
   repeated IndexDescription index_descriptions = 2;
 }
 ```
@@ -970,7 +970,7 @@ message SearchRequest {
   // Filtering entities by timestamp. (Optional)
   uint64 travel_timestamp = 10;
 
-  // The time tolerance between entities visibility and search action. Default is 0. In Milvus, each entity has a timestamp. To ensure data consistence, each node(query node and data node) will consume data in a time interval. So entity visibility is a bit later than its timestamp. If this value is 0, Milvus will hold the search action, wait until all entities whose timestamp is earlier that the search action's timestamp to be fully consumed.
+  // The time tolerance between entities visibility and search action. Default is 0. In Milvus, each entity has a timestamp. To ensure data consistence, each node(query node and data node) will consume data in a time interval. So entity visibility is a bit later than its timestamp. If this value is 0, Milvus will hold the search action, wait until all entities whose timestamp is earlier than the search action's timestamp to be fully consumed.
   uint64 guarantee_timestamp = 11;
 }
 ```

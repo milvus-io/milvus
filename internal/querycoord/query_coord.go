@@ -63,6 +63,7 @@ type queryChannelInfo struct {
 	responseChannel string
 }
 
+// Params is param table of query coordinator
 var Params paramtable.GlobalParamTable
 
 // QueryCoord is the coordinator of queryNodes
@@ -115,7 +116,7 @@ func (qc *QueryCoord) Register() error {
 }
 
 func (qc *QueryCoord) initSession() error {
-	qc.session = sessionutil.NewSession(qc.loopCtx, Params.QueryCoordCfg.MetaRootPath, qc.etcdCli)
+	qc.session = sessionutil.NewSession(qc.loopCtx, Params.BaseParams.MetaRootPath, qc.etcdCli)
 	if qc.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
@@ -127,7 +128,7 @@ func (qc *QueryCoord) initSession() error {
 
 // Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
-	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.QueryCoordCfg.MetaRootPath), zap.String("address", Params.QueryCoordCfg.Address))
+	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.BaseParams.MetaRootPath), zap.String("address", Params.QueryCoordCfg.Address))
 	var initError error
 	qc.initOnce.Do(func() {
 		err := qc.initSession()
@@ -137,12 +138,12 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 		log.Debug("queryCoord try to connect etcd")
-		etcdKV := etcdkv.NewEtcdKV(qc.etcdCli, Params.QueryCoordCfg.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(qc.etcdCli, Params.BaseParams.MetaRootPath)
 		qc.kvClient = etcdKV
 		log.Debug("query coordinator try to connect etcd success")
 
 		// init id allocator
-		idAllocatorKV := tsoutil.NewTSOKVBase(qc.etcdCli, Params.QueryCoordCfg.KvRootPath, "queryCoordTaskID")
+		idAllocatorKV := tsoutil.NewTSOKVBase(qc.etcdCli, Params.BaseParams.KvRootPath, "queryCoordTaskID")
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 		initError = idAllocator.Initialize()
 		if initError != nil {
@@ -183,14 +184,14 @@ func (qc *QueryCoord) Init() error {
 
 		qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	})
-	log.Debug("query coordinator init success")
+	log.Debug("QueryCoord init success")
 	return initError
 }
 
 // Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.QueryCoordCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err := qc.msFactory.SetParams(m)
@@ -423,7 +424,8 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 				}
 				switch event.Type {
 				case mvccpb.PUT:
-					if Params.QueryCoordCfg.AutoHandoff && qc.indexChecker.verifyHandoffReqValid(segmentInfo) {
+					validHandoffReq, _ := qc.indexChecker.verifyHandoffReqValid(segmentInfo)
+					if Params.QueryCoordCfg.AutoHandoff && validHandoffReq {
 						qc.indexChecker.enqueueHandoffReq(segmentInfo)
 						log.Debug("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
 					} else {

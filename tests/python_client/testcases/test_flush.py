@@ -100,7 +100,6 @@ class TestFlushBase:
         tag_new = gen_unique_str()
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(id_collection, tag_new)
-        ids = [i for i in range(default_nb)]
         connect.insert(id_collection, default_entities, partition_name=default_tag)
         connect.flush([id_collection])
         connect.insert(id_collection, default_entities, partition_name=tag_new)
@@ -144,6 +143,7 @@ class TestFlushBase:
             "segment_row_limit": default_segment_row_limit,
             "auto_id": False
         }
+        log.debug(f"test_add_collections_fields_flush: fields: {fields}, collection_new:{collection_new}")
         connect.create_collection(collection_new, fields)
         connect.create_partition(id_collection, default_tag)
         connect.create_partition(collection_new, default_tag)

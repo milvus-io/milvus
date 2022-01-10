@@ -23,7 +23,8 @@ chaos_type=${2:-"pod_kill"} #pod_kill or pod_failure
 chaos_task=${3:-"chaos-test"} # chaos-test or data-consist-test 
 node_num=${4:-1} # cluster_1_node or cluster_n_nodes
 
-release="test"-${pod}-${chaos_type/_/-} # replace pod_kill to pod-kill
+cur_time=$(date +%H-%M-%S)
+release="test"-${pod}-${chaos_type/_/-}-${cur_time} # replace pod_kill to pod-kill
 
 # install milvus cluster for chaos testing
 pushd ./scripts
@@ -35,13 +36,13 @@ echo "install milvus"
 if [ ${pod} != "standalone" ];
 then
     echo "insatll cluster"
-    helm install --wait --timeout 360s ${release} milvus/milvus --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
+    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.tag=${image_tag:-"master-latest"} --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
 fi
 
 if [ ${pod} == "standalone" ];
 then
     echo "install standalone"
-    helm install --wait --timeout 360s ${release} milvus/milvus -f ../standalone-values.yaml -n=${ns}
+    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.tag=${image_tag:-"master-latest"} -f ../standalone-values.yaml -n=${ns}
 fi
 
 # wait all pod ready
@@ -55,9 +56,11 @@ if [ "$platform" == "Mac" ];
 then
     sed -i "" "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
     sed -i "" "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_${chaos_type}.yaml\'/g" constants.py
+    sed -i "" "s/RELEASE_NAME =.*/RELEASE_NAME = \'${release}\'/g" constants.py
 else
     sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/${chaos_type}\/'/g" constants.py
     sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${pod}_${chaos_type}.yaml\'/g" constants.py
+    sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${release}\'/g" constants.py
 fi
 
 # run chaos testing
@@ -70,9 +73,8 @@ else
 fi
 pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no
 python scripts/hello_milvus.py --host "$host"
-# chaos test
-export ENABLE_TRACEBACK=False
 
+# chaos test
 if [ "$chaos_task" == "chaos-test" ];
 then
     pytest -s -v test_chaos.py --host "$host" --log-cli-level=INFO --capture=no || echo "chaos test fail"
@@ -91,5 +93,5 @@ pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capt
 python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
 # save logs
-cur_time=`date +%Y-%m-%d-%H-%M-%S`
+cur_time=$(date +%Y-%m-%d-%H-%M-%S)
 bash ../../scripts/export_log_k8s.sh ${ns} ${release} k8s_log/${pod}-${chaos_type}-${chaos_task}-${cur_time}

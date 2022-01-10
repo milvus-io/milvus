@@ -9,22 +9,21 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <map>
 #include <exception>
+#include <map>
 #include <google/protobuf/text_format.h>
 
-#include "pb/index_cgo_msg.pb.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "exceptions/EasyAssert.h"
-#include "IndexWrapper.h"
+#include "pb/index_cgo_msg.pb.h"
+#include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/utils.h"
-#include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/common/Timer.h"
 #include "knowhere/common/Utils.h"
+#include "knowhere/index/vector_index/ConfAdapterMgr.h"
+#include "knowhere/index/vector_index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
-namespace milvus {
-namespace indexbuilder {
+namespace milvus::indexbuilder {
 
 IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* serialized_index_params) {
     type_params_ = std::string(serialized_type_params);
@@ -384,5 +383,4 @@ IndexWrapper::LoadRawData() {
     }
 }
 
-}  // namespace indexbuilder
-}  // namespace milvus
+}  // namespace milvus::indexbuilder

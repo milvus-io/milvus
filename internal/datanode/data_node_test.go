@@ -235,7 +235,7 @@ func TestDataNode(t *testing.T) {
 			// pulsar produce
 			msFactory := msgstream.NewPmsFactory()
 			m := map[string]interface{}{
-				"pulsarAddress":  Params.DataNodeCfg.PulsarAddress,
+				"pulsarAddress":  Params.PulsarCfg.Address,
 				"receiveBufSize": 1024,
 				"pulsarBufSize":  1024}
 			err = msFactory.SetParams(m)
@@ -495,7 +495,7 @@ func TestWatchChannel(t *testing.T) {
 	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.DataNodeCfg.MetaRootPath)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
 		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))

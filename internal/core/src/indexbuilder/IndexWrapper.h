@@ -10,14 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <string>
-#include <optional>
-#include <vector>
+
 #include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
 #include "knowhere/index/vector_index/VecIndex.h"
 
-namespace milvus {
-namespace indexbuilder {
+namespace milvus::indexbuilder {
 
 class IndexWrapper {
  public:
@@ -107,5 +108,4 @@ class IndexWrapper {
     std::once_flag raw_data_loaded_;
 };
 
-}  // namespace indexbuilder
-}  // namespace milvus
+}  // namespace milvus::indexbuilder

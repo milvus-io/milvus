@@ -97,8 +97,8 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 		olds = append(olds, c.NodeID)
 	}
 
-	newOnlines := c.getNewOnlines(nodes, olds)
-	for _, n := range newOnlines {
+	newOnLines := c.getNewOnLines(nodes, olds)
+	for _, n := range newOnLines {
 		if err := c.AddNode(n); err != nil {
 			return err
 		}
@@ -116,8 +116,8 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 	log.Debug("cluster start up",
 		zap.Any("nodes", nodes),
 		zap.Any("olds", olds),
-		zap.Int64s("new onlines", newOnlines),
-		zap.Int64s("offlines", offlines))
+		zap.Int64s("new onlines", newOnLines),
+		zap.Int64s("offLines", offlines))
 	return nil
 }
 
@@ -148,7 +148,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 			c.mu.Lock()
 
 			channels := c.store.GetNodesChannels()
-			reallocs, err := c.bgChecker(channels, time.Now())
+			reallocates, err := c.bgChecker(channels, time.Now())
 			if err != nil {
 				log.Warn("channel manager bg check failed", zap.Error(err))
 
@@ -156,7 +156,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 				continue
 			}
 
-			updates := c.reassignPolicy(c.store, reallocs)
+			updates := c.reassignPolicy(c.store, reallocates)
 			log.Debug("channel manager bg check reassign", zap.Array("updates", updates))
 			for _, update := range updates {
 				if update.Type == Add {
@@ -173,7 +173,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 	}
 }
 
-func (c *ChannelManager) getNewOnlines(curr []int64, old []int64) []int64 {
+func (c *ChannelManager) getNewOnLines(curr []int64, old []int64) []int64 {
 	mold := make(map[int64]struct{})
 	ret := make([]int64, 0, len(curr))
 	for _, n := range old {
@@ -261,7 +261,15 @@ func (c *ChannelManager) Watch(ch *channel) error {
 			c.fillChannelPosition(v)
 		}
 	}
-	return c.store.Update(updates)
+	err := c.store.Update(updates)
+	if err != nil {
+		log.Error("ChannelManager RWChannelStore update failed", zap.Int64("collectionID", ch.CollectionID),
+			zap.String("channelName", ch.Name), zap.Error(err))
+		return err
+	}
+	log.Debug("ChannelManager RWChannelStore update success", zap.Int64("collectionID", ch.CollectionID),
+		zap.String("channelName", ch.Name))
+	return nil
 }
 
 func (c *ChannelManager) fillChannelPosition(update *ChannelOp) {

@@ -139,7 +139,7 @@ func (i *IndexCoord) Register() error {
 }
 
 func (i *IndexCoord) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexCoordCfg.MetaRootPath, i.etcdCli)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.BaseParams.MetaRootPath, i.etcdCli)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -164,7 +164,7 @@ func (i *IndexCoord) Init() error {
 		}
 
 		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.IndexCoordCfg.MetaRootPath)
+			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.BaseParams.MetaRootPath)
 			metakv, err := NewMetaTable(etcdKV)
 			if err != nil {
 				return err
@@ -207,7 +207,7 @@ func (i *IndexCoord) Init() error {
 		}
 
 		//init idAllocator
-		kvRootPath := Params.IndexCoordCfg.KvRootPath
+		kvRootPath := Params.BaseParams.KvRootPath
 		etcdKV := tsoutil.NewTSOKVBase(i.etcdCli, kvRootPath, "index_gid")
 
 		i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
@@ -217,11 +217,11 @@ func (i *IndexCoord) Init() error {
 		}
 
 		option := &miniokv.Option{
-			Address:           Params.IndexCoordCfg.MinIOAddress,
-			AccessKeyID:       Params.IndexCoordCfg.MinIOAccessKeyID,
-			SecretAccessKeyID: Params.IndexCoordCfg.MinIOSecretAccessKey,
-			UseSSL:            Params.IndexCoordCfg.MinIOUseSSL,
-			BucketName:        Params.IndexCoordCfg.MinioBucketName,
+			Address:           Params.MinioCfg.Address,
+			AccessKeyID:       Params.MinioCfg.AccessKeyID,
+			SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+			UseSSL:            Params.MinioCfg.UseSSL,
+			BucketName:        Params.MinioCfg.BucketName,
 			CreateBucket:      true,
 		}
 
@@ -291,9 +291,18 @@ func (i *IndexCoord) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 
-	i.loopCancel()
-	i.sched.Close()
+	if i.loopCancel != nil {
+		i.loopCancel()
+		log.Info("cancel the loop of IndexCoord")
+	}
+
+	if i.sched != nil {
+		i.sched.Close()
+		log.Info("close the task scheduler of IndexCoord")
+	}
+
 	i.loopWg.Wait()
+
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}

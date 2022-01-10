@@ -40,7 +40,7 @@ func VerifyResponse(response interface{}, err error) error {
 	}
 	switch resp := response.(type) {
 	case Response:
-		// note that resp will not be nil here, since it's still a interface
+		// note that resp will not be nil here, since it's still an interface
 		if resp.GetStatus() == nil {
 			return errNilStatusResponse
 		}
@@ -73,7 +73,7 @@ func getTimetravelReverseTime(ctx context.Context, allocator allocator) (*timetr
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
-	ttpts := pts.Add(-time.Duration(Params.DataCoordCfg.CompactionRetentionDuration) * time.Second)
+	ttpts := pts.Add(-time.Duration(Params.DataCoordCfg.RetentionDuration) * time.Second)
 	tt := tsoutil.ComposeTS(ttpts.UnixNano()/int64(time.Millisecond), 0)
 	return &timetravel{tt}, nil
 }

@@ -147,16 +147,22 @@ type rocksmq struct {
 // 3. Start retention goroutine
 func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
 	// TODO we should use same rocksdb instance with different cfs
+	maxProcs := runtime.GOMAXPROCS(0)
+	parallelism := 1
+	if maxProcs > 32 {
+		parallelism = 4
+	} else if maxProcs > 8 {
+		parallelism = 2
+	}
+	log.Debug("Start rocksmq ", zap.Int("max proc", maxProcs), zap.Int("parallism", parallelism))
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
-	bbto.SetCacheIndexAndFilterBlocks(true)
-	bbto.SetPinL0FilterAndIndexBlocksInCache(true)
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
 	optsKV := gorocksdb.NewDefaultOptions()
 	optsKV.SetBlockBasedTableFactory(bbto)
 	optsKV.SetCreateIfMissing(true)
 	// by default there are only 1 thread for flush compaction, which may block each other.
 	// increase to a reasonable thread numbers
-	optsKV.IncreaseParallelism(runtime.NumCPU())
+	optsKV.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsKV.SetMaxBackgroundFlushes(1)
 
@@ -174,7 +180,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	optsStore.SetCreateIfMissing(true)
 	// by default there are only 1 thread for flush compaction, which may block each other.
 	// increase to a reasonable thread numbers
-	optsStore.IncreaseParallelism(runtime.NumCPU())
+	optsStore.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsStore.SetMaxBackgroundFlushes(1)
 
@@ -219,16 +225,19 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	go func() {
 		for {
 			time.Sleep(5 * time.Minute)
-			log.Info("Rocksmq memory usage",
-				zap.String("rockskv kv cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
-				zap.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.cur-size-all-mem-tables")),
+			log.Info("Rocksmq stats",
+				zap.String("cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
+				zap.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.size-all-mem-tables")),
 				zap.String("rockskv table readers", kv.DB.GetProperty("rocksdb.estimate-table-readers-mem")),
 				zap.String("rockskv pinned", kv.DB.GetProperty("rocksdb.block-cache-pinned-usage")),
-
-				zap.String("store kv cache", db.GetProperty("rocksdb.block-cache-usage")),
-				zap.String("store memtable ", db.GetProperty("rocksdb.cur-size-all-mem-tables")),
+				zap.String("store memtable ", db.GetProperty("rocksdb.size-all-mem-tables")),
 				zap.String("store table readers", db.GetProperty("rocksdb.estimate-table-readers-mem")),
 				zap.String("store pinned", db.GetProperty("rocksdb.block-cache-pinned-usage")),
+				zap.String("store l0 file num", db.GetProperty("rocksdb.num-files-at-level0")),
+				zap.String("store l1 file num", db.GetProperty("rocksdb.num-files-at-level1")),
+				zap.String("store l2 file num", db.GetProperty("rocksdb.num-files-at-level2")),
+				zap.String("store l3 file num", db.GetProperty("rocksdb.num-files-at-level3")),
+				zap.String("store l4 file num", db.GetProperty("rocksdb.num-files-at-level4")),
 			)
 		}
 	}()
@@ -572,9 +581,11 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	if getProduceTime > 200 {
 		log.Warn("rocksmq produce too slowly", zap.String("topic", topicName),
 			zap.Int64("get lock elapse", getLockTime),
-			zap.Int64("alloc elapse", allocTime),
-			zap.Int64("write elapse", writeTime),
-			zap.Int64("updatePage elapse", getProduceTime))
+			zap.Int64("alloc elapse", allocTime-getLockTime),
+			zap.Int64("write elapse", writeTime-allocTime),
+			zap.Int64("updatePage elapse", getProduceTime-writeTime),
+			zap.Int64("produce total elapse", getProduceTime),
+		)
 	}
 	return msgIDs, nil
 }
@@ -644,7 +655,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
 	prefix := topicName + "/"
-	iter := rmq.store.NewIterator(readOpts)
+	iter := rocksdbkv.NewRocksIteratorWithUpperBound(rmq.store, typeutil.AddOne(prefix), readOpts)
 	defer iter.Close()
 
 	var dataKey string
@@ -654,10 +665,9 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		dataKey = path.Join(topicName, strconv.FormatInt(currentID.(int64), 10))
 	}
 	iter.Seek([]byte(dataKey))
-
 	consumerMessage := make([]ConsumerMessage, 0, n)
 	offset := 0
-	for ; iter.ValidForPrefix([]byte(prefix)) && offset < n; iter.Next() {
+	for ; iter.Valid() && offset < n; iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
 		strKey := string(key.Data())
@@ -687,6 +697,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	if err := iter.Err(); err != nil {
 		return nil, err
 	}
+	iterTime := time.Since(start).Milliseconds()
 
 	// When already consume to last mes, an empty slice will be returned
 	if len(consumerMessage) == 0 {
@@ -705,13 +716,17 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 			zap.String("groupName", groupName), zap.Error(err))
 		return nil, err
 	}
+	updateAckedTime := time.Since(start).Milliseconds()
 	rmq.moveConsumePos(topicName, groupName, newID+1)
 
 	// TODO add this to monitor metrics
 	getConsumeTime := time.Since(start).Milliseconds()
 	if getConsumeTime > 200 {
 		log.Warn("rocksmq consume too slowly", zap.String("topic", topicName),
-			zap.Int64("get lock elapse", getLockTime), zap.Int64("consume elapse", getConsumeTime))
+			zap.Int64("get lock elapse", getLockTime),
+			zap.Int64("iterator elapse", iterTime-getLockTime),
+			zap.Int64("updateAckedInfo elapse", updateAckedTime-iterTime),
+			zap.Int64("total consume elapse", getConsumeTime))
 	}
 	return consumerMessage, nil
 }
@@ -795,7 +810,7 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
-	iter := rmq.store.NewIterator(readOpts)
+	iter := rocksdbkv.NewRocksIterator(rmq.store, readOpts)
 	defer iter.Close()
 
 	prefix := topicName + "/"
@@ -863,11 +878,11 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 	defer readOpts.Destroy()
 	pageMsgFirstKey := pageMsgPrefix + strconv.FormatInt(firstID, 10)
 
-	iter := rmq.kv.(*rocksdbkv.RocksdbKV).DB.NewIterator(readOpts)
+	iter := rocksdbkv.NewRocksIteratorWithUpperBound(rmq.kv.(*rocksdbkv.RocksdbKV).DB, typeutil.AddOne(pageMsgPrefix), readOpts)
 	defer iter.Close()
 	var pageIDs []UniqueID
 
-	for iter.Seek([]byte(pageMsgFirstKey)); iter.ValidForPrefix([]byte(pageMsgPrefix)); iter.Next() {
+	for iter.Seek([]byte(pageMsgFirstKey)); iter.Valid(); iter.Next() {
 		key := iter.Key()
 		pageID, err := parsePageID(string(key.Data()))
 		if key != nil {
@@ -940,7 +955,7 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	}
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	readOpts.SetPrefixSameAsStart(true)
-	iter := rmq.store.NewIterator(readOpts)
+	iter := rocksdbkv.NewRocksIteratorWithUpperBound(rmq.store, typeutil.AddOne(topicName+"/"), readOpts)
 	dataKey := path.Join(topicName, strconv.FormatInt(startMsgID, 10))
 	iter.Seek([]byte(dataKey))
 	// if iterate fail
@@ -957,7 +972,6 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 	reader := &rocksmqReader{
 		store:              rmq.store,
 		topic:              topicName,
-		prefix:             []byte(topicName + "/"),
 		readerName:         readerName,
 		readOpts:           readOpts,
 		iter:               iter,
@@ -981,6 +995,20 @@ func (rmq *rocksmq) getReader(topicName, readerName string) *rocksmqReader {
 	if vals, ok := rmq.readers.Load(topicName); ok {
 		for _, v := range vals.([]*rocksmqReader) {
 			if v.readerName == readerName {
+				return v
+			}
+		}
+	}
+	return nil
+}
+
+func (rmq *rocksmq) getAndDeleteReader(topicName, readerName string) *rocksmqReader {
+	if vals, ok := rmq.readers.Load(topicName); ok {
+		readers := vals.([]*rocksmqReader)
+		for i, v := range vals.([]*rocksmqReader) {
+			if v.readerName == readerName {
+				readers[i] = readers[len(readers)-1]
+				rmq.readers.Store(topicName, readers[:len(readers)-1])
 				return v
 			}
 		}
@@ -1032,10 +1060,11 @@ func (rmq *rocksmq) CloseReader(topicName string, readerName string) {
 	if rmq.isClosed() {
 		return
 	}
-	reader := rmq.getReader(topicName, readerName)
+	reader := rmq.getAndDeleteReader(topicName, readerName)
 	if reader == nil {
 		log.Warn("reader not exist", zap.String("topic", topicName), zap.String("readerName", readerName))
 		return
 	}
 	reader.Close()
+	reader = nil
 }

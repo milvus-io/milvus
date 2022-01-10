@@ -21,6 +21,7 @@ import (
 
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 )
@@ -133,7 +134,6 @@ func (ri *retentionInfo) Stop() {
 // 3. delete acked info by range of page id;
 // 4. delete message by range of page id;
 func (ri *retentionInfo) expiredCleanUp(topic string) error {
-	log.Debug("Timeticker triggers an expiredCleanUp task for topic: " + topic)
 	start := time.Now()
 	var deletedAckedSize int64
 	var pageCleaned UniqueID
@@ -148,17 +148,18 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 	// Quick Path, No page to check
 	if totalAckedSize == 0 {
-		log.Debug("All messages are not expired, skip retention because no ack", zap.Any("topic", topic))
+		log.Debug("All messages are not expired, skip retention because no ack", zap.Any("topic", topic),
+			zap.Any("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
 	pageReadOpts := gorocksdb.NewDefaultReadOptions()
 	defer pageReadOpts.Destroy()
 	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic) + "/"
 
-	pageIter := ri.kv.DB.NewIterator(pageReadOpts)
+	pageIter := rocksdbkv.NewRocksIteratorWithUpperBound(ri.kv.DB, typeutil.AddOne(pageMsgPrefix), pageReadOpts)
 	defer pageIter.Close()
 	pageIter.Seek([]byte(pageMsgPrefix))
-	for ; pageIter.ValidForPrefix([]byte(pageMsgPrefix)); pageIter.Next() {
+	for ; pageIter.Valid(); pageIter.Next() {
 		pKey := pageIter.Key()
 		pageID, err := parsePageID(string(pKey.Data()))
 		if pKey != nil {
@@ -201,7 +202,8 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 
 	log.Debug("Expired check by retention time", zap.Any("topic", topic),
-		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize), zap.Any("pageCleaned", pageCleaned))
+		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize),
+		zap.Any("pageCleaned", pageCleaned), zap.Any("time taken", time.Since(start).Milliseconds()))
 
 	for ; pageIter.Valid(); pageIter.Next() {
 		pValue := pageIter.Value()
@@ -234,7 +236,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 
 	if pageEndID == 0 {
-		log.Debug("All messages are not expired, skip retention", zap.Any("topic", topic))
+		log.Debug("All messages are not expired, skip retention", zap.Any("topic", topic), zap.Any("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
 	expireTime := time.Since(start).Milliseconds()
@@ -251,11 +253,11 @@ func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 	defer pageReadOpts.Destroy()
 	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic) + "/"
 	// ensure the iterator won't iterate to other topics
-	pageIter := ri.kv.DB.NewIterator(pageReadOpts)
+	pageIter := rocksdbkv.NewRocksIteratorWithUpperBound(ri.kv.DB, typeutil.AddOne(pageMsgPrefix), pageReadOpts)
 	defer pageIter.Close()
 	pageIter.Seek([]byte(pageMsgPrefix))
 	var ackedSize int64
-	for ; pageIter.ValidForPrefix([]byte(pageMsgPrefix)); pageIter.Next() {
+	for ; pageIter.Valid(); pageIter.Next() {
 		key := pageIter.Key()
 		pageID, err := parsePageID(string(key.Data()))
 		if key != nil {
@@ -353,7 +355,7 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 		return err
 	}
 
-	log.Debug("Delete message for topic: "+topic, zap.Any("startID", startID), zap.Any("endID", endID))
+	log.Debug("Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
 	return nil
 }
 

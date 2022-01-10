@@ -238,8 +238,8 @@ class TestPartitionParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partiton_respectively(self):
         """
-        target: test release the partiton after load partiton
-        method: load partiton1 and load other partiton
+        target: test release the partition after load partition
+        method: load partition1 and load another partition
         expected: raise exception
         """
         self._connect()
@@ -251,30 +251,30 @@ class TestPartitionParams(TestcaseBase):
         partition_w1.load()
         error = {ct.err_code: 1, ct.err_msg: f'load the partition after load collection is not supported'}
         partition_w2.load(check_task=CheckTasks.err_res,
-                             check_items=error)
+                          check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_partitons_after_release(self):
+    def test_load_partitions_after_release(self):
         """
-        target: test release the partiton after load partition
-        method: load partitons and release partitions
+        target: test release the partition after load partition
+        method: load partitions and release partitions
         expected: no exception
         """
         self._connect()
         collection_w = self.init_collection_wrap()
-        partition_w1 = self.init_partition_wrap(collection_w,name="partition_w1")
-        partition_w2 = self.init_partition_wrap(collection_w,name="partition_w2")
+        partition_w1 = self.init_partition_wrap(collection_w, name="partition_w1")
+        partition_w2 = self.init_partition_wrap(collection_w, name="partition_w2")
         partition_w1.insert(cf.gen_default_list_data())
         partition_w2.insert(cf.gen_default_list_data())
-        partition_names=["partition_w1","partition_w2"]
+        partition_names = ["partition_w1", "partition_w2"]
         collection_w.load(partition_names)
         collection_w.release(partition_names)
 
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_partiton_after_load_partition(self):
+    def test_load_partition_after_load_partition(self):
         """
-        target: test release the partiton after load partition
+        target: test release the partition after load partition
         method: load partition1 and release the partition1
                 load partition2
         expected: no exception
@@ -515,7 +515,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_create_and_drop_multi_times(self):
         """
         target: verify create and drop for times
-        method: 1.create a partition with default schema
+        method: 1. create a partition with default schema
                 2. drop the partition
                 3. loop #1 and #2 for times
         expected: create and drop successfully
@@ -538,7 +538,7 @@ class TestPartitionOperations(TestcaseBase):
     def test_partition_drop_non_empty_partition(self):
         """
         target: verify drop a partition which has data inserted
-        method: 1.create a partition with default schema
+        method: 1. create a partition with default schema
                 2. insert some data
                 3. drop the partition
         expected: drop successfully
@@ -567,7 +567,7 @@ class TestPartitionOperations(TestcaseBase):
         method: 1. create a partition
                 2. insert same data
                 3. create an index
-                5. drop the partition
+                4. drop the partition
         expected: drop successfully
         """
         # create collection

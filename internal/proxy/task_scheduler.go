@@ -55,6 +55,8 @@ type taskQueue interface {
 	getMaxTaskNum() int64
 }
 
+var _ taskQueue = (*baseTaskQueue)(nil)
+
 // baseTaskQueue implements taskQueue.
 type baseTaskQueue struct {
 	unissuedTasks *list.List
@@ -478,6 +480,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	}
 }
 
+// definitionLoop schedules the ddl tasks.
 func (sched *taskScheduler) definitionLoop() {
 	defer sched.wg.Done()
 	for {

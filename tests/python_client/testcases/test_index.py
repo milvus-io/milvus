@@ -19,7 +19,7 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 # copied from pymilvus
 uid = "test_index"
-BUILD_TIMEOUT = 300
+# BUILD_TIMEOUT = 300
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
 # query = gen_search_vectors_params(field_name, default_entities, default_top_k, 1)
@@ -405,14 +405,14 @@ class TestIndexBase:
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        result = connect.insert(collection, default_entities)
+        connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
             index = connect.describe_index(collection, "")
@@ -445,7 +445,7 @@ class TestIndexBase:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -459,7 +459,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -475,7 +475,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -502,7 +502,7 @@ class TestIndexBase:
             dis_connect.create_index(collection, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, collection, get_simple_index, get_nq):
         """
         target: test create index interface, search with more query vectors
@@ -522,7 +522,7 @@ class TestIndexBase:
         res = connect.search(collection, **params)
         assert len(res) == nq
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_multithread(self, connect, collection, args):
         """
@@ -563,7 +563,7 @@ class TestIndexBase:
             connect.create_index(collection_name, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_insert_flush(self, connect, collection, get_simple_index):
         """
         target: test create index
@@ -581,7 +581,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly(self, connect, collection, get_simple_index):
         """
         target: check if index can be created repeatedly, with the same create_index params
@@ -596,7 +596,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -614,7 +614,7 @@ class TestIndexBase:
         assert not index  # FLAT is the last index_type, drop all indexes in server
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_B(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -634,7 +634,7 @@ class TestIndexBase:
         # assert not index  # FLAT is the last index_type, drop all indexes in server
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -650,7 +650,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -665,7 +665,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -682,7 +682,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -700,7 +700,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors_ip(self, connect, collection, get_simple_index, get_nq):
         """
         target: test create index interface, search with more query vectors
@@ -722,7 +722,7 @@ class TestIndexBase:
         res = connect.search(collection, **params)
         assert len(res) == nq
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_multithread_ip(self, connect, collection, args):
         """
@@ -765,7 +765,7 @@ class TestIndexBase:
             connect.create_index(collection_name, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert_ip(self, connect, collection):
         """
         target: test create index interface when there is no vectors in collection,
@@ -786,7 +786,7 @@ class TestIndexBase:
             assert index == default_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly_ip(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the same create_index params
@@ -802,7 +802,7 @@ class TestIndexBase:
             assert index == default_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -1023,7 +1023,7 @@ class TestIndexBinary:
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, binary_collection, get_jaccard_index):
         """
         target: test create index interface
@@ -1037,7 +1037,7 @@ class TestIndexBinary:
         assert binary_index == get_jaccard_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, binary_collection, get_jaccard_index):
         """
         target: test create index interface
@@ -1052,7 +1052,7 @@ class TestIndexBinary:
         assert binary_index == get_jaccard_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, binary_collection, get_jaccard_index, get_nq):
         """
         target: test create index interface, search with more query vectors
@@ -1071,7 +1071,7 @@ class TestIndexBinary:
         res = connect.search(binary_collection, **params)
         assert len(res) == nq
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         """
@@ -1256,7 +1256,7 @@ class TestIndexAsync:
     ******************************************************************
     """
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -1272,7 +1272,7 @@ class TestIndexAsync:
         log.info(res)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_drop(self, connect, collection):
         """
         target: test create index interface
@@ -1293,7 +1293,7 @@ class TestIndexAsync:
             res = future.result()
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_callback(self, connect, collection, get_simple_index):
         """
         target: test create index interface

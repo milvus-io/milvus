@@ -129,7 +129,7 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 	err = rocksdbKV.RemoveWithPrefix("")
 	assert.Nil(t, err)
 
-	// test remove from a empty cf
+	// test remove from an empty cf
 	err = rocksdbKV.RemoveWithPrefix("")
 	assert.Nil(t, err)
 

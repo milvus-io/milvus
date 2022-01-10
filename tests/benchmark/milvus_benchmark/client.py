@@ -1,7 +1,7 @@
 import random
 import logging
 import time
-import traceback
+# import traceback
 from multiprocessing import Process
 from pymilvus import Milvus, DataType
 import utils as util
@@ -42,7 +42,6 @@ def time_wrapper(func):
         rps: Specify the rps of the return interface
         """
         start = time.time()
-        # logger.debug("Milvus {} start".format(func.__name__))
         log = kwargs.get("log", True)
         kwargs.pop("log", None)
         rps = kwargs.get("rps", False)
@@ -230,7 +229,7 @@ class MilvusClient(object):
 
     def delete_rand(self):
         delete_id_length = random.randint(1, 100)
-        count_before = self.count()
+        # count_before = self.count()
         logger.debug("%s: length to delete: %d" % (self._collection_name, delete_id_length))
         delete_ids = self.get_rand_ids(delete_id_length)
         self.delete(delete_ids)
@@ -254,9 +253,9 @@ class MilvusClient(object):
         status = self._milvus.compact(tmp_collection_name)
         self.check_status(status)
 
-    # only support "in" in expr
     @time_wrapper
     def get(self, ids, collection_name=None, timeout=None):
+        """ only support "in" in expr """
         tmp_collection_name = self._collection_name if collection_name is None else collection_name
         # res = self._milvus.get(tmp_collection_name, ids, output_fields=None, partition_names=None)
         ids_expr = "id in %s" % (str(ids))
@@ -330,9 +329,9 @@ class MilvusClient(object):
             "params": search_param}
         }}
         must_params = [vector_query]
-        query = {
-            "bool": {"must": must_params}
-        }
+        # query = {
+        #     "bool": {"must": must_params}
+        # }
         logger.debug("Start warm up query")
         for i in range(times):
             params = util.search_param_analysis(vector_query, None)

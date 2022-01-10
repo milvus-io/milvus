@@ -21,28 +21,35 @@ set -u
 # Print commands
 set -x
 function milvus_ci_release_name(){
-    # rules for helm release name 
+    # Rules for helm release name 
     local name="m"
     if [[ "${MILVUS_SERVER_TYPE:-}" == "distributed" ]]; then
-        # distributed mode
+        # Distributed mode
        name+="d"
     else 
-       #standalone mode      
+       # Standalone mode      
         name+="s"
 
     fi 
-    #[debug] add pr number into release name 
+    # Add pr number into release name 
     if [[ -n ${CHANGE_ID:-} ]]; then 
         name+="-${CHANGE_ID:-}"
     fi 
 
-    # if [[ -n ${GIT_COMMIT:-} ]]; then 
-    #         name+="-${GIT_COMMIT:0:4}"
-    # fi 
-
-    # [remove-kind] Add Jenkins BUILD_ID into Name
+    
+    # Add Jenkins BUILD_ID into Name
     if [[ -n ${JENKINS_BUILD_ID:-} ]]; then 
             name+="-${JENKINS_BUILD_ID}"
+    fi 
+
+
+    if [[ "${CI_MODE:-}" == "nightly" ]]; then
+        # Nightly CI
+       name+="-n"
+    else 
+       # Pull Request CI    
+        name+="-pr"
+
     fi 
 
     export MILVUS_HELM_RELEASE_NAME=${name}

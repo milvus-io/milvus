@@ -14,7 +14,6 @@
 #endif
 
 #include <iostream>
-
 #include "segcore/collection_c.h"
 #include "segcore/Collection.h"
 

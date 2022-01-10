@@ -49,13 +49,14 @@ const (
 	defaultQueryNodeID      = int64(100)
 	defaultChannelNum       = 2
 	defaultNumRowPerSegment = 1000
+	defaultVecFieldID       = 101
 )
 
 func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.CollectionSchema {
 	var fieldVec schemapb.FieldSchema
 	if isBinary {
 		fieldVec = schemapb.FieldSchema{
-			FieldID:      UniqueID(101),
+			FieldID:      UniqueID(defaultVecFieldID),
 			Name:         "vec",
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_BinaryVector,
@@ -74,7 +75,7 @@ func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.Collect
 		}
 	} else {
 		fieldVec = schemapb.FieldSchema{
-			FieldID:      UniqueID(101),
+			FieldID:      UniqueID(defaultVecFieldID),
 			Name:         "vec",
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_FloatVector,
@@ -311,11 +312,11 @@ func newDataCoordMock(ctx context.Context) (*dataCoordMock, error) {
 
 	// create minio client
 	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
 	}
 	kv, err := minioKV.NewMinIOKV(ctx, option)

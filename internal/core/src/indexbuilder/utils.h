@@ -11,15 +11,14 @@
 
 #pragma once
 
-#include <vector>
-#include <string>
 #include <algorithm>
+#include <string>
 #include <tuple>
+#include <vector>
 
 #include "knowhere/index/IndexType.h"
 
-namespace milvus {
-namespace indexbuilder {
+namespace milvus::indexbuilder {
 
 std::vector<std::string>
 NM_List() {
@@ -99,5 +98,4 @@ is_unsupported(const milvus::knowhere::IndexType& index_type, const milvus::know
                                                             unsupported_index_combinations);
 }
 
-}  // namespace indexbuilder
-}  // namespace milvus
+}  // namespace milvus::indexbuilder

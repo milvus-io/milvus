@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from base.client_base import TestcaseBase
@@ -5,6 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
+from pymilvus.grpc_gen.common_pb2 import SegmentState
 
 prefix = "delete"
 half_nb = ct.default_nb // 2
@@ -863,6 +866,37 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.delete(expr=f'{ct.default_int64_field_name} in {[1]}')
         collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, 1]}',
                            check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_query_after_handoff(self):
+        """
+        target: test search after delete and handoff
+        method: 1.create and load collection
+                2.insert entities and delete id 0
+                3.flush entities
+                4.query deleted id after handoff completed
+        expected: Delete successfully, query get empty result
+        """
+        # init collection and load
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        collection_w.load()
+
+        # insert data and delete id 0
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        del_res, _ = collection_w.delete(tmp_expr)
+
+        # flush
+        assert collection_w.num_entities == tmp_nb
+
+        # wait for the handoff to complete
+        while True:
+            time.sleep(0.5)
+            segment_infos = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            if segment_infos[0].state == SegmentState.Sealed:
+                break
+        # query deleted id
+        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="TODO")

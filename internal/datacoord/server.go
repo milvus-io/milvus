@@ -26,8 +26,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -43,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/minio/minio-go/v7"
@@ -231,7 +230,7 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) initSession() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli)
+	s.session = sessionutil.NewSession(s.ctx, Params.BaseParams.MetaRootPath, s.etcdCli)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -257,7 +256,7 @@ func (s *Server) Init() error {
 func (s *Server) Start() error {
 	var err error
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.DataCoordCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	err = s.msFactory.SetParams(m)
@@ -344,21 +343,21 @@ func (s *Server) initGarbageCollection() error {
 	var cli *minio.Client
 	var err error
 	if Params.DataCoordCfg.EnableGarbageCollection {
-		cli, err = minio.New(Params.DataCoordCfg.MinioAddress, &minio.Options{
-			Creds:  credentials.NewStaticV4(Params.DataCoordCfg.MinioAccessKeyID, Params.DataCoordCfg.MinioSecretAccessKey, ""),
-			Secure: Params.DataCoordCfg.MinioUseSSL,
+		cli, err = minio.New(Params.MinioCfg.Address, &minio.Options{
+			Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, ""),
+			Secure: Params.MinioCfg.UseSSL,
 		})
 		if err != nil {
 			return err
 		}
 
 		checkBucketFn := func() error {
-			has, err := cli.BucketExists(context.TODO(), Params.DataCoordCfg.MinioBucketName)
+			has, err := cli.BucketExists(context.TODO(), Params.MinioCfg.BucketName)
 			if err != nil {
 				return err
 			}
 			if !has {
-				err = cli.MakeBucket(context.TODO(), Params.DataCoordCfg.MinioBucketName, minio.MakeBucketOptions{})
+				err = cli.MakeBucket(context.TODO(), Params.MinioCfg.BucketName, minio.MakeBucketOptions{})
 				if err != nil {
 					return err
 				}
@@ -378,8 +377,8 @@ func (s *Server) initGarbageCollection() error {
 	s.garbageCollector = newGarbageCollector(s.meta, GcOption{
 		cli:        cli,
 		enabled:    Params.DataCoordCfg.EnableGarbageCollection,
-		bucketName: Params.DataCoordCfg.MinioBucketName,
-		rootPath:   Params.DataCoordCfg.MinioRootPath,
+		bucketName: Params.MinioCfg.BucketName,
+		rootPath:   Params.MinioCfg.RootPath,
 
 		checkInterval:    Params.DataCoordCfg.GCInterval,
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,
@@ -418,7 +417,7 @@ func (s *Server) startSegmentManager() {
 }
 
 func (s *Server) initMeta() error {
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.DataCoordCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.BaseParams.MetaRootPath)
 	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
 		var err error
@@ -677,7 +676,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Debug("flush loop shutdown")
+				logutil.Logger(s.ctx).Debug("flush loop shutdown")
 				return
 			case segmentID := <-s.flushCh:
 				//Ignore return error
@@ -732,7 +731,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.DataCoordCfg.MetaRootPath, s.etcdCli); err != nil {
+	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.BaseParams.MetaRootPath, s.etcdCli); err != nil {
 		return err
 	}
 	if err = s.rootCoordClient.Init(); err != nil {
@@ -749,7 +748,7 @@ func (s *Server) Stop() error {
 	if !atomic.CompareAndSwapInt64(&s.isServing, ServerStateHealthy, ServerStateStopped) {
 		return nil
 	}
-	log.Debug("dataCoord server shutdown")
+	logutil.Logger(s.ctx).Debug("server shutdown")
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()

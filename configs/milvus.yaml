@@ -21,10 +21,6 @@ etcd:
   rootPath: by-dev # The root path where data is stored in etcd
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
-  segmentBinlogSubPath: datacoord/binlog/segment  # Full Path = rootPath/metaSubPath/segmentBinlogSubPath
-  collectionBinlogSubPath: datacoord/binlog/collection # Full Path = rootPath/metaSubPath/collectionBinglogSubPath
-  flushStreamPosSubPath: datacoord/flushstream # Full path = rootPath/metaSubPath/flushStreamPosSubPath
-  statsStreamPosSubPath: datacoord/statsstream # Full path = rootPath/metaSubPath/statsStreamPosSubPath
 
 # Related configuration of minio, which is responsible for data persistence for Milvus.
 minio:
@@ -62,27 +58,19 @@ rootCoord:
   dmlChannelNum: 256 # The number of dml channels created at system startup
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
-  timeout: 3600 # time out, 5 seconds
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
   port: 19530
 
   grpc:
-    serverMaxRecvSize: 536870912 # 512 MB, 100 * 1024 * 1024
-    serverMaxSendSize: 536870912 # 512 MB, 100 * 1024 * 1024
+    serverMaxRecvSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
+    serverMaxSendSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
   timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
   msgStream:
-    insert:
-      bufSize: 1024 # msgPack chan buffer size
-    search:
-      bufSize: 512 # msgPack chan buffer size
-    searchResult:
-      recvBufSize: 1024 # msgPack chan buffer size
-      pulsarBufSize: 1024 # pulsar chan buffer size
     timeTick:
       bufSize: 512
   maxNameLength: 255  # Maximum length of name for a collection or alias
@@ -177,7 +165,6 @@ dataCoord:
 
   compaction:
     enableAutoCompaction: true
-    retentionDuration: 432000 # 5 days in seconds
 
   gc:
     interval: 3600 # gc interval in seconds
@@ -220,7 +207,7 @@ log:
 msgChannel:
   # Channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
-    cluster:           "by-dev"
+    cluster: "by-dev"
     rootCoordTimeTick: "rootcoord-timetick"
     rootCoordStatistics: "rootcoord-statistics"
     rootCoordDml: "rootcoord-dml"
@@ -250,6 +237,7 @@ msgChannel:
 common:
   defaultPartitionName: "_default"  # default partition name for a collection
   defaultIndexName: "_default_idx"  # default index name
+  retentionDuration: 432000 # 5 days in seconds
 
 knowhere:
   # Default value: auto

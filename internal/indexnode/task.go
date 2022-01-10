@@ -24,9 +24,9 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -80,6 +80,7 @@ func (bt *BaseTask) ID() UniqueID {
 	return bt.id
 }
 
+// setID set the ID for the task.
 func (bt *BaseTask) setID(id UniqueID) {
 	bt.id = id
 }
@@ -138,6 +139,7 @@ func (it *IndexBuildTask) OnEnqueue() error {
 	return nil
 }
 
+// checkIndexMeta load meta from etcd to determine whether the task should continue execution.
 func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 	fn := func() error {
 		//TODO error handling need to be optimized, return Unrecoverable to avoid retry
@@ -338,7 +340,10 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 
 		return nil
 	}
-	err = funcutil.ProcessFuncParallel(len(toLoadDataPaths), runtime.NumCPU(), loadKey, "loadKey")
+	// Use runtime.GOMAXPROCS(0) instead of runtime.NumCPU()
+	// to respect CPU quota of container/pod
+	// gomaxproc will be set by `automaxproc`, passing 0 will just retrieve the value
+	err = funcutil.ProcessFuncParallel(len(toLoadDataPaths), runtime.GOMAXPROCS(0), loadKey, "loadKey")
 	if err != nil {
 		log.Warn("loadKey from minio failed", zap.Error(err))
 		it.internalErr = err

@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -91,6 +92,7 @@ const (
 	DropAliasTaskName               = "DropAliasTask"
 	AlterAliasTaskName              = "AlterAliasTask"
 
+	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
 )
 
@@ -889,8 +891,7 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		return 0
 	}
 
-	threshold := Params.ProxyCfg.PulsarMaxMessageSize
-	log.Debug("Proxy", zap.Int("threshold of message size: ", threshold))
+	threshold := Params.PulsarCfg.MaxMessageSize
 	// not accurate
 	/* #nosec G103 */
 	getFixedSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
@@ -1456,7 +1457,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(showResp.Status.Reason)
 	}
-	log.Debug("query coordinator show collections",
+	log.Debug("QueryCoord show collections",
 		zap.Any("collID", collID),
 		zap.Any("collections", showResp.CollectionIDs),
 	)
@@ -1577,6 +1578,12 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	travelTimestamp := st.query.TravelTimestamp
 	if travelTimestamp == 0 {
 		travelTimestamp = st.BeginTs()
+	} else {
+		durationSeconds := tsoutil.CalculateDuration(st.BeginTs(), travelTimestamp) / 1000
+		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+			duration := time.Second * time.Duration(durationSeconds)
+			return fmt.Errorf("only support to travel back to %s so far", duration.String())
+		}
 	}
 	guaranteeTimestamp := st.query.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
@@ -1888,7 +1895,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 	for {
 		select {
 		case <-st.TraceCtx().Done():
-			log.Debug("Proxy", zap.Int64("searchTask PostExecute Loop exit caused by ctx.Done", st.ID()))
+			log.Debug("Proxy searchTask PostExecute Loop exit caused by ctx.Done", zap.Int64("taskID", st.ID()))
 			return fmt.Errorf("searchTask:wait to finish failed, timeout: %d", st.ID())
 		case searchResults := <-st.resultBuf:
 			// fmt.Println("searchResults: ", searchResults)
@@ -2107,7 +2114,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(showResp.Status.Reason)
 	}
-	log.Debug("query coordinator show collections",
+	log.Debug("QueryCoord show collections",
 		zap.Any("collections", showResp.CollectionIDs),
 		zap.Any("collID", collectionID))
 
@@ -2186,10 +2193,15 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
 	travelTimestamp := qt.query.TravelTimestamp
 	if travelTimestamp == 0 {
 		travelTimestamp = qt.BeginTs()
+	} else {
+		durationSeconds := tsoutil.CalculateDuration(qt.BeginTs(), travelTimestamp) / 1000
+		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+			duration := time.Second * time.Duration(durationSeconds)
+			return fmt.Errorf("only support to travel back to %s so far", duration.String())
+		}
 	}
 	guaranteeTimestamp := qt.query.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
@@ -4840,11 +4852,13 @@ func (c *CreateAliasTask) SetTs(ts Timestamp) {
 	c.Base.Timestamp = ts
 }
 
+// OnEnqueue defines the behavior task enqueued
 func (c *CreateAliasTask) OnEnqueue() error {
 	c.Base = &commonpb.MsgBase{}
 	return nil
 }
 
+// PreExecute defines the action before task execution
 func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	c.Base.MsgType = commonpb.MsgType_CreateAlias
 	c.Base.SourceID = Params.ProxyCfg.ProxyID
@@ -4862,12 +4876,14 @@ func (c *CreateAliasTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+// Execute defines the actual execution of create alias
 func (c *CreateAliasTask) Execute(ctx context.Context) error {
 	var err error
 	c.result, err = c.rootCoord.CreateAlias(ctx, c.CreateAliasRequest)
 	return err
 }
 
+// PostExecute defines the post execution, do nothing for create alias
 func (c *CreateAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }

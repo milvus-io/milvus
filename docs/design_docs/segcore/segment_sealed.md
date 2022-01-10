@@ -36,6 +36,6 @@ Search is executable as long as all the columns involved in the search are loade
 10. `schema`: schema
 
 # SegmentSealedImpl internal function definition
-1. Most functions are the implementation of the corresponding functions of segment interface, which will not be repeated here
-2. `update_row_count`: Used to update the row_count field
-3. `mask_with_timestamps`: Use Timestamp column to update search bitmask, used to support Time Travel function
+1. Most functions are the implementation of the corresponding functions of the segment interface, which will not be repeated here.
+2. `update_row_count`: Used to update the row_count field.
+3. `mask_with_timestamps`: Use Timestamp column to update search bitmask, used to support Time Travel function.

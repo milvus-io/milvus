@@ -88,7 +88,7 @@ func (p *proxyManager) WatchProxy() error {
 
 	eventCh := p.etcdCli.Watch(
 		p.ctx,
-		path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		path.Join(Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithCreatedNotify(),
 		clientv3.WithPrevKV(),
@@ -168,7 +168,7 @@ func (p *proxyManager) parseSession(value []byte) (*sessionutil.Session, error) 
 func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Session, int64, error) {
 	resp, err := p.etcdCli.Get(
 		ctx,
-		path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		path.Join(Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)
@@ -200,7 +200,7 @@ func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sess
 	defer cancel()
 	resp, err := cli.Get(
 		ctx2,
-		path.Join(Params.RootCoordCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+		path.Join(Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
 		clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
 	)

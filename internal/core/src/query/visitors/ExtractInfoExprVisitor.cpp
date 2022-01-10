@@ -13,7 +13,7 @@
 #include "query/generated/ExtractInfoExprVisitor.h"
 
 namespace milvus::query {
-#if 1
+
 namespace impl {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
@@ -26,7 +26,6 @@ class ExtractInfoExprVisitor : ExprVisitor {
     ExtractedPlanInfo& plan_info_;
 };
 }  // namespace impl
-#endif
 
 void
 ExtractInfoExprVisitor::visit(LogicalUnaryExpr& expr) {
