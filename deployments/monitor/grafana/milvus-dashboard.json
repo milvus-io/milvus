@@ -348,7 +348,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "prometheus",
-      "description": "per-minute increasing rate of describe_collection requests",
+      "description": "per-minute increasing rate of describe_collection requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
