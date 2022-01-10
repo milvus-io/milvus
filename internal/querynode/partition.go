@@ -63,6 +63,7 @@ func (p *Partition) removeSegmentID(segmentID UniqueID) {
 	log.Debug("remove a segment from replica", zap.Int64("collectionID", p.collectionID), zap.Int64("partitionID", p.partitionID), zap.Int64("segmentID", segmentID))
 }
 
+// newPartition returns a new Partition
 func newPartition(collectionID UniqueID, partitionID UniqueID) *Partition {
 	var newPartition = &Partition{
 		collectionID: collectionID,
