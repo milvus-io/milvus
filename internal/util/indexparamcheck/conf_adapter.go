@@ -449,6 +449,7 @@ func newRHNSWSQConfAdapter() *RHNSWSQConfAdapter {
 	return &RHNSWSQConfAdapter{}
 }
 
+// NGTPANNGConfAdapter checks if a NGT_PANNG index can be built.
 type NGTPANNGConfAdapter struct {
 	BaseConfAdapter
 }
