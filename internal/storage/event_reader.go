@@ -19,9 +19,7 @@ package storage
 import (
 	"bytes"
 	"fmt"
-	"runtime"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -110,10 +108,5 @@ func newEventReader(datatype schemapb.DataType, buffer *bytes.Buffer) (*EventRea
 		return nil, err
 	}
 	reader.PayloadReaderInterface = payloadReader
-	runtime.SetFinalizer(reader, func(reader *EventReader) {
-		if !reader.isClosed {
-			log.Error("event reader is leaking.. please check")
-		}
-	})
 	return reader, nil
 }

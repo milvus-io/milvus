@@ -20,10 +20,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"runtime"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -276,11 +274,6 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 		},
 	}
 
-	runtime.SetFinalizer(w, func(writer *InsertBinlogWriter) {
-		if !w.isClosed() {
-			log.Error("insert binlog writer is leaking.. please check")
-		}
-	})
 	return w
 }
 
@@ -300,11 +293,6 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			buffer:          nil,
 		},
 	}
-	runtime.SetFinalizer(w, func(writer *DeleteBinlogWriter) {
-		if !w.isClosed() {
-			log.Error("delete binlog writer is leaking.. please check")
-		}
-	})
 	return w
 }
 
@@ -322,11 +310,6 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 			buffer:          nil,
 		},
 	}
-	runtime.SetFinalizer(w, func(writer *DDLBinlogWriter) {
-		if !w.isClosed() {
-			log.Error("ddl binlog writer is leaking.. please check")
-		}
-	})
 	return w
 }
 
@@ -362,10 +345,5 @@ func NewIndexFileBinlogWriter(
 			buffer:          nil,
 		},
 	}
-	runtime.SetFinalizer(w, func(writer *IndexFileBinlogWriter) {
-		if !w.isClosed() {
-			log.Error("index file binlog writer is leaking.. please check")
-		}
-	})
 	return w
 }

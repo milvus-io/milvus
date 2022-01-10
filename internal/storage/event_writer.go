@@ -22,10 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -259,11 +257,6 @@ func newInsertEventWriter(dataType schemapb.DataType) (*insertEventWriter, error
 	}
 	writer.baseEventWriter.getEventDataSize = writer.insertEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.insertEventData.WriteEventData
-	runtime.SetFinalizer(writer, func(writer *insertEventWriter) {
-		if !writer.isClosed {
-			log.Error("insert event binlog writer is leaking.. please check")
-		}
-	})
 	return writer, nil
 }
 
@@ -286,11 +279,6 @@ func newDeleteEventWriter(dataType schemapb.DataType) (*deleteEventWriter, error
 	}
 	writer.baseEventWriter.getEventDataSize = writer.deleteEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.deleteEventData.WriteEventData
-	runtime.SetFinalizer(writer, func(writer *deleteEventWriter) {
-		if !writer.isClosed {
-			log.Error("delete event binlog writer is leaking.. please check")
-		}
-	})
 	return writer, nil
 }
 
@@ -317,11 +305,6 @@ func newCreateCollectionEventWriter(dataType schemapb.DataType) (*createCollecti
 	}
 	writer.baseEventWriter.getEventDataSize = writer.createCollectionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.createCollectionEventData.WriteEventData
-	runtime.SetFinalizer(writer, func(writer *createCollectionEventWriter) {
-		if !writer.isClosed {
-			log.Error("create collection event binlog writer is leaking.. please check")
-		}
-	})
 	return writer, nil
 }
 
@@ -348,11 +331,6 @@ func newDropCollectionEventWriter(dataType schemapb.DataType) (*dropCollectionEv
 	}
 	writer.baseEventWriter.getEventDataSize = writer.dropCollectionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.dropCollectionEventData.WriteEventData
-	runtime.SetFinalizer(writer, func(writer *dropCollectionEventWriter) {
-		if !writer.isClosed {
-			log.Error("drop collection event binlog writer is leaking.. please check")
-		}
-	})
 	return writer, nil
 }
 
@@ -379,11 +357,6 @@ func newCreatePartitionEventWriter(dataType schemapb.DataType) (*createPartition
 	}
 	writer.baseEventWriter.getEventDataSize = writer.createPartitionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.createPartitionEventData.WriteEventData
-	runtime.SetFinalizer(writer, func(writer *createPartitionEventWriter) {
-		if !writer.isClosed {
-			log.Error("create partition binlog writer is leaking.. please check")
-		}
-	})
 	return writer, nil
 }
 
@@ -410,11 +383,6 @@ func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEven
 	}
 	writer.baseEventWriter.getEventDataSize = writer.dropPartitionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.dropPartitionEventData.WriteEventData
-	runtime.SetFinalizer(writer, func(writer *dropPartitionEventWriter) {
-		if !writer.isClosed {
-			log.Error("drop partition event binlog writer is leaking.. please check")
-		}
-	})
 	return writer, nil
 }
 
@@ -437,11 +405,6 @@ func newIndexFileEventWriter() (*indexFileEventWriter, error) {
 	}
 	writer.baseEventWriter.getEventDataSize = writer.indexFileEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.indexFileEventData.WriteEventData
-	runtime.SetFinalizer(writer, func(writer *indexFileEventWriter) {
-		if !writer.isClosed {
-			log.Error("index file event binlog writer is leaking.. please check")
-		}
-	})
 
 	return writer, nil
 }
