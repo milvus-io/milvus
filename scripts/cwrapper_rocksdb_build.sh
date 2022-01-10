@@ -74,16 +74,32 @@ CMAKE_CMD="cmake \
 ${CMAKE_CMD}
 echo ${CMAKE_CMD}
 
+unameOut="$(uname -s)"
 if [[ ! ${jobs+1} ]]; then
-    jobs=$(nproc)
+  case "${unameOut}" in
+      Linux*)     jobs=$(nproc);;
+      Darwin*)    jobs=$(sysctl -n hw.physicalcpu);;
+      *)          echo "UNKNOWN:${unameOut}"; exit 0;
+  esac
 fi
+
 make -j ${jobs}
 
 go env -w CGO_CFLAGS="-I${OUTPUT_LIB}/include"
+ldflags=""
 if [ -f "${OUTPUT_LIB}/lib/librocksdb.a" ]; then
-    go env -w CGO_LDFLAGS="-L${OUTPUT_LIB}/lib -l:librocksdb.a -lstdc++ -lm -lz"
+     case "${unameOut}" in
+          Linux*)     ldflags="-L${OUTPUT_LIB}/lib -l:librocksdb.a -lstdc++ -lm -lz";;
+          Darwin*)    ldflags="-L${OUTPUT_LIB}/lib -lrocksdb -lstdc++ -lm -lz";;
+          *)          echo "UNKNOWN:${unameOut}"; exit 0;
+      esac
 else
-    go env -w CGO_LDFLAGS="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz"
+     case "${unameOut}" in
+              Linux*)     ldflags="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz";;
+              Darwin*)    ldflags="-L${OUTPUT_LIB}/lib64 -lrocksdb -lstdc++ -lm -lz";;
+              *)          echo "UNKNOWN:${unameOut}" ; exit 0;
+      esac
 fi
 
+go env -w CGO_LDFLAGS="$ldflags"
 go get github.com/tecbot/gorocksdb

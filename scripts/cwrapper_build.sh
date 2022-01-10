@@ -80,6 +80,11 @@ ${CMAKE_CMD}
 echo ${CMAKE_CMD}
 
 if [[ ! ${jobs+1} ]]; then
-    jobs=$(nproc)
+  unameOut="$(uname -s)"
+  case "${unameOut}" in
+      Linux*)     jobs=$(nproc);;
+      Darwin*)    jobs=$(sysctl -n hw.physicalcpu);;
+      *)          echo "UNKNOWN:${unameOut}" ; exit 0;
+  esac
 fi
 make -j ${jobs} && make install
