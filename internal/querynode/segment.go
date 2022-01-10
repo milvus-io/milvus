@@ -92,7 +92,7 @@ type Segment struct {
 	once        sync.Once // guards enableIndex
 	enableIndex bool
 
-	rmMutex          sync.Mutex // guards recentlyModified
+	rmMutex          sync.RWMutex // guards recentlyModified
 	recentlyModified bool
 
 	typeMu      sync.Mutex // guards builtIndex
@@ -141,8 +141,8 @@ func (s *Segment) setRecentlyModified(modify bool) {
 }
 
 func (s *Segment) getRecentlyModified() bool {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
+	s.rmMutex.RLock()
+	defer s.rmMutex.RUnlock()
 	return s.recentlyModified
 }
 
