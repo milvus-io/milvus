@@ -428,6 +428,7 @@ func newRHNSWPQConfAdapter() *RHNSWPQConfAdapter {
 	return &RHNSWPQConfAdapter{}
 }
 
+// RHNSWSQConfAdapter checks if a rhnsw sq index can be built.
 type RHNSWSQConfAdapter struct {
 	BaseConfAdapter
 }
