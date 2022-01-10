@@ -1,7 +1,7 @@
 --extra-index-url https://test.pypi.org/simple/
 grpcio==1.37.1
 grpcio-tools==1.37.1
-numpy==1.19.5
+numpy==1.21.0
 pytest-cov==2.8.1
 sklearn==0.0
 pytest==6.2.2
