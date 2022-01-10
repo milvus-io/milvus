@@ -156,7 +156,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		ID:                         collID,
 		Schema:                     &schema,
 		PartitionIDs:               []typeutil.UniqueID{partID},
-		PartitionNames:             []string{Params.RootCoordCfg.DefaultPartitionName},
+		PartitionNames:             []string{Params.CommonCfg.DefaultPartitionName},
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
@@ -178,7 +178,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		Base:                 t.Req.Base,
 		DbName:               t.Req.DbName,
 		CollectionName:       t.Req.CollectionName,
-		PartitionName:        Params.RootCoordCfg.DefaultPartitionName,
+		PartitionName:        Params.CommonCfg.DefaultPartitionName,
 		DbID:                 0, //TODO,not used
 		CollectionID:         collID,
 		PartitionID:          partID,
@@ -821,7 +821,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateIndex {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	indexName := Params.RootCoordCfg.DefaultIndexName //TODO, get name from request
+	indexName := Params.CommonCfg.DefaultIndexName //TODO, get name from request
 	indexID, _, err := t.core.IDAllocator(1)
 	log.Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {

@@ -56,7 +56,8 @@ type GlobalParamTable struct {
 	PulsarCfg  pulsarConfig
 	RocksmqCfg rocksmqConfig
 	MinioCfg   minioConfig
-	//CommonCfg     commonConfig
+
+	CommonCfg commonConfig
 	//KnowhereCfg   knowhereConfig
 	//MsgChannelCfg msgChannelConfig
 
@@ -84,7 +85,8 @@ func (p *GlobalParamTable) Init() {
 	p.PulsarCfg.init(&p.BaseParams)
 	p.RocksmqCfg.init(&p.BaseParams)
 	p.MinioCfg.init(&p.BaseParams)
-	//p.CommonCfg.init(&p.BaseParams)
+
+	p.CommonCfg.init(&p.BaseParams)
 	//p.KnowhereCfg.init(&p.BaseParams)
 	//p.MsgChannelCfg.init(&p.BaseParams)
 
@@ -238,28 +240,35 @@ func (p *minioConfig) initRootPath() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
-//type commonConfig struct {
-//	BaseParams *BaseParamTable
-//
-//	DefaultPartitionName string
-//	DefaultIndexName     string
-//}
-//
-//func (p *commonConfig) init(bp *BaseParamTable) {
-//	p.BaseParams = bp
-//	p.initDefaultPartitionName()
-//	p.initDefaultIndexName()
-//}
-//
-//func (p *commonConfig) initDefaultPartitionName() {
-//	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
-//	p.DefaultPartitionName = name
-//}
-//
-//func (p *commonConfig) initDefaultIndexName() {
-//	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
-//	p.DefaultIndexName = name
-//}
+type commonConfig struct {
+	BaseParams *BaseParamTable
+
+	DefaultPartitionName string
+	DefaultIndexName     string
+	RetentionDuration    int64
+}
+
+func (p *commonConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initDefaultPartitionName()
+	p.initDefaultIndexName()
+	p.initRetentionDuration()
+}
+
+func (p *commonConfig) initDefaultPartitionName() {
+	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
+	p.DefaultPartitionName = name
+}
+
+func (p *commonConfig) initDefaultIndexName() {
+	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
+	p.DefaultIndexName = name
+}
+
+func (p *commonConfig) initRetentionDuration() {
+	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- knowhere ---
@@ -440,8 +449,6 @@ type rootCoordConfig struct {
 
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
-	DefaultPartitionName        string
-	DefaultIndexName            string
 	MinSegmentSizeToEnableIndex int64
 
 	CreatedTime time.Time
@@ -462,8 +469,6 @@ func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.initDmlChannelNum()
 	p.initMaxPartitionNum()
 	p.initMinSegmentSizeToEnableIndex()
-	p.initDefaultPartitionName()
-	p.initDefaultIndexName()
 }
 
 func (p *rootCoordConfig) initClusterMsgChannelPrefix() {
@@ -531,16 +536,6 @@ func (p *rootCoordConfig) initMinSegmentSizeToEnableIndex() {
 	p.MinSegmentSizeToEnableIndex = p.BaseParams.ParseInt64WithDefault("rootCoord.minSegmentSizeToEnableIndex", 1024)
 }
 
-func (p *rootCoordConfig) initDefaultPartitionName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
-	p.DefaultPartitionName = name
-}
-
-func (p *rootCoordConfig) initDefaultIndexName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
-	p.DefaultIndexName = name
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
 type proxyConfig struct {
@@ -560,8 +555,6 @@ type proxyConfig struct {
 	MaxFieldNum              int64
 	MaxShardNum              int32
 	MaxDimension             int64
-	DefaultPartitionName     string
-	DefaultIndexName         string
 	BufFlagExpireTime        time.Duration
 	BufFlagCleanupInterval   time.Duration
 
@@ -575,8 +568,6 @@ type proxyConfig struct {
 	RetrieveResultChannelNames []string
 
 	MaxTaskNum int64
-
-	RetentionDuration int64
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -596,13 +587,10 @@ func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.initMaxFieldNum()
 	p.initMaxShardNum()
 	p.initMaxDimension()
-	p.initDefaultPartitionName()
-	p.initDefaultIndexName()
 
 	p.initMaxTaskNum()
 	p.initBufFlagExpireTime()
 	p.initBufFlagCleanupInterval()
-	p.initRetentionDuration()
 }
 
 // Refresh is called after session init
@@ -687,16 +675,6 @@ func (p *proxyConfig) initMaxDimension() {
 	p.MaxDimension = maxDimension
 }
 
-func (p *proxyConfig) initDefaultPartitionName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
-	p.DefaultPartitionName = name
-}
-
-func (p *proxyConfig) initDefaultIndexName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
-	p.DefaultIndexName = name
-}
-
 func (p *proxyConfig) initMaxTaskNum() {
 	p.MaxTaskNum = p.BaseParams.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
 }
@@ -709,10 +687,6 @@ func (p *proxyConfig) initBufFlagExpireTime() {
 func (p *proxyConfig) initBufFlagCleanupInterval() {
 	interval := p.BaseParams.ParseInt64WithDefault("proxy.bufFlagCleanupInterval", 600)
 	p.BufFlagCleanupInterval = time.Duration(interval) * time.Second
-}
-
-func (p *proxyConfig) initRetentionDuration() {
-	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1123,10 +1097,8 @@ type dataCoordConfig struct {
 	UpdatedTime time.Time
 
 	EnableCompaction        bool
+	EnableAutoCompaction    bool
 	EnableGarbageCollection bool
-
-	RetentionDuration    int64
-	EnableAutoCompaction bool
 
 	// Garbage Collection
 	GCInterval         time.Duration
@@ -1151,8 +1123,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initDataCoordSubscriptionName()
 
 	p.initEnableCompaction()
-
-	p.initRetentionDuration()
 	p.initEnableAutoCompaction()
 
 	p.initEnableGarbageCollection()
@@ -1243,10 +1213,6 @@ func (p *dataCoordConfig) initGCMissingTolerance() {
 
 func (p *dataCoordConfig) initGCDropTolerance() {
 	p.GCDropTolerance = time.Duration(p.BaseParams.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 24*60*60)) * time.Second
-}
-
-func (p *dataCoordConfig) initRetentionDuration() {
-	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {

@@ -73,8 +73,8 @@ func getSystemInfoMetrics(
 				ID:          node.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.ProxyConfiguration{
-				DefaultPartitionName: Params.ProxyCfg.DefaultPartitionName,
-				DefaultIndexName:     Params.ProxyCfg.DefaultIndexName,
+				DefaultPartitionName: Params.CommonCfg.DefaultPartitionName,
+				DefaultIndexName:     Params.CommonCfg.DefaultIndexName,
 			},
 		},
 	}

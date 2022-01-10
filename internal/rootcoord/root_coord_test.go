@@ -345,7 +345,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		ID:                         collID,
 		Schema:                     &schema,
 		PartitionIDs:               []typeutil.UniqueID{partID},
-		PartitionNames:             []string{Params.RootCoordCfg.DefaultPartitionName},
+		PartitionNames:             []string{Params.CommonCfg.DefaultPartitionName},
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
@@ -370,7 +370,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		Base:                 t.Base,
 		DbName:               t.DbName,
 		CollectionName:       t.CollectionName,
-		PartitionName:        Params.RootCoordCfg.DefaultPartitionName,
+		PartitionName:        Params.CommonCfg.DefaultPartitionName,
 		DbID:                 0, //TODO,not used
 		CollectionID:         collID,
 		PartitionID:          partID,
@@ -1071,7 +1071,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.FieldIndexes))
 		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, idxMeta.IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, idxMeta.IndexName)
 
 		req.FieldName = "no field"
 		rsp, err = core.CreateIndex(ctx, req)
@@ -1120,7 +1120,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 		assert.Equal(t, "vector", rsp.IndexDescriptions[0].FieldName)
 	})
 
@@ -1182,7 +1182,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 	})
 
 	wg.Add(1)
@@ -1223,11 +1223,11 @@ func TestRootCoord(t *testing.T) {
 
 		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName, idxMeta.IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, idxMeta.IndexName)
 
 		idxMeta, err = core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.RootCoordCfg.DefaultIndexName+"_bak", idxMeta.IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName+"_bak", idxMeta.IndexName)
 
 	})
 
@@ -1244,9 +1244,9 @@ func TestRootCoord(t *testing.T) {
 			DbName:         "",
 			CollectionName: collName,
 			FieldName:      "vector",
-			IndexName:      Params.RootCoordCfg.DefaultIndexName,
+			IndexName:      Params.CommonCfg.DefaultIndexName,
 		}
-		_, idx, err := core.MetaTable.GetIndexByName(collName, Params.RootCoordCfg.DefaultIndexName)
+		_, idx, err := core.MetaTable.GetIndexByName(collName, Params.CommonCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(idx))
 
@@ -1259,7 +1259,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, idx[0].IndexID, im.idxDropID[0])
 		im.mutex.Unlock()
 
-		_, idx, err = core.MetaTable.GetIndexByName(collName, Params.RootCoordCfg.DefaultIndexName)
+		_, idx, err = core.MetaTable.GetIndexByName(collName, Params.CommonCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, 0, len(idx))
 	})
@@ -1289,7 +1289,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
 		partName, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.RootCoordCfg.DefaultPartitionName, partName)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, partName)
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))

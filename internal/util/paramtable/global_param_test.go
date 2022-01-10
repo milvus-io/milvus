@@ -67,6 +67,18 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("Minio rootpath = %s", Params.RootPath)
 	})
 
+	t.Run("test commonConfig", func(t *testing.T) {
+		Params := GlobalParams.CommonCfg
+
+		assert.NotEqual(t, Params.DefaultPartitionName, "")
+		t.Logf("default partition name = %s", Params.DefaultPartitionName)
+
+		assert.NotEqual(t, Params.DefaultIndexName, "")
+		t.Logf("default index name = %s", Params.DefaultIndexName)
+
+		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
 
@@ -90,12 +102,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		assert.NotEqual(t, Params.MinSegmentSizeToEnableIndex, 0)
 		t.Logf("master MinSegmentSizeToEnableIndex = %d", Params.MinSegmentSizeToEnableIndex)
-
-		assert.NotEqual(t, Params.DefaultPartitionName, "")
-		t.Logf("default partition name = %s", Params.DefaultPartitionName)
-
-		assert.NotEqual(t, Params.DefaultIndexName, "")
-		t.Logf("default index name = %s", Params.DefaultIndexName)
 
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
@@ -123,12 +129,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum)
 
 		t.Logf("MaxDimension: %d", Params.MaxDimension)
-
-		t.Logf("DefaultPartitionName: %s", Params.DefaultPartitionName)
-
-		t.Logf("DefaultIndexName: %s", Params.DefaultIndexName)
-
-		//t.Logf("RoleName: %s", typeutil.ProxyRole)
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum)
 	})

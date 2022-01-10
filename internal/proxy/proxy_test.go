@@ -1260,7 +1260,7 @@ func TestProxy(t *testing.T) {
 		wg.Add(1)
 		t.Run("search_travel", func(t *testing.T) {
 			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration-100) * time.Second)
+			past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration-100) * time.Second)
 			travelTs := tsoutil.ComposeTSByTime(past, 0)
 			req := constructSearchRequest()
 			req.TravelTimestamp = travelTs
@@ -1273,7 +1273,7 @@ func TestProxy(t *testing.T) {
 		wg.Add(1)
 		t.Run("search_travel_succ", func(t *testing.T) {
 			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration+100) * time.Second)
+			past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration+100) * time.Second)
 			travelTs := tsoutil.ComposeTSByTime(past, 0)
 			req := constructSearchRequest()
 			req.TravelTimestamp = travelTs
@@ -1306,7 +1306,7 @@ func TestProxy(t *testing.T) {
 		wg.Add(1)
 		t.Run("query_travel", func(t *testing.T) {
 			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration-100) * time.Second)
+			past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration-100) * time.Second)
 			travelTs := tsoutil.ComposeTSByTime(past, 0)
 			queryReq := &milvuspb.QueryRequest{
 				Base:               nil,
@@ -1326,7 +1326,7 @@ func TestProxy(t *testing.T) {
 		wg.Add(1)
 		t.Run("query_travel_succ", func(t *testing.T) {
 			defer wg.Done()
-			past := time.Now().Add(time.Duration(-1*Params.ProxyCfg.RetentionDuration+100) * time.Second)
+			past := time.Now().Add(time.Duration(-1*Params.CommonCfg.RetentionDuration+100) * time.Second)
 			travelTs := tsoutil.ComposeTSByTime(past, 0)
 			queryReq := &milvuspb.QueryRequest{
 				Base:               nil,

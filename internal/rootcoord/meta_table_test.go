@@ -276,7 +276,7 @@ func TestMetaTable(t *testing.T) {
 		},
 		CreateTime:                 0,
 		PartitionIDs:               []typeutil.UniqueID{partIDDefault},
-		PartitionNames:             []string{Params.RootCoordCfg.DefaultPartitionName},
+		PartitionNames:             []string{Params.CommonCfg.DefaultPartitionName},
 		PartitionCreatedTimestamps: []uint64{0},
 	}
 	idxInfo := []*pb.IndexInfo{
@@ -733,7 +733,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 
 		ts = ftso()
-		_, err = mt.DeletePartition(collInfo.ID, Params.RootCoordCfg.DefaultPartitionName, ts, "")
+		_, err = mt.DeletePartition(collInfo.ID, Params.CommonCfg.DefaultPartitionName, ts, "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "default partition cannot be deleted")
 
