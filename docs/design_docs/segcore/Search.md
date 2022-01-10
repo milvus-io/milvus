@@ -23,7 +23,7 @@ After obtaining the AST, the execution engine uses the visitor mode to explain a
 1. Each node includes two steps, a mandatory vector search and an optional predicate.
 
    1. If Predicate exists, execute predicate expression stage to generate bitset as the vector search bitmask.
-   2. If Predicate does not exist, vector search bitmask will be empty.
+   2. If Predicate does not exist, the vector search bitmask will be empty.
    3. Bitmask will be used to mark filtered out / deleted entities in the vector execution engine.
 
 2. Currently, Milvus supports the following node on the AST, visitor mode is used to interpret and execute from top to bottom and generate the final bitmask.
