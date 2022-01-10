@@ -71,7 +71,7 @@ Besides All the reviewer's responsibility listed above, Approvers should also ma
 
 - Commit message starts with a capital letter and does not end with punctuation
 
-- Commit message is clear and meaningful. You can only have title but no body if the title is self explained
+- Commit message is clear and meaningful. You can only have title without body if the title is self explained
 
 - PR links to the correct issue, which clearly states the problems to be solved and the planned solution
 
