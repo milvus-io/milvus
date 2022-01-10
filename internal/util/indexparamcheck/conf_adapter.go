@@ -479,6 +479,7 @@ func newNGTPANNGConfAdapter() *NGTPANNGConfAdapter {
 	return &NGTPANNGConfAdapter{}
 }
 
+// NGTONNGConfAdapter checks if a NGT_ONNG index can be built.
 type NGTONNGConfAdapter struct {
 	BaseConfAdapter
 }
