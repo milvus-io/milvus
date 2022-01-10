@@ -335,11 +335,11 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
 	}
 

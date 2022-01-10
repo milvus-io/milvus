@@ -254,11 +254,11 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
 	}
 
@@ -357,13 +357,12 @@ func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
 // ---------- unittest util functions ----------
 // functions of third-party
 func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
-	bucketName := Params.QueryNodeCfg.MinioBucketName
 	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
-		BucketName:        bucketName,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
 	}
 	kv, err := minioKV.NewMinIOKV(ctx, option)

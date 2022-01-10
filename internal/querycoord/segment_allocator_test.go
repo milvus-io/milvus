@@ -53,12 +53,12 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 	}
 
 	cluster.dataKV, err = minioKV.NewMinIOKV(baseCtx, option)

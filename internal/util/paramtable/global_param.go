@@ -55,6 +55,7 @@ type GlobalParamTable struct {
 
 	PulsarCfg  pulsarConfig
 	RocksmqCfg rocksmqConfig
+	MinioCfg   minioConfig
 	//CommonCfg     commonConfig
 	//KnowhereCfg   knowhereConfig
 	//MsgChannelCfg msgChannelConfig
@@ -82,6 +83,7 @@ func (p *GlobalParamTable) Init() {
 
 	p.PulsarCfg.init(&p.BaseParams)
 	p.RocksmqCfg.init(&p.BaseParams)
+	p.MinioCfg.init(&p.BaseParams)
 	//p.CommonCfg.init(&p.BaseParams)
 	//p.KnowhereCfg.init(&p.BaseParams)
 	//p.MsgChannelCfg.init(&p.BaseParams)
@@ -102,7 +104,6 @@ func (p *GlobalParamTable) SetLogConfig(role string) {
 	p.BaseParams.SetLogConfig()
 }
 
-// TODO: considering remove it: comment a large block of code is not a good practice, old code can be found with git
 ///////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type pulsarConfig struct {
@@ -161,6 +162,78 @@ func (p *rocksmqConfig) initPath() {
 		panic(err)
 	}
 	p.Path = path
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- minio ---
+type minioConfig struct {
+	BaseParams *BaseParamTable
+
+	Address         string
+	AccessKeyID     string
+	SecretAccessKey string
+	UseSSL          bool
+	BucketName      string
+	RootPath        string
+}
+
+func (p *minioConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initAddress()
+	p.initAccessKeyID()
+	p.initSecretAccessKey()
+	p.initUseSSL()
+	p.initBucketName()
+	p.initRootPath()
+}
+
+func (p *minioConfig) initAddress() {
+	endpoint, err := p.BaseParams.Load("_MinioAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.Address = endpoint
+}
+
+func (p *minioConfig) initAccessKeyID() {
+	keyID, err := p.BaseParams.Load("_MinioAccessKeyID")
+	if err != nil {
+		panic(err)
+	}
+	p.AccessKeyID = keyID
+}
+
+func (p *minioConfig) initSecretAccessKey() {
+	key, err := p.BaseParams.Load("_MinioSecretAccessKey")
+	if err != nil {
+		panic(err)
+	}
+	p.SecretAccessKey = key
+}
+
+func (p *minioConfig) initUseSSL() {
+	usessl, err := p.BaseParams.Load("_MinioUseSSL")
+	if err != nil {
+		panic(err)
+	}
+	p.UseSSL, _ = strconv.ParseBool(usessl)
+}
+
+func (p *minioConfig) initBucketName() {
+	bucketName, err := p.BaseParams.Load("_MinioBucketName")
+	if err != nil {
+		panic(err)
+	}
+	p.BucketName = bucketName
+}
+
+func (p *minioConfig) initRootPath() {
+	rootPath, err := p.BaseParams.Load("minio.rootPath")
+	if err != nil {
+		panic(err)
+	}
+	p.RootPath = rootPath
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -664,13 +737,6 @@ type queryCoordConfig struct {
 	SearchChannelPrefix       string
 	SearchResultChannelPrefix string
 
-	//--- Minio ---
-	MinioEndPoint        string
-	MinioAccessKeyID     string
-	MinioSecretAccessKey string
-	MinioUseSSLStr       bool
-	MinioBucketName      string
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
@@ -696,13 +762,6 @@ func (p *queryCoordConfig) init(bp *BaseParamTable) {
 	p.initSearchResultChannelPrefix()
 	p.initStatsChannelName()
 	p.initTimeTickChannelName()
-
-	//--- Minio ----
-	p.initMinioEndPoint()
-	p.initMinioAccessKeyID()
-	p.initMinioSecretAccessKey()
-	p.initMinioUseSSLStr()
-	p.initMinioBucketName()
 
 	//---- Handoff ---
 	p.initAutoHandoff()
@@ -760,50 +819,6 @@ func (p *queryCoordConfig) initTimeTickChannelName() {
 	}
 	s := []string{p.ClusterChannelPrefix, config}
 	p.TimeTickChannelName = strings.Join(s, "-")
-}
-
-func (p *queryCoordConfig) initMinioEndPoint() {
-	url, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioEndPoint = url
-}
-
-func (p *queryCoordConfig) initMinioAccessKeyID() {
-	id, err := p.BaseParams.Load("minio.accessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioAccessKeyID = id
-}
-
-func (p *queryCoordConfig) initMinioSecretAccessKey() {
-	key, err := p.BaseParams.Load("minio.secretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioSecretAccessKey = key
-}
-
-func (p *queryCoordConfig) initMinioUseSSLStr() {
-	ssl, err := p.BaseParams.Load("minio.useSSL")
-	if err != nil {
-		panic(err)
-	}
-	sslBoolean, err := strconv.ParseBool(ssl)
-	if err != nil {
-		panic(err)
-	}
-	p.MinioUseSSLStr = sslBoolean
-}
-
-func (p *queryCoordConfig) initMinioBucketName() {
-	bucketName, err := p.BaseParams.Load("minio.bucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioBucketName = bucketName
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
@@ -892,13 +907,6 @@ type queryNodeConfig struct {
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 
-	// minio
-	MinioEndPoint        string
-	MinioAccessKeyID     string
-	MinioSecretAccessKey string
-	MinioUseSSLStr       bool
-	MinioBucketName      string
-
 	// search
 	SearchChannelNames         []string
 	SearchResultChannelNames   []string
@@ -937,13 +945,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
 	p.initCacheSize()
-
-	p.initMinioEndPoint()
-	p.initMinioAccessKeyID()
-	p.initMinioSecretAccessKey()
-	p.initMinioUseSSLStr()
-	p.initMinioBucketName()
-
 	p.initGracefulTime()
 
 	p.initFlowGraphMaxQueueLength()
@@ -997,51 +998,6 @@ func (p *queryNodeConfig) initCacheSize() {
 		return
 	}
 	p.CacheSize = value
-}
-
-// ---------------------------------------------------------- minio
-func (p *queryNodeConfig) initMinioEndPoint() {
-	url, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioEndPoint = url
-}
-
-func (p *queryNodeConfig) initMinioAccessKeyID() {
-	id, err := p.BaseParams.Load("minio.accessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioAccessKeyID = id
-}
-
-func (p *queryNodeConfig) initMinioSecretAccessKey() {
-	key, err := p.BaseParams.Load("minio.secretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioSecretAccessKey = key
-}
-
-func (p *queryNodeConfig) initMinioUseSSLStr() {
-	ssl, err := p.BaseParams.Load("minio.useSSL")
-	if err != nil {
-		panic(err)
-	}
-	sslBoolean, err := strconv.ParseBool(ssl)
-	if err != nil {
-		panic(err)
-	}
-	p.MinioUseSSLStr = sslBoolean
-}
-
-func (p *queryNodeConfig) initMinioBucketName() {
-	bucketName, err := p.BaseParams.Load("minio.bucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioBucketName = bucketName
 }
 
 // advanced params
@@ -1151,14 +1107,6 @@ type dataCoordConfig struct {
 	// --- ETCD ---
 	ChannelWatchSubPath string
 
-	// --- MinIO ---
-	MinioAddress         string
-	MinioAccessKeyID     string
-	MinioSecretAccessKey string
-	MinioUseSSL          bool
-	MinioBucketName      string
-	MinioRootPath        string
-
 	// --- SEGMENTS ---
 	SegmentMaxSize          float64
 	SegmentSealProportion   float64
@@ -1203,13 +1151,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initDataCoordSubscriptionName()
 
 	p.initEnableCompaction()
-
-	p.initMinioAddress()
-	p.initMinioAccessKeyID()
-	p.initMinioSecretAccessKey()
-	p.initMinioUseSSL()
-	p.initMinioBucketName()
-	p.initMinioRootPath()
 
 	p.initRetentionDuration()
 	p.initEnableAutoCompaction()
@@ -1304,55 +1245,6 @@ func (p *dataCoordConfig) initGCDropTolerance() {
 	p.GCDropTolerance = time.Duration(p.BaseParams.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 24*60*60)) * time.Second
 }
 
-// --- MinIO ---
-func (p *dataCoordConfig) initMinioAddress() {
-	endpoint, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioAddress = endpoint
-}
-
-func (p *dataCoordConfig) initMinioAccessKeyID() {
-	keyID, err := p.BaseParams.Load("_MinioAccessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioAccessKeyID = keyID
-}
-
-func (p *dataCoordConfig) initMinioSecretAccessKey() {
-	key, err := p.BaseParams.Load("_MinioSecretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioSecretAccessKey = key
-}
-
-func (p *dataCoordConfig) initMinioUseSSL() {
-	usessl, err := p.BaseParams.Load("_MinioUseSSL")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioUseSSL, _ = strconv.ParseBool(usessl)
-}
-
-func (p *dataCoordConfig) initMinioBucketName() {
-	bucketName, err := p.BaseParams.Load("_MinioBucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioBucketName = bucketName
-}
-
-func (p *dataCoordConfig) initMinioRootPath() {
-	rootPath, err := p.BaseParams.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioRootPath = rootPath
-}
-
 func (p *dataCoordConfig) initRetentionDuration() {
 	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
 }
@@ -1398,13 +1290,6 @@ type dataNodeConfig struct {
 	// etcd
 	ChannelWatchSubPath string
 
-	// MinIO
-	MinioAddress         string
-	MinioAccessKeyID     string
-	MinioSecretAccessKey string
-	MinioUseSSL          bool
-	MinioBucketName      string
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -1425,12 +1310,6 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.initMsgChannelSubName()
 
 	p.initChannelWatchPath()
-
-	p.initMinioAddress()
-	p.initMinioAccessKeyID()
-	p.initMinioSecretAccessKey()
-	p.initMinioUseSSL()
-	p.initMinioBucketName()
 
 	p.initDmlChannelName()
 	p.initDeltaChannelName()
@@ -1459,7 +1338,7 @@ func (p *dataNodeConfig) initFlushInsertBufferSize() {
 }
 
 func (p *dataNodeConfig) initInsertBinlogRootPath() {
-	// GOOSE TODO: rootPath change to  TenentID
+	// GOOSE TODO: rootPath change to TenentID
 	rootPath, err := p.BaseParams.Load("minio.rootPath")
 	if err != nil {
 		panic(err)
@@ -1513,47 +1392,6 @@ func (p *dataNodeConfig) initChannelWatchPath() {
 	p.ChannelWatchSubPath = "channelwatch"
 }
 
-// --- MinIO ---
-func (p *dataNodeConfig) initMinioAddress() {
-	endpoint, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioAddress = endpoint
-}
-
-func (p *dataNodeConfig) initMinioAccessKeyID() {
-	keyID, err := p.BaseParams.Load("_MinioAccessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioAccessKeyID = keyID
-}
-
-func (p *dataNodeConfig) initMinioSecretAccessKey() {
-	key, err := p.BaseParams.Load("_MinioSecretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioSecretAccessKey = key
-}
-
-func (p *dataNodeConfig) initMinioUseSSL() {
-	usessl, err := p.BaseParams.Load("_MinioUseSSL")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioUseSSL, _ = strconv.ParseBool(usessl)
-}
-
-func (p *dataNodeConfig) initMinioBucketName() {
-	bucketName, err := p.BaseParams.Load("_MinioBucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioBucketName = bucketName
-}
-
 func (p *dataNodeConfig) initDmlChannelName() {
 	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
 	if err != nil {
@@ -1582,12 +1420,6 @@ type indexCoordConfig struct {
 
 	IndexStorageRootPath string
 
-	MinIOAddress         string
-	MinIOAccessKeyID     string
-	MinIOSecretAccessKey string
-	MinIOUseSSL          bool
-	MinioBucketName      string
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -1595,60 +1427,7 @@ type indexCoordConfig struct {
 func (p *indexCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initMinIOAddress()
-	p.initMinIOAccessKeyID()
-	p.initMinIOSecretAccessKey()
-	p.initMinIOUseSSL()
-	p.initMinioBucketName()
 	p.initIndexStorageRootPath()
-}
-
-// initMinIOAddress initializes init the minio address of configuration items.
-func (p *indexCoordConfig) initMinIOAddress() {
-	ret, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOAddress = ret
-}
-
-// initMinIOAccessKeyID initializes the minio access key of configuration items.
-func (p *indexCoordConfig) initMinIOAccessKeyID() {
-	ret, err := p.BaseParams.Load("minio.accessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOAccessKeyID = ret
-}
-
-// initMinIOSecretAccessKey initializes the minio secret access key.
-func (p *indexCoordConfig) initMinIOSecretAccessKey() {
-	ret, err := p.BaseParams.Load("minio.secretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOSecretAccessKey = ret
-}
-
-// initMinIOUseSSL initializes the minio use SSL of configuration items.
-func (p *indexCoordConfig) initMinIOUseSSL() {
-	ret, err := p.BaseParams.Load("minio.useSSL")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOUseSSL, err = strconv.ParseBool(ret)
-	if err != nil {
-		panic(err)
-	}
-}
-
-// initMinioBucketName initializes the minio bucket name of configuration items.
-func (p *indexCoordConfig) initMinioBucketName() {
-	bucketName, err := p.BaseParams.Load("minio.bucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioBucketName = bucketName
 }
 
 // initIndexStorageRootPath initializes the root path of index files.
@@ -1674,12 +1453,6 @@ type indexNodeConfig struct {
 
 	IndexStorageRootPath string
 
-	MinIOAddress         string
-	MinIOAccessKeyID     string
-	MinIOSecretAccessKey string
-	MinIOUseSSL          bool
-	MinioBucketName      string
-
 	SimdType string
 
 	CreatedTime time.Time
@@ -1689,11 +1462,6 @@ type indexNodeConfig struct {
 func (p *indexNodeConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	p.initMinIOAddress()
-	p.initMinIOAccessKeyID()
-	p.initMinIOSecretAccessKey()
-	p.initMinIOUseSSL()
-	p.initMinioBucketName()
 	p.initIndexStorageRootPath()
 	p.initKnowhereSimdType()
 }
@@ -1703,55 +1471,12 @@ func (p *indexNodeConfig) InitAlias(alias string) {
 	p.Alias = alias
 }
 
-func (p *indexNodeConfig) initMinIOAddress() {
-	ret, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOAddress = ret
-}
-
-func (p *indexNodeConfig) initMinIOAccessKeyID() {
-	ret, err := p.BaseParams.Load("_MinioAccessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOAccessKeyID = ret
-}
-
-func (p *indexNodeConfig) initMinIOSecretAccessKey() {
-	ret, err := p.BaseParams.Load("_MinioSecretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOSecretAccessKey = ret
-}
-
-func (p *indexNodeConfig) initMinIOUseSSL() {
-	ret, err := p.BaseParams.Load("_MinioUseSSL")
-	if err != nil {
-		panic(err)
-	}
-	p.MinIOUseSSL, err = strconv.ParseBool(ret)
-	if err != nil {
-		panic(err)
-	}
-}
-
 func (p *indexNodeConfig) initIndexStorageRootPath() {
 	rootPath, err := p.BaseParams.Load("minio.rootPath")
 	if err != nil {
 		panic(err)
 	}
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
-}
-
-func (p *indexNodeConfig) initMinioBucketName() {
-	bucketName, err := p.BaseParams.Load("_MinioBucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.MinioBucketName = bucketName
 }
 
 func (p *indexNodeConfig) initKnowhereSimdType() {

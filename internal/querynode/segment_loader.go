@@ -672,12 +672,12 @@ func newSegmentLoader(ctx context.Context,
 	etcdKV *etcdkv.EtcdKV,
 	factory msgstream.Factory) *segmentLoader {
 	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 	}
 
 	client, err := minioKV.NewMinIOKV(ctx, option)

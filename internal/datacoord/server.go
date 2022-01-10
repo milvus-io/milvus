@@ -343,21 +343,21 @@ func (s *Server) initGarbageCollection() error {
 	var cli *minio.Client
 	var err error
 	if Params.DataCoordCfg.EnableGarbageCollection {
-		cli, err = minio.New(Params.DataCoordCfg.MinioAddress, &minio.Options{
-			Creds:  credentials.NewStaticV4(Params.DataCoordCfg.MinioAccessKeyID, Params.DataCoordCfg.MinioSecretAccessKey, ""),
-			Secure: Params.DataCoordCfg.MinioUseSSL,
+		cli, err = minio.New(Params.MinioCfg.Address, &minio.Options{
+			Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, ""),
+			Secure: Params.MinioCfg.UseSSL,
 		})
 		if err != nil {
 			return err
 		}
 
 		checkBucketFn := func() error {
-			has, err := cli.BucketExists(context.TODO(), Params.DataCoordCfg.MinioBucketName)
+			has, err := cli.BucketExists(context.TODO(), Params.MinioCfg.BucketName)
 			if err != nil {
 				return err
 			}
 			if !has {
-				err = cli.MakeBucket(context.TODO(), Params.DataCoordCfg.MinioBucketName, minio.MakeBucketOptions{})
+				err = cli.MakeBucket(context.TODO(), Params.MinioCfg.BucketName, minio.MakeBucketOptions{})
 				if err != nil {
 					return err
 				}
@@ -377,8 +377,8 @@ func (s *Server) initGarbageCollection() error {
 	s.garbageCollector = newGarbageCollector(s.meta, GcOption{
 		cli:        cli,
 		enabled:    Params.DataCoordCfg.EnableGarbageCollection,
-		bucketName: Params.DataCoordCfg.MinioBucketName,
-		rootPath:   Params.DataCoordCfg.MinioRootPath,
+		bucketName: Params.MinioCfg.BucketName,
+		rootPath:   Params.MinioCfg.RootPath,
 
 		checkInterval:    Params.DataCoordCfg.GCInterval,
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,

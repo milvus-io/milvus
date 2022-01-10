@@ -176,11 +176,11 @@ func (i *IndexNode) Init() error {
 		i.etcdKV = etcdKV
 
 		option := &miniokv.Option{
-			Address:           Params.IndexNodeCfg.MinIOAddress,
-			AccessKeyID:       Params.IndexNodeCfg.MinIOAccessKeyID,
-			SecretAccessKeyID: Params.IndexNodeCfg.MinIOSecretAccessKey,
-			UseSSL:            Params.IndexNodeCfg.MinIOUseSSL,
-			BucketName:        Params.IndexNodeCfg.MinioBucketName,
+			Address:           Params.MinioCfg.Address,
+			AccessKeyID:       Params.MinioCfg.AccessKeyID,
+			SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+			UseSSL:            Params.MinioCfg.UseSSL,
+			BucketName:        Params.MinioCfg.BucketName,
 			CreateBucket:      true,
 		}
 		kv, err := miniokv.NewMinIOKV(i.loopCtx, option)
