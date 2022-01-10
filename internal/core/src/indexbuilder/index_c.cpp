@@ -14,7 +14,6 @@
 #include <malloc.h>
 #endif
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
 
@@ -52,7 +51,8 @@ DeleteIndex(CIndex index) {
     delete cIndex;
 #ifndef __APPLE__
     malloc_trim(0);
-#endif}
+#endif
+}
 
 CStatus
 BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors) {
