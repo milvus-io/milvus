@@ -79,6 +79,13 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
 	})
 
+	t.Run("test knowhereConfig", func(t *testing.T) {
+		Params := GlobalParams.KnowhereCfg
+
+		assert.NotEqual(t, Params.SimdType, "")
+		t.Logf("knowhere simd type = %s", Params.SimdType)
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
 
@@ -323,8 +330,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("NodeID: %v", Params.NodeID)
 
 		t.Logf("Alias: %v", Params.Alias)
-
-		t.Logf("SimdType: %v", Params.SimdType)
 
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)

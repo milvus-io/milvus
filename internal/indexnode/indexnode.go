@@ -138,9 +138,9 @@ func (i *IndexNode) initKnowhere() {
 	C.IndexBuilderInit()
 
 	// override index builder SIMD type
-	cSimdType := C.CString(Params.IndexNodeCfg.SimdType)
+	cSimdType := C.CString(Params.KnowhereCfg.SimdType)
 	cRealSimdType := C.IndexBuilderSetSimdType(cSimdType)
-	Params.IndexNodeCfg.SimdType = C.GoString(cRealSimdType)
+	Params.KnowhereCfg.SimdType = C.GoString(cRealSimdType)
 	C.free(unsafe.Pointer(cRealSimdType))
 	C.free(unsafe.Pointer(cSimdType))
 }
