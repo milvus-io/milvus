@@ -41,6 +41,13 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.Equal(t, Params.MaxMessageSize, SuggestPulsarMaxMessageSize)
 	})
 
+	t.Run("test rocksmqConfig", func(t *testing.T) {
+		Params := GlobalParams.RocksmqCfg
+
+		assert.NotEqual(t, Params.Path, "")
+		t.Logf("rocksmq path = %s", Params.Path)
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
 
@@ -79,8 +86,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 	t.Run("test proxyConfig", func(t *testing.T) {
 		Params := GlobalParams.ProxyCfg
-
-		t.Logf("RocksmqPath: %s", Params.RocksmqPath)
 
 		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
 
