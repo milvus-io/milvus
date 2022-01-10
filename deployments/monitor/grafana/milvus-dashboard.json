@@ -142,7 +142,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of create_collection requests",
+      "description": "per-minute increasing rate of create_collection requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
