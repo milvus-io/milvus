@@ -95,7 +95,7 @@ type Segment struct {
 	rmMutex          sync.Mutex // guards recentlyModified
 	recentlyModified bool
 
-	typeMu      sync.Mutex // guards builtIndex
+	typeMu      sync.RWMutex // guards builtIndex
 	segmentType segmentType
 
 	paramMutex sync.RWMutex // guards index
@@ -153,8 +153,8 @@ func (s *Segment) setType(segType segmentType) {
 }
 
 func (s *Segment) getType() segmentType {
-	s.typeMu.Lock()
-	defer s.typeMu.Unlock()
+	s.typeMu.RLock()
+	defer s.typeMu.RUnlock()
 	return s.segmentType
 }
 

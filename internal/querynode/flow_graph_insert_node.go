@@ -281,7 +281,7 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 		return
 	}
 
-	if targetSegment.segmentType != segmentTypeGrowing {
+	if targetSegment.getType() != segmentTypeGrowing {
 		wg.Done()
 		return
 	}
@@ -313,7 +313,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 		return
 	}
 
-	if targetSegment.segmentType != segmentTypeGrowing {
+	if targetSegment.getType() != segmentTypeGrowing {
 		return
 	}
 
