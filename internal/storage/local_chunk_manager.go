@@ -82,11 +82,12 @@ func (lcm *LocalChunkManager) Read(key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer file.Close()
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}
-	return content, file.Close()
+	return content, nil
 }
 
 // ReadAt reads specific position data of local storage if exists.
