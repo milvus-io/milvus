@@ -39,6 +39,8 @@ jobs:
         working-directory: tests/python_client/deploy
         run: |
           pip install -r requirements.txt
+          # update pymilvus to latest version
+          pip install -i https://test.pypi.org/simple/ pymilvus==2.0.0rc10.dev2
       
       - name: Run deploy test
         timeout-minutes: 60
@@ -102,7 +104,9 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
-          pip install -r requirements.txt         
+          pip install -r requirements.txt
+          # update pymilvus to latest version
+          pip install -i https://test.pypi.org/simple/ pymilvus==2.0.0rc10.dev2         
       
       - name: First Milvus Deployment
         timeout-minutes: 60
