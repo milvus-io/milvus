@@ -184,7 +184,7 @@ message DropCollectionRequest {
 ```
 
 ## HasCollection
-To test existence of a collection by name. Return [BoolResponse](#boolresponse) to tell client whether the collection is exist.
+To test the existence of a collection by name. Return [BoolResponse](#boolresponse) to tell client whether the collection is exist.
 ```
 rpc HasCollection(HasCollectionRequest) returns (BoolResponse) {}
 ```
