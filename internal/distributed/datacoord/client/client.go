@@ -148,6 +148,7 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// Flush flushes a collection's data
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -388,6 +389,7 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
 
+// CompleteCompaction completes a compaction with the result
 func (c *Client) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -401,6 +403,7 @@ func (c *Client) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 	return ret.(*commonpb.Status), err
 }
 
+// ManualCompaction triggers a compaction for a collection
 func (c *Client) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -414,6 +417,7 @@ func (c *Client) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	return ret.(*milvuspb.ManualCompactionResponse), err
 }
 
+// GetCompactionState gets the state of a compaction
 func (c *Client) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -427,6 +431,7 @@ func (c *Client) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	return ret.(*milvuspb.GetCompactionStateResponse), err
 }
 
+// GetCompactionStateWithPlans gets the state of a compaction by plan
 func (c *Client) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
