@@ -4897,18 +4897,22 @@ type DropAliasTask struct {
 	result    *commonpb.Status
 }
 
+// TraceCtx returns the context for trace
 func (d *DropAliasTask) TraceCtx() context.Context {
 	return d.ctx
 }
 
+// ID returns the MsgID
 func (d *DropAliasTask) ID() UniqueID {
 	return d.Base.MsgID
 }
 
+// SetID sets the MsgID
 func (d *DropAliasTask) SetID(uid UniqueID) {
 	d.Base.MsgID = uid
 }
 
+// Name returns the name of the task
 func (d *DropAliasTask) Name() string {
 	return DropAliasTaskName
 }
