@@ -245,7 +245,7 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "$datasource",
-      "description": "per-minute increasing rate of show_collections requests",
+      "description": "per-minute increasing rate of show_collections requests.",
       "fieldConfig": {
         "defaults": {},
         "overrides": []
