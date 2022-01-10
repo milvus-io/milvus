@@ -41,7 +41,8 @@ class TestInsertParams(TestcaseBase):
     def test_insert_dataframe_data(self):
         """
         target: test insert DataFrame data
-        method: 1.create 2.insert dataframe data
+        method: 1.create collection
+                2.insert dataframe data
         expected: assert num entities
         """
         c_name = cf.gen_unique_str(prefix)
