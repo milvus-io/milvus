@@ -180,7 +180,7 @@ message CreateIndexRequest {
 
 13. When receiving `CreateIndex` request, `IndexNode` would wrap this request into `IndexBuildTask`, and push this task into `IndexBuildQueue`, then send response to `IndexCoord`.
 
-14. There is a background service, `indexBuildLoop`, in the `IndexNode`. `indexBuildLoop` would call `scheduleIndexBuildTask` to get a `IndexBuildTask` from `IndexBuildQueue`, and then start another `goroutine` to build index and update meta.
+14. There is a background service, `indexBuildLoop`, in the `IndexNode`. `indexBuildLoop` would call `scheduleIndexBuildTask` to get an `IndexBuildTask` from `IndexBuildQueue`, and then start another `goroutine` to build index and update meta.
 
 _Note_: `IndexNode` will not notify the `QueryCoord` to load the index files, if a user wants to speed up search by these index files, he should call `ReleaseCollection` firstly, then call `LoadCollection` to load these index files.
 
