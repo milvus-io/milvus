@@ -970,7 +970,7 @@ message SearchRequest {
   // Filtering entities by timestamp. (Optional)
   uint64 travel_timestamp = 10;
 
-  // The time tolerance between entities visibility and search action. Default is 0. In Milvus, each entity has a timestamp. To ensure data consistence, each node(query node and data node) will consume data in a time interval. So entity visibility is a bit later than its timestamp. If this value is 0, Milvus will hold the search action, wait until all entities whose timestamp is earlier that the search action's timestamp to be fully consumed.
+  // The time tolerance between entities visibility and search action. Default is 0. In Milvus, each entity has a timestamp. To ensure data consistence, each node(query node and data node) will consume data in a time interval. So entity visibility is a bit later than its timestamp. If this value is 0, Milvus will hold the search action, wait until all entities whose timestamp is earlier than the search action's timestamp to be fully consumed.
   uint64 guarantee_timestamp = 11;
 }
 ```
