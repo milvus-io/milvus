@@ -47,7 +47,7 @@ all Approvers are listed under OWNERS_ALIASES file.
 
 - If `[skip e2e]` is tagged, is it safe enough to skip running e2e tests?
   - Notes: it skips running e2e tests, if there is a `[skip e2e]` in the commit message.
-- Does the code will generate similar logs many times in one seconds?
+- Does the code will generate similar logs many times in one second?
 
 ## Things to keep in mind when you are writing a review comment
 
