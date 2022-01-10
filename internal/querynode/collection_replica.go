@@ -439,7 +439,7 @@ func (colReplica *collectionReplica) getPartitionByID(partitionID UniqueID) (*Pa
 func (colReplica *collectionReplica) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
 	partition, ok := colReplica.partitions[partitionID]
 	if !ok {
-		return nil, errors.New("partition hasn't been loaded or has been released, partition id = %d" + strconv.FormatInt(partitionID, 10))
+		return nil, fmt.Errorf("partition %d hasn't been loaded or has been released", partitionID)
 	}
 
 	return partition, nil
