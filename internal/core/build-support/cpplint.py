@@ -3717,7 +3717,7 @@ def CheckSpacing(filename, clean_lines, linenum, nesting_state, error):
       # OK, we have a blank line at the start of a code block.  Before we
       # complain, we check if it is an exception to the rule: The previous
       # non-empty line has the parameters of a function header that are indented
-      # 4 spaces (because they did not fit in a 80 column line when placed on
+      # 4 spaces (because they did not fit in an 80 column line when placed on
       # the same line as the function name).  We also check for the case where
       # the previous line is indented 6 spaces, which may happen when the
       # initializers of a constructor do not fit into a 80 column line.
