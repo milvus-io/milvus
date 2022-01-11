@@ -64,6 +64,9 @@ jobs:
            brew install boost libomp ninja tbb
            brew uninstall llvm
            brew install llvm@12
-           export CC="$(brew --prefix llvm)/bin/clang"
-           export CXX="$(brew --prefix llvm)/bin/clang++"
+           export CPPFLAGS="-I/usr/local/opt/llvm@12/include"
+           echo 'export PATH="/usr/local/opt/llvm@12/bin:$PATH"' >> /Users/runner/.bash_profile
+           export LDFLAGS="-L/usr/local/opt/llvm@12/lib"
+           export CC="/usr/local/opt/llvm@12/bin/clang"
+           export CXX="/usr/local/opt/llvm@12/bin/clang++"           
            make check-proto-product && make verifiers
