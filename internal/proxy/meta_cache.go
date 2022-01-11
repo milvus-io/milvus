@@ -67,6 +67,7 @@ type partitionInfo struct {
 	createdUtcTimestamp uint64
 }
 
+// make sure MetaCache implements Cache.
 var _ Cache = (*MetaCache)(nil)
 
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
