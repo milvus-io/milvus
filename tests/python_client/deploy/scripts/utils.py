@@ -146,7 +146,7 @@ def load_and_search(prefix):
         # define output_fields of search result
         res = c.search(
             vectors[:1], "float_vector", search_params, topK,
-            "count > 500", output_fields=["count", "random_value"], timeout=60
+            "count > 500", output_fields=["count", "random_value"], timeout=120
         )
         end_time = time.time()
         # show result
