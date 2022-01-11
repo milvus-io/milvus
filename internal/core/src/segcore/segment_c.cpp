@@ -23,17 +23,17 @@
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
-NewSegment(CCollection collection, SegmentType seg_type) {
+NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
     auto col = (milvus::segcore::Collection*)collection;
 
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
         case Growing:
-            segment = milvus::segcore::CreateGrowingSegment(col->get_schema());
+            segment = milvus::segcore::CreateGrowingSegment(col->get_schema(), segment_id);
             break;
         case Sealed:
         case Indexing:
-            segment = milvus::segcore::CreateSealedSegment(col->get_schema());
+            segment = milvus::segcore::CreateSealedSegment(col->get_schema(), segment_id);
             break;
         default:
             LOG_SEGCORE_ERROR_ << "invalid segment type " << (int32_t)seg_type;
@@ -61,18 +61,28 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
-       CSearchResult* result) {
+       CSearchResult* result,
+       int64_t segment_id) {
+    const std::string log_prefix = "[TODO: remove] debug #14077, segment_id = " + std::to_string(segment_id) + ", ";
+    std::cout << log_prefix << "cgo::Search searching..., timestamp = " << timestamp << ", segmentPtr = " << c_segment
+              << ", planPtr = " << c_plan << ", resultPtr = " << result << std::endl;
     try {
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+        std::cout << log_prefix << "cgo::Search init segment done" << std::endl;
         auto plan = (milvus::query::Plan*)c_plan;
+        std::cout << log_prefix << "cgo::Search init plan done" << std::endl;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
+        std::cout << log_prefix << "cgo::Search init placeHolderGroup done" << std::endl;
         auto search_result = segment->Search(plan, *phg_ptr, timestamp);
+        std::cout << log_prefix << "cgo::Search done" << std::endl;
         if (!milvus::segcore::PositivelyRelated(plan->plan_node_->search_info_.metric_type_)) {
             for (auto& dis : search_result->distances_) {
                 dis *= -1;
             }
         }
+        std::cout << log_prefix << "cgo::Search PositivelyRelated done" << std::endl;
         *result = search_result.release();
+        std::cout << log_prefix << "cgo::Search result release done" << std::endl;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

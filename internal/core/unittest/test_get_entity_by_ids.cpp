@@ -325,8 +325,8 @@ TEST(GetEntityByIds, delete_retrieve) {
     }
 
     int64_t new_count = 6;
-    std::vector<idx_t> new_pks{0,1,2,3,4,5};
-    std::vector<idx_t> new_timestamps{10, 10, 10,10,10, 10};
+    std::vector<idx_t> new_pks{0, 1, 2, 3, 4, 5};
+    std::vector<idx_t> new_timestamps{10, 10, 10, 10, 10, 10};
     auto reserved_offset = segment->PreDelete(new_count);
     ASSERT_EQ(reserved_offset, row_count);
     segment->Delete(reserved_offset, new_count, reinterpret_cast<const int64_t*>(new_pks.data()),
@@ -343,7 +343,7 @@ TEST(GetEntityByIds, delete_retrieve) {
         for (int i = 0; i < size; ++i) {
             auto index = choose(i);
             auto data = field0_data.data(i);
-            ASSERT_EQ(data, i64_col[index+new_count]);
+            ASSERT_EQ(data, i64_col[index + new_count]);
         }
 
         auto field1 = retrieve_results->fields_data(1);
@@ -351,5 +351,4 @@ TEST(GetEntityByIds, delete_retrieve) {
         auto field1_data = field1.vectors().float_vector();
         ASSERT_EQ(field1_data.data_size(), DIM * size);
     }
-
 }
