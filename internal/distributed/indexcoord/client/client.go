@@ -87,6 +87,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
+// getIndexCoordAddr get the address of IndexCoord from session.
 func (c *Client) getIndexCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
