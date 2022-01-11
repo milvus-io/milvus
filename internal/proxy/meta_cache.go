@@ -49,6 +49,7 @@ type Cache interface {
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
+	// RemoveCollection remove the specific collection.
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
 }
