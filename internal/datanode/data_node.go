@@ -317,9 +317,9 @@ func (node *DataNode) handleWatchInfo(key string, data []byte) {
 		log.Warn("fail to parse ChannelWatchInfo", zap.String("key", key), zap.Error(err))
 		return
 	}
-	log.Debug("DataNode handleWatchInfo Unmarshal success")
+	log.Debug("DataNode handleWatchInfo Unmarshal success", zap.String("key", key))
 	if watchInfo.State == datapb.ChannelWatchState_Complete {
-		log.Warn("DataNode handleWatchInfo State is already ChannelWatchState_Complete")
+		log.Warn("DataNode handleWatchInfo State is already ChannelWatchState_Complete", zap.String("key", key))
 		return
 	}
 	if watchInfo.Vchan == nil {
