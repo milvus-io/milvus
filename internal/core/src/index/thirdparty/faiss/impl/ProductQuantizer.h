@@ -104,7 +104,7 @@ struct ProductQuantizer {
 
     /** Compute distance table for one vector.
      *
-     * The distance table for x = [x_0 x_1 .. x_(M-1)] is a M * ksub
+     * The distance table for x = [x_0 x_1 .. x_(M-1)] is an M * ksub
      * matrix that contains
      *
      *   dis_table (m, j) = || x_m - c_(m, j)||^2
