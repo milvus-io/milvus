@@ -57,8 +57,8 @@ type GlobalParamTable struct {
 	RocksmqCfg rocksmqConfig
 	MinioCfg   minioConfig
 
-	CommonCfg commonConfig
-	//KnowhereCfg   knowhereConfig
+	CommonCfg   commonConfig
+	KnowhereCfg knowhereConfig
 	//MsgChannelCfg msgChannelConfig
 
 	RootCoordCfg  rootCoordConfig
@@ -87,7 +87,7 @@ func (p *GlobalParamTable) Init() {
 	p.MinioCfg.init(&p.BaseParams)
 
 	p.CommonCfg.init(&p.BaseParams)
-	//p.KnowhereCfg.init(&p.BaseParams)
+	p.KnowhereCfg.init(&p.BaseParams)
 	//p.MsgChannelCfg.init(&p.BaseParams)
 
 	p.RootCoordCfg.init(&p.BaseParams)
@@ -257,13 +257,11 @@ func (p *commonConfig) init(bp *BaseParamTable) {
 }
 
 func (p *commonConfig) initDefaultPartitionName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
-	p.DefaultPartitionName = name
+	p.DefaultPartitionName = p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
 }
 
 func (p *commonConfig) initDefaultIndexName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
-	p.DefaultIndexName = name
+	p.DefaultIndexName = p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
 }
 
 func (p *commonConfig) initRetentionDuration() {
@@ -272,13 +270,21 @@ func (p *commonConfig) initRetentionDuration() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- knowhere ---
-//type knowhereConfig struct {
-//	BaseParams *BaseParamTable
-//}
-//
-//func (p *knowhereConfig) init(bp *BaseParamTable) {
-//	p.BaseParams = bp
-//}
+type knowhereConfig struct {
+	BaseParams *BaseParamTable
+
+	SimdType string
+}
+
+func (p *knowhereConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initSimdType()
+}
+
+func (p *knowhereConfig) initSimdType() {
+	p.SimdType = p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- msgChannel ---
@@ -903,7 +909,6 @@ type queryNodeConfig struct {
 
 	// segcore
 	ChunkRows int64
-	SimdType  string
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -937,7 +942,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 	p.initStatsPublishInterval()
 
 	p.initSegcoreChunkRows()
-	p.initKnowhereSimdType()
 
 	p.initSkipQueryChannelRecovery()
 	p.initOverloadedMemoryThresholdPercentage()
@@ -1046,12 +1050,6 @@ func (p *queryNodeConfig) initGracefulTime() {
 
 func (p *queryNodeConfig) initSegcoreChunkRows() {
 	p.ChunkRows = p.BaseParams.ParseInt64WithDefault("queryNode.segcore.chunkRows", 32768)
-}
-
-func (p *queryNodeConfig) initKnowhereSimdType() {
-	simdType := p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
-	p.SimdType = simdType
-	log.Debug("initialize the knowhere simd type", zap.String("simd_type", p.SimdType))
 }
 
 func (p *queryNodeConfig) initSkipQueryChannelRecovery() {
@@ -1419,8 +1417,6 @@ type indexNodeConfig struct {
 
 	IndexStorageRootPath string
 
-	SimdType string
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -1429,7 +1425,6 @@ func (p *indexNodeConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
 	p.initIndexStorageRootPath()
-	p.initKnowhereSimdType()
 }
 
 // InitAlias initializes an alias for the IndexNode role.
@@ -1443,12 +1438,6 @@ func (p *indexNodeConfig) initIndexStorageRootPath() {
 		panic(err)
 	}
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
-}
-
-func (p *indexNodeConfig) initKnowhereSimdType() {
-	simdType := p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
-	p.SimdType = simdType
-	log.Debug("initialize the knowhere simd type", zap.String("simd_type", p.SimdType))
 }
 
 ///////////////////////////////////////////////////////////////////////////////

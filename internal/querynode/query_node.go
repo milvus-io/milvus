@@ -173,9 +173,9 @@ func (node *QueryNode) InitSegcore() {
 	C.SegcoreSetChunkRows(cChunkRows)
 
 	// override segcore SIMD type
-	cSimdType := C.CString(Params.QueryNodeCfg.SimdType)
+	cSimdType := C.CString(Params.KnowhereCfg.SimdType)
 	cRealSimdType := C.SegcoreSetSimdType(cSimdType)
-	Params.QueryNodeCfg.SimdType = C.GoString(cRealSimdType)
+	Params.KnowhereCfg.SimdType = C.GoString(cRealSimdType)
 	C.free(unsafe.Pointer(cRealSimdType))
 	C.free(unsafe.Pointer(cSimdType))
 }
