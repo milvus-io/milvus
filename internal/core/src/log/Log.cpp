@@ -96,15 +96,15 @@ get_thread_starttime() {
 
     int64_t pid = getpid();
     char filename[256];
-    snprintf(filename, sizeof(filename), "/proc/%lld/task/%lld/stat", (long long)pid, (long long)tid);
+    snprintf(filename, sizeof(filename), "/proc/%lld/task/%lld/stat", (long long)pid, (long long)tid);  // NOLINT
 
     int64_t val = 0;
     char comm[16], state;
     FILE* thread_stat = fopen(filename, "r");
-    auto ret = fscanf(thread_stat, "%lld %s %s ", (long long*)&val, comm, &state);
+    auto ret = fscanf(thread_stat, "%lld %s %s ", (long long*)&val, comm, &state);  // NOLINT
 
     for (auto i = 4; i < 23; i++) {
-            ret = fscanf(thread_stat, "%lld ", (long long*)&val);
+        ret = fscanf(thread_stat, "%lld ", (long long*)&val);  // NOLINT
         if (i == 22) {
             break;
         }

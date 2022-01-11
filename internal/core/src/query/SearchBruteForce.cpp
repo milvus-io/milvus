@@ -18,7 +18,6 @@
 #elif __linux__
 #include <faiss/utils/BinaryDistance.h>
 #include <faiss/utils/distances.h>
-#include <faiss/utils/BinaryDistance.h>
 #else
 #error "Unsupported OS environment.";
 #endif
@@ -44,7 +43,7 @@ raw_search(MetricType metric_type,
            idx_t* labels,
            const BitsetView bitset) {
 #ifdef __APPLE__
-    //TODO
+    // TODO
 #elif __linux__
     using namespace faiss;  // NOLINT
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
@@ -116,10 +115,12 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
     auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
 #ifdef __APPLE__
     if (metric_type == MetricType::METRIC_L2) {
-        knowhere::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(), sub_qr.get_distances()};
+        knowhere::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(),
+                                            sub_qr.get_distances()};
         knowhere::knn_L2sqr_sse(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
     } else {
-        knowhere::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(), sub_qr.get_distances()};
+        knowhere::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(),
+                                            sub_qr.get_distances()};
         knowhere::knn_inner_product_sse(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
     }
 #elif __linux__
