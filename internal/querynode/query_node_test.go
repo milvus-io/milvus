@@ -234,7 +234,7 @@ func newMessageStreamFactory() (msgstream.Factory, error) {
 
 func TestMain(m *testing.M) {
 	setup()
-	Params.QueryNodeCfg.StatsChannelName = Params.QueryNodeCfg.StatsChannelName + strconv.Itoa(rand.Int())
+	Params.MsgChannelCfg.QueryNodeStats = Params.MsgChannelCfg.QueryNodeStats + strconv.Itoa(rand.Int())
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

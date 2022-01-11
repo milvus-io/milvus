@@ -88,11 +88,11 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 
 	randVal := rand.Int()
 
-	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
-	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("master-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("master-statistics-%d", randVal)
 	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
 	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 
 	err = core.SetDataCoord(ctx, &tbd{})
 	assert.Nil(b, err)

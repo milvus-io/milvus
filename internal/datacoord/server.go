@@ -447,11 +447,11 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		return
 	}
-	ttMsgStream.AsConsumerWithPosition([]string{Params.DataCoordCfg.TimeTickChannelName},
-		Params.DataCoordCfg.DataCoordSubscriptionName, mqclient.SubscriptionPositionLatest)
+	ttMsgStream.AsConsumerWithPosition([]string{Params.MsgChannelCfg.DataCoordTimeTick},
+		Params.MsgChannelCfg.DataCoordSubName, mqclient.SubscriptionPositionLatest)
 	log.Debug("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", Params.DataCoordCfg.TimeTickChannelName),
-		zap.String("subscription", Params.DataCoordCfg.DataCoordSubscriptionName))
+		zap.String("timeTickChannel", Params.MsgChannelCfg.DataCoordTimeTick),
+		zap.String("subscription", Params.MsgChannelCfg.DataCoordSubName))
 	ttMsgStream.Start()
 
 	go func() {

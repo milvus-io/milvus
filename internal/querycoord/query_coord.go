@@ -273,8 +273,8 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	rand.Seed(time.Now().UnixNano())
 	queryChannels := make([]*queryChannelInfo, 0)
 	channelID := len(queryChannels)
-	searchPrefix := Params.QueryCoordCfg.SearchChannelPrefix
-	searchResultPrefix := Params.QueryCoordCfg.SearchResultChannelPrefix
+	searchPrefix := Params.MsgChannelCfg.QueryCoordSearch
+	searchResultPrefix := Params.MsgChannelCfg.QueryCoordSearchResult
 	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
 	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
 

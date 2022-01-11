@@ -435,17 +435,17 @@ func (c *Core) setMsgStreams() error {
 	if Params.PulsarCfg.Address == "" {
 		return fmt.Errorf("pulsar address is empty")
 	}
-	if Params.RootCoordCfg.MsgChannelSubName == "" {
-		return fmt.Errorf("msgChannelSubName is empty")
+	if Params.MsgChannelCfg.RootCoordSubName == "" {
+		return fmt.Errorf("RootCoordSubName is empty")
 	}
 
 	// rootcoord time tick channel
-	if Params.RootCoordCfg.TimeTickChannel == "" {
+	if Params.MsgChannelCfg.RootCoordTimeTick == "" {
 		return fmt.Errorf("timeTickChannel is empty")
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
-	timeTickStream.AsProducer([]string{Params.RootCoordCfg.TimeTickChannel})
-	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.RootCoordCfg.TimeTickChannel))
+	timeTickStream.AsProducer([]string{Params.MsgChannelCfg.RootCoordTimeTick})
+	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.MsgChannelCfg.RootCoordTimeTick))
 
 	c.SendTimeTick = func(t typeutil.Timestamp, reason string) error {
 		msgPack := ms.MsgPack{}
@@ -1177,7 +1177,7 @@ func (c *Core) Start() error {
 	}
 
 	log.Debug(typeutil.RootCoordRole, zap.Int64("node id", c.session.ServerID))
-	log.Debug(typeutil.RootCoordRole, zap.String("time tick channel name", Params.RootCoordCfg.TimeTickChannel))
+	log.Debug(typeutil.RootCoordRole, zap.String("time tick channel name", Params.MsgChannelCfg.RootCoordTimeTick))
 
 	c.startOnce.Do(func() {
 		if err := c.proxyManager.WatchProxy(); err != nil {
@@ -1252,7 +1252,7 @@ func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.RootCoordCfg.TimeTickChannel,
+		Value: Params.MsgChannelCfg.RootCoordTimeTick,
 	}, nil
 }
 
@@ -1263,7 +1263,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.RootCoordCfg.StatisticsChannel,
+		Value: Params.MsgChannelCfg.RootCoordStatistics,
 	}, nil
 }
 

@@ -284,7 +284,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		return nil
 	}
 	pChannelName := rootcoord.ToPhysicalChannel(vchanInfo.ChannelName)
-	deltaChannelName, err := rootcoord.ConvertChannelName(pChannelName, Params.DataNodeCfg.DmlChannelName, Params.DataNodeCfg.DeltaChannelName)
+	deltaChannelName, err := rootcoord.ConvertChannelName(pChannelName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
 	if err != nil {
 		log.Error(err.Error())
 		return nil

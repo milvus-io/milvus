@@ -86,23 +86,55 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("knowhere simd type = %s", Params.SimdType)
 	})
 
+	t.Run("test knowhereConfig", func(t *testing.T) {
+		Params := GlobalParams.MsgChannelCfg
+
+		// -- rootcoord --
+		assert.Equal(t, Params.RootCoordTimeTick, "by-dev-rootcoord-timetick")
+		t.Logf("rootcoord timetick channel = %s", Params.RootCoordTimeTick)
+
+		assert.Equal(t, Params.RootCoordStatistics, "by-dev-rootcoord-statistics")
+		t.Logf("rootcoord statistics channel = %s", Params.RootCoordStatistics)
+
+		assert.Equal(t, Params.RootCoordDml, "by-dev-rootcoord-dml")
+		t.Logf("rootcoord dml channel = %s", Params.RootCoordDml)
+
+		assert.Equal(t, Params.RootCoordDelta, "by-dev-rootcoord-delta")
+		t.Logf("rootcoord delta channel = %s", Params.RootCoordDelta)
+
+		assert.Equal(t, Params.RootCoordSubName, "by-dev-rootCoord")
+		t.Logf("rootcoord subname = %s", Params.RootCoordSubName)
+
+		// -- querycoord --
+		assert.Equal(t, Params.QueryCoordSearch, "by-dev-search")
+		t.Logf("querycoord search channel = %s", Params.QueryCoordSearch)
+
+		assert.Equal(t, Params.QueryCoordSearchResult, "by-dev-searchResult")
+		t.Logf("querycoord search result channel = %s", Params.QueryCoordSearchResult)
+
+		assert.Equal(t, Params.QueryCoordTimeTick, "by-dev-queryTimeTick")
+		t.Logf("querycoord timetick channel = %s", Params.QueryCoordTimeTick)
+
+		// -- querynode --
+		assert.Equal(t, Params.QueryNodeStats, "by-dev-query-node-stats")
+		t.Logf("querynode stats channel = %s", Params.QueryNodeStats)
+
+		// -- datacoord --
+		assert.Equal(t, Params.DataCoordInsert, "by-dev-insert-channel-")
+		t.Logf("datacoord insert channel = %s", Params.DataCoordInsert)
+
+		assert.Equal(t, Params.DataCoordTimeTick, "by-dev-datacoord-timetick-channel")
+		t.Logf("datacoord timetick channel = %s", Params.DataCoordTimeTick)
+
+		assert.Equal(t, Params.DataCoordSegmentInfo, "by-dev-segment-info-channel")
+		t.Logf("datacoord segment info channel = %s", Params.DataCoordSegmentInfo)
+
+		assert.Equal(t, Params.DataCoordSubName, "by-dev-dataCoord")
+		t.Logf("datacoord subname = %s", Params.DataCoordSubName)
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
-
-		assert.Equal(t, Params.MsgChannelSubName, "by-dev-rootCoord")
-		t.Logf("msg channel sub name = %s", Params.MsgChannelSubName)
-
-		assert.Equal(t, Params.TimeTickChannel, "by-dev-rootcoord-timetick")
-		t.Logf("master time tick channel = %s", Params.TimeTickChannel)
-
-		assert.Equal(t, Params.StatisticsChannel, "by-dev-rootcoord-statistics")
-		t.Logf("master statistics channel = %s", Params.StatisticsChannel)
-
-		assert.Equal(t, Params.DmlChannelName, "by-dev-rootcoord-dml")
-		t.Logf("dml channel = %s", Params.DmlChannelName)
-
-		assert.Equal(t, Params.DeltaChannelName, "by-dev-rootcoord-delta")
-		t.Logf("delta channel = %s", Params.DeltaChannelName)
 
 		assert.NotEqual(t, Params.MaxPartitionNum, 0)
 		t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum)
@@ -123,9 +155,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		assert.Equal(t, Params.ProxySubName, "by-dev-proxy-0")
 		t.Logf("ProxySubName: %s", Params.ProxySubName)
-
-		assert.Equal(t, Params.ProxyTimeTickChannelNames, []string{"by-dev-proxyTimeTick-0"})
-		t.Logf("ProxyTimeTickChannelNames: %v", Params.ProxyTimeTickChannelNames)
 
 		t.Logf("MsgStreamTimeTickBufSize: %d", Params.MsgStreamTimeTickBufSize)
 
@@ -180,19 +209,7 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
-		Params := GlobalParams.QueryCoordCfg
-
-		assert.Equal(t, Params.SearchChannelPrefix, "by-dev-search")
-		t.Logf("QueryCoord search channel = %s", Params.SearchChannelPrefix)
-
-		assert.Equal(t, Params.SearchResultChannelPrefix, "by-dev-searchResult")
-		t.Logf("QueryCoord search result channel = %s", Params.SearchResultChannelPrefix)
-
-		assert.Equal(t, Params.StatsChannelName, "by-dev-query-node-stats")
-		t.Logf("QueryCoord stats channel = %s", Params.StatsChannelName)
-
-		assert.Equal(t, Params.TimeTickChannelName, "by-dev-queryTimeTick")
-		t.Logf("QueryCoord  time tick channel = %s", Params.TimeTickChannelName)
+		//Params := GlobalParams.QueryCoordCfg
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -228,38 +245,20 @@ func TestGlobalParamTable(t *testing.T) {
 		assert.Equal(t, int32(1024), maxParallelism)
 
 		Params.QueryNodeID = 3
-		Params.initMsgChannelSubName()
-		name := Params.MsgChannelSubName
+		Params.initQueryNodeSubName()
+		name := Params.QueryNodeSubName
 		assert.Equal(t, name, "by-dev-queryNode")
-
-		name = Params.StatsChannelName
-		assert.Equal(t, name, "by-dev-query-node-stats")
-
-		ch := Params.QueryTimeTickChannelName
-		assert.Equal(t, ch, "by-dev-queryTimeTick")
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
-		Params := GlobalParams.DataCoordCfg
-
-		assert.Equal(t, Params.InsertChannelPrefixName, "by-dev-insert-channel-")
-		t.Logf("DataCoord insert channel = %s", Params.InsertChannelPrefixName)
-
-		assert.Equal(t, Params.TimeTickChannelName, "by-dev-datacoord-timetick-channel")
-		t.Logf("DataCoord timetick channel = %s", Params.TimeTickChannelName)
-
-		assert.Equal(t, Params.SegmentInfoChannelName, "by-dev-segment-info-channel")
-		t.Logf("DataCoord segment info channel = %s", Params.SegmentInfoChannelName)
-
-		assert.Equal(t, Params.DataCoordSubscriptionName, "by-dev-dataCoord")
-		t.Logf("DataCoord subscription channel = %s", Params.DataCoordSubscriptionName)
+		//Params := GlobalParams.DataCoordCfg
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
 		Params := GlobalParams.DataNodeCfg
 
 		Params.NodeID = 2
-		Params.initMsgChannelSubName()
+		Params.Refresh()
 
 		id := Params.NodeID
 		log.Println("NodeID:", id)
@@ -279,17 +278,9 @@ func TestGlobalParamTable(t *testing.T) {
 		path1 := Params.InsertBinlogRootPath
 		log.Println("InsertBinlogRootPath:", path1)
 
-		path1 = Params.ClusterChannelPrefix
-		assert.Equal(t, path1, "by-dev")
-		log.Println("ClusterChannelPrefix:", Params.ClusterChannelPrefix)
-
-		name := Params.TimeTickChannelName
-		assert.Equal(t, name, "by-dev-datacoord-timetick-channel")
-		log.Println("TimeTickChannelName:", name)
-
-		name = Params.MsgChannelSubName
+		name := Params.DataNodeSubName
 		assert.Equal(t, name, "by-dev-dataNode-2")
-		log.Println("MsgChannelSubName:", name)
+		log.Println("DataNodeSubName:", name)
 
 		Params.CreatedTime = time.Now()
 		log.Println("CreatedTime: ", Params.CreatedTime)

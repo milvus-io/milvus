@@ -715,8 +715,8 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 	if err != nil {
 		return nil, err
 	}
-	wTt.AsProducer([]string{Params.DataNodeCfg.TimeTickChannelName})
-	log.Debug("datanode AsProducer", zap.String("TimeTickChannelName", Params.DataNodeCfg.TimeTickChannelName))
+	wTt.AsProducer([]string{Params.MsgChannelCfg.DataCoordTimeTick})
+	log.Debug("datanode AsProducer", zap.String("TimeTickChannelName", Params.MsgChannelCfg.DataCoordTimeTick))
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 

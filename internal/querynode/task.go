@@ -157,7 +157,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 		return err
 	}
 	consumeChannels := []string{r.req.QueryChannel}
-	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
+	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 
 	sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
 	if r.req.SeekPosition == nil || len(r.req.SeekPosition.MsgID) == 0 {
@@ -301,7 +301,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}()
 
-	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
+	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 
 	// group channels by to seeking or consuming
 	channel2SeekPosition := make(map[string]*internalpb.MsgPosition)
@@ -525,7 +525,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	}
 
 	channel2FlowGraph := w.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels)
-	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
+	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 	// channels as consumer
 	for _, channel := range vDeltaChannels {
 		fg := channel2FlowGraph[channel]
