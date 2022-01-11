@@ -22,32 +22,46 @@ on:
 
 jobs:
   ubuntu:
-    name: Code Checker AMD64 Ubuntu ${{ matrix.ubuntu }}
-    runs-on: ubuntu-${{ matrix.ubuntu }}
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: [18.04]
+        include:
+        - name: Code Checker AMD64 Ubuntu 18.04
+          os: ubuntu-18.04
+        - name: Code Checker MacOS 11
+          os: macos-11
     env:
-      UBUNTU: ${{ matrix.ubuntu }}
+      UBUNTU: 18.04
     steps:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Cache CCache Volumes
+        if: ${{  matrix.os == 'ubuntu-18.04' }}
         uses: actions/cache@v1
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
-          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('internal/core/**') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
+          path: .docker/amd64-ubuntu18.04-ccache
+          key: ubuntu18.04-ccache-${{ hashFiles('internal/core/**') }}
+          restore-keys: ubuntu18.04-ccache-
       - name: Cache Go Mod Volumes
+        if: ${{  matrix.os == 'ubuntu-18.04' }}
         uses: actions/cache@v1
         with:
-          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
-          key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+          path: .docker/amd64-ubuntu18.04-go-mod
+          key: ubuntu18.04-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: ubuntu18.04-go-mod-
       - name: Code Check
+        if: ${{  matrix.os == 'ubuntu-18.04' }}
         env:
           CHECK_BUILDER: "1"
         run: |
-          ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+           ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+      - name: Code Check
+        if: ${{  matrix.os == 'macos-11' }}
+        run: |
+           brew install boost libomp ninja tbb
+           export CC="$(brew --prefix llvm)/bin/clang"
+           export CXX="$(brew --prefix llvm)/bin/clang++"
+           make check-proto-product && make verifiers
