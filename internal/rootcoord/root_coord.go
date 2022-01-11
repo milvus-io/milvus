@@ -419,7 +419,7 @@ func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[t
 				segID2PartID[s] = partID
 			}
 		} else {
-			log.Debug("failed to get flushed segments from data coord", zap.Int64("collection_id", collID), zap.Int64("partition_id", partID), zap.Error(err))
+			log.Debug("failed to get flushed segments from DataCoord", zap.Int64("collection_id", collID), zap.Int64("partition_id", partID), zap.Error(err))
 			return nil, err
 		}
 	}
