@@ -192,9 +192,9 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		log.Warn("illegal segment type when create segment")
 		return nil
 	case segmentTypeSealed:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed)
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(segmentID))
 	case segmentTypeGrowing:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing)
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(segmentID))
 	default:
 		log.Warn("illegal segment type when create segment")
 		return nil
@@ -309,7 +309,7 @@ func (s *Segment) search(plan *SearchPlan,
 	cPlaceHolderGroup := cPlaceholderGroups[0]
 
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
-	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult)
+	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult, C.int64_t(s.segmentID))
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}
