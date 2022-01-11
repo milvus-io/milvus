@@ -20,7 +20,7 @@ During a search, each 'chunk' will be searched, and the search results will be s
 
 Growing Segment also implements small batch index for vectors. The parameters of small batch index are preset in `segcore config`
 
-When `metric type` is specified in the schema, the default parameters will build index for each chunk to accelerate query
+When `metric type` is specified in the schema, the default parameters will build an index for each chunk to accelerate query
 
 ## SegmentGrowingImpl internal
 
