@@ -2694,7 +2694,7 @@ class TestSearchBase:
         assert abs(res[0][0].distance - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(300)
+    # @pytest.mark.timeout(300)
     def test_search_concurrent_multithreads_single_connection(self, connect, args):
         """
         target: test concurrent search with multi processes
