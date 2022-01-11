@@ -338,7 +338,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 			ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Minute)
 			segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
 			if err != nil {
-				log.Debug("failed to get flushed segments from data coord",
+				log.Debug("failed to get flushed segments from DataCoord",
 					zap.Int64("collection id", collMeta.ID),
 					zap.Int64("partition id", partID),
 					zap.Error(err))
