@@ -736,7 +736,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	exist := false
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
 	if err != nil {
-		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
+		log.Debug("Get flushed segment from DataCoord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
 		exist = true
 	} else {
 		for _, id := range segIDs {
