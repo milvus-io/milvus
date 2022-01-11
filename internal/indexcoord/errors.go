@@ -30,6 +30,7 @@ func msgIndexCoordIsUnhealthy(coordID UniqueID) string {
 	return fmt.Sprintf("IndexCoord %d is not ready", coordID)
 }
 
+// errIndexCoordIsUnhealthy return an error that the specified IndexCoord is not healthy.
 func errIndexCoordIsUnhealthy(coordID UniqueID) error {
 	return errors.New(msgIndexCoordIsUnhealthy(coordID))
 }
