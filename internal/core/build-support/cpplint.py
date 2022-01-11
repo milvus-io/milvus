@@ -3720,7 +3720,7 @@ def CheckSpacing(filename, clean_lines, linenum, nesting_state, error):
       # 4 spaces (because they did not fit in a 80 column line when placed on
       # the same line as the function name).  We also check for the case where
       # the previous line is indented 6 spaces, which may happen when the
-      # initializers of a constructor do not fit into a 80 column line.
+      # initializers of a constructor do not fit into an 80 column line.
       exception = False
       if Match(r' {6}\w', prev_line):  # Initializer list?
         # We are looking for the opening column of initializer list, which
