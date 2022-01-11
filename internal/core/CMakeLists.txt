@@ -141,6 +141,15 @@ if ( NOT LINT_EXCLUSIONS_FILE )
     set( LINT_EXCLUSIONS_FILE ${BUILD_SUPPORT_DIR}/lint_exclusions.txt )
 endif ()
 
+add_custom_target(lint
+    ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_cpplint.py
+                            --cpplint_binary    ${CPPLINT_BIN}
+                            --exclude_globs     ${LINT_EXCLUSIONS_FILE}
+                            --source_dir            ${CMAKE_CURRENT_SOURCE_DIR}/src
+                            ${MILVUS_LINT_QUIET}
+                            )
+
+
 find_program( CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR} )
 message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
 

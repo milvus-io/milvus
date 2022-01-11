@@ -151,22 +151,16 @@ LogMgr::Filename(const std::string& filename) {
 
 LogMgr&
 LogMgr::Level(std::unordered_map<std::string, bool>& enables) {
-    //fiu_do_on("LogMgr.Level.trace_enable_to_false", enables["trace"] = false);
     enable(el_config_, el::Level::Trace, enables["trace"]);
 
-    //fiu_do_on("LogMgr.Level.info_enable_to_false", enables["info"] = false);
     enable(el_config_, el::Level::Info, enables["info"]);
 
-    //fiu_do_on("LogMgr.Level.debug_enable_to_false", enables["debug"] = false);
     enable(el_config_, el::Level::Debug, enables["debug"]);
 
-    //fiu_do_on("LogMgr.Level.warning_enable_to_false", enables["warning"] = false);
     enable(el_config_, el::Level::Warning, enables["warning"]);
 
-    //fiu_do_on("LogMgr.Level.error_enable_to_false", enables["error"] = false);
     enable(el_config_, el::Level::Error, enables["error"]);
 
-    //fiu_do_on("LogMgr.Level.fatal_enable_to_false", enables["fatal"] = false);
     enable(el_config_, el::Level::Fatal, enables["fatal"]);
 
     return *this;
@@ -182,7 +176,6 @@ LogMgr::To(bool log_to_stdout, bool log_to_file) {
 
 LogMgr&
 LogMgr::Rotate(int64_t max_log_file_size, int64_t log_rotate_num) {
-    //fiu_do_on("LogMgr.Rotate.set_max_log_size_small_than_min", max_log_file_size = MAX_LOG_FILE_SIZE_MIN - 1);
     if (max_log_file_size < MAX_LOG_FILE_SIZE_MIN || max_log_file_size > MAX_LOG_FILE_SIZE_MAX) {
         std::string msg = "max_log_file_size must in range[" + std::to_string(MAX_LOG_FILE_SIZE_MIN) + ", " +
                           std::to_string(MAX_LOG_FILE_SIZE_MAX) + "], now is " + std::to_string(max_log_file_size);
@@ -196,7 +189,6 @@ LogMgr::Rotate(int64_t max_log_file_size, int64_t log_rotate_num) {
 
     // set delete_exceeds = 0 means disable throw away log file even they reach certain limit.
     if (log_rotate_num != 0) {
-       // fiu_do_on("LogMgr.Rotate.delete_exceeds_small_than_min", log_rotate_num = LOG_ROTATE_NUM_MIN - 1);
         if (log_rotate_num < LOG_ROTATE_NUM_MIN || log_rotate_num > LOG_ROTATE_NUM_MAX) {
             std::string msg = "log_rotate_num must in range[" + std::to_string(LOG_ROTATE_NUM_MIN) + ", " +
                               std::to_string(LOG_ROTATE_NUM_MAX) + "], now is " + std::to_string(log_rotate_num);
