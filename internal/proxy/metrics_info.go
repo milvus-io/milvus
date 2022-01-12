@@ -285,7 +285,7 @@ func getSystemInfoMetrics(
 			})
 		}
 
-		// add data coord to system topology graph
+		// add DataCoord to system topology graph
 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataCoordTopologyNode)
 	}
 
