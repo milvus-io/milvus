@@ -139,7 +139,7 @@ case "${unameOut}" in
         export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
         export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
         ;;
-    *)          echo "UNKNOWN:${unameOut}"; exit 0;
+          *)   echo "==System:${unameOut}";
 esac
 
 CMAKE_CMD="cmake \
@@ -178,12 +178,12 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
   echo "clang-format check passed!"
 
   # clang-tidy check
-  #make check-clang-tidy
-  #if [ $? -ne 0 ]; then
-  #    echo "ERROR! clang-tidy check failed"
-  #    exit 1
-  #fi
-  #echo "clang-tidy check passed!"
+  make check-clang-tidy
+  if [ $? -ne 0 ]; then
+      echo "ERROR! clang-tidy check failed"
+      exit 1
+  fi
+  echo "clang-tidy check passed!"
 else
   # compile and build
   make -j ${jobs} install || exit 1

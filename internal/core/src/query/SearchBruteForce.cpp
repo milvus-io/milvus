@@ -13,7 +13,7 @@
 #include <vector>
 
 #ifdef __APPLE__
-#include "knowhere/index/vector_index/impl/bruteforce/distances/BruteForce.h"
+#include "knowhere/index/vector_index/impl/bruteforce/BruteForce.h"
 #include "knowhere/common/Heap.h"
 #elif __linux__
 #include <faiss/utils/BinaryDistance.h>
