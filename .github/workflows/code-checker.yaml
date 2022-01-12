@@ -62,6 +62,4 @@ jobs:
         if: ${{  matrix.os == 'macos-11' }}
         run: |
            brew install boost libomp ninja tbb
-           export CC="/usr/local/opt/llvm/bin/clang"
-           export CXX="/usr/local/opt/llvm/bin/clang++"           
            make check-proto-product && make verifiers
