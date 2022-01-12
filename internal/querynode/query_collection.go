@@ -1028,9 +1028,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 	// get global sealed segments
 	var globalSealedSegments []UniqueID
 	if len(searchMsg.PartitionIDs) > 0 {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collection.id)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDs()
 	}
 
 	searchResults := make([]*SearchResult, 0)
@@ -1243,9 +1243,9 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 
 	var globalSealedSegments []UniqueID
 	if len(retrieveMsg.PartitionIDs) > 0 {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(retrieveMsg.PartitionIDs)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDsByPartitionIds(retrieveMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDs()
 	}
 
 	var mergeList []*segcorepb.RetrieveResults

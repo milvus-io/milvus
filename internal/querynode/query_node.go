@@ -203,7 +203,6 @@ func (node *QueryNode) Init() error {
 
 		node.historical = newHistorical(node.queryNodeLoopCtx,
 			historicalReplica,
-			node.etcdKV,
 			node.tSafeReplica,
 		)
 		node.streaming = newStreaming(node.queryNodeLoopCtx,
@@ -269,7 +268,6 @@ func (node *QueryNode) Start() error {
 	go node.scheduler.Start()
 
 	// start services
-	go node.historical.start()
 	go node.watchChangeInfo()
 	go node.statsService.start()
 

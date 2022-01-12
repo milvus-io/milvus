@@ -887,15 +887,11 @@ func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterf
 }
 
 func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
-	kv, err := genEtcdKV()
-	if err != nil {
-		return nil, err
-	}
 	replica, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
 	}
-	h := newHistorical(ctx, replica, kv, tSafeReplica)
+	h := newHistorical(ctx, replica, tSafeReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
