@@ -218,8 +218,6 @@ func (qc *QueryCoord) Start() error {
 		go qc.loadBalanceSegmentLoop()
 	}
 
-	qc.UpdateStateCode(internalpb.StateCode_Healthy)
-
 	return nil
 }
 

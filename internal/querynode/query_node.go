@@ -274,12 +274,6 @@ func (node *QueryNode) Start() error {
 	Params.QueryNodeCfg.CreatedTime = time.Now()
 	Params.QueryNodeCfg.UpdatedTime = time.Now()
 
-	node.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("query node start successfully",
-		zap.Any("queryNodeID", Params.QueryNodeCfg.QueryNodeID),
-		zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
-		zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
-	)
 	return nil
 }
 

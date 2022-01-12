@@ -171,6 +171,9 @@ func (s *Server) start() error {
 		log.Debug("DataCoord register service failed", zap.Error(err))
 		return err
 	}
+
+	s.dataCoord.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("DataCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 

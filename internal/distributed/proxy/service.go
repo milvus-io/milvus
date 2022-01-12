@@ -139,20 +139,15 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 // Start start the Proxy Server
 func (s *Server) Run() error {
-	log.Debug("init Proxy server")
 	if err := s.init(); err != nil {
-		log.Warn("init Proxy server failed", zap.Error(err))
 		return err
 	}
-	log.Debug("init Proxy server done")
+	log.Debug("Proxy init done ...")
 
-	log.Debug("start Proxy server")
 	if err := s.start(); err != nil {
-		log.Warn("start Proxy server failed", zap.Error(err))
 		return err
 	}
-	log.Debug("start Proxy server done")
-
+	log.Debug("Proxy start done ...")
 	return nil
 }
 
@@ -330,6 +325,11 @@ func (s *Server) start() error {
 		log.Warn("failed to register Proxy", zap.Error(err))
 		return err
 	}
+
+	s.proxy.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("Proxy start successfully",
+		zap.Int64("nodeID", proxy.Params.ProxyCfg.ProxyID),
+		zap.String("State", internalpb.StateCode_Healthy.String()))
 
 	return nil
 }

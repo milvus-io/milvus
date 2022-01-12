@@ -1191,9 +1191,6 @@ func (c *Core) Start() error {
 		go c.checkFlushedSegmentsLoop()
 		Params.RootCoordCfg.CreatedTime = time.Now()
 		Params.RootCoordCfg.UpdatedTime = time.Now()
-
-		c.UpdateStateCode(internalpb.StateCode_Healthy)
-		log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	})
 
 	return nil

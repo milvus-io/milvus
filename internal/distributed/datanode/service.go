@@ -299,6 +299,10 @@ func (s *Server) start() error {
 		log.Debug("DataNode Register etcd failed", zap.Error(err))
 		return err
 	}
+	s.datanode.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("DataNode start successfully ",
+		zap.Int64("nodeID", dn.Params.DataNodeCfg.NodeID),
+		zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 

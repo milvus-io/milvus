@@ -66,6 +66,7 @@ func TestIndexCoord(t *testing.T) {
 	assert.Nil(t, err)
 	err = ic.Start()
 	assert.Nil(t, err)
+	ic.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	err = inm0.Stop()
 	assert.Nil(t, err)

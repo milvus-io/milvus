@@ -77,6 +77,7 @@ func TestIndexNode(t *testing.T) {
 
 	err = in.Register()
 	assert.Nil(t, err)
+	in.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	t.Run("CreateIndex FloatVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
@@ -488,6 +489,7 @@ func TestCreateIndexFailed(t *testing.T) {
 
 	err = in.Register()
 	assert.Nil(t, err)
+	in.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	t.Run("CreateIndex error", func(t *testing.T) {
 		var insertCodec storage.InsertCodec

@@ -194,6 +194,11 @@ func (s *Server) start() error {
 		log.Error("QueryNode register service failed", zap.Error(err))
 		return err
 	}
+
+	s.querynode.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("query node start successfully",
+		zap.Int64("queryNodeID", qn.Params.QueryNodeCfg.QueryNodeID),
+		zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 

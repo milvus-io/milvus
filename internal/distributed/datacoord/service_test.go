@@ -76,6 +76,9 @@ func (m *MockDataCoord) Register() error {
 func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
+func (m *MockDataCoord) UpdateStateCode(code internalpb.StateCode) {
+}
+
 func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	return m.states, m.err
 }

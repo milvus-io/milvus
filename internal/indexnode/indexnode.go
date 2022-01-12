@@ -211,16 +211,12 @@ func (i *IndexNode) Start() error {
 
 		Params.IndexNodeCfg.CreatedTime = time.Now()
 		Params.IndexNodeCfg.UpdatedTime = time.Now()
-
-		i.UpdateStateCode(internalpb.StateCode_Healthy)
-		log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
 	})
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
 
-	log.Debug("IndexNode start finished", zap.Error(startErr))
 	return startErr
 }
 

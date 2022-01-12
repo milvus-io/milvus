@@ -173,7 +173,11 @@ func (s *Server) start() error {
 		log.Error("IndexNode Register etcd failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexNode Register etcd success")
+
+	s.indexnode.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("IndexNode start successfully ",
+		zap.Int64("nodeID", indexnode.Params.IndexNodeCfg.NodeID),
+		zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 

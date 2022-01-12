@@ -370,9 +370,6 @@ func (node *Proxy) Start() error {
 	Params.ProxyCfg.CreatedTime = now
 	Params.ProxyCfg.UpdatedTime = now
 
-	log.Debug("update state code", zap.String("role", typeutil.ProxyRole), zap.String("State", internalpb.StateCode_Healthy.String()))
-	node.UpdateStateCode(internalpb.StateCode_Healthy)
-
 	return nil
 }
 

@@ -275,6 +275,8 @@ func (s *Server) start() error {
 		log.Error("RootCoord registers service failed", zap.Error(err))
 		return err
 	}
+	s.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 

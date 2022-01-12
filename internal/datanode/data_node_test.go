@@ -71,6 +71,7 @@ func TestDataNode(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
+	node.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	t.Run("Test WatchDmChannels ", func(t *testing.T) {
 		emptyNode := &DataNode{}
@@ -174,6 +175,7 @@ func TestDataNode(t *testing.T) {
 		assert.Nil(t, err)
 		err = node1.Start()
 		assert.Nil(t, err)
+		node1.UpdateStateCode(internalpb.StateCode_Healthy)
 		defer func() {
 			err := node1.Stop()
 			assert.Nil(t, err)

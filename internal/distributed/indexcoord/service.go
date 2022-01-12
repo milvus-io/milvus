@@ -124,7 +124,9 @@ func (s *Server) start() error {
 		log.Error("IndexCoord", zap.Any("register session error", err))
 		return err
 	}
-	log.Debug("IndexCoord registers service successfully")
+
+	s.indexcoord.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("IndexCoord start successfully", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 

@@ -265,6 +265,10 @@ type DataCoordComponent interface {
 	// SetEtcdClient set EtcdClient for DataCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	// UpdateStateCode updates state code for DataCoord
+	//  `stateCode` is current statement of this dataCoord, indicating whether it's healthy.
+	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
 // IndexNode is the interface `indexnode` package implements

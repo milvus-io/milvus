@@ -468,6 +468,7 @@ func TestProxy(t *testing.T) {
 
 	err = proxy.Start()
 	assert.NoError(t, err)
+	proxy.UpdateStateCode(internalpb.StateCode_Healthy)
 	assert.Equal(t, internalpb.StateCode_Healthy, proxy.stateCode.Load().(internalpb.StateCode))
 
 	// register proxy

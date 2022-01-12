@@ -274,7 +274,14 @@ func (s *Server) start() error {
 	if err != nil {
 		return err
 	}
-	return s.queryCoord.Register()
+	err = s.queryCoord.Register()
+	if err != nil {
+		return err
+	}
+
+	s.queryCoord.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("QueryCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
+	return nil
 }
 
 // Stop stops QueryCoord's grpc service.

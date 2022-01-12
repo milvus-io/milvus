@@ -269,8 +269,6 @@ func (i *IndexCoord) Start() error {
 		go i.watchMetaLoop()
 
 		startErr = i.sched.Start()
-
-		i.UpdateStateCode(internalpb.StateCode_Healthy)
 	})
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
@@ -279,9 +277,6 @@ func (i *IndexCoord) Start() error {
 
 	Params.IndexCoordCfg.CreatedTime = time.Now()
 	Params.IndexCoordCfg.UpdatedTime = time.Now()
-
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexCoord start successfully", zap.Any("State", i.stateCode.Load()))
 
 	return startErr
 }

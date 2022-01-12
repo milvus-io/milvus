@@ -652,6 +652,7 @@ func TestRootCoord(t *testing.T) {
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
+	core.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	time.Sleep(100 * time.Millisecond)
 	shardsNum := int32(8)
@@ -2352,6 +2353,7 @@ func TestRootCoord2(t *testing.T) {
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
+	core.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
@@ -2633,6 +2635,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
+	core.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
@@ -2800,6 +2803,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
+	core.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,

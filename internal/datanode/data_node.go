@@ -492,7 +492,6 @@ func (node *DataNode) Start() error {
 	Params.DataNodeCfg.CreatedTime = time.Now()
 	Params.DataNodeCfg.UpdatedTime = time.Now()
 
-	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
 

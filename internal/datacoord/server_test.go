@@ -2265,6 +2265,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	assert.Nil(t, err)
 	err = svr.Register()
 	assert.Nil(t, err)
+	svr.UpdateStateCode(internalpb.StateCode_Healthy)
 	return svr
 }
 

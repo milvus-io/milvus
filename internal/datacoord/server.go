@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -295,10 +296,21 @@ func (s *Server) Start() error {
 	s.startServerLoop()
 	Params.DataCoordCfg.CreatedTime = time.Now()
 	Params.DataCoordCfg.UpdatedTime = time.Now()
-	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
-	logutil.Logger(s.ctx).Debug("startup success")
 
 	return nil
+}
+
+// UpdateStateCode updates dataCoord's state code
+// TODO:: use internalpb.StateCode instead of ServerState
+func (s *Server) UpdateStateCode(code internalpb.StateCode) {
+	switch code {
+	case internalpb.StateCode_Initializing:
+		atomic.StoreInt64(&s.isServing, ServerStateInitializing)
+	case internalpb.StateCode_Healthy:
+		atomic.StoreInt64(&s.isServing, ServerStateHealthy)
+	default:
+		atomic.StoreInt64(&s.isServing, ServerStateStopped)
+	}
 }
 
 func (s *Server) initCluster() error {
