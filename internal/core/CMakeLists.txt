@@ -25,8 +25,6 @@ include(CheckCXXCompilerFlag)
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     message(STATUS "==============Darwin Environment==============")
     set(MACOS TRUE)
-    set(CMAKE_CXX_COMPILER "/usr/local/opt/llvm/bin/clang++")
-    set(CMAKE_CXX_FLAGS "-L/usr/local/opt/libomp/lib -I/usr/local/opt/llvm/include -I/usr/local/include -I/usr/local/opt/openblas/include -I/usr/local/opt/libomp/include -DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1")
     check_cxx_compiler_flag(-std=c++11 HAS_STD_CPP11_FLAG)
     if(HAS_STD_CPP11_FLAG)
         add_compile_options(-std=c++11)
@@ -109,13 +107,33 @@ include( ThirdPartyPackages )
 # **************************** Compiler arguments ****************************
 message( STATUS "Building Milvus CPU version" )
 
+if (LINUX)
 append_flags( CMAKE_CXX_FLAGS
               FLAGS
-                    "-fPIC"
-                    "-DELPP_THREAD_SAFE"
-                    "-fopenmp"
-                    "-Werror"
-                    )
+              "-fPIC"
+              "-DELPP_THREAD_SAFE"
+              "-fopenmp"
+              "-Werror"
+              )
+endif ()
+
+if (MACOS)
+    append_flags( CMAKE_CXX_FLAGS
+            FLAGS
+            "-fPIC"
+            "-DELPP_THREAD_SAFE"
+            "-fopenmp"
+            "-Wno-error"
+            "-Wsign-compare"
+            "-Wall"
+            "-pedantic"
+            "-Wno-unused-command-line-argument"
+            "-Wextra"
+            "-Wno-unused-parameter"
+            "-Wno-deprecated"
+            "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
+            )
+endif ()
 
 # **************************** Coding style check tools ****************************
 find_package( ClangTools )
