@@ -603,7 +603,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 				retErr = fmt.Errorf("get bin log file paths panic, msg = %v", err)
 			}
 		}()
-		<-initCh //wait connect to data coord
+		<-initCh //wait connect to DataCoord
 		ts, err := c.TSOAllocator(1)
 		if err != nil {
 			return nil, err
