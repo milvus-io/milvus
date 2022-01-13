@@ -50,4 +50,4 @@ jobs:
         env:
           CHECK_BUILDER: "1"
         run: |
-          ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+          ./build/builder.sh /bin/bash -c "go mod tidy && make verifiers"
