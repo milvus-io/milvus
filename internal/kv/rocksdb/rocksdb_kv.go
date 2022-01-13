@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/tecbot/gorocksdb"
+	"github.com/soothing-rain/gorocksdb"
 )
 
 // RocksdbKV is KV implemented by rocksdb

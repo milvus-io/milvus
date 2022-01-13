@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
-	"github.com/tecbot/gorocksdb"
+	"github.com/soothing-rain/gorocksdb"
 	"go.uber.org/zap"
 )
 

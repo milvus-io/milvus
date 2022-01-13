@@ -21,7 +21,7 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/tecbot/gorocksdb"
+	"github.com/soothing-rain/gorocksdb"
 )
 
 type rocksmqReader struct {

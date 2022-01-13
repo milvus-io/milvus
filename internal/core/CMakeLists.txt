@@ -16,15 +16,23 @@
 
 cmake_minimum_required( VERSION 3.18 )
 
+if ( APPLE )
+    set( CMAKE_CROSSCOMPILING TRUE )
+    set( RUN_HAVE_GNU_POSIX_REGEX 0 )
+    set( CMAKE_C_COMPILER "/usr/local/opt/llvm/bin/clang" )
+    set( CMAKE_CXX_COMPILER "/usr/local/opt/llvm/bin/clang++" )
+endif ()
+
 add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
 
 project(core LANGUAGES C CXX)
 include(CheckCXXCompilerFlag)
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+if ( APPLE )
     message(STATUS "==============Darwin Environment==============")
     set(MACOS TRUE)
+    set(CMAKE_CXX_FLAGS "-L/usr/local/opt/libomp/lib -I/usr/local/opt/llvm/include -I/usr/local/include -I/usr/local/opt/openblas/include -I/usr/local/opt/libomp/include -DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1")
     check_cxx_compiler_flag(-std=c++11 HAS_STD_CPP11_FLAG)
     if(HAS_STD_CPP11_FLAG)
         add_compile_options(-std=c++11)
