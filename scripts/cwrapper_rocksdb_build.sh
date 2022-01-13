@@ -100,5 +100,9 @@ else
       esac
 fi
 
+if [[ $(arch) == 'arm64' ]]; then
+  go env -w GOARCH=arm64
+fi
+
 go env -w CGO_LDFLAGS="$ldflags"
-go get -u github.com/soothing-rain/gorocksdb
+go get github.com/soothing-rain/gorocksdb
