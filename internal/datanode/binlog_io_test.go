@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
@@ -52,6 +53,16 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 11, len(p.inPaths))
 		assert.Equal(t, 3, len(p.statsPaths))
+		assert.Equal(t, 1, len(p.inPaths[0].GetBinlogs()))
+		assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
+		assert.NotNil(t, p.deltaInfo)
+
+		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData, iData}, dData, meta)
+		assert.NoError(t, err)
+		assert.Equal(t, 11, len(p.inPaths))
+		assert.Equal(t, 3, len(p.statsPaths))
+		assert.Equal(t, 2, len(p.inPaths[0].GetBinlogs()))
+		assert.Equal(t, 2, len(p.statsPaths[0].GetBinlogs()))
 		assert.NotNil(t, p.deltaInfo)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -243,8 +254,8 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 		log.Debug("test paths",
 			zap.Any("kvs no.", len(kvs)),
-			zap.String("insert paths field0", pin[0].GetBinlogs()[0].GetLogPath()),
-			zap.String("stats paths field0", pstats[0].GetBinlogs()[0].GetLogPath()))
+			zap.String("insert paths field0", pin[common.TimeStampField].GetBinlogs()[0].GetLogPath()),
+			zap.String("stats paths field0", pstats[common.TimeStampField].GetBinlogs()[0].GetLogPath()))
 	})
 
 	t.Run("Test genInsertBlobs error", func(t *testing.T) {

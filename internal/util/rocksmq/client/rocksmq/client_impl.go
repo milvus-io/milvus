@@ -143,11 +143,14 @@ func (c *client) consume(consumer *consumer) {
 	}
 }
 
-func (c *client) deliver(consumer *consumer, batchMin int) {
+func (c *client) deliver(consumer *consumer, batchMax int) {
 	for {
 		n := cap(consumer.messageCh) - len(consumer.messageCh)
-		if n < batchMin { // batch min size
-			n = batchMin
+		if n == 0 {
+			return
+		}
+		if n > batchMax { // batch min size
+			n = batchMax
 		}
 		msgs, err := consumer.client.server.Consume(consumer.topic, consumer.consumerName, n)
 		if err != nil {
@@ -179,7 +182,6 @@ func (c *client) CreateReader(readerOptions ReaderOptions) (Reader, error) {
 
 // Close close the channel to notify rocksmq to stop operation and close rocksmq server
 func (c *client) Close() {
-	// TODO(yukun): Should call server.close() here?
 	c.closeOnce.Do(func() {
 		close(c.closeCh)
 		c.wg.Wait()

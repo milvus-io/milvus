@@ -90,8 +90,8 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 
 	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("master-time-tick-%d", randVal)
 	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("master-statistics-%d", randVal)
-	Params.RootCoordCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.MetaRootPath)
-	Params.RootCoordCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.RootCoordCfg.KvRootPath)
+	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
+	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
 	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
 
 	err = core.SetDataCoord(ctx, &tbd{})
@@ -122,7 +122,7 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+		"pulsarAddress":  Params.PulsarCfg.Address,
 		"pulsarBufSize":  1024}
 	err = msFactory.SetParams(m)
 	assert.Nil(b, err)

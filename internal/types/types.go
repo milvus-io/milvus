@@ -178,7 +178,7 @@ type DataCoord interface {
 	// error is returned only when some communication issue occurs
 	GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error)
 
-	// GetParititonStatistics requests partition statistics
+	// GetPartitionStatistics requests partition statistics
 	//
 	// ctx is the context to control request deadline and cancellation
 	// req contains the collection and partition id to query
@@ -288,7 +288,7 @@ type IndexNodeComponent interface {
 	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
+	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
@@ -326,7 +326,7 @@ type IndexCoordComponent interface {
 	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
+	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 }
 
@@ -657,19 +657,19 @@ type ProxyComponent interface {
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// SetRootCoord set RootCoord for Proxy
+	//SetRootCoordClient set RootCoord for Proxy
 	// `rootCoord` is a client of root coordinator.
 	SetRootCoordClient(rootCoord RootCoord)
 
-	// SetDataCoord set DataCoord for Proxy
+	// SetDataCoordClient set DataCoord for Proxy
 	// `dataCoord` is a client of data coordinator.
 	SetDataCoordClient(dataCoord DataCoord)
 
-	// SetIndexCoord set IndexCoord for Proxy
+	// SetIndexCoordClient set IndexCoord for Proxy
 	//  `indexCoord` is a client of index coordinator.
 	SetIndexCoordClient(indexCoord IndexCoord)
 
-	// SetQueryCoord set QueryCoord for Proxy
+	// SetQueryCoordClient set QueryCoord for Proxy
 	//  `queryCoord` is a client of query coordinator.
 	SetQueryCoordClient(queryCoord QueryCoord)
 
@@ -1121,7 +1121,7 @@ type QueryCoordComponent interface {
 	SetEtcdClient(etcdClient *clientv3.Client)
 
 	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this query coord, indicating whether it's healthy.
+	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 
 	// SetDataCoord set DataCoord for QueryCoord

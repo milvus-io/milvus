@@ -198,14 +198,17 @@ func (data *Int8FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
+// GetMemorySize implements FieldData.GetMemorySize
 func (data *Int16FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
+// GetMemorySize implements FieldData.GetMemorySize
 func (data *Int32FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
+// GetMemorySize implements FieldData.GetMemorySize
 func (data *Int64FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
@@ -257,6 +260,7 @@ type InsertCodec struct {
 	Schema *etcdpb.CollectionMeta
 }
 
+// NewInsertCodec creates an InsertCodec with provided collection meta
 func NewInsertCodec(schema *etcdpb.CollectionMeta) *InsertCodec {
 	return &InsertCodec{Schema: schema}
 }
@@ -294,6 +298,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
 		eventWriter, err := writer.NextInsertEventWriter()
 		if err != nil {
+			writer.Close()
 			return nil, nil, err
 		}
 
@@ -301,38 +306,85 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BoolFieldData).GetMemorySize()))
 		case schemapb.DataType_Int8:
 			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int8FieldData).GetMemorySize()))
 		case schemapb.DataType_Int16:
 			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int16FieldData).GetMemorySize()))
 		case schemapb.DataType_Int32:
 			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int32FieldData).GetMemorySize()))
 		case schemapb.DataType_Int64:
 			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int64FieldData).GetMemorySize()))
 		case schemapb.DataType_Float:
 			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatFieldData).GetMemorySize()))
 		case schemapb.DataType_Double:
 			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*DoubleFieldData).GetMemorySize()))
 		case schemapb.DataType_String:
 			for _, singleString := range singleData.(*StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
 				if err != nil {
+					eventWriter.Close()
+					writer.Close()
 					return nil, nil, err
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*StringFieldData).GetMemorySize()))
 		case schemapb.DataType_BinaryVector:
 			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BinaryVectorFieldData).GetMemorySize()))
 		case schemapb.DataType_FloatVector:
 			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatVectorFieldData).GetMemorySize()))
 		default:
 			return nil, nil, fmt.Errorf("undefined data type %d", field.DataType)
@@ -344,11 +396,15 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 		err = writer.Finish()
 		if err != nil {
+			eventWriter.Close()
+			writer.Close()
 			return nil, nil, err
 		}
 
 		buffer, err := writer.GetBuffer()
 		if err != nil {
+			eventWriter.Close()
+			writer.Close()
 			return nil, nil, err
 		}
 		blobKey := fmt.Sprintf("%d", field.FieldID)
@@ -690,6 +746,12 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	binlogWriter := NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
 	eventWriter, err := binlogWriter.NextDeleteEventWriter()
 	if err != nil {
+		binlogWriter.Close()
+		return nil, err
+	}
+	defer binlogWriter.Close()
+	defer eventWriter.Close()
+	if err != nil {
 		return nil, err
 	}
 	if len(data.Pks) != len(data.Tss) {
@@ -735,8 +797,6 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	blob := &Blob{
 		Value: buffer,
 	}
-	eventWriter.Close()
-	binlogWriter.Close()
 	return blob, nil
 
 }
@@ -830,10 +890,16 @@ func NewDataDefinitionCodec(collectionID int64) *DataDefinitionCodec {
 // It returns blobs in the end.
 func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequests []string, eventTypes []EventTypeCode) ([]*Blob, error) {
 	writer := NewDDLBinlogWriter(schemapb.DataType_Int64, dataDefinitionCodec.collectionID)
+	eventWriter, err := writer.NextCreateCollectionEventWriter()
+	if err != nil {
+		writer.Close()
+		return nil, err
+	}
+	defer writer.Close()
+	defer eventWriter.Close()
 
 	var blobs []*Blob
 
-	eventWriter, err := writer.NextCreateCollectionEventWriter()
 	if err != nil {
 		return nil, err
 	}
@@ -932,8 +998,6 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 		Key:   DDL,
 		Value: buffer,
 	})
-	eventWriter.Close()
-	writer.Close()
 
 	return blobs, nil
 }
@@ -1044,11 +1108,14 @@ func (codec *IndexFileBinlogCodec) Serialize(
 
 		eventWriter, err := writer.NextIndexFileEventWriter()
 		if err != nil {
+			writer.Close()
 			return nil, err
 		}
 
 		err = eventWriter.AddByteToPayload(datas[pos].Value)
 		if err != nil {
+			eventWriter.Close()
+			writer.Close()
 			return nil, err
 		}
 
@@ -1061,10 +1128,14 @@ func (codec *IndexFileBinlogCodec) Serialize(
 
 		err = writer.Finish()
 		if err != nil {
+			eventWriter.Close()
+			writer.Close()
 			return nil, err
 		}
 		buffer, err := writer.GetBuffer()
 		if err != nil {
+			eventWriter.Close()
+			writer.Close()
 			return nil, err
 		}
 
@@ -1079,11 +1150,13 @@ func (codec *IndexFileBinlogCodec) Serialize(
 
 	// save index params
 	writer := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, IndexParamsKey)
-
 	eventWriter, err := writer.NextIndexFileEventWriter()
 	if err != nil {
+		writer.Close()
 		return nil, err
 	}
+	defer writer.Close()
+	defer eventWriter.Close()
 
 	params, _ := json.Marshal(indexParams)
 	err = eventWriter.AddByteToPayload(params)
@@ -1113,8 +1186,6 @@ func (codec *IndexFileBinlogCodec) Serialize(
 		//Key:   strconv.Itoa(len(datas)),
 		Value: buffer,
 	})
-	eventWriter.Close()
-	writer.Close()
 
 	return blobs, nil
 }

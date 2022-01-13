@@ -85,18 +85,22 @@ func (info *indexInfo) getBuildID() UniqueID {
 	return info.buildID
 }
 
+// getFieldID returns filed id of index
 func (info *indexInfo) getFieldID() UniqueID {
 	return info.fieldID
 }
 
+// getIndexPaths returns indexPaths
 func (info *indexInfo) getIndexPaths() []string {
 	return info.indexPaths
 }
 
+// getIndexParams returns indexParams
 func (info *indexInfo) getIndexParams() map[string]string {
 	return info.indexParams
 }
 
+// getReadyLoad returns if index is ready to load
 func (info *indexInfo) getReadyLoad() bool {
 	return info.readyLoad
 }

@@ -126,7 +126,7 @@ func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 func TestQueryCollection_withoutVChannel(t *testing.T) {
 	ctx := context.Background()
 	m := map[string]interface{}{
-		"PulsarAddress":  Params.QueryNodeCfg.PulsarAddress,
+		"PulsarAddress":  Params.PulsarCfg.Address,
 		"ReceiveBufSize": 1024,
 		"PulsarBufSize":  1024}
 	factory := msgstream.NewPmsFactory()
@@ -135,7 +135,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.QueryNodeCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 
 	schema := genTestCollectionSchema(0, false, 2)
 	historicalReplica := newCollectionReplica(etcdKV)

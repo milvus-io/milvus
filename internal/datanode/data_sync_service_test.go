@@ -96,7 +96,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 	ctx := context.Background()
 
 	tests := []*testInfo{
-		{false, false, &mockMsgStreamFactory{false, true},
+		{true, false, &mockMsgStreamFactory{false, true},
 			0, "by-dev-rootcoord-dml-test_v0",
 			0, 0, "", 0,
 			0, 0, "", 0,
@@ -177,7 +177,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	defer cancel()
 
 	// init data node
-	pulsarURL := Params.DataNodeCfg.PulsarAddress
+	pulsarURL := Params.PulsarCfg.Address
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")

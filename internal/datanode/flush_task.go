@@ -86,7 +86,7 @@ func newTaskInjection(segmentCnt int, pf func(pack *segmentFlushPack)) *taskInje
 	return ti
 }
 
-// Injected returns a chan, which will be closed after pre set segments counts a injected
+// Injected returns a chan, which will be closed after pre set segments counts an injected
 func (ti *taskInjection) Injected() <-chan struct{} {
 	return ti.injected
 }

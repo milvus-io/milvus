@@ -198,7 +198,7 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.DataNodeCfg.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx, Params.BaseParams.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -220,9 +220,19 @@ func (node *DataNode) Init() error {
 	}
 	Params.DataNodeCfg.Refresh()
 
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarCfg.Address,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024,
+	}
+
+	if err := node.msFactory.SetParams(m); err != nil {
+		log.Warn("DataNode Init msFactory SetParams failed, use default",
+			zap.Error(err))
+		return err
+	}
 	log.Debug("DataNode Init",
-		zap.String("MsgChannelSubName", Params.DataNodeCfg.MsgChannelSubName),
-	)
+		zap.String("MsgChannelSubName", Params.DataNodeCfg.MsgChannelSubName))
 
 	return nil
 }
@@ -286,12 +296,16 @@ func (node *DataNode) checkWatchedList() error {
 func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 	switch evt.Type {
 	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
+		log.Debug("DataNode handleChannelEvt EventTypePut", zap.String("key", string(evt.Kv.Key)))
 		node.handleWatchInfo(string(evt.Kv.Key), evt.Kv.Value)
 	case clientv3.EventTypeDelete:
 		// guaranteed there is no "/" in channel name
 		parts := strings.Split(string(evt.Kv.Key), "/")
 		vchanName := parts[len(parts)-1]
-		log.Warn("handle channel delete event", zap.Int64("node id", Params.DataNodeCfg.NodeID), zap.String("vchannel", vchanName))
+		log.Debug("DataNode handleChannelEvt EventTypeDelete",
+			zap.String("key", string(evt.Kv.Key)),
+			zap.String("vChanName", vchanName),
+			zap.Int64("node id", Params.DataNodeCfg.NodeID))
 		node.ReleaseDataSyncService(vchanName)
 	}
 }
@@ -303,39 +317,49 @@ func (node *DataNode) handleWatchInfo(key string, data []byte) {
 		log.Warn("fail to parse ChannelWatchInfo", zap.String("key", key), zap.Error(err))
 		return
 	}
+	log.Debug("DataNode handleWatchInfo Unmarshal success")
 	if watchInfo.State == datapb.ChannelWatchState_Complete {
+		log.Warn("DataNode handleWatchInfo State is already ChannelWatchState_Complete")
 		return
 	}
 	if watchInfo.Vchan == nil {
 		log.Warn("found ChannelWatchInfo with nil VChannelInfo", zap.String("key", key))
 		return
 	}
+	log.Warn("DataNode handleWatchInfo try to NewDataSyncService", zap.String("key", key))
 	err = node.NewDataSyncService(watchInfo.Vchan)
 	if err != nil {
 		log.Warn("fail to create DataSyncService", zap.String("key", key), zap.Error(err))
 		return
 	}
+	log.Warn("DataNode handleWatchInfo NewDataSyncService success", zap.String("key", key))
+
 	watchInfo.State = datapb.ChannelWatchState_Complete
 	v, err := proto.Marshal(&watchInfo)
 	if err != nil {
-		log.Warn("fail to Marshal watchInfo", zap.String("key", key), zap.Error(err))
+		log.Warn("DataNode handleWatchInfo fail to Marshal watchInfo", zap.String("key", key), zap.Error(err))
 		return
 	}
 	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), watchInfo.GetVchan().GetChannelName())
+	log.Warn("DataNode handleWatchInfo try to Save", zap.String("key", key),
+		zap.String("k", k),
+		zap.String("v", string(v)))
+
 	err = node.watchKv.Save(k, string(v))
 	if err != nil {
-		log.Warn("fail to change WatchState to complete", zap.String("key", key), zap.Error(err))
+		log.Warn("DataNode handleWatchInfo fail to change WatchState to complete", zap.String("key", key), zap.Error(err))
 		node.ReleaseDataSyncService(key)
 	}
 }
 
 // NewDataSyncService adds a new dataSyncService for new dmlVchannel and starts dataSyncService.
 func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
-	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
+	node.chanMut.RLock()
 	if _, ok := node.vchan2SyncService[vchan.GetChannelName()]; ok {
+		node.chanMut.RUnlock()
 		return nil
 	}
+	node.chanMut.RUnlock()
 
 	replica, err := newReplica(node.ctx, node.rootCoord, vchan.CollectionID)
 	if err != nil {
@@ -344,7 +368,8 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 
 	var alloc allocatorInterface = newAllocator(node.rootCoord)
 
-	log.Debug("Received Vchannel Info",
+	log.Debug("DataNode NewDataSyncService received Vchannel Info",
+		zap.Int64("collectionID", vchan.CollectionID),
 		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
 		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegments())),
 	)
@@ -353,13 +378,18 @@ func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
 
 	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache, node.blobKv, node.compactionExecutor)
 	if err != nil {
+		log.Error("DataNode NewDataSyncService newDataSyncService failed",
+			zap.Error(err),
+		)
 		return err
 	}
 
+	node.chanMut.Lock()
 	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
 	node.vchan2FlushChs[vchan.GetChannelName()] = flushCh
+	node.chanMut.Unlock()
 
-	log.Info("Start New dataSyncService",
+	log.Info("DataNode NewDataSyncService success",
 		zap.Int64("Collection ID", vchan.GetCollectionID()),
 		zap.String("Vchannel name", vchan.GetChannelName()),
 	)
@@ -388,14 +418,15 @@ func (node *DataNode) ReleaseDataSyncService(vchanName string) {
 	log.Info("Release flowgraph resources begin", zap.String("Vchannel", vchanName))
 
 	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
-	if dss, ok := node.vchan2SyncService[vchanName]; ok {
-		dss.close()
-	}
-
+	dss, ok := node.vchan2SyncService[vchanName]
 	delete(node.vchan2SyncService, vchanName)
 	delete(node.vchan2FlushChs, vchanName)
+	node.chanMut.Unlock()
 
+	if ok {
+		// This is a time-consuming process, better to put outside of the lock
+		dss.close()
+	}
 	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
 
@@ -420,7 +451,7 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.DataNodeCfg.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.BaseParams.MetaRootPath)
 		node.watchKv = etcdKV
 		return nil
 	}
@@ -430,12 +461,12 @@ func (node *DataNode) Start() error {
 	}
 
 	option := &miniokv.Option{
-		Address:           Params.DataNodeCfg.MinioAddress,
-		AccessKeyID:       Params.DataNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.DataNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.DataNodeCfg.MinioUseSSL,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
-		BucketName:        Params.DataNodeCfg.MinioBucketName,
 	}
 
 	kv, err := miniokv.NewMinIOKV(node.ctx, option)

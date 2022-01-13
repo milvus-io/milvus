@@ -134,7 +134,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			continue
 		}
 
-		log.Debug("success to assign segments", zap.Any("assignments", allocations))
+		log.Debug("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", allocations))
 
 		for _, allocation := range allocations {
 			result := &datapb.SegmentIDAssignment{
@@ -312,6 +312,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	log.Debug("receive SaveBinlogPaths request",
+		zap.Int64("nodeID", req.GetBase().GetSourceID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
 		zap.Bool("isFlush", req.GetFlushed()),

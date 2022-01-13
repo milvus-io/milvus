@@ -88,6 +88,7 @@ jobs:
           # replace chaos object
           sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/pod_kill\/'/g" constants.py
           sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_pod_kill.yaml\'/g" constants.py
+          sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${{ env.RELEASE }}\'/g" constants.py
           cat constants.py
           timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
 
@@ -177,7 +178,7 @@ jobs:
           kubectl get po -n chaos-testing
           # export k8s log for chaos mesh and milvus
           bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/data-consist-test
-          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon
+          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon k8s_logs/chaos-mesh-daemon
       
       - name: Upload logs
         if: ${{ always() }}

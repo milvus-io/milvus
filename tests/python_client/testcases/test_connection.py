@@ -8,7 +8,7 @@ import common.common_type as ct
 import common.common_func as cf
 from common.code_mapping import ConnectionErrorMessage as cem
 
-CONNECT_TIMEOUT = 12
+# CONNECT_TIMEOUT = 12
 
 
 class TestConnectionParams(TestcaseBase):
@@ -844,7 +844,7 @@ class TestConnectIPInvalid(object):
         yield request.param
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.timeout(CONNECT_TIMEOUT)
+    # @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_ip(self, args, get_invalid_ip):
         ip = get_invalid_ip
         with pytest.raises(Exception) as e:
@@ -864,7 +864,7 @@ class TestConnectPortInvalid(object):
         yield request.param
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.timeout(CONNECT_TIMEOUT)
+    # @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_port(self, args, get_invalid_port):
         """
         target: test ip:port connect with invalid port value
@@ -889,7 +889,7 @@ class TestConnectURIInvalid(object):
         yield request.param
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.timeout(CONNECT_TIMEOUT)
+    # @pytest.mark.timeout(CONNECT_TIMEOUT)
     def test_connect_with_invalid_uri(self, get_invalid_uri, args):
         """
         target: test uri connect with invalid uri value

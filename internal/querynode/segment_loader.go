@@ -462,10 +462,14 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	if err != nil {
 		return err
 	}
+	defer stream.Close()
 	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
 	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
-	stream.SeekReaders([]*internalpb.MsgPosition{position})
+	err = stream.SeekReaders([]*internalpb.MsgPosition{position})
+	if err != nil {
+		return err
+	}
 
 	delData := &deleteData{
 		deleteIDs:        make(map[UniqueID][]int64),
@@ -518,7 +522,6 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		go deletePk(loader.historicalReplica, delData, segmentID, &wg)
 	}
 	wg.Wait()
-	stream.Close()
 	log.Debug("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
 }
@@ -669,12 +672,12 @@ func newSegmentLoader(ctx context.Context,
 	etcdKV *etcdkv.EtcdKV,
 	factory msgstream.Factory) *segmentLoader {
 	option := &minioKV.Option{
-		Address:           Params.QueryNodeCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryNodeCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryNodeCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryNodeCfg.MinioUseSSLStr,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
-		BucketName:        Params.QueryNodeCfg.MinioBucketName,
 	}
 
 	client, err := minioKV.NewMinIOKV(ctx, option)

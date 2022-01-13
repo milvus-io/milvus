@@ -33,16 +33,16 @@ Ideally, `u2` expects `C0` to be empty at `t2`, and could only see `A1` at `t7`;
 
 It's easy to achieve this in a `single-node` database. But for a `Distributed System`, such as `Milvus`, it's a little difficult; the following problems need to be solved:
 
-1. If `u1` and `u2` are on different nodes, and their time clock is not synchronized. To give an extreme example, suppose that the time of `u2` is 24 hours later than `u1`, then all the operations of `u1` can't be seen by `u2` until next day.
-2. Network latency. If `u2` starts the `Search on C0` at `t17`, then how can it be guaranteed that all the `events` before `t17` have been processed? If the events of `delete A1 from C0` has been delayed due to the network latency, then it would lead to incorrect state: `u2` would see both `A1` and `A2` at `t17`.
+1. If `u1` and `u2` are on different nodes, and their time clock is not synchronized. To give an extreme example, suppose that the time of `u2` is 24 hours later than `u1`, then all the operations of `u1` can't be seen by `u2` until the next day.
+2. Network latency. If `u2` starts the `Search on C0` at `t17`, then how can it be guaranteed that all the `events` before `t17` have been processed? If the events of `delete A1 from C0` have been delayed due to the network latency, then it would lead to an incorrect state: `u2` would see both `A1` and `A2` at `t17`.
 
 `Time synchronization system` is used to solve the above problems.
 
 ## Timestamp Oracle(TSO)
 
-Like [TiKV](https://github.com/tikv/tikv), Milvus 2.0 provides `TSO` service. All the events must alloc timestamp from `TSO`，not from local clock, so the first problem can be solved.
+Like [TiKV](https://github.com/tikv/tikv), Milvus 2.0 provides `TSO` service. All the events must alloc timestamp from `TSO`, not from the local clock, so the first problem can be solved.
 
-`TSO` is provided by the `RootCoord` component. Clients could alloc one or more timestamp in a single request; the `proto` is defined as following.
+`TSO` is provided by the `RootCoord` component. Clients could alloc one or more timestamp in a single request; the `proto` is defined as follows.
 
 ```proto
 service RootCoord {
@@ -63,7 +63,7 @@ message AllocTimestampResponse {
 }
 ```
 
-`Timestamp` is of type `uint64`, containing physical and logical parts.
+`Timestamp` is of type `uint64`, and contains physical and logical parts.
 
 This is the format of `Timestamp`
 
@@ -73,8 +73,8 @@ In an `AllocTimestamp` request, if `AllocTimestampRequest.count` is greater than
 
 ## Time Synchronization
 
-To understand the `Time Synchronization` better, let's introduce the data operation of Milvus 2.0 briefly.
-Taking `Insert Operation` as an example.
+To better understand `Time Synchronization`, let's introduce the data operation of Milvus 2.0 briefly.
+Take `Insert Operation` as an example.
 
 - User can configure lots of `Proxy` to achieve load balancing, in `Milvus 2.0`
 - User can use `SDK` to connect to any `Proxy`
@@ -96,7 +96,7 @@ The 3 `InsertMsg` from `Proxy1` are incremented in timestamp, and the 2 `InsertM
 
 ![msgstream](./graphs/timesync_msgstream.png)
 
-So the second problem has turned into this: after reading a message from `MsgStream`, how to make sure that all the messages with smaller timestamp have been consumed?
+So the second problem has turned into this: After reading a message from `MsgStream`, how to make sure that all the messages with smaller timestamp have been consumed?
 
 For example, when reading a message with timestamp `110` produced by `Proxy2`, but the message with timestamp `80` produced by `Proxy1`, is still in the `MsgStream`. How can this situation be handled?
 

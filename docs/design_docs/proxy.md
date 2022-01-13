@@ -91,7 +91,7 @@ of meta information in Root Coordinator, it will inform all Proxies to clear the
 requests will get the latest meta information.
 
 For inserts to a collection that is auto_id configured in the collection schema, Proxy assigns a primary key for
-every row of insert requests. For now the only supported data type of auto-generated primary field is `int64`. Proxy 
+every row of insert requests. For now, the only supported data type of auto-generated primary field is `int64`. Proxy 
 applies for a batch of primary keys from Root Coordinator and caches them for local assignments. When the primary keys in the cache
 are not enough, Proxy will continue to apply for another batch of primary keys.
 

@@ -17,6 +17,8 @@
 package querynode
 
 import (
+	"fmt"
+
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -36,7 +38,7 @@ type filterDeleteNode struct {
 
 // Name returns the name of filterDeleteNode
 func (fddNode *filterDeleteNode) Name() string {
-	return "fdNode"
+	return fmt.Sprintf("fdNode-%d", fddNode.collectionID)
 }
 
 // Operate handles input messages, to filter invalid delete messages

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package mqclient
 
@@ -25,6 +30,7 @@ type RmqConsumer struct {
 	closeCh    chan struct{}
 	once       sync.Once
 	skip       int32
+	wg         sync.WaitGroup
 }
 
 // Subscription returns the subscription name of this consumer
@@ -37,7 +43,9 @@ func (rc *RmqConsumer) Chan() <-chan Message {
 	if rc.msgChannel == nil {
 		rc.once.Do(func() {
 			rc.msgChannel = make(chan Message, 256)
+			rc.wg.Add(1)
 			go func() {
+				defer rc.wg.Done()
 				for { //nolint:gosimple
 					select {
 					case msg, ok := <-rc.c.Chan():
@@ -78,6 +86,6 @@ func (rc *RmqConsumer) Ack(message Message) {
 
 // Close is used to free the resources of this consumer
 func (rc *RmqConsumer) Close() {
-	rc.c.Close()
 	close(rc.closeCh)
+	rc.wg.Wait()
 }

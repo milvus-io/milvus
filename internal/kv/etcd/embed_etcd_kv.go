@@ -29,9 +29,14 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// implementation assertion
+var _ kv.MetaKv = (*EmbedEtcdKV)(nil)
+
+// EmbedEtcdKV use embedded Etcd instance as a KV storage
 type EmbedEtcdKV struct {
 	client    *clientv3.Client
 	rootPath  string

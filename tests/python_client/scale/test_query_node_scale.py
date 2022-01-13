@@ -118,3 +118,5 @@ class TestQueryNodeScale:
         log.debug(collection_w.num_entities)
         time.sleep(60)
         log.debug("Shrink querynode test finished")
+
+        mic.uninstall(release_name, namespace=constants.NAMESPACE)

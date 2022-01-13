@@ -20,10 +20,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
 // TODO(dragondriver): maybe IndexNode should be an interface so that we can mock it in the test cases
@@ -52,7 +51,7 @@ func getSystemInfoMetrics(
 			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
-			MinioBucketName: Params.IndexNodeCfg.MinioBucketName,
+			MinioBucketName: Params.MinioCfg.BucketName,
 
 			SimdType: Params.IndexNodeCfg.SimdType,
 		},

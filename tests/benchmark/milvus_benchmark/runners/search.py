@@ -180,7 +180,6 @@ class InsertSearchRunner(BaseRunner):
                 if isinstance(filter, dict) and "term" in filter:
                     filter_query.append(eval(filter["term"]))
                     # filter_param.append(filter["term"])
-                # logger.info("filter param: %s" % json.dumps(filter_param))
                 for nq in nqs:
                     # Take nq groups of data for query
                     query_vectors = base_query_vectors[0:nq]

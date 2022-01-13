@@ -121,7 +121,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 			assert.Nil(t, err)
 
 			assert.NotNil(t, dn)
-			assert.Equal(t, "deleteNode", dn.Name())
+			assert.Equal(t, "deleteNode-"+dn.channelName, dn.Name())
 			dn.Close()
 		})
 	}
@@ -246,7 +246,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-operate"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.DataNodeCfg.MetaRootPath = testPath
+		Params.BaseParams.MetaRootPath = testPath
 		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
@@ -270,7 +270,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-operate"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.DataNodeCfg.MetaRootPath = testPath
+		Params.BaseParams.MetaRootPath = testPath
 		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
@@ -299,7 +299,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-operate"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.DataNodeCfg.MetaRootPath = testPath
+		Params.BaseParams.MetaRootPath = testPath
 		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{

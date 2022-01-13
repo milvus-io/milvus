@@ -15,9 +15,11 @@
 // limitations under the License.
 
 #pragma once
-#include <type_traits>
-#include "common/Types.h"
+
 #include <cassert>
+#include <type_traits>
+
+#include "Types.h"
 #include "VectorTrait.h"
 
 namespace milvus {

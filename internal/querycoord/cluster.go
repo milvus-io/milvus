@@ -131,12 +131,12 @@ func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdK
 	}
 
 	option := &minioKV.Option{
-		Address:           Params.QueryCoordCfg.MinioEndPoint,
-		AccessKeyID:       Params.QueryCoordCfg.MinioAccessKeyID,
-		SecretAccessKeyID: Params.QueryCoordCfg.MinioSecretAccessKey,
-		UseSSL:            Params.QueryCoordCfg.MinioUseSSLStr,
+		Address:           Params.MinioCfg.Address,
+		AccessKeyID:       Params.MinioCfg.AccessKeyID,
+		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+		UseSSL:            Params.MinioCfg.UseSSL,
+		BucketName:        Params.MinioCfg.BucketName,
 		CreateBucket:      true,
-		BucketName:        Params.QueryCoordCfg.MinioBucketName,
 	}
 
 	c.dataKV, err = minioKV.NewMinIOKV(ctx, option)
@@ -706,32 +706,32 @@ func defaultSegEstimatePolicy() segEstimatePolicy {
 type segEstimatePolicy func(request *querypb.LoadSegmentsRequest, dataKv kv.DataKV) (int64, error)
 
 func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.DataKV) (int64, error) {
-	segmentSize := int64(0)
-
-	//TODO:: collection has multi vector field
-	//vecFields := make([]int64, 0)
-	//for _, field := range segments.Schema.Fields {
-	//	if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
-	//		vecFields = append(vecFields, field.FieldID)
-	//	}
-	//}
-	// get fields data size, if len(indexFieldIDs) == 0, vector field would be involved in fieldBinLogs
+	requestSize := int64(0)
 	for _, loadInfo := range segments.Infos {
-		// get index size
-		if loadInfo.EnableIndex {
-			for _, pathInfo := range loadInfo.IndexPathInfos {
-				segmentSize += int64(pathInfo.GetSerializedSize())
+		segmentSize := int64(0)
+		// get which field has index file
+		vecFieldIndexInfo := make(map[int64]*querypb.VecFieldIndexInfo)
+		for _, indexInfo := range loadInfo.IndexInfos {
+			if indexInfo.EnableIndex {
+				fieldID := indexInfo.FieldID
+				vecFieldIndexInfo[fieldID] = indexInfo
 			}
-			continue
 		}
 
-		// get binlog size
 		for _, binlogPath := range loadInfo.BinlogPaths {
-			for _, binlog := range binlogPath.Binlogs {
-				segmentSize += binlog.GetLogSize()
+			fieldID := binlogPath.FieldID
+			// if index node has built index, cal segment size by index file size, or use raw data's binlog size
+			if indexInfo, ok := vecFieldIndexInfo[fieldID]; ok {
+				segmentSize += indexInfo.IndexSize
+			} else {
+				for _, binlog := range binlogPath.Binlogs {
+					segmentSize += binlog.GetLogSize()
+				}
 			}
 		}
+		loadInfo.SegmentSize = segmentSize
+		requestSize += segmentSize
 	}
 
-	return segmentSize, nil
+	return requestSize, nil
 }

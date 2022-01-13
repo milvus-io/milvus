@@ -20,7 +20,8 @@ package indexnode
 
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
 
-#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include <stdlib.h>
 #include "indexbuilder/init_c.h"
@@ -67,6 +68,7 @@ var _ types.IndexNode = (*IndexNode)(nil)
 // make sure IndexNode implements types.IndexNodeComponent
 var _ types.IndexNodeComponent = (*IndexNode)(nil)
 
+// Params is a GlobalParamTable singleton of indexnode
 var Params paramtable.GlobalParamTable
 
 // IndexNode is a component that executes the task of building indexes.
@@ -145,7 +147,7 @@ func (i *IndexNode) initKnowhere() {
 }
 
 func (i *IndexNode) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.IndexNodeCfg.MetaRootPath, i.etcdCli)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.BaseParams.MetaRootPath, i.etcdCli)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
@@ -171,15 +173,15 @@ func (i *IndexNode) Init() error {
 		}
 		log.Debug("IndexNode init session successful", zap.Int64("serverID", i.session.ServerID))
 
-		etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.IndexNodeCfg.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.BaseParams.MetaRootPath)
 		i.etcdKV = etcdKV
 
 		option := &miniokv.Option{
-			Address:           Params.IndexNodeCfg.MinIOAddress,
-			AccessKeyID:       Params.IndexNodeCfg.MinIOAccessKeyID,
-			SecretAccessKeyID: Params.IndexNodeCfg.MinIOSecretAccessKey,
-			UseSSL:            Params.IndexNodeCfg.MinIOUseSSL,
-			BucketName:        Params.IndexNodeCfg.MinioBucketName,
+			Address:           Params.MinioCfg.Address,
+			AccessKeyID:       Params.MinioCfg.AccessKeyID,
+			SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
+			UseSSL:            Params.MinioCfg.UseSSL,
+			BucketName:        Params.MinioCfg.BucketName,
 			CreateBucket:      true,
 		}
 		kv, err := miniokv.NewMinIOKV(i.loopCtx, option)

@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )

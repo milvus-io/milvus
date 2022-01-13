@@ -11,13 +11,15 @@
 
 
 import random
-
+import time
+import argparse
 from pymilvus import (
     connections, list_collections,
     FieldSchema, CollectionSchema, DataType,
     Collection
 )
 TIMEOUT = 120
+
 
 def hello_milvus(host="127.0.0.1"):
     import time
@@ -54,13 +56,13 @@ def hello_milvus(host="127.0.0.1"):
         ]
     )
     t1 = time.time()
-    print(f"\nInsert {nb} vectors cost {t1 - t0} seconds")
+    print(f"\nInsert {nb} vectors cost {t1 - t0:.4f} seconds")
 
     t0 = time.time()
     print(f"\nGet collection entities...")
     print(collection.num_entities)
     t1 = time.time()
-    print(f"\nGet collection entities cost {t1 - t0} seconds")
+    print(f"\nGet collection entities cost {t1 - t0:.4f} seconds")
 
     # create index and load table
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -68,31 +70,30 @@ def hello_milvus(host="127.0.0.1"):
     t0 = time.time()
     collection.create_index(field_name="float_vector", index_params=default_index)
     t1 = time.time()
-    print(f"\nCreate index cost {t1 - t0} seconds")
+    print(f"\nCreate index cost {t1 - t0:.4f} seconds")
     print(f"\nload collection...")
     t0 = time.time()
     collection.load()
     t1 = time.time()
-    print(f"\nload collection cost {t1 - t0} seconds")
+    print(f"\nload collection cost {t1 - t0:.4f} seconds")
 
     # load and search
     topK = 5
     search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
-    start_time = time.time()
+    t0 = time.time()
     print(f"\nSearch...")
     # define output_fields of search result
     res = collection.search(
         vectors[-2:], "float_vector", search_params, topK,
         "count > 100", output_fields=["count", "random_value"], timeout=TIMEOUT
     )
-    end_time = time.time()
-
+    t1 = time.time()
+    print(f"search cost  {t1 - t0:.4f} seconds")
     # show result
     for hits in res:
         for hit in hits:
             # Get value of the random value field for search result
             print(hit, hit.entity.get("random_value"))
-    print("search latency = %.4fs" % (end_time - start_time))
 
     # query
     expr = "count in [2,4,6,8]"
@@ -104,14 +105,9 @@ def hello_milvus(host="127.0.0.1"):
     # collection.release()
 
 
-import argparse
-
 parser = argparse.ArgumentParser(description='host ip')
 parser.add_argument('--host', type=str, default='127.0.0.1', help='host ip')
 args = parser.parse_args()
-
 # add time stamp
-import time
-
 print(f"\nStart time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
 hello_milvus(args.host)

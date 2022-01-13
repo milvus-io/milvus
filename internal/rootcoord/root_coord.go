@@ -443,8 +443,8 @@ func (c *Core) setDdMsgSendFlag(b bool) error {
 }
 
 func (c *Core) setMsgStreams() error {
-	if Params.RootCoordCfg.PulsarAddress == "" {
-		return fmt.Errorf("pulsarAddress is empty")
+	if Params.PulsarCfg.Address == "" {
+		return fmt.Errorf("pulsar address is empty")
 	}
 	if Params.RootCoordCfg.MsgChannelSubName == "" {
 		return fmt.Errorf("msgChannelSubName is empty")
@@ -623,12 +623,16 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		if binlog.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return nil, fmt.Errorf("getInsertBinlogPaths from data service failed, error = %s", binlog.Status.Reason)
 		}
+		binlogPaths := make([]string, 0)
 		for i := range binlog.FieldIDs {
 			if binlog.FieldIDs[i] == fieldID {
-				return binlog.Paths[i].Values, nil
+				binlogPaths = append(binlogPaths, binlog.Paths[i].Values...)
 			}
 		}
-		return nil, fmt.Errorf("binlog file does not exist, segment id = %d, field id = %d", segID, fieldID)
+		if len(binlogPaths) == 0 {
+			return nil, fmt.Errorf("binlog file does not exist, segment id = %d, field id = %d", segID, fieldID)
+		}
+		return binlogPaths, nil
 	}
 
 	c.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (retRows int64, retErr error) {
@@ -933,12 +937,13 @@ func (c *Core) Register() error {
 	return nil
 }
 
+// SetEtcdClient sets the etcdCli of Core
 func (c *Core) SetEtcdClient(etcdClient *clientv3.Client) {
 	c.etcdCli = etcdClient
 }
 
 func (c *Core) initSession() error {
-	c.session = sessionutil.NewSession(c.ctx, Params.RootCoordCfg.MetaRootPath, c.etcdCli)
+	c.session = sessionutil.NewSession(c.ctx, Params.BaseParams.MetaRootPath, c.etcdCli)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
@@ -962,18 +967,18 @@ func (c *Core) Init() error {
 			return
 		}
 		connectEtcdFn := func() error {
-			if c.kvBase, initError = c.kvBaseCreate(Params.RootCoordCfg.KvRootPath); initError != nil {
+			if c.kvBase, initError = c.kvBaseCreate(Params.BaseParams.KvRootPath); initError != nil {
 				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
 			}
 			var metaKV kv.TxnKV
-			metaKV, initError = c.kvBaseCreate(Params.RootCoordCfg.MetaRootPath)
+			metaKV, initError = c.kvBaseCreate(Params.BaseParams.MetaRootPath)
 			if initError != nil {
 				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
 			}
 			var ss *suffixSnapshot
-			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.RootCoordCfg.MetaRootPath, "snapshots"); initError != nil {
+			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.BaseParams.MetaRootPath, "snapshots"); initError != nil {
 				log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
 				return initError
 			}
@@ -984,14 +989,14 @@ func (c *Core) Init() error {
 
 			return nil
 		}
-		log.Debug("RootCoord, Connecting to Etcd", zap.String("kv root", Params.RootCoordCfg.KvRootPath), zap.String("meta root", Params.RootCoordCfg.MetaRootPath))
+		log.Debug("RootCoord, Connecting to Etcd", zap.String("kv root", Params.BaseParams.KvRootPath), zap.String("meta root", Params.BaseParams.MetaRootPath))
 		err := retry.Do(c.ctx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
 			return
 		}
 
 		log.Debug("RootCoord, Setting TSO and ID Allocator")
-		kv := tsoutil.NewTSOKVBase(c.etcdCli, Params.RootCoordCfg.KvRootPath, "gid")
+		kv := tsoutil.NewTSOKVBase(c.etcdCli, Params.BaseParams.KvRootPath, "gid")
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", kv)
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
@@ -1003,7 +1008,7 @@ func (c *Core) Init() error {
 			return idAllocator.UpdateID()
 		}
 
-		kv = tsoutil.NewTSOKVBase(c.etcdCli, Params.RootCoordCfg.KvRootPath, "tso")
+		kv = tsoutil.NewTSOKVBase(c.etcdCli, Params.BaseParams.KvRootPath, "tso")
 		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", kv)
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
@@ -1016,7 +1021,7 @@ func (c *Core) Init() error {
 		}
 
 		m := map[string]interface{}{
-			"PulsarAddress":  Params.RootCoordCfg.PulsarAddress,
+			"PulsarAddress":  Params.PulsarCfg.Address,
 			"ReceiveBufSize": 1024,
 			"PulsarBufSize":  1024}
 		if initError = c.msFactory.SetParams(m); initError != nil {

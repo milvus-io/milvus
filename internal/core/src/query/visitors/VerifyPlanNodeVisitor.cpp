@@ -9,15 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "query/generated/VerifyPlanNodeVisitor.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "segcore/SegmentGrowingImpl.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "query/generated/VerifyPlanNodeVisitor.h"
 
 namespace milvus::query {
 
-#if 1
 namespace impl {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
@@ -30,7 +28,6 @@ class VerifyPlanNodeVisitor : PlanNodeVisitor {
     std::optional<RetType> ret_;
 };
 }  // namespace impl
-#endif
 
 static knowhere::IndexType
 InferIndexType(const Json& search_params) {

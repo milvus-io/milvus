@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-
 	"go.uber.org/zap"
 )
 
@@ -115,16 +114,19 @@ func newParallelConfig() parallelConfig {
 // start starts the flowgraph in datasyncservice
 func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
-		log.Debug("Data Sync Service starting flowgraph")
+		log.Debug("dataSyncService starting flowgraph", zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vChanName", dsService.vchannelName))
 		dsService.fg.Start()
 	} else {
-		log.Debug("Data Sync Service flowgraph nil")
+		log.Warn("dataSyncService starting flowgraph is nil", zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vChanName", dsService.vchannelName))
 	}
 }
 
 func (dsService *dataSyncService) close() {
 	if dsService.fg != nil {
-		log.Debug("Data Sync Service closing flowgraph")
+		log.Debug("dataSyncService closing flowgraph", zap.Int64("collectionID", dsService.collectionID),
+			zap.String("vChanName", dsService.vchannelName))
 		dsService.fg.Close()
 	}
 
@@ -135,18 +137,6 @@ func (dsService *dataSyncService) close() {
 // initNodes inits a TimetickedFlowGraph
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
-
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.DataNodeCfg.PulsarAddress,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024,
-	}
-
-	err := dsService.msFactory.SetParams(m)
-	if err != nil {
-		return err
-	}
-
 	// initialize flush manager for DataSync Service
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica,
 		flushNotifyFunc(dsService), dropVirtualChannelFunc(dsService))
@@ -214,6 +204,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		parallelConfig: newParallelConfig(),
 	}
 
+	var err error
 	var dmStreamNode Node
 	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), c)
 	if err != nil {

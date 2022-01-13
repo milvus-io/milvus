@@ -34,7 +34,7 @@ func Test_NewClient(t *testing.T) {
 	ctx := context.Background()
 	etcdCli, err := etcd.GetEtcdClient(&proxy.Params.BaseParams)
 	assert.Nil(t, err)
-	client, err := NewClient(ctx, proxy.Params.ProxyCfg.MetaRootPath, etcdCli)
+	client, err := NewClient(ctx, proxy.Params.BaseParams.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 

@@ -360,6 +360,7 @@ def milvus(request):
 def collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
+    log.debug(f'collection_name: {collection_name}')
     try:
         default_fields = gen_default_fields()
         connect.create_collection(collection_name, default_fields)
@@ -380,6 +381,7 @@ def collection(request, connect):
 def id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
+    log.debug(f'id_collection_name: {collection_name}')
     try:
         fields = gen_default_fields(auto_id=False)
         connect.create_collection(collection_name, fields)

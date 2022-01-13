@@ -48,8 +48,8 @@ type UniqueID = typeutil.UniqueID
 // Timestamp is alias of typeutil.Timestamp
 type Timestamp = typeutil.Timestamp
 
-const sendTimeTickMsgInterval = 200 * time.Millisecond
-const channelMgrTickerInterval = 100 * time.Millisecond
+// const sendTimeTickMsgInterval = 200 * time.Millisecond
+// const channelMgrTickerInterval = 100 * time.Millisecond
 
 // make sure Proxy implements types.Proxy
 var _ types.Proxy = (*Proxy)(nil)
@@ -129,7 +129,7 @@ func (node *Proxy) Register() error {
 
 // initSession initialize the session of Proxy.
 func (node *Proxy) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.ProxyCfg.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx, Params.BaseParams.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return errors.New("new session failed, maybe etcd cannot be connected")
 	}
@@ -177,7 +177,7 @@ func (node *Proxy) Init() error {
 	}
 
 	m := map[string]interface{}{
-		"PulsarAddress": Params.ProxyCfg.PulsarAddress,
+		"PulsarAddress": Params.PulsarCfg.Address,
 		"PulsarBufSize": 1024}
 	log.Debug("set parameters for ms factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", m))
 	if err := node.msFactory.SetParams(m); err != nil {
@@ -238,8 +238,10 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("create task scheduler done", zap.String("role", typeutil.ProxyRole))
 
-	log.Debug("create channels time ticker", zap.String("role", typeutil.ProxyRole))
-	node.chTicker = newChannelsTimeTicker(node.ctx, channelMgrTickerInterval, []string{}, node.sched.getPChanStatistics, tsoAllocator)
+	syncTimeTickInterval := Params.ProxyCfg.TimeTickInterval / 2
+	log.Debug("create channels time ticker",
+		zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
+	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("create metrics cache manager", zap.String("role", typeutil.ProxyRole))
@@ -262,12 +264,12 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	go func() {
 		defer node.wg.Done()
 
-		// TODO(dragondriver): read this from config
-		timer := time.NewTicker(sendTimeTickMsgInterval)
+		timer := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
 
 		for {
 			select {
 			case <-node.ctx.Done():
+				log.Info("send channels time tick loop exit")
 				return
 			case <-timer.C:
 				stats, ts, err := node.chTicker.getMinTsStatistics()

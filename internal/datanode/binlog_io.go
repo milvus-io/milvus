@@ -114,7 +114,11 @@ func (b *binlogIO) upload(
 
 	p := &cpaths{}
 
-	kvs := make(map[string]string)
+	var (
+		inPathm    = make(map[UniqueID]*datapb.FieldBinlog) // FieldID > its FieldBinlog
+		statsPathm = make(map[UniqueID]*datapb.FieldBinlog) // FieldID > its statsBinlog
+		kvs        = make(map[string]string)
+	)
 
 	for _, iData := range iDatas {
 		tf, ok := iData.Data[common.TimeStampField]
@@ -136,9 +140,33 @@ func (b *binlogIO) upload(
 			kvs[k] = v
 		}
 
-		p.inPaths = append(p.inPaths, inpaths...)
-		p.statsPaths = append(p.statsPaths, statspaths...)
+		for fID, fieldBinlog := range inpaths {
+			tmpfb, ok := inPathm[fID]
+			if !ok {
+				tmpfb = fieldBinlog
+			} else {
+				tmpfb.Binlogs = append(tmpfb.Binlogs, fieldBinlog.GetBinlogs()...)
+			}
+			inPathm[fID] = tmpfb
+		}
 
+		for fID, fieldBinlog := range statspaths {
+			tmpfb, ok := statsPathm[fID]
+			if !ok {
+				tmpfb = fieldBinlog
+			} else {
+				tmpfb.Binlogs = append(tmpfb.Binlogs, fieldBinlog.GetBinlogs()...)
+			}
+			statsPathm[fID] = tmpfb
+		}
+	}
+
+	for _, bs := range inPathm {
+		p.inPaths = append(p.inPaths, bs)
+	}
+
+	for _, bs := range statsPathm {
+		p.statsPaths = append(p.statsPaths, bs)
 	}
 
 	// If there are delta logs
@@ -208,16 +236,18 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 }
 
 // genInsertBlobs returns kvs, insert-paths, stats-paths
-func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string]string, []*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string]string, map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
 	inCodec := storage.NewInsertCodec(meta)
 	inlogs, statslogs, err := inCodec.Serialize(partID, segID, data)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	kvs := make(map[string]string, len(inlogs)+len(statslogs))
-	inpaths := make([]*datapb.FieldBinlog, 0, len(inlogs))
-	statspaths := make([]*datapb.FieldBinlog, 0, len(statslogs))
+	var (
+		kvs        = make(map[string]string, len(inlogs)+len(statslogs))
+		inpaths    = make(map[UniqueID]*datapb.FieldBinlog)
+		statspaths = make(map[UniqueID]*datapb.FieldBinlog)
+	)
 
 	notifyGenIdx := make(chan struct{})
 	defer close(notifyGenIdx)
@@ -237,15 +267,10 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		fileLen := len(value)
 
 		kvs[key] = value
-		inpaths = append(inpaths, &datapb.FieldBinlog{
+		inpaths[fID] = &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []*datapb.Binlog{
-				{
-					LogSize: int64(fileLen),
-					LogPath: key,
-				},
-			},
-		})
+			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key}},
+		}
 	}
 
 	for _, blob := range statslogs {
@@ -259,16 +284,10 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		fileLen := len(value)
 
 		kvs[key] = value
-		statspaths = append(statspaths, &datapb.FieldBinlog{
-
+		statspaths[fID] = &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []*datapb.Binlog{
-				{
-					LogSize: int64(fileLen),
-					LogPath: key,
-				},
-			},
-		})
+			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key}},
+		}
 	}
 
 	return kvs, inpaths, statspaths, nil

@@ -25,11 +25,25 @@ include(CheckCXXCompilerFlag)
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     message(STATUS "==============Darwin Environment==============")
     set(MACOS TRUE)
-    set(CMAKE_CXX_COMPILER "/usr/local/opt/llvm/bin/clang++")
-    set(CMAKE_CXX_FLAGS "-I/usr/local/opt/llvm/include -I/usr/local/include -I/usr/local/opt/openblas/include -I/usr/local/opt/libomp/include  -DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1")
     check_cxx_compiler_flag(-std=c++11 HAS_STD_CPP11_FLAG)
     if(HAS_STD_CPP11_FLAG)
         add_compile_options(-std=c++11)
+    endif()
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        set(OpenMP_C "${CMAKE_C_COMPILER}" CACHE STRING "" FORCE)
+        set(OpenMP_C_FLAGS "-fopenmp=libomp -Wno-unused-command-line-argument" CACHE STRING "" FORCE)
+        set(OpenMP_C_LIB_NAMES "libomp" "libgomp" "libiomp5" CACHE STRING "" FORCE)
+        set(OpenMP_libomp_LIBRARY ${OpenMP_C_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libgomp_LIBRARY ${OpenMP_C_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libiomp5_LIBRARY ${OpenMP_C_LIB_NAMES} CACHE STRING "" FORCE)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(OpenMP_CXX "${CMAKE_CXX_COMPILER}" CACHE STRING "" FORCE)
+        set(OpenMP_CXX_FLAGS "-fopenmp=libomp -Wno-unused-command-line-argument" CACHE STRING "" FORCE)
+        set(OpenMP_CXX_LIB_NAMES "libomp" "libgomp" "libiomp5" CACHE STRING "" FORCE)
+        set(OpenMP_libomp_LIBRARY ${OpenMP_CXX_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libgomp_LIBRARY ${OpenMP_CXX_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libiomp5_LIBRARY ${OpenMP_CXX_LIB_NAMES} CACHE STRING "" FORCE)
     endif()
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     message(STATUS "==============Linux Environment===============")
@@ -37,6 +51,11 @@ elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 else ()
     message(FATAL_ERROR "Unsupported platform!" )
 endif ()
+
+find_package(OpenMP REQUIRED)
+if (OPENMP_FOUND)
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
@@ -84,21 +103,37 @@ include_directories(thirdparty)
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )
-find_package(OpenMP REQUIRED)
-if (OPENMP_FOUND)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-endif()
 
 # **************************** Compiler arguments ****************************
 message( STATUS "Building Milvus CPU version" )
 
+if (LINUX)
 append_flags( CMAKE_CXX_FLAGS
               FLAGS
-                    "-fPIC"
-                    "-DELPP_THREAD_SAFE"
-                    "-fopenmp"
-                    "-Werror"
-                    )
+              "-fPIC"
+              "-DELPP_THREAD_SAFE"
+              "-fopenmp"
+              "-Werror"
+              )
+endif ()
+
+if (MACOS)
+    append_flags( CMAKE_CXX_FLAGS
+            FLAGS
+            "-fPIC"
+            "-DELPP_THREAD_SAFE"
+            "-fopenmp"
+            "-Wno-error"
+            "-Wsign-compare"
+            "-Wall"
+            "-pedantic"
+            "-Wno-unused-command-line-argument"
+            "-Wextra"
+            "-Wno-unused-parameter"
+            "-Wno-deprecated"
+            "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
+            )
+endif ()
 
 # **************************** Coding style check tools ****************************
 find_package( ClangTools )
@@ -125,19 +160,17 @@ if ( NOT LINT_EXCLUSIONS_FILE )
     set( LINT_EXCLUSIONS_FILE ${BUILD_SUPPORT_DIR}/lint_exclusions.txt )
 endif ()
 
-find_program( CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR} )
-message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
-
-#
-# "make lint" targets
-#
-add_custom_target( lint
+add_custom_target(lint
     ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_cpplint.py
                             --cpplint_binary    ${CPPLINT_BIN}
                             --exclude_globs     ${LINT_EXCLUSIONS_FILE}
-                            --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}
+                            --source_dir            ${CMAKE_CURRENT_SOURCE_DIR}/src
                             ${MILVUS_LINT_QUIET}
                             )
+
+
+find_program( CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR} )
+message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
 
 #
 # "make clang-format" and "make check-clang-format" targets
@@ -208,7 +241,9 @@ add_subdirectory( src )
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
     add_subdirectory(unittest)
-    add_subdirectory(bench)
+    if (LINUX)
+        add_subdirectory(bench)
+    endif ()
 endif ()
 
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )

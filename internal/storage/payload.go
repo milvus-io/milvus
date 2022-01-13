@@ -19,7 +19,7 @@ package storage
 /*
 #cgo CFLAGS: -I${SRCDIR}/cwrapper
 
-#cgo LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -L${SRCDIR}/cwrapper/output/lib64 -lwrapper -lparquet -larrow -larrow_bundled_dependencies -lstdc++ -lm
+#cgo LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -lwrapper -lparquet -larrow -larrow_bundled_dependencies -lstdc++ -lm
 #include <stdlib.h>
 #include "ParquetWrapper.h"
 */
@@ -75,11 +75,13 @@ type PayloadReaderInterface interface {
 	Close()
 }
 
+// PayloadWriter writes data into payload
 type PayloadWriter struct {
 	payloadWriterPtr C.CPayloadWriter
 	colType          schemapb.DataType
 }
 
+// PayloadReader reads data from payload
 type PayloadReader struct {
 	payloadReaderPtr C.CPayloadReader
 	colType          schemapb.DataType
@@ -186,6 +188,7 @@ func (w *PayloadWriter) AddBoolToPayload(msgs []bool) error {
 	return HandleCStatus(&status, "AddBoolToPayload failed")
 }
 
+// AddByteToPayload adds @msgs into payload
 func (w *PayloadWriter) AddByteToPayload(msgs []byte) error {
 	length := len(msgs)
 	if length <= 0 {
@@ -364,7 +367,7 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte) (*PayloadReader, er
 	if len(buf) == 0 {
 		return nil, errors.New("create Payload reader failed, buffer is empty")
 	}
-	r := C.NewPayloadReader(C.int(colType), (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.long(len(buf)))
+	r := C.NewPayloadReader(C.int(colType), (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.int64_t(len(buf)))
 	if r == nil {
 		return nil, errors.New("failed to read parquet from buffer")
 	}

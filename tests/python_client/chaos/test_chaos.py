@@ -140,13 +140,16 @@ class TestChaos(TestChaosBase):
     def test_chaos(self, chaos_yaml):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
+        log.info(f"chaos_yaml: {chaos_yaml}")
         log.info(connections.get_connection_addr('default'))
         cc.start_monitor_threads(self.health_checkers)
 
         # parse chaos object
         chaos_config = cc.gen_experiment_config(chaos_yaml)
+        release_name = constants.RELEASE_NAME
+        log.info(f"release_name: {release_name}")
+        chaos_config['metadata']['name'] = release_name
         meta_name = chaos_config.get('metadata', None).get('name', None)
-        release_name = meta_name
         chaos_config_str = json.dumps(chaos_config)
         chaos_config_str = chaos_config_str.replace("milvus-chaos", release_name)
         chaos_config = json.loads(chaos_config_str)
@@ -185,7 +188,7 @@ class TestChaos(TestChaosBase):
         # reset counting
         cc.reset_counting(self.health_checkers)
 
-        # wait 40s
+        # wait 120s
         sleep(constants.CHAOS_DURATION)
 
         log.info(f'Alive threads: {threading.enumerate()}')

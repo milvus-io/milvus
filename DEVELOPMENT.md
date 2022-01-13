@@ -26,7 +26,7 @@ Table of contents
 
 ## Building Milvus with Docker
 
-Official releases are built using Docker containers. To build Milvus using Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
+Official releases are built with Docker containers. To build Milvus with Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
 
 ## Building Milvus on a local OS/shell environment
 
@@ -47,6 +47,8 @@ In fact, all Linux distributions are available to develop Milvus. The following 
 
 #### Dependencies
 - Debian/Ubuntu
+- MacOS, both Apple Silicon and Intel Processors are supported.
+
 
 ```shell
 $ sudo apt update
@@ -86,6 +88,20 @@ $ wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost
       cd ../ && rm -rf ./boost_1_65_1*
 
 ```
+
+- MacOS
+1. Install the latest version of XCode.
+2. Install required libraries.
+   ```bash
+   brew install boost cmake gfortran libomp llvm ninja openblas tbb
+   ```
+3. Create soft links if libraries cannot be correctly located. For example:
+   ```bash
+   sudo ln -s "$(brew --prefix libomp)/include/omp.h" /usr/local/include/omp.h
+   ```
+
+***CAVEATS*
+* [Google Test](https://github.com/google/googletest.git) is automatically cloned from GitHub, which in some case could conflict with your local google test library.
 
 Once you have finished, confirm that `gcc` and `make` are installed:
 

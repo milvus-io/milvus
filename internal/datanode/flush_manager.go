@@ -97,7 +97,7 @@ type orderFlushQueue struct {
 	postInjection postInjectionFunc
 }
 
-// newOrderFlushQueue creates a orderFlushQueue
+// newOrderFlushQueue creates an orderFlushQueue
 func newOrderFlushQueue(segID UniqueID, f notifyMetaFunc) *orderFlushQueue {
 	q := &orderFlushQueue{
 		segmentID:  segID,
@@ -247,7 +247,7 @@ type rendezvousFlushManager struct {
 	dropHandler dropHandler
 }
 
-// getFlushQueue gets or creates a orderFlushQueue for segment id if not found
+// getFlushQueue gets or creates an orderFlushQueue for segment id if not found
 func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQueue {
 	newQueue := newOrderFlushQueue(segmentID, m.notifyFunc)
 	actual, _ := m.dispatcher.LoadOrStore(segmentID, newQueue)
@@ -678,17 +678,21 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			// TODO silverxia change to graceful stop datanode
 			panic(pack.err)
 		}
-		fieldInsert := []*datapb.FieldBinlog{}
-		fieldStats := []*datapb.FieldBinlog{}
-		deltaInfos := []*datapb.FieldBinlog{}
-		checkPoints := []*datapb.CheckPoint{}
+
+		var (
+			fieldInsert = []*datapb.FieldBinlog{}
+			fieldStats  = []*datapb.FieldBinlog{}
+			deltaInfos  = make([]*datapb.FieldBinlog, 1)
+			checkPoints = []*datapb.CheckPoint{}
+		)
+
 		for k, v := range pack.insertLogs {
 			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
 		for k, v := range pack.statsLogs {
 			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
-		deltaInfos = append(deltaInfos, &datapb.FieldBinlog{Binlogs: pack.deltaLogs})
+		deltaInfos[0] = &datapb.FieldBinlog{Binlogs: pack.deltaLogs}
 
 		// only current segment checkpoint info,
 		updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
@@ -706,7 +710,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			zap.Any("startPos", startPos),
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 			zap.Int("Length of Field2Stats", len(fieldStats)),
-			zap.Int("Length of Field2Deltalogs", len(deltaInfos)),
+			zap.Int("Length of Field2Deltalogs", len(deltaInfos[0].GetBinlogs())),
 			zap.String("vChannelName", dsService.vchannelName),
 		)
 

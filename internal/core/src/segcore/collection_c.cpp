@@ -9,6 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#ifndef __APPLE__
+#include <malloc.h>
+#endif
+
 #include <iostream>
 #include "segcore/collection_c.h"
 #include "segcore/Collection.h"
@@ -24,6 +28,9 @@ void
 DeleteCollection(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
     delete col;
+#ifndef __APPLE__
+    malloc_trim(0);
+#endif
 }
 
 const char*

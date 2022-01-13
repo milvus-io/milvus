@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -32,6 +33,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
+)
+
+var (
+	// TODO: better to be configurable
+	enableTtChecker        = true
+	timeTickSyncTtInterval = 2 * time.Minute
+	ttCheckerName          = "rootTtChecker"
+	ttCheckerWarnMsg       = fmt.Sprintf("RootCoord haven't synchronized the time tick for %f minutes", timeTickSyncTtInterval.Minutes())
 )
 
 type timetickSync struct {
@@ -275,6 +284,14 @@ func (t *timetickSync) getProxy(sess []*sessionutil.Session) {
 // StartWatch watch proxy node change and process all channels' timetick msg
 func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	defer wg.Done()
+
+	var checker *timerecord.LongTermChecker
+	if enableTtChecker {
+		checker = timerecord.NewLongTermChecker(t.ctx, ttCheckerName, timeTickSyncTtInterval, ttCheckerWarnMsg)
+		checker.Start()
+		defer checker.Stop()
+	}
+
 	for {
 		select {
 		case <-t.ctx.Done():
@@ -290,6 +307,10 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			local := proxyTimetick[t.session.ServerID]
 			if len(local.chanTs) == 0 {
 				continue
+			}
+
+			if enableTtChecker {
+				checker.Check()
 			}
 
 			hdr := fmt.Sprintf("send ts to %d channels", len(local.chanTs))

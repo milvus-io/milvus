@@ -298,6 +298,7 @@ func newBinIVFConfAdapter() *BinIVFConfAdapter {
 type NSGConfAdapter struct {
 }
 
+// CheckTrain checks if a nsg index can be built with specific parameters.
 func (adapter *NSGConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckStrByValues(params, Metric, METRICS) {
 		return false
@@ -328,10 +329,12 @@ func newNSGConfAdapter() *NSGConfAdapter {
 	return &NSGConfAdapter{}
 }
 
+// HNSWConfAdapter checks if a hnsw index can be built.
 type HNSWConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a hnsw index can be built with specific parameters.
 func (adapter *HNSWConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false
@@ -348,10 +351,12 @@ func newHNSWConfAdapter() *HNSWConfAdapter {
 	return &HNSWConfAdapter{}
 }
 
+// ANNOYConfAdapter checks if an ANNOY index can be built.
 type ANNOYConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if an annoy index can be built with specific parameters.
 func (adapter *ANNOYConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, NTREES, MinNTrees, MaxNTrees) {
 		return false
@@ -364,10 +369,12 @@ func newANNOYConfAdapter() *ANNOYConfAdapter {
 	return &ANNOYConfAdapter{}
 }
 
+// RHNSWFlatConfAdapter checks if a rhnsw flat index can be built.
 type RHNSWFlatConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a rhnsw flat index can be built with specific parameters.
 func (adapter *RHNSWFlatConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false
@@ -384,11 +391,13 @@ func newRHNSWFlatConfAdapter() *RHNSWFlatConfAdapter {
 	return &RHNSWFlatConfAdapter{}
 }
 
+// RHNSWPQConfAdapter checks if a rhnsw pq index can be built.
 type RHNSWPQConfAdapter struct {
 	BaseConfAdapter
 	IVFPQConfAdapter
 }
 
+// CheckTrain checks if a rhnsw pq index can be built with specific parameters.
 func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !adapter.BaseConfAdapter.CheckTrain(params) {
 		return false
@@ -419,10 +428,12 @@ func newRHNSWPQConfAdapter() *RHNSWPQConfAdapter {
 	return &RHNSWPQConfAdapter{}
 }
 
+// RHNSWSQConfAdapter checks if a rhnsw sq index can be built.
 type RHNSWSQConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a rhnsw sq index can be built with specific parameters.
 func (adapter *RHNSWSQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false

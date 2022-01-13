@@ -184,11 +184,11 @@ func (inm *Mock) Register() error {
 		return errors.New("IndexNode register failed")
 	}
 	Params.Init()
-	inm.etcdKV = etcdkv.NewEtcdKV(inm.etcdCli, Params.IndexNodeCfg.MetaRootPath)
+	inm.etcdKV = etcdkv.NewEtcdKV(inm.etcdCli, Params.BaseParams.MetaRootPath)
 	if err := inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole); err != nil {
 		return err
 	}
-	session := sessionutil.NewSession(context.Background(), Params.IndexNodeCfg.MetaRootPath, inm.etcdCli)
+	session := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, inm.etcdCli)
 	session.Init(typeutil.IndexNodeRole, "localhost:21121", false, false)
 	session.Register()
 	return nil
@@ -353,7 +353,7 @@ func getMockSystemInfoMetrics(
 			Type:        typeutil.IndexNodeRole,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
-			MinioBucketName: Params.IndexNodeCfg.MinioBucketName,
+			MinioBucketName: Params.MinioCfg.BucketName,
 
 			SimdType: Params.IndexNodeCfg.SimdType,
 		},

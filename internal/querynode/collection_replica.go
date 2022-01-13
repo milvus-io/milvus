@@ -20,7 +20,8 @@ package querynode
 
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
 
-#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -204,7 +205,7 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 	defer colReplica.mu.Unlock()
 
 	if ok := colReplica.hasCollectionPrivate(collectionID); ok {
-		return errors.New("collection has been loaded, id %d" + strconv.FormatInt(collectionID, 10))
+		return fmt.Errorf("collection has been loaded, id %d", collectionID)
 	}
 
 	var newCollection = newCollection(collectionID, schema)
@@ -252,7 +253,7 @@ func (colReplica *collectionReplica) getCollectionByID(collectionID UniqueID) (*
 func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
 	collection, ok := colReplica.collections[collectionID]
 	if !ok {
-		return nil, errors.New("collection hasn't been loaded or has been released, collection id =" + strconv.FormatInt(collectionID, 10))
+		return nil, fmt.Errorf("collection hasn't been loaded or has been released, collection id = %d", collectionID)
 	}
 
 	return collection, nil
@@ -357,12 +358,12 @@ func (colReplica *collectionReplica) getSegmentInfosByColID(collectionID UniqueI
 	for _, partitionID := range collection.partitionIDs {
 		partition, ok := colReplica.partitions[partitionID]
 		if !ok {
-			return nil, errors.New("the meta of collection and partition are inconsistent in QueryNode")
+			return nil, fmt.Errorf("the meta of collection %d and partition %d are inconsistent in QueryNode", collectionID, partitionID)
 		}
 		for _, segmentID := range partition.segmentIDs {
 			segment, ok := colReplica.segments[segmentID]
 			if !ok {
-				return nil, errors.New("the meta of partition and segment are inconsistent in QueryNode")
+				return nil, fmt.Errorf("the meta of partition %d and segment %d are inconsistent in QueryNode", partitionID, segmentID)
 			}
 			segmentInfo := getSegmentInfo(segment)
 			segmentInfos = append(segmentInfos, segmentInfo)
@@ -439,7 +440,7 @@ func (colReplica *collectionReplica) getPartitionByID(partitionID UniqueID) (*Pa
 func (colReplica *collectionReplica) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
 	partition, ok := colReplica.partitions[partitionID]
 	if !ok {
-		return nil, errors.New("partition hasn't been loaded or has been released, partition id = %d" + strconv.FormatInt(partitionID, 10))
+		return nil, fmt.Errorf("partition %d hasn't been loaded or has been released", partitionID)
 	}
 
 	return partition, nil
@@ -579,7 +580,7 @@ func (colReplica *collectionReplica) getSegmentByID(segmentID UniqueID) (*Segmen
 func (colReplica *collectionReplica) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
 	segment, ok := colReplica.segments[segmentID]
 	if !ok {
-		return nil, errors.New("cannot find segment in QueryNode, id = " + strconv.FormatInt(segmentID, 10))
+		return nil, fmt.Errorf("cannot find segment %d in QueryNode", segmentID)
 	}
 
 	return segment, nil
