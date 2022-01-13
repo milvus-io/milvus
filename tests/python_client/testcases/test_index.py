@@ -199,7 +199,8 @@ class TestIndexOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        self._connect().flush([collection_w.name])
+        # flush
+        collection_w.num_entities
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         # TODO: assert index
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
