@@ -77,7 +77,7 @@ else
 #	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
-verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
+verifiers: build-cpp getdeps cppcheck fmt milvus static-check ruleguard
 
 # Build various components locally.
 binlog:
