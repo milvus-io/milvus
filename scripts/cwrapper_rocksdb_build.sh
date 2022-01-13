@@ -95,9 +95,9 @@ if [ -f "${OUTPUT_LIB}/lib/librocksdb.a" ]; then
       esac
 else
      case "${unameOut}" in
-              Linux*)     ldflags="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz";;
-              Darwin*)    ldflags="-L${OUTPUT_LIB}/lib64 -lrocksdb -lstdc++ -lm -lz";;
-              *)          echo "UNKNOWN:${unameOut}" ; exit 0;
+          Linux*)     ldflags="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz";;
+          Darwin*)    ldflags="-L${OUTPUT_LIB}/lib64 -lrocksdb -lstdc++ -lm -lz";;
+          *)          echo "UNKNOWN:${unameOut}" ; exit 0;
       esac
 fi
 
