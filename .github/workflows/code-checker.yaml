@@ -3,6 +3,7 @@ name: Code Checker
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
+  push: 
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
@@ -50,4 +51,5 @@ jobs:
         env:
           CHECK_BUILDER: "1"
         run: |
-          ./build/builder.sh /bin/bash -c "go mod tidy && make verifiers"
+          ./build/builder.sh /bin/bash -c "go mod tidy || true "
+          ./build/builder.sh /bin/bash -c "make verifiers"
