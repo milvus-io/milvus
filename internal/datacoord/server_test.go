@@ -294,7 +294,6 @@ func TestGetSegmentStates(t *testing.T) {
 				assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 				assert.EqualValues(t, 1, len(resp.States))
 				if test.expected {
-					assert.EqualValues(t, commonpb.ErrorCode_Success, resp.States[0].Status.ErrorCode)
 					assert.EqualValues(t, test.expectedState, resp.States[0].State)
 				}
 			})

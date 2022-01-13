@@ -302,6 +302,7 @@ type dataCoordMock struct {
 	Segment2Binlog      map[UniqueID]*datapb.SegmentBinlogs
 	baseSegmentID       UniqueID
 	channelNumPerCol    int
+	segmentNotExist     bool
 }
 
 func newDataCoordMock(ctx context.Context) (*dataCoordMock, error) {
@@ -402,9 +403,33 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 	}, nil
 }
 
+func (data *dataCoordMock) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
+	var state commonpb.SegmentState
+	if data.segmentNotExist {
+		state = commonpb.SegmentState_NotExist
+	} else {
+		state = commonpb.SegmentState_Flushed
+	}
+	var segmentStates []*datapb.SegmentStateInfo
+	for _, segmentID := range req.SegmentIDs {
+		segmentStates = append(segmentStates, &datapb.SegmentStateInfo{
+			SegmentID: segmentID,
+			State:     state,
+		})
+	}
+
+	return &datapb.GetSegmentStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		States: segmentStates,
+	}, nil
+}
+
 type indexCoordMock struct {
 	types.IndexCoord
 	returnIndexFile bool
+	returnError     bool
 }
 
 func newIndexCoordMock() *indexCoordMock {
@@ -419,6 +444,12 @@ func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.Get
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
+
+	if c.returnError {
+		res.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		return res, nil
+	}
+
 	if c.returnIndexFile {
 		indexPaths, _ := generateIndex(defaultSegmentID)
 		indexPathInfo := &indexpb.IndexFilePathInfo{
