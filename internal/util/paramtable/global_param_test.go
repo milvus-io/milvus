@@ -402,11 +402,3 @@ func TestGrpcClientParams(t *testing.T) {
 	Params.initClientMaxSendSize()
 	assert.Equal(t, Params.ClientMaxSendSize, DefaultClientMaxSendSize)
 }
-
-func TestCheckPortAvailable(t *testing.T) {
-	num := 10
-	for i := 0; i < num; i++ {
-		port := GetAvailablePort()
-		assert.Equal(t, CheckPortAvailable(port), true)
-	}
-}

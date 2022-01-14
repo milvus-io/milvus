@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"math"
-	"net"
 	"os"
 	"path"
 	"strconv"
@@ -23,7 +22,6 @@ import (
 
 	"github.com/go-basic/ipv4"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -1472,12 +1470,6 @@ func (p *grpcConfig) LoadFromArgs() {
 
 func (p *grpcConfig) initPort() {
 	p.Port = p.ParseInt(p.Domain + ".port")
-	if p.Domain == typeutil.ProxyRole || p.Domain == typeutil.DataNodeRole || p.Domain == typeutil.IndexNodeRole || p.Domain == typeutil.QueryNodeRole {
-		if !CheckPortAvailable(p.Port) {
-			p.Port = GetAvailablePort()
-			log.Warn("get available port when init", zap.String("Domain", p.Domain), zap.Int("Port", p.Port))
-		}
-	}
 }
 
 // GetAddress return grpc address
@@ -1619,25 +1611,4 @@ func (p *GrpcClientConfig) initClientMaxRecvSize() {
 
 	log.Debug("initClientMaxRecvSize",
 		zap.String("role", p.Domain), zap.Int("grpc.clientMaxRecvSize", p.ClientMaxRecvSize))
-}
-
-// CheckPortAvailable check if a port is available to be listened on
-func CheckPortAvailable(port int) bool {
-	addr := ":" + strconv.Itoa(port)
-	listener, err := net.Listen("tcp", addr)
-	if listener != nil {
-		listener.Close()
-	}
-	return err == nil
-}
-
-// GetAvailablePort return an available port that can be listened on
-func GetAvailablePort() int {
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
-
-	return listener.Addr().(*net.TCPAddr).Port
 }
