@@ -172,7 +172,7 @@ jobs:
           kubectl get pods
           ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
           kubectl port-forward service/deploy-testing-milvus 19530 >/dev/null 2>&1 &
-          sleep 20s
+          sleep 120s
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
           
