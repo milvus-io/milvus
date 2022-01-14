@@ -572,12 +572,13 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
-
-		log.Debug("QueryNode.GetMetrics",
-			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
-			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
-			zap.Error(err))
+		if err != nil {
+			log.Warn("QueryNode.GetMetrics failed",
+				zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
+				zap.String("req", req.Request),
+				zap.String("metric_type", metricType),
+				zap.Error(err))
+		}
 
 		return metrics, nil
 	}
