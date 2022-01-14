@@ -281,7 +281,10 @@ func (c *Core) startTimeTickLoop() {
 		case <-ticker.C:
 			c.ddlLock.Lock()
 			if ts, err := c.TSOAllocator(1); err == nil {
-				c.SendTimeTick(ts, "timetick loop")
+				err := c.SendTimeTick(ts, "timetick loop")
+				if err != nil {
+					log.Warn("Failed to send timetick", zap.Error(err))
+				}
 			}
 			c.ddlLock.Unlock()
 		}

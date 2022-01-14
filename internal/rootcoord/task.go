@@ -238,7 +238,10 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		return nil
 	}
 
@@ -330,8 +333,10 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
-
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		// send tt into deleted channels to tell data_node to clear flowgragh
 		t.core.chanTimeTick.sendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
 
@@ -543,7 +548,10 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		return nil
 	}
 
@@ -627,7 +635,10 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		return nil
 	}
 
