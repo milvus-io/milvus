@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn import preprocessing
 
 from pymilvus import DataType
+from pymilvus.orm.types import CONSISTENCY_STRONG
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
@@ -86,44 +87,53 @@ def gen_binary_vec_field(name=ct.default_binary_vec_field_name, is_primary=False
 
 
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                  auto_id=False, dim=ct.default_dim):
+                                  auto_id=False, dim=ct.default_dim, consistency_level=CONSISTENCY_STRONG):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    consistency_level=consistency_level)
     return schema
 
 
 def gen_collection_schema_all_datatype(description=ct.default_desc,
                                        primary_field=ct.default_int64_field_name,
-                                       auto_id=False, dim=ct.default_dim):
+                                       auto_id=False, dim=ct.default_dim,
+                                       consistency_level=CONSISTENCY_STRONG):
     fields = [gen_int64_field(), gen_int32_field(), gen_int16_field(), gen_int8_field(),
               gen_bool_field(), gen_float_field(), gen_double_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
-                                                                    primary_field=primary_field, auto_id=auto_id)
+                                                                    primary_field=primary_field, auto_id=auto_id,
+                                                                    consistency_level=consistency_level)
     return schema
 
 
-def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False):
+def gen_collection_schema(fields, primary_field=None, description=ct.default_desc, auto_id=False,
+                          consistency_level=CONSISTENCY_STRONG):
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, primary_field=primary_field,
-                                                                    description=description, auto_id=auto_id)
+                                                                    description=description, auto_id=auto_id,
+                                                                    consistency_level=consistency_level)
     return schema
 
 
 def gen_default_binary_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
-                                         auto_id=False, dim=ct.default_dim):
+                                         auto_id=False, dim=ct.default_dim,
+                                         consistency_level=CONSISTENCY_STRONG):
     fields = [gen_int64_field(), gen_float_field(), gen_binary_vec_field(dim=dim)]
     binary_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                            primary_field=primary_field,
-                                                                           auto_id=auto_id)
+                                                                           auto_id=auto_id,
+                                                                           consistency_level=consistency_level)
+
     return binary_schema
 
 
-def gen_schema_multi_vector_fields(vec_fields):
+def gen_schema_multi_vector_fields(vec_fields, consistency_level=CONSISTENCY_STRONG):
     fields = [gen_int64_field(), gen_float_field(), gen_float_vec_field()]
     fields.extend(vec_fields)
     primary_field = ct.default_int64_field_name
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
-                                                                    primary_field=primary_field, auto_id=False)
+                                                                    primary_field=primary_field, auto_id=False,
+                                                                    consistency_level=consistency_level)
     return schema
 
 
