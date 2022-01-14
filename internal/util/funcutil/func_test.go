@@ -282,3 +282,11 @@ func TestCheckCtxValid(t *testing.T) {
 	time.Sleep(timeout + deltaTime)
 	assert.False(t, CheckCtxValid(ctx3))
 }
+
+func TestCheckPortAvailable(t *testing.T) {
+	num := 10
+	for i := 0; i < num; i++ {
+		port := GetAvailablePort()
+		assert.Equal(t, CheckPortAvailable(port), true)
+	}
+}

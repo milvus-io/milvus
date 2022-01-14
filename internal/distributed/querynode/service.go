@@ -87,6 +87,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.QueryNodeRole)
 
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+		log.Warn("QueryNode get available port when init", zap.Int("Port", Params.Port))
+	}
+
 	qn.Params.InitOnce()
 	qn.Params.QueryNodeCfg.QueryNodeIP = Params.IP
 	qn.Params.QueryNodeCfg.QueryNodePort = int64(Params.Port)

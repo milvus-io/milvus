@@ -158,12 +158,11 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.ProxyRole)
-	log.Debug("init Proxy service's parameter table done")
+	log.Debug("Proxy init service's parameter table done")
 
-	proxy.Params.ProxyCfg.NetworkAddress = Params.GetAddress()
-	if !paramtable.CheckPortAvailable(Params.Port) {
-		// as the entry of Milvus, we'd better not to use another port
-		return fmt.Errorf("port %d already in use", Params.Port)
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+		log.Warn("Proxy get available port when init", zap.Int("Port", Params.Port))
 	}
 
 	proxy.Params.InitOnce()

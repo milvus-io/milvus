@@ -217,7 +217,10 @@ func (s *Server) Stop() error {
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.InitOnce(typeutil.DataNodeRole)
-
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+		log.Warn("DataNode get available port when init", zap.Int("Port", Params.Port))
+	}
 	dn.Params.InitOnce()
 	dn.Params.DataNodeCfg.Port = Params.Port
 	dn.Params.DataNodeCfg.IP = Params.IP
