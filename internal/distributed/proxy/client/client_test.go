@@ -68,6 +68,12 @@ func Test_NewClient(t *testing.T) {
 
 		r4, err := client.ReleaseDQLMessageStream(ctx, nil)
 		retCheck(retNotNil, r4, err)
+
+		r5, err := client.SendSearchResult(ctx, nil)
+		retCheck(retNotNil, r5, err)
+
+		r6, err := client.SendRetrieveResult(ctx, nil)
+		retCheck(retNotNil, r6, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{

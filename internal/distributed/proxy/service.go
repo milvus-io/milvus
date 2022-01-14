@@ -571,3 +571,11 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.proxy.GetFlushState(ctx, req)
 }
+
+func (s *Server) SendSearchResult(ctx context.Context, results *internalpb.SearchResults) (*commonpb.Status, error) {
+	return s.proxy.SendSearchResult(ctx, results)
+}
+
+func (s *Server) SendRetrieveResult(ctx context.Context, results *internalpb.RetrieveResults) (*commonpb.Status, error) {
+	return s.proxy.SendRetrieveResult(ctx, results)
+}

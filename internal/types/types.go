@@ -647,6 +647,9 @@ type Proxy interface {
 	//
 	// error is returned only when some communication issue occurs.
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
+
+	SendSearchResult(ctx context.Context, req *internalpb.SearchResults) (*commonpb.Status, error)
+	SendRetrieveResult(ctx context.Context, req *internalpb.RetrieveResults) (*commonpb.Status, error)
 }
 
 // ProxyComponent defines the interface of proxy component.

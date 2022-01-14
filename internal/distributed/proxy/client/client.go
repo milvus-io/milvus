@@ -141,3 +141,29 @@ func (c *Client) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.Relea
 	}
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) SendSearchResult(ctx context.Context, results *internalpb.SearchResults) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(proxypb.ProxyClient).SendSearchResult(ctx, results)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}
+
+func (c *Client) SendRetrieveResult(ctx context.Context, results *internalpb.RetrieveResults) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(proxypb.ProxyClient).SendRetrieveResult(ctx, results)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

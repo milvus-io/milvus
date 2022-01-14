@@ -182,9 +182,9 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	}
 
 	// add result channel
-	producerChannels := []string{r.req.QueryResultChannel}
-	sc.queryResultMsgStream.AsProducer(producerChannels)
-	log.Debug("QueryNode AsProducer", zap.Strings("channels", producerChannels))
+	// producerChannels := []string{r.req.QueryResultChannel}
+	// sc.queryResultMsgStream.AsProducer(producerChannels)
+	// log.Debug("QueryNode AsProducer", zap.Strings("channels", producerChannels))
 
 	// init global sealed segments
 	for _, segment := range r.req.GlobalSealedSegments {

@@ -15,6 +15,9 @@ service Proxy {
   rpc GetDdChannel(internal.GetDdChannelRequest) returns (milvus.StringResponse) {}
 
   rpc ReleaseDQLMessageStream(ReleaseDQLMessageStreamRequest) returns (common.Status) {}
+
+  rpc SendSearchResult(internal.SearchResults) returns (common.Status) {}
+  rpc SendRetrieveResult(internal.RetrieveResults) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {
