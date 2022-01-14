@@ -22,7 +22,7 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/soothing-rain/gorocksdb"
+	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 )
 

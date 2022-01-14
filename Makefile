@@ -20,6 +20,11 @@ ARCH := $(shell arch)
 
 all: build-cpp build-go
 
+pre-build-go:
+ifeq ($(OS),Darwin) # MacOS X
+	@(env bash $(PWD)/scripts/replace_gorocksdb_version.sh)
+endif
+
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
@@ -107,7 +112,7 @@ print-build-info:
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
 
-milvus: build-cpp print-build-info
+milvus: pre-build-go build-cpp print-build-info
 	@echo "Building Milvus ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \

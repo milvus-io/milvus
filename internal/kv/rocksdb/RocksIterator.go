@@ -4,7 +4,7 @@ import (
 	"runtime"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/soothing-rain/gorocksdb"
+	"github.com/tecbot/gorocksdb"
 )
 
 /**
