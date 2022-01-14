@@ -52,7 +52,7 @@ max_compaction_interval = 60  # the max time interval (s) from the last compacti
 max_field_num = 256  # Maximum number of fields in a collection
 
 Not_Exist = "Not_Exist"
-Connect_Object_Name = "Milvus"
+Connect_Object_Name = True
 list_content = "list_content"
 dict_content = "dict_content"
 value_content = "value_content"

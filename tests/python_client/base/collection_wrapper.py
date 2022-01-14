@@ -1,4 +1,5 @@
 import sys
+import time
 
 from pymilvus import Collection
 
@@ -120,6 +121,7 @@ class ApiCollectionWrapper:
 
     def query(self, expr, output_fields=None, partition_names=None, timeout=None, check_task=None, check_items=None,
               **kwargs):
+        time.sleep(5)
         timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
