@@ -1816,15 +1816,17 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg
 func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
+		log.Warn("failed to updateTimeTick because rootcoord is not healthy", zap.Any("state", code))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 	if in.Base.MsgType != commonpb.MsgType_TimeTick {
+		log.Warn("failed to updateTimeTick because base messasge is not timetick, state", zap.Any("base message type", in.Base.MsgType))
 		msgTypeName := commonpb.MsgType_name[int32(in.Base.GetMsgType())]
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "invalid message type "+msgTypeName), nil
 	}
 	err := c.chanTimeTick.updateTimeTick(in, "gRPC")
 	if err != nil {
-		log.Error("UpdateTimeTick failed", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to updateTimeTick", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "UpdateTimeTick failed: "+err.Error()), nil
 	}
