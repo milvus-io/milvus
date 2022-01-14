@@ -15,6 +15,8 @@ GOPATH 	:= $(shell $(GO) env GOPATH)
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
+OS := $(shell uname -s)
+ARCH := $(shell arch)
 
 all: build-cpp build-go
 
@@ -72,9 +74,19 @@ ifdef GO_DIFF_FILES
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go $(GO_DIFF_FILES)
 else
 	@echo "Running $@ check"
+ifeq ($(OS),Darwin) # MacOS X
+ifeq ($(ARCH),arm64)
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./cmd/...
+else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
-#	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
+endif
+else
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
+endif
+	#@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
 verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard

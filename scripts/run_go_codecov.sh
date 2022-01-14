@@ -24,13 +24,23 @@ echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 
 # run unittest
 echo "Running unittest under ./internal"
-for d in $(go list ./internal... | grep -v vendor); do
-    go test -race -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
-    if [ -f profile.out ]; then
-        sed '1d' profile.out >> ${FILE_COVERAGE_INFO}
-        rm profile.out
-    fi
-done
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  for d in $(go list ./internal... | grep -v -e vendor -e allocator -e /indexnode -e /querynode -e /paramtable -e metrics_info_test); do
+      go test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+      if [ -f profile.out ]; then
+          sed '1d' profile.out >> ${FILE_COVERAGE_INFO}
+          rm profile.out
+      fi
+  done
+else
+  for d in $(go list ./internal... | grep -v vendor); do
+      go test -race -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+      if [ -f profile.out ]; then
+          sed '1d' profile.out >> ${FILE_COVERAGE_INFO}
+          rm profile.out
+      fi
+  done
+fi
 
 # generate html report
 go tool cover -html=./${FILE_COVERAGE_INFO} -o ./${FILE_COVERAGE_HTML}

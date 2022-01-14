@@ -50,6 +50,12 @@ endif (CCACHE_FOUND)
 macro( build_rocksdb )
     message( STATUS "Building ROCKSDB-${ROCKSDB_VERSION} from source" )
 
+    if ( APPLE )
+        set ( ROCKSDB_URL_MD5 "e4a0625f0cec82060e62c81b787a1124" )
+    else ()
+        set ( ROCKSDB_URL_MD5 "e4a0625f0cec82060e62c81b787a1124" )
+    endif ()
+
     set( ROCKSDB_CMAKE_ARGS
          "-DWITH_GFLAGS=OFF"
          "-DROCKSDB_BUILD_SHARED=OFF"
@@ -66,7 +72,7 @@ macro( build_rocksdb )
             DOWNLOAD_DIR        ${THIRDPARTY_DOWNLOAD_PATH}
             INSTALL_DIR         ${CMAKE_INSTALL_PREFIX}
             URL                 ${ROCKSDB_SOURCE_URL}
-            URL_MD5             "e4a0625f0cec82060e62c81b787a1124"
+            URL_MD5             ${ROCKSDB_URL_MD5}
             CMAKE_ARGS          ${ROCKSDB_CMAKE_ARGS}
             INSTALL_COMMAND     make install
             )
