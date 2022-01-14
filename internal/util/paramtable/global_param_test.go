@@ -357,9 +357,6 @@ func TestGrpcServerParams(t *testing.T) {
 
 	t.Logf("Address = %s", Params.GetAddress())
 
-	assert.NotNil(t, Params.Listener)
-	t.Logf("Listener = %d", Params.Listener)
-
 	assert.NotZero(t, Params.ServerMaxRecvSize)
 	t.Logf("ServerMaxRecvSize = %d", Params.ServerMaxRecvSize)
 
@@ -390,9 +387,6 @@ func TestGrpcClientParams(t *testing.T) {
 	t.Logf("Port = %d", Params.Port)
 
 	t.Logf("Address = %s", Params.GetAddress())
-
-	assert.NotNil(t, Params.Listener)
-	t.Logf("Listener = %d", Params.Listener)
 
 	assert.NotZero(t, Params.ClientMaxRecvSize)
 	t.Logf("ClientMaxRecvSize = %d", Params.ClientMaxRecvSize)

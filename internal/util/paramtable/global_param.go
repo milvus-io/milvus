@@ -1445,11 +1445,10 @@ func (p *indexNodeConfig) initIndexStorageRootPath() {
 type grpcConfig struct {
 	BaseParamTable
 
-	once     sync.Once
-	Domain   string
-	IP       string
-	Port     int
-	Listener net.Listener
+	once   sync.Once
+	Domain string
+	IP     string
+	Port   int
 }
 
 func (p *grpcConfig) init(domain string) {
@@ -1459,7 +1458,6 @@ func (p *grpcConfig) init(domain string) {
 	p.LoadFromEnv()
 	p.LoadFromArgs()
 	p.initPort()
-	p.initListener()
 }
 
 // LoadFromEnv is used to initialize configuration items from env.
@@ -1474,7 +1472,6 @@ func (p *grpcConfig) LoadFromArgs() {
 
 func (p *grpcConfig) initPort() {
 	p.Port = p.ParseInt(p.Domain + ".port")
-
 	if p.Domain == typeutil.ProxyRole || p.Domain == typeutil.DataNodeRole || p.Domain == typeutil.IndexNodeRole || p.Domain == typeutil.QueryNodeRole {
 		if !CheckPortAvailable(p.Port) {
 			p.Port = GetAvailablePort()
@@ -1486,16 +1483,6 @@ func (p *grpcConfig) initPort() {
 // GetAddress return grpc address
 func (p *grpcConfig) GetAddress() string {
 	return p.IP + ":" + strconv.Itoa(p.Port)
-}
-
-func (p *grpcConfig) initListener() {
-	if p.Domain == typeutil.DataNodeRole {
-		listener, err := net.Listen("tcp", p.GetAddress())
-		if err != nil {
-			panic(err)
-		}
-		p.Listener = listener
-	}
 }
 
 // GrpcServerConfig is configuration for grpc server.
