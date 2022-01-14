@@ -458,13 +458,6 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	idata := buffer.buffer
 
 	// 1.2 Get Fields
-	var fieldIDs []int64
-	var fieldTypes []schemapb.DataType
-	for _, field := range collSchema.Fields {
-		fieldIDs = append(fieldIDs, field.FieldID)
-		fieldTypes = append(fieldTypes, field.DataType)
-	}
-
 	blobReaders := make([]io.Reader, 0)
 	for _, blob := range msg.RowData {
 		blobReaders = append(blobReaders, bytes.NewReader(blob.GetValue()))
