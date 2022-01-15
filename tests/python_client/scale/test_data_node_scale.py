@@ -10,7 +10,7 @@ from customize.milvus_operator import MilvusOperator
 from scale import constants
 from pymilvus import connections
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready
+from utils.util_k8s import wait_pods_ready, export_pod_logs
 from utils.util_pymilvus import get_latest_tag
 
 prefix = "data_scale"
@@ -55,52 +55,61 @@ class TestDataNodeScale:
         host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
         # host = '10.98.0.4'
 
-        # connect
-        connections.add_connection(default={"host": host, "port": 19530})
-        connections.connect(alias='default')
+        try:
+            # connect
+            connections.add_connection(default={"host": host, "port": 19530})
+            connections.connect(alias='default')
 
-        # create
-        c_name = cf.gen_unique_str("scale_query")
-        # c_name = 'scale_query_DymS7kI4'
-        collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(), shards_num=5)
+            # create
+            c_name = cf.gen_unique_str("scale_query")
+            # c_name = 'scale_query_DymS7kI4'
+            collection_w = ApiCollectionWrapper()
+            collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(), shards_num=5)
 
-        tmp_nb = 10000
+            tmp_nb = 10000
 
-        def do_insert():
-            while True:
-                tmp_df = cf.gen_default_dataframe_data(tmp_nb)
-                collection_w.insert(tmp_df)
-                log.debug(collection_w.num_entities)
+            def do_insert():
+                while True:
+                    tmp_df = cf.gen_default_dataframe_data(tmp_nb)
+                    collection_w.insert(tmp_df)
+                    log.debug(collection_w.num_entities)
 
-        t_insert = threading.Thread(target=do_insert, args=(), daemon=True)
-        t_insert.start()
+            t_insert = threading.Thread(target=do_insert, args=(), daemon=True)
+            t_insert.start()
 
-        # scale dataNode to 5
-        mic.upgrade(release_name, {'spec.components.dataNode.replicas': 5}, constants.NAMESPACE)
-        time.sleep(300)
-        log.debug("Expand dataNode test finished")
+            # scale dataNode to 5
+            mic.upgrade(release_name, {'spec.components.dataNode.replicas': 5}, constants.NAMESPACE)
+            time.sleep(300)
+            log.debug("Expand dataNode test finished")
 
-        # create new collection and insert
-        new_c_name = cf.gen_unique_str("scale_query")
-        collection_w_new = ApiCollectionWrapper()
-        collection_w_new.init_collection(name=new_c_name, schema=cf.gen_default_collection_schema(), shards_num=2)
+            # create new collection and insert
+            new_c_name = cf.gen_unique_str("scale_query")
+            collection_w_new = ApiCollectionWrapper()
+            collection_w_new.init_collection(name=new_c_name, schema=cf.gen_default_collection_schema(), shards_num=2)
 
-        def do_new_insert():
-            while True:
-                tmp_df = cf.gen_default_dataframe_data(tmp_nb)
-                collection_w_new.insert(tmp_df)
-                log.debug(collection_w_new.num_entities)
+            def do_new_insert():
+                while True:
+                    tmp_df = cf.gen_default_dataframe_data(tmp_nb)
+                    collection_w_new.insert(tmp_df)
+                    log.debug(collection_w_new.num_entities)
 
-        t_insert_new = threading.Thread(target=do_new_insert, args=(), daemon=True)
-        t_insert_new.start()
+            t_insert_new = threading.Thread(target=do_new_insert, args=(), daemon=True)
+            t_insert_new.start()
 
-        # scale dataNode to 3
-        mic.upgrade(release_name, {'spec.components.dataNode.replicas': 3}, constants.NAMESPACE)
-        wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
+            # scale dataNode to 3
+            mic.upgrade(release_name, {'spec.components.dataNode.replicas': 3}, constants.NAMESPACE)
+            wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
-        log.debug(collection_w.num_entities)
-        time.sleep(300)
-        log.debug("Shrink dataNode test finished")
+            log.debug(collection_w.num_entities)
+            time.sleep(300)
+            log.debug("Shrink dataNode test finished")
 
-        mic.uninstall(release_name, namespace=constants.NAMESPACE)
+        except Exception as e:
+            raise Exception(str(e))
+
+        finally:
+            label = f"app.kubernetes.io/instance={release_name}"
+            log.info('Start to export milvus pod logs')
+            export_pod_logs(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
+
+            mic.uninstall(release_name, namespace=constants.NAMESPACE)

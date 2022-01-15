@@ -82,7 +82,7 @@ def get_pod_list(namespace, label_selector):
         raise Exception(str(e))
 
 
-def export_pod_logs(namespace, label_selector):
+def export_pod_logs(namespace, label_selector, release_name=None):
     """
     export pod logs with label selector to '/tmp/milvus'
 
@@ -92,10 +92,19 @@ def export_pod_logs(namespace, label_selector):
     :param label_selector: labels to restrict which pods logs to export
     :type label_selector: str
 
+    :param release_name: use the release name as server logs director name
+    :type label_selector: str
+
     :example:
             >>> export_pod_logs("chaos-testing", "app.kubernetes.io/instance=mic-milvus")
     """
-    pod_log_path = '/tmp/milvus_logs'
+    if isinstance(release_name, str):
+        if len(release_name.strip()) == 0:
+            raise ValueError("Got an unexpected space release_name")
+    else:
+        raise TypeError("Got an unexpected non-string release_name")
+    pod_log_path = '/tmp/milvus_logs' if release_name is None else f'/tmp/milvus_logs/{release_name}'
+
     if not os.path.isdir(pod_log_path):
         os.makedirs(pod_log_path)
 
