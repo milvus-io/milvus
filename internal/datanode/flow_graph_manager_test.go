@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -44,7 +45,11 @@ func TestFlowGraphManager(t *testing.T) {
 	require.Nil(t, err)
 
 	fm := newFlowgraphManager()
-	defer fm.dropAll()
+	defer func() {
+		// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
+		time.Sleep(200 * time.Millisecond)
+		fm.dropAll()
+	}()
 	t.Run("Test addAndStart", func(t *testing.T) {
 		vchanName := "by-dev-rootcoord-dml-test-flowgraphmanager-addAndStart"
 		vchan := &datapb.VchannelInfo{
@@ -57,6 +62,8 @@ func TestFlowGraphManager(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, fm.exist(vchanName))
 
+		// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
+		time.Sleep(200 * time.Millisecond)
 		fm.dropAll()
 	})
 
@@ -72,6 +79,8 @@ func TestFlowGraphManager(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, fm.exist(vchanName))
 
+		// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
+		time.Sleep(200 * time.Millisecond)
 		fm.release(vchanName)
 
 		assert.False(t, fm.exist(vchanName))

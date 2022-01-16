@@ -34,6 +34,7 @@ type PulsarConsumer struct {
 	closeCh    chan struct{}
 	once       sync.Once
 	skip       bool
+	closeOnce  sync.Once
 }
 
 // Subscription get a subscription for the consumer
@@ -104,8 +105,15 @@ func (pc *PulsarConsumer) Ack(message Message) {
 
 // Close the consumer and stop the broker to push more messages
 func (pc *PulsarConsumer) Close() {
-	pc.c.Close()
-	close(pc.closeCh)
+	pc.closeOnce.Do(func() {
+		defer pc.c.Close()
+		// Unsubscribe for the consumer
+		err := pc.c.Unsubscribe()
+		if err != nil {
+			panic(err)
+		}
+		close(pc.closeCh)
+	})
 }
 
 // patchEarliestMessageID unsafe patch logic to change messageID partitionIdx to 0
