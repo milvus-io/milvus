@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util"
 )
 
@@ -86,6 +87,8 @@ type Meta interface {
 	saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2SealedSegmentChangeInfos, error)
 	removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) (col2SealedSegmentChangeInfos, error)
 	sendSealedSegmentChangeInfos(collectionID UniqueID, queryChannel string, changeInfos *querypb.SealedSegmentsChangeInfo) (*internalpb.MsgPosition, error)
+
+	getWatchedChannelsByNodeID(nodeID int64) *querypb.UnsubscribeChannelInfo
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -993,6 +996,75 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 
 	m.collectionInfos[collectionID] = info
 	return nil
+}
+
+func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.UnsubscribeChannelInfo {
+	// 1. find all the search/dmChannel/deltaChannel the node has watched
+	colID2DmChannels := make(map[UniqueID][]string)
+	colID2DeltaChannels := make(map[UniqueID][]string)
+	colID2QueryChannel := make(map[UniqueID]string)
+	dmChannelInfos := m.getDmChannelInfosByNodeID(nodeID)
+	// get dmChannel/search channel the node has watched
+	for _, channelInfo := range dmChannelInfos {
+		collectionID := channelInfo.CollectionID
+		dmChannel := rootcoord.ToPhysicalChannel(channelInfo.DmChannel)
+		if _, ok := colID2DmChannels[collectionID]; !ok {
+			colID2DmChannels[collectionID] = []string{}
+		}
+		colID2DmChannels[collectionID] = append(colID2DmChannels[collectionID], dmChannel)
+		if _, ok := colID2QueryChannel[collectionID]; !ok {
+			queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
+			colID2QueryChannel[collectionID] = queryChannelInfo.QueryChannel
+		}
+	}
+	segmentInfos := m.getSegmentInfosByNode(nodeID)
+	// get delta/search channel the node has watched
+	for _, segmentInfo := range segmentInfos {
+		collectionID := segmentInfo.CollectionID
+		if _, ok := colID2DeltaChannels[collectionID]; !ok {
+			deltaChanelInfos, err := m.getDeltaChannelsByCollectionID(collectionID)
+			if err != nil {
+				// all nodes succeeded in releasing the Data, but queryCoord hasn't cleaned up the meta in time, and a Node went down
+				// and meta was cleaned after m.getSegmentInfosByNode(nodeID)
+				continue
+			}
+			deltaChannels := make([]string, len(deltaChanelInfos))
+			for offset, channelInfo := range deltaChanelInfos {
+				deltaChannels[offset] = rootcoord.ToPhysicalChannel(channelInfo.ChannelName)
+			}
+			colID2DeltaChannels[collectionID] = deltaChannels
+		}
+		if _, ok := colID2QueryChannel[collectionID]; !ok {
+			queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
+			colID2QueryChannel[collectionID] = queryChannelInfo.QueryChannel
+		}
+	}
+
+	// creating unsubscribeChannelInfo, which will be written to etcd
+	colID2Channels := make(map[UniqueID][]string)
+	for collectionID, channels := range colID2DmChannels {
+		colID2Channels[collectionID] = append(colID2Channels[collectionID], channels...)
+	}
+	for collectionID, channels := range colID2DeltaChannels {
+		colID2Channels[collectionID] = append(colID2Channels[collectionID], channels...)
+	}
+	for collectionID, channel := range colID2QueryChannel {
+		colID2Channels[collectionID] = append(colID2Channels[collectionID], channel)
+	}
+
+	unsubscribeChannelInfo := &querypb.UnsubscribeChannelInfo{
+		NodeID: nodeID,
+	}
+
+	for collectionID, channels := range colID2Channels {
+		unsubscribeChannelInfo.CollectionChannels = append(unsubscribeChannelInfo.CollectionChannels,
+			&querypb.UnsubscribeChannels{
+				CollectionID: collectionID,
+				Channels:     channels,
+			})
+	}
+
+	return unsubscribeChannelInfo
 }
 
 //func (m *MetaReplica) printMeta() {

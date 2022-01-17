@@ -520,7 +520,14 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(releaseCollectionTask)
 	assert.Nil(t, err)
 
-	waitTaskFinalState(releaseCollectionTask, taskFailed)
+	for {
+		if releaseCollectionTask.getState() == taskDone {
+			break
+		}
+	}
+	node.releaseCollection = returnSuccessResult
+
+	waitTaskFinalState(releaseCollectionTask, taskExpired)
 
 	node.stop()
 	queryCoord.Stop()
