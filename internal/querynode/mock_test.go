@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // ---------- unittest util functions ----------
@@ -1296,10 +1295,7 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node.etcdCli = etcdCli
-	session := &sessionutil.Session{
-		ServerID: 1,
-	}
-	node.session = session
+	node.initSession()
 
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 	node.etcdKV = etcdKV

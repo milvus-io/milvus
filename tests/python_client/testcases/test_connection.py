@@ -495,7 +495,7 @@ class TestConnectionOperation(TestcaseBase):
 
         # list all connections and check the response
         list_content = [(connect_name, "GrpcHandler")] if connect_name is DefaultConfig.DEFAULT_USING else \
-            [(DefaultConfig.DEFAULT_USING, None), (connect_name, ct.Connect_Object_Name)]
+            [(DefaultConfig.DEFAULT_USING, None), (connect_name, "GrpcHandler")]
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: list_content})
 

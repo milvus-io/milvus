@@ -78,6 +78,7 @@ type QueryCoord struct {
 	queryCoordID uint64
 	meta         Meta
 	cluster      Cluster
+	handler      *channelUnsubscribeHandler
 	newNodeFn    newQueryNodeFn
 	scheduler    *TaskScheduler
 	idAllocator  func() (UniqueID, error)
@@ -161,8 +162,15 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 
+		// init channelUnsubscribeHandler
+		qc.handler, initError = newChannelUnsubscribeHandler(qc.loopCtx, qc.kvClient, qc.msFactory)
+		if initError != nil {
+			log.Error("query coordinator init channelUnsubscribeHandler failed", zap.Error(initError))
+			return
+		}
+
 		// init cluster
-		qc.cluster, initError = newQueryNodeCluster(qc.loopCtx, qc.meta, qc.kvClient, qc.newNodeFn, qc.session)
+		qc.cluster, initError = newQueryNodeCluster(qc.loopCtx, qc.meta, qc.kvClient, qc.newNodeFn, qc.session, qc.handler)
 		if initError != nil {
 			log.Error("query coordinator init cluster failed", zap.Error(initError))
 			return
@@ -204,6 +212,9 @@ func (qc *QueryCoord) Start() error {
 	qc.indexChecker.start()
 	log.Debug("start index checker ...")
 
+	qc.handler.start()
+	log.Debug("start channel unsubscribe loop ...")
+
 	Params.QueryCoordCfg.CreatedTime = time.Now()
 	Params.QueryCoordCfg.UpdatedTime = time.Now()
 
@@ -235,6 +246,11 @@ func (qc *QueryCoord) Stop() error {
 	if qc.indexChecker != nil {
 		qc.indexChecker.close()
 		log.Debug("close index checker ...")
+	}
+
+	if qc.handler != nil {
+		qc.handler.close()
+		log.Debug("close channel unsubscribe loop ...")
 	}
 
 	if qc.loopCancel != nil {

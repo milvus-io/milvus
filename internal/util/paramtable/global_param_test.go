@@ -230,7 +230,7 @@ func TestGlobalParamTable(t *testing.T) {
 		Params.QueryNodeID = 3
 		Params.initMsgChannelSubName()
 		name := Params.MsgChannelSubName
-		assert.Equal(t, name, "by-dev-queryNode-3")
+		assert.Equal(t, name, "by-dev-queryNode")
 
 		name = Params.StatsChannelName
 		assert.Equal(t, name, "by-dev-query-node-stats")

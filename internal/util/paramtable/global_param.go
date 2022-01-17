@@ -1028,7 +1028,7 @@ func (p *queryNodeConfig) initMsgChannelSubName() {
 		log.Warn(err.Error())
 	}
 
-	s := []string{p.ClusterChannelPrefix, namePrefix, strconv.FormatInt(p.QueryNodeID, 10)}
+	s := []string{p.ClusterChannelPrefix, namePrefix}
 	p.MsgChannelSubName = strings.Join(s, "-")
 }
 

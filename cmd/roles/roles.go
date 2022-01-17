@@ -491,6 +491,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		syscall.SIGHUP,
 		syscall.SIGINT,
 		syscall.SIGTERM,
+		syscall.SIGSEGV,
 		syscall.SIGQUIT)
 	sig := <-sc
 	log.Error("Get signal to exit\n", zap.String("signal", sig.String()))

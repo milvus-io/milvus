@@ -90,6 +90,9 @@ type Proxy struct {
 
 	msFactory msgstream.Factory
 
+	searchResultCh   chan *internalpb.SearchResults
+	retrieveResultCh chan *internalpb.RetrieveResults
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -99,10 +102,13 @@ type Proxy struct {
 func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
+	n := 1024 // better to be configurable
 	node := &Proxy{
-		ctx:       ctx1,
-		cancel:    cancel,
-		msFactory: factory,
+		ctx:              ctx1,
+		cancel:           cancel,
+		msFactory:        factory,
+		searchResultCh:   make(chan *internalpb.SearchResults, n),
+		retrieveResultCh: make(chan *internalpb.RetrieveResults, n),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
@@ -231,7 +237,9 @@ func (node *Proxy) Init() error {
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("create task scheduler", zap.String("role", typeutil.ProxyRole))
-	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory)
+	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory,
+		schedOptWithSearchResultCh(node.searchResultCh),
+		schedOptWithRetrieveResultCh(node.retrieveResultCh))
 	if err != nil {
 		log.Warn("failed to create task scheduler", zap.Error(err), zap.String("role", typeutil.ProxyRole))
 		return err

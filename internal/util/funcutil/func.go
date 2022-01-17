@@ -175,6 +175,11 @@ func CheckCtxValid(ctx context.Context) bool {
 	return ctx.Err() != context.DeadlineExceeded && ctx.Err() != context.Canceled
 }
 
+// GenChannelSubName generate subName to watch channel
+func GenChannelSubName(prefix string, collectionID int64, nodeID int64) string {
+	return fmt.Sprintf("%s-%d-%d", prefix, collectionID, nodeID)
+}
+
 // CheckPortAvailable check if a port is available to be listened on
 func CheckPortAvailable(port int) bool {
 	addr := ":" + strconv.Itoa(port)

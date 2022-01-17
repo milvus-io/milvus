@@ -11,6 +11,7 @@ from base.client_base import param_info
 from check.param_check import ip_check, number_check
 from config.log_config import log_config
 from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
+from pymilvus.orm.types import CONSISTENCY_STRONG
 
 timeout = 60
 dimension = 128
@@ -363,7 +364,7 @@ def collection(request, connect):
     log.debug(f'collection_name: {collection_name}')
     try:
         default_fields = gen_default_fields()
-        connect.create_collection(collection_name, default_fields)
+        connect.create_collection(collection_name, default_fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
 
@@ -384,7 +385,7 @@ def id_collection(request, connect):
     log.debug(f'id_collection_name: {collection_name}')
     try:
         fields = gen_default_fields(auto_id=False)
-        connect.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
 
@@ -403,7 +404,7 @@ def binary_collection(request, connect):
     collection_name = gen_unique_str(ori_collection_name)
     try:
         fields = gen_binary_default_fields()
-        connect.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
 
@@ -424,7 +425,7 @@ def binary_id_collection(request, connect):
     collection_name = gen_unique_str(ori_collection_name)
     try:
         fields = gen_binary_default_fields(auto_id=False)
-        connect.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
 

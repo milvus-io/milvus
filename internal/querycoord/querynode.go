@@ -132,9 +132,9 @@ func (qn *queryNode) start() error {
 }
 
 func (qn *queryNode) stop() {
-	qn.stateLock.Lock()
-	defer qn.stateLock.Unlock()
-	qn.state = offline
+	//qn.stateLock.Lock()
+	//defer qn.stateLock.Unlock()
+	//qn.state = offline
 	if qn.client != nil {
 		qn.client.Stop()
 	}

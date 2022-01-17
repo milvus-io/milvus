@@ -24,6 +24,7 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -39,13 +40,17 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-	meta, err := newMeta(baseCtx, kv, nil, nil)
+	factory := msgstream.NewPmsFactory()
+	meta, err := newMeta(baseCtx, kv, factory, nil)
+	assert.Nil(t, err)
+	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
 	cluster := &queryNodeCluster{
 		ctx:              baseCtx,
 		cancel:           cancel,
 		client:           kv,
 		clusterMeta:      meta,
+		handler:          handler,
 		nodes:            make(map[int64]Node),
 		newNodeFn:        newQueryNodeTest,
 		session:          clusterSession,
