@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"math"
-	"net"
 	"os"
 	"path"
 	"strconv"
@@ -23,7 +22,6 @@ import (
 
 	"github.com/go-basic/ipv4"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -56,8 +54,9 @@ type GlobalParamTable struct {
 	PulsarCfg  pulsarConfig
 	RocksmqCfg rocksmqConfig
 	MinioCfg   minioConfig
-	//CommonCfg     commonConfig
-	//KnowhereCfg   knowhereConfig
+
+	CommonCfg   commonConfig
+	KnowhereCfg knowhereConfig
 	//MsgChannelCfg msgChannelConfig
 
 	RootCoordCfg  rootCoordConfig
@@ -84,8 +83,9 @@ func (p *GlobalParamTable) Init() {
 	p.PulsarCfg.init(&p.BaseParams)
 	p.RocksmqCfg.init(&p.BaseParams)
 	p.MinioCfg.init(&p.BaseParams)
-	//p.CommonCfg.init(&p.BaseParams)
-	//p.KnowhereCfg.init(&p.BaseParams)
+
+	p.CommonCfg.init(&p.BaseParams)
+	p.KnowhereCfg.init(&p.BaseParams)
 	//p.MsgChannelCfg.init(&p.BaseParams)
 
 	p.RootCoordCfg.init(&p.BaseParams)
@@ -238,38 +238,51 @@ func (p *minioConfig) initRootPath() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
-//type commonConfig struct {
-//	BaseParams *BaseParamTable
-//
-//	DefaultPartitionName string
-//	DefaultIndexName     string
-//}
-//
-//func (p *commonConfig) init(bp *BaseParamTable) {
-//	p.BaseParams = bp
-//	p.initDefaultPartitionName()
-//	p.initDefaultIndexName()
-//}
-//
-//func (p *commonConfig) initDefaultPartitionName() {
-//	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
-//	p.DefaultPartitionName = name
-//}
-//
-//func (p *commonConfig) initDefaultIndexName() {
-//	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
-//	p.DefaultIndexName = name
-//}
+type commonConfig struct {
+	BaseParams *BaseParamTable
+
+	DefaultPartitionName string
+	DefaultIndexName     string
+	RetentionDuration    int64
+}
+
+func (p *commonConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initDefaultPartitionName()
+	p.initDefaultIndexName()
+	p.initRetentionDuration()
+}
+
+func (p *commonConfig) initDefaultPartitionName() {
+	p.DefaultPartitionName = p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
+}
+
+func (p *commonConfig) initDefaultIndexName() {
+	p.DefaultIndexName = p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
+}
+
+func (p *commonConfig) initRetentionDuration() {
+	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- knowhere ---
-//type knowhereConfig struct {
-//	BaseParams *BaseParamTable
-//}
-//
-//func (p *knowhereConfig) init(bp *BaseParamTable) {
-//	p.BaseParams = bp
-//}
+type knowhereConfig struct {
+	BaseParams *BaseParamTable
+
+	SimdType string
+}
+
+func (p *knowhereConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	p.initSimdType()
+}
+
+func (p *knowhereConfig) initSimdType() {
+	p.SimdType = p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- msgChannel ---
@@ -440,8 +453,6 @@ type rootCoordConfig struct {
 
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
-	DefaultPartitionName        string
-	DefaultIndexName            string
 	MinSegmentSizeToEnableIndex int64
 
 	CreatedTime time.Time
@@ -462,8 +473,6 @@ func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.initDmlChannelNum()
 	p.initMaxPartitionNum()
 	p.initMinSegmentSizeToEnableIndex()
-	p.initDefaultPartitionName()
-	p.initDefaultIndexName()
 }
 
 func (p *rootCoordConfig) initClusterMsgChannelPrefix() {
@@ -531,16 +540,6 @@ func (p *rootCoordConfig) initMinSegmentSizeToEnableIndex() {
 	p.MinSegmentSizeToEnableIndex = p.BaseParams.ParseInt64WithDefault("rootCoord.minSegmentSizeToEnableIndex", 1024)
 }
 
-func (p *rootCoordConfig) initDefaultPartitionName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
-	p.DefaultPartitionName = name
-}
-
-func (p *rootCoordConfig) initDefaultIndexName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
-	p.DefaultIndexName = name
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
 type proxyConfig struct {
@@ -560,8 +559,6 @@ type proxyConfig struct {
 	MaxFieldNum              int64
 	MaxShardNum              int32
 	MaxDimension             int64
-	DefaultPartitionName     string
-	DefaultIndexName         string
 	BufFlagExpireTime        time.Duration
 	BufFlagCleanupInterval   time.Duration
 
@@ -575,8 +572,6 @@ type proxyConfig struct {
 	RetrieveResultChannelNames []string
 
 	MaxTaskNum int64
-
-	RetentionDuration int64
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -596,13 +591,10 @@ func (p *proxyConfig) init(bp *BaseParamTable) {
 	p.initMaxFieldNum()
 	p.initMaxShardNum()
 	p.initMaxDimension()
-	p.initDefaultPartitionName()
-	p.initDefaultIndexName()
 
 	p.initMaxTaskNum()
 	p.initBufFlagExpireTime()
 	p.initBufFlagCleanupInterval()
-	p.initRetentionDuration()
 }
 
 // Refresh is called after session init
@@ -687,16 +679,6 @@ func (p *proxyConfig) initMaxDimension() {
 	p.MaxDimension = maxDimension
 }
 
-func (p *proxyConfig) initDefaultPartitionName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultPartitionName", "_default")
-	p.DefaultPartitionName = name
-}
-
-func (p *proxyConfig) initDefaultIndexName() {
-	name := p.BaseParams.LoadWithDefault("common.defaultIndexName", "_default_idx")
-	p.DefaultIndexName = name
-}
-
 func (p *proxyConfig) initMaxTaskNum() {
 	p.MaxTaskNum = p.BaseParams.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
 }
@@ -709,10 +691,6 @@ func (p *proxyConfig) initBufFlagExpireTime() {
 func (p *proxyConfig) initBufFlagCleanupInterval() {
 	interval := p.BaseParams.ParseInt64WithDefault("proxy.bufFlagCleanupInterval", 600)
 	p.BufFlagCleanupInterval = time.Duration(interval) * time.Second
-}
-
-func (p *proxyConfig) initRetentionDuration() {
-	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -929,7 +907,6 @@ type queryNodeConfig struct {
 
 	// segcore
 	ChunkRows int64
-	SimdType  string
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -963,7 +940,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 	p.initStatsPublishInterval()
 
 	p.initSegcoreChunkRows()
-	p.initKnowhereSimdType()
 
 	p.initSkipQueryChannelRecovery()
 	p.initOverloadedMemoryThresholdPercentage()
@@ -1074,12 +1050,6 @@ func (p *queryNodeConfig) initSegcoreChunkRows() {
 	p.ChunkRows = p.BaseParams.ParseInt64WithDefault("queryNode.segcore.chunkRows", 32768)
 }
 
-func (p *queryNodeConfig) initKnowhereSimdType() {
-	simdType := p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
-	p.SimdType = simdType
-	log.Debug("initialize the knowhere simd type", zap.String("simd_type", p.SimdType))
-}
-
 func (p *queryNodeConfig) initSkipQueryChannelRecovery() {
 	p.SkipQueryChannelRecovery = p.BaseParams.ParseBool("msgChannel.skipQueryChannelRecovery", false)
 }
@@ -1123,10 +1093,8 @@ type dataCoordConfig struct {
 	UpdatedTime time.Time
 
 	EnableCompaction        bool
+	EnableAutoCompaction    bool
 	EnableGarbageCollection bool
-
-	RetentionDuration    int64
-	EnableAutoCompaction bool
 
 	// Garbage Collection
 	GCInterval         time.Duration
@@ -1151,8 +1119,6 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initDataCoordSubscriptionName()
 
 	p.initEnableCompaction()
-
-	p.initRetentionDuration()
 	p.initEnableAutoCompaction()
 
 	p.initEnableGarbageCollection()
@@ -1243,10 +1209,6 @@ func (p *dataCoordConfig) initGCMissingTolerance() {
 
 func (p *dataCoordConfig) initGCDropTolerance() {
 	p.GCDropTolerance = time.Duration(p.BaseParams.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 24*60*60)) * time.Second
-}
-
-func (p *dataCoordConfig) initRetentionDuration() {
-	p.RetentionDuration = p.BaseParams.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
@@ -1453,8 +1415,6 @@ type indexNodeConfig struct {
 
 	IndexStorageRootPath string
 
-	SimdType string
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -1463,7 +1423,6 @@ func (p *indexNodeConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
 	p.initIndexStorageRootPath()
-	p.initKnowhereSimdType()
 }
 
 // InitAlias initializes an alias for the IndexNode role.
@@ -1479,22 +1438,15 @@ func (p *indexNodeConfig) initIndexStorageRootPath() {
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
 }
 
-func (p *indexNodeConfig) initKnowhereSimdType() {
-	simdType := p.BaseParams.LoadWithDefault("knowhere.simdType", "auto")
-	p.SimdType = simdType
-	log.Debug("initialize the knowhere simd type", zap.String("simd_type", p.SimdType))
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // --- grpc ---
 type grpcConfig struct {
 	BaseParamTable
 
-	once     sync.Once
-	Domain   string
-	IP       string
-	Port     int
-	Listener net.Listener
+	once   sync.Once
+	Domain string
+	IP     string
+	Port   int
 }
 
 func (p *grpcConfig) init(domain string) {
@@ -1504,7 +1456,6 @@ func (p *grpcConfig) init(domain string) {
 	p.LoadFromEnv()
 	p.LoadFromArgs()
 	p.initPort()
-	p.initListener()
 }
 
 // LoadFromEnv is used to initialize configuration items from env.
@@ -1519,28 +1470,11 @@ func (p *grpcConfig) LoadFromArgs() {
 
 func (p *grpcConfig) initPort() {
 	p.Port = p.ParseInt(p.Domain + ".port")
-
-	if p.Domain == typeutil.ProxyRole || p.Domain == typeutil.DataNodeRole || p.Domain == typeutil.IndexNodeRole || p.Domain == typeutil.QueryNodeRole {
-		if !CheckPortAvailable(p.Port) {
-			p.Port = GetAvailablePort()
-			log.Warn("get available port when init", zap.String("Domain", p.Domain), zap.Int("Port", p.Port))
-		}
-	}
 }
 
 // GetAddress return grpc address
 func (p *grpcConfig) GetAddress() string {
 	return p.IP + ":" + strconv.Itoa(p.Port)
-}
-
-func (p *grpcConfig) initListener() {
-	if p.Domain == typeutil.DataNodeRole {
-		listener, err := net.Listen("tcp", p.GetAddress())
-		if err != nil {
-			panic(err)
-		}
-		p.Listener = listener
-	}
 }
 
 // GrpcServerConfig is configuration for grpc server.
@@ -1677,25 +1611,4 @@ func (p *GrpcClientConfig) initClientMaxRecvSize() {
 
 	log.Debug("initClientMaxRecvSize",
 		zap.String("role", p.Domain), zap.Int("grpc.clientMaxRecvSize", p.ClientMaxRecvSize))
-}
-
-// CheckPortAvailable check if a port is available to be listened on
-func CheckPortAvailable(port int) bool {
-	addr := ":" + strconv.Itoa(port)
-	listener, err := net.Listen("tcp", addr)
-	if listener != nil {
-		listener.Close()
-	}
-	return err == nil
-}
-
-// GetAvailablePort return an available port that can be listened on
-func GetAvailablePort() int {
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
-
-	return listener.Addr().(*net.TCPAddr).Port
 }

@@ -284,10 +284,10 @@ type IndexNode interface {
 type IndexNodeComponent interface {
 	IndexNode
 
-	// SetEtcdClient set etcd client for QueryCoord
+	// SetEtcdClient set etcd client for IndexNodeComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// UpdateStateCode updates state code for QueryCoord
+	// UpdateStateCode updates state code for IndexNodeComponent
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 }

@@ -154,6 +154,55 @@ func TestCheckIndexLoop(t *testing.T) {
 	cancel()
 }
 
+func TestHandoffNotExistSegment(t *testing.T) {
+	refreshParams()
+	ctx, cancel := context.WithCancel(context.Background())
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	defer etcdCli.Close()
+	assert.Nil(t, err)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	meta, err := newMeta(ctx, kv, nil, nil)
+	assert.Nil(t, err)
+
+	rootCoord := newRootCoordMock()
+	assert.Nil(t, err)
+	indexCoord := newIndexCoordMock()
+	indexCoord.returnError = true
+	dataCoord, err := newDataCoordMock(ctx)
+	assert.Nil(t, err)
+	dataCoord.segmentNotExist = true
+
+	meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genCollectionSchema(defaultCollectionID, false))
+
+	segmentInfo := &querypb.SegmentInfo{
+		SegmentID:    defaultSegmentID,
+		CollectionID: defaultCollectionID,
+		PartitionID:  defaultPartitionID,
+		SegmentState: commonpb.SegmentState_Sealed,
+	}
+	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+	value, err := proto.Marshal(segmentInfo)
+	assert.Nil(t, err)
+
+	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, nil, rootCoord, indexCoord, dataCoord)
+	assert.Nil(t, err)
+
+	err = kv.Save(key, string(value))
+	assert.Nil(t, err)
+	indexChecker.enqueueHandoffReq(segmentInfo)
+	indexChecker.wg.Add(1)
+	go indexChecker.checkIndexLoop()
+	for {
+		_, err := kv.Load(key)
+		if err != nil {
+			break
+		}
+	}
+	assert.Equal(t, 0, len(indexChecker.indexedSegmentsChan))
+	cancel()
+	indexChecker.wg.Wait()
+}
+
 func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())

@@ -21,10 +21,12 @@ import (
 	"fmt"
 )
 
+// msgIndexNodeIsUnhealthy return a message tha IndexNode is not healthy.
 func msgIndexNodeIsUnhealthy(nodeID UniqueID) string {
 	return fmt.Sprintf("index node %d is not ready", nodeID)
 }
 
+// errIndexNodeIsUnhealthy return an error that specified IndexNode is not healthy.
 func errIndexNodeIsUnhealthy(nodeID UniqueID) error {
 	return errors.New(msgIndexNodeIsUnhealthy(nodeID))
 }

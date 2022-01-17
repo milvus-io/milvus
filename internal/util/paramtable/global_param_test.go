@@ -67,6 +67,25 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("Minio rootpath = %s", Params.RootPath)
 	})
 
+	t.Run("test commonConfig", func(t *testing.T) {
+		Params := GlobalParams.CommonCfg
+
+		assert.NotEqual(t, Params.DefaultPartitionName, "")
+		t.Logf("default partition name = %s", Params.DefaultPartitionName)
+
+		assert.NotEqual(t, Params.DefaultIndexName, "")
+		t.Logf("default index name = %s", Params.DefaultIndexName)
+
+		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
+	})
+
+	t.Run("test knowhereConfig", func(t *testing.T) {
+		Params := GlobalParams.KnowhereCfg
+
+		assert.NotEqual(t, Params.SimdType, "")
+		t.Logf("knowhere simd type = %s", Params.SimdType)
+	})
+
 	t.Run("test rootCoordConfig", func(t *testing.T) {
 		Params := GlobalParams.RootCoordCfg
 
@@ -90,12 +109,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		assert.NotEqual(t, Params.MinSegmentSizeToEnableIndex, 0)
 		t.Logf("master MinSegmentSizeToEnableIndex = %d", Params.MinSegmentSizeToEnableIndex)
-
-		assert.NotEqual(t, Params.DefaultPartitionName, "")
-		t.Logf("default partition name = %s", Params.DefaultPartitionName)
-
-		assert.NotEqual(t, Params.DefaultIndexName, "")
-		t.Logf("default index name = %s", Params.DefaultIndexName)
 
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
@@ -123,12 +136,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum)
 
 		t.Logf("MaxDimension: %d", Params.MaxDimension)
-
-		t.Logf("DefaultPartitionName: %s", Params.DefaultPartitionName)
-
-		t.Logf("DefaultIndexName: %s", Params.DefaultIndexName)
-
-		//t.Logf("RoleName: %s", typeutil.ProxyRole)
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum)
 	})
@@ -324,8 +331,6 @@ func TestGlobalParamTable(t *testing.T) {
 
 		t.Logf("Alias: %v", Params.Alias)
 
-		t.Logf("SimdType: %v", Params.SimdType)
-
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)
 
@@ -351,9 +356,6 @@ func TestGrpcServerParams(t *testing.T) {
 	t.Logf("Port = %d", Params.Port)
 
 	t.Logf("Address = %s", Params.GetAddress())
-
-	assert.NotNil(t, Params.Listener)
-	t.Logf("Listener = %d", Params.Listener)
 
 	assert.NotZero(t, Params.ServerMaxRecvSize)
 	t.Logf("ServerMaxRecvSize = %d", Params.ServerMaxRecvSize)
@@ -386,9 +388,6 @@ func TestGrpcClientParams(t *testing.T) {
 
 	t.Logf("Address = %s", Params.GetAddress())
 
-	assert.NotNil(t, Params.Listener)
-	t.Logf("Listener = %d", Params.Listener)
-
 	assert.NotZero(t, Params.ClientMaxRecvSize)
 	t.Logf("ClientMaxRecvSize = %d", Params.ClientMaxRecvSize)
 
@@ -402,12 +401,4 @@ func TestGrpcClientParams(t *testing.T) {
 	Params.Remove(role + ".grpc.clientMaxSendSize")
 	Params.initClientMaxSendSize()
 	assert.Equal(t, Params.ClientMaxSendSize, DefaultClientMaxSendSize)
-}
-
-func TestCheckPortAvailable(t *testing.T) {
-	num := 10
-	for i := 0; i < num; i++ {
-		port := GetAvailablePort()
-		assert.Equal(t, CheckPortAvailable(port), true)
-	}
 }

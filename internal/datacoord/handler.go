@@ -35,7 +35,7 @@ type Handler interface {
 	FinishDropChannel(channel string)
 }
 
-// Handler is a helper of Server
+// ServerHandler is a helper of Server
 type ServerHandler struct {
 	s *Server
 }

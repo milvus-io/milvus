@@ -256,6 +256,7 @@ enum MsgType : int {
   SegmentInfo = 600,
   SystemInfo = 601,
   GetRecoveryInfo = 602,
+  GetSegmentState = 603,
   TimeTick = 1200,
   QueryNodeStats = 1201,
   LoadIndex = 1202,

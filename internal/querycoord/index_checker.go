@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -192,13 +193,25 @@ func (ic *IndexChecker) checkIndexLoop() {
 				validHandoffReq, collectionInfo := ic.verifyHandoffReqValid(segmentInfo)
 				if validHandoffReq && Params.QueryCoordCfg.AutoHandoff {
 					indexInfo, err := getIndexInfo(ic.ctx, segmentInfo, collectionInfo.Schema, ic.rootCoord, ic.indexCoord)
+					if err == nil {
+						// if index exist or not enableIndex, ready to load
+						segmentInfo.IndexInfos = indexInfo
+						ic.enqueueIndexedSegment(segmentInfo)
+						break
+					}
+
+					// if segment has not been compacted and dropped, continue to wait for the build index to complete
+					segmentState, err := getSegmentStates(ic.ctx, segmentInfo.SegmentID, ic.dataCoord)
 					if err != nil {
+						log.Warn("checkIndexLoop: get segment state failed", zap.Int64("segmentID", segmentInfo.SegmentID), zap.Error(err))
 						continue
 					}
 
-					segmentInfo.IndexInfos = indexInfo
-					ic.enqueueIndexedSegment(segmentInfo)
-					break
+					if segmentState.State != commonpb.SegmentState_NotExist {
+						continue
+					}
+
+					log.Debug("checkIndexLoop: segment has been compacted and dropped before handoff", zap.Int64("segmentID", segmentInfo.SegmentID))
 				}
 
 				buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
@@ -334,4 +347,32 @@ func getIndexInfo(ctx context.Context, info *querypb.SegmentInfo, schema *schema
 		indexInfo.IndexSize = int64(fieldPathInfo.SerializedSize)
 	}
 	return []*querypb.VecFieldIndexInfo{indexInfo}, nil
+}
+
+func getSegmentStates(ctx context.Context, segmentID UniqueID, dataCoord types.DataCoord) (*datapb.SegmentStateInfo, error) {
+	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel2()
+
+	req := &datapb.GetSegmentStatesRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_GetSegmentState,
+		},
+		SegmentIDs: []UniqueID{segmentID},
+	}
+	resp, err := dataCoord.GetSegmentStates(ctx2, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(resp.Status.Reason)
+		return nil, err
+	}
+
+	if len(resp.States) != 1 {
+		err = errors.New("the length of segmentStates result should be 1")
+		return nil, err
+	}
+
+	return resp.States[0], nil
 }

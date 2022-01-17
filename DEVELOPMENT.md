@@ -34,7 +34,7 @@ The details below outline the hardware and software requirements for building on
 
 ### Hardware Requirements
 
-Milvus is written in Go and C++, compiling it can use a lot of resources. We recommend the following for any physical or virtual machine being used for building Milvus.
+Milvus is written in Go and C++, it requires a lot of resources to compile it. We recommend the following for any physical or virtual machine being used for building Milvus.
 
 ```
 - 8GB of RAM

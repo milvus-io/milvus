@@ -156,7 +156,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		ID:                         collID,
 		Schema:                     &schema,
 		PartitionIDs:               []typeutil.UniqueID{partID},
-		PartitionNames:             []string{Params.RootCoordCfg.DefaultPartitionName},
+		PartitionNames:             []string{Params.CommonCfg.DefaultPartitionName},
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
@@ -178,7 +178,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		Base:                 t.Req.Base,
 		DbName:               t.Req.DbName,
 		CollectionName:       t.Req.CollectionName,
-		PartitionName:        Params.RootCoordCfg.DefaultPartitionName,
+		PartitionName:        Params.CommonCfg.DefaultPartitionName,
 		DbID:                 0, //TODO,not used
 		CollectionID:         collID,
 		PartitionID:          partID,
@@ -238,7 +238,10 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		return nil
 	}
 
@@ -330,11 +333,15 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
-
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		// send tt into deleted channels to tell data_node to clear flowgragh
-		t.core.chanTimeTick.sendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
-
+		err := t.core.chanTimeTick.sendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
+		if err != nil {
+			log.Warn("failed to send time tick to channel", zap.Any("physical names", collMeta.PhysicalChannelNames), zap.Error(err))
+		}
 		// remove dml channel after send dd msg
 		t.core.chanTimeTick.removeDmlChannels(collMeta.PhysicalChannelNames...)
 
@@ -543,7 +550,10 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		return nil
 	}
 
@@ -627,7 +637,10 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
-		t.core.SendTimeTick(ts, reason)
+		errTimeTick := t.core.SendTimeTick(ts, reason)
+		if errTimeTick != nil {
+			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+		}
 		return nil
 	}
 
@@ -821,7 +834,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateIndex {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	indexName := Params.RootCoordCfg.DefaultIndexName //TODO, get name from request
+	indexName := Params.CommonCfg.DefaultIndexName //TODO, get name from request
 	indexID, _, err := t.core.IDAllocator(1)
 	log.Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {
