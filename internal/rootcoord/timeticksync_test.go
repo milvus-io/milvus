@@ -26,15 +26,11 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 func TestTimetickSync(t *testing.T) {
 	ctx := context.Background()
-
-	session := &sessionutil.Session{
-		ServerID: 100,
-	}
+	sourceID := int64(100)
 
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
@@ -51,7 +47,7 @@ func TestTimetickSync(t *testing.T) {
 	Params.RootCoordCfg.DmlChannelNum = 2
 	Params.RootCoordCfg.DmlChannelName = "rootcoord-dml"
 	Params.RootCoordCfg.DeltaChannelName = "rootcoord-delta"
-	ttSync := newTimeTickSync(ctx, session, factory, nil)
+	ttSync := newTimeTickSync(ctx, sourceID, factory, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -108,7 +104,7 @@ func TestTimetickSync(t *testing.T) {
 		assert.Nil(t, err)
 
 		ttSync.ddlMinTs = uint64(300)
-		ttSync.session.ServerID = int64(1)
+		ttSync.sourceID = int64(1)
 		err = ttSync.updateTimeTick(msg, "1")
 		assert.Nil(t, err)
 	})

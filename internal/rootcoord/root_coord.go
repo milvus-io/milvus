@@ -1032,7 +1032,7 @@ func (c *Core) Init() error {
 		}
 
 		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
-		c.chanTimeTick = newTimeTickSync(c.ctx, c.session, c.msFactory, chanMap)
+		c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.msFactory, chanMap)
 		c.chanTimeTick.addProxy(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 
@@ -1040,7 +1040,7 @@ func (c *Core) Init() error {
 		c.proxyManager = newProxyManager(
 			c.ctx,
 			c.etcdCli,
-			c.chanTimeTick.getProxy,
+			c.chanTimeTick.clearProxy,
 			c.proxyClientManager.GetProxyClients,
 		)
 		c.proxyManager.AddSession(c.chanTimeTick.addProxy, c.proxyClientManager.AddProxyClient)

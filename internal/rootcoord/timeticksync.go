@@ -44,8 +44,8 @@ var (
 )
 
 type timetickSync struct {
-	ctx     context.Context
-	session *sessionutil.Session
+	ctx      context.Context
+	sourceID int64
 
 	dmlChannels   *dmlChannels // used for insert
 	deltaChannels *dmlChannels // used for delete
@@ -85,7 +85,7 @@ func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
 	return c.defaultTs
 }
 
-func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
+func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
 	// initialize dml channels used for insert
 	dmlChannels := newDmlChannels(ctx, factory, Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DmlChannelNum)
 	// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels
@@ -110,8 +110,8 @@ func newTimeTickSync(ctx context.Context, session *sessionutil.Session, factory 
 	}
 
 	return &timetickSync{
-		ctx:     ctx,
-		session: session,
+		ctx:      ctx,
+		sourceID: sourceID,
 
 		dmlChannels:   dmlChannels,
 		deltaChannels: deltaChannels,
@@ -236,7 +236,7 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 		return nil
 	}
 
-	if in.Base.SourceID == t.session.ServerID {
+	if in.Base.SourceID == t.sourceID {
 		if prev != nil && in.DefaultTimestamp <= prev.defaultTs {
 			log.Debug("timestamp go back", zap.Int64("source id", in.Base.SourceID),
 				zap.Uint64("curr ts", in.DefaultTimestamp),
@@ -273,7 +273,7 @@ func (t *timetickSync) delProxy(sess *sessionutil.Session) {
 	}
 }
 
-func (t *timetickSync) getProxy(sess []*sessionutil.Session) {
+func (t *timetickSync) clearProxy(sess []*sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	for _, s := range sess {
@@ -304,7 +304,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			}
 
 			// reduce each channel to get min timestamp
-			local := proxyTimetick[t.session.ServerID]
+			local := proxyTimetick[t.sourceID]
 			if len(local.chanTs) == 0 {
 				continue
 			}
@@ -356,7 +356,7 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: ts,
-			SourceID:  t.session.ServerID,
+			SourceID:  t.sourceID,
 		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
