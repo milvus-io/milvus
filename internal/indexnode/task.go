@@ -505,6 +505,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	defer it.releaseMemory()
+
 	var err error
 	it.index, err = NewCIndex(it.newTypeParams, it.newIndexParams)
 	if err != nil {
@@ -537,8 +539,6 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	it.tr.Elapse("index building all done")
 	log.Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
 		zap.Int64("partition", it.partitionID), zap.Int64("segment", it.segmentID))
-
-	it.releaseMemory()
 
 	return nil
 }
