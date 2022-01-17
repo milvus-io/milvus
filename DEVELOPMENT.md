@@ -132,7 +132,15 @@ $ make verifiers
 It is required that all pull request candidates should pass all Milvus unit tests.
 
 Beforce running unit tests, you need to first bring up the Milvus deployment environment.
-You may set up a local docker environment with our docker compose yaml file to start unit testing:
+You may set up a local docker environment with our docker compose yaml file to start unit testing.
+For Apple Silicon users (Apple M1):
+```shell
+$ cd deployments/docker/dev
+$ docker-compose -f docker-compose-apple-silicon.yml up -d
+$ cd ../../../
+$ make unittest
+```
+For others:
 ```shell
 $ cd deployments/docker/dev
 $ docker-compose up -d
