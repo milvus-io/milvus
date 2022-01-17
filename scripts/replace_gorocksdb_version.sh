@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 # Licensed to the LF AI & Data foundation under one
 # or more contributor license agreements. See the NOTICE file
 # distributed with this work for additional information
@@ -14,15 +16,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(CONFIG_SRC
-        ConfigKnowhere.cpp
-        )
-
-add_library(milvus_config
-        ${CONFIG_SRC}
-        )
-target_link_libraries(milvus_config
-        knowhere
-        milvus_proto
-        milvus_utils
-        )
+sed -i .bak 's/github.com\/tecbot\/gorocksdb/github.com\/soothing-rain\/gorocksdb/g' \
+internal/kv/rocksdb/rocksdb_kv.go \
+internal/kv/rocksdb/RocksIterator.go \
+internal/util/rocksmq/server/rocksmq/rocksmq_impl.go \
+internal/util/rocksmq/server/rocksmq/rocksmq_reader.go \
+internal/util/rocksmq/server/rocksmq/rocksmq_retention.go

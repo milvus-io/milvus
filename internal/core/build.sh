@@ -23,8 +23,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-
-BUILD_OUTPUT_DIR="${SCRIPTS_DIR}/../../cmake_build"
+BUILD_OUTPUT_DIR="./cmake_build"
 BUILD_TYPE="Release"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="${SCRIPTS_DIR}/output"
@@ -130,6 +129,19 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
   exit 0
 fi
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Darwin*)
+        llvm_prefix="$(brew --prefix llvm)"
+        export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
+        export CC="${llvm_prefix}/bin/clang"
+        export CXX="${llvm_prefix}/bin/clang++"
+        export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
+        export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
+        ;;
+          *)   echo "==System:${unameOut}";
+esac
+
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
@@ -143,6 +155,8 @@ CMAKE_CMD="cmake \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
+-DMILVUS_ENABLE_PROFILING=${SUPPORT_PROFILING} \
+-DKNOWHERE_GPU_VERSION=${SUPPORT_GPU} \
 ${SCRIPTS_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}

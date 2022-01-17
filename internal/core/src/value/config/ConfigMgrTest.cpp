@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <fiu-control.h>
-#include <fiu/fiu-local.h>
 #include <gtest/gtest.h>
 #include "ConfigMgr.h"
 

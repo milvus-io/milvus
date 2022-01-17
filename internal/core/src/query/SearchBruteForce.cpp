@@ -12,8 +12,15 @@
 #include <string>
 #include <vector>
 
-#include <faiss/utils/distances.h>
+#ifdef __APPLE__
+#include "knowhere/index/vector_index/impl/bruteforce/BruteForce.h"
+#include "knowhere/common/Heap.h"
+#elif __linux__
 #include <faiss/utils/BinaryDistance.h>
+#include <faiss/utils/distances.h>
+#else
+#error "Unsupported OS environment.";
+#endif
 
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"
@@ -35,6 +42,9 @@ raw_search(MetricType metric_type,
            float* D,
            idx_t* labels,
            const BitsetView bitset) {
+#ifdef __APPLE__
+    // TODO
+#elif __linux__
     using namespace faiss;  // NOLINT
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float_maxheap_array_t res = {size_t(n), size_t(k), labels, D};
@@ -62,6 +72,9 @@ raw_search(MetricType metric_type,
             std::string("binary search not support metric type: ") + segcore::MetricTypeToString(metric_type);
         PanicInfo(msg);
     }
+#else
+#error "Unsupported OS environment.";
+#endif
 }
 
 SubSearchResult
@@ -100,18 +113,29 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
     SubSearchResult sub_qr(num_queries, topk, metric_type, round_decimal);
     auto query_data = reinterpret_cast<const float*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
-
+#ifdef __APPLE__
+    if (metric_type == MetricType::METRIC_L2) {
+        knowhere::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(),
+                                            sub_qr.get_distances()};
+        knowhere::knn_L2sqr_sse(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
+    } else {
+        knowhere::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(),
+                                            sub_qr.get_distances()};
+        knowhere::knn_inner_product_sse(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
+    }
+#elif __linux__
     if (metric_type == MetricType::METRIC_L2) {
         faiss::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(), sub_qr.get_distances()};
         faiss::knn_L2sqr(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
-        sub_qr.round_values();
-        return sub_qr;
     } else {
         faiss::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(), sub_qr.get_distances()};
         faiss::knn_inner_product(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
-        sub_qr.round_values();
-        return sub_qr;
     }
+#else
+#error "Unsupported OS environment.";
+#endif
+    sub_qr.round_values();
+    return sub_qr;
 }
 
 SubSearchResult

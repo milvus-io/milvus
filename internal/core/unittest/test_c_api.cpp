@@ -16,12 +16,12 @@
 #include <random>
 #include <string>
 #include <unordered_set>
+#include <knowhere/index/vector_index/helpers/IndexParameter.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <knowhere/index/vector_index/IndexIVFPQ.h>
 
 #include "common/LoadInfo.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
-#include "index/knowhere/knowhere/index/vector_index/IndexIVFPQ.h"
 #include "pb/milvus.pb.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"

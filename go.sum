@@ -484,6 +484,10 @@ github.com/smartystreets/goconvey v1.6.4/go.mod h1:syvi0/a8iFYH4r/RixwvyeAJjdLS9
 github.com/soheilhy/cmux v0.1.4/go.mod h1:IM3LyeVVIOuxMH7sFAkER9+bJ4dT7Ms6E4xg4kGIyLM=
 github.com/soheilhy/cmux v0.1.5 h1:jjzc5WVemNEDTLwv9tlmemhC73tI08BNOIGwBOo10Js=
 github.com/soheilhy/cmux v0.1.5/go.mod h1:T7TcVDs9LWfQgPlPsdngu6I6QIoyIFZDDC6sNE1GqG0=
+github.com/soothing-rain/gorocksdb v0.0.0-20220113074926-f4b9b182e17e h1:E1iqJnSWf+BVfBbuBKLaW4rSCZAAMH1ui1uT+IXTgz4=
+github.com/soothing-rain/gorocksdb v0.0.0-20220113074926-f4b9b182e17e/go.mod h1:OEi1TEIyGy/kDfY3ZwoHfn+/dIK0ZOOKJ2ReaYf4sao=
+github.com/soothing-rain/gorocksdb v0.0.0-20220113075731-e68e68ed4c62 h1:EAmHsU58jrwMjgnVVxgnlqlBG+1uFuv+Om1qXr5GfII=
+github.com/soothing-rain/gorocksdb v0.0.0-20220113075731-e68e68ed4c62/go.mod h1:OEi1TEIyGy/kDfY3ZwoHfn+/dIK0ZOOKJ2ReaYf4sao=
 github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
 github.com/spaolacci/murmur3 v1.1.0 h1:7c1g84S4BPRrfL5Xrdp6fOJ206sU9y293DDHaoy0bLI=
 github.com/spaolacci/murmur3 v1.1.0/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=

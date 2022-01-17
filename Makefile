@@ -15,8 +15,15 @@ GOPATH 	:= $(shell $(GO) env GOPATH)
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
+OS := $(shell uname -s)
+ARCH := $(shell arch)
 
 all: build-cpp build-go
+
+pre-build-go:
+ifeq ($(OS),Darwin) # MacOS X
+	@(env bash $(PWD)/scripts/replace_gorocksdb_version.sh)
+endif
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -72,9 +79,19 @@ ifdef GO_DIFF_FILES
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go $(GO_DIFF_FILES)
 else
 	@echo "Running $@ check"
+ifeq ($(OS),Darwin) # MacOS X
+ifeq ($(ARCH),arm64)
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./cmd/...
+else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
-#	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
+endif
+else
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
+endif
+	#@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
 verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
@@ -85,7 +102,7 @@ binlog:
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/tools/binlog/main.go 1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
-BUILD_TIME = $(shell date --utc)
+BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
 
@@ -95,7 +112,7 @@ print-build-info:
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Go Version: $(GO_VERSION)"
 
-milvus: build-cpp print-build-info
+milvus: pre-build-go build-cpp print-build-info
 	@echo "Building Milvus ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \

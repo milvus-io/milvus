@@ -18,7 +18,8 @@ package querynode
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
-#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -98,7 +99,7 @@ func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*searchRequ
 		return nil, errors.New("empty search request")
 	}
 	var blobPtr = unsafe.Pointer(&searchRequestBlob[0])
-	blobSize := C.long(len(searchRequestBlob))
+	blobSize := C.int64_t(len(searchRequestBlob))
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
 

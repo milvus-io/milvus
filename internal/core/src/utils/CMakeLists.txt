@@ -15,4 +15,4 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/utils UTILS_FILES )
 
 add_library( milvus_utils STATIC ${UTILS_FILES} )
 
-target_link_libraries( milvus_utils PRIVATE fiu milvus_exceptions)
+target_link_libraries( milvus_utils PRIVATE milvus_exceptions)

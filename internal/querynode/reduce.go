@@ -18,7 +18,8 @@ package querynode
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
-#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/plan_c.h"
 #include "segcore/reduce_c.h"
@@ -55,7 +56,7 @@ func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
-	cNumSegments := C.long(numSegments)
+	cNumSegments := C.int64_t(numSegments)
 
 	status := C.ReduceSearchResultsAndFillData(plan.cSearchPlan, cSearchResultPtr, cNumSegments)
 	if err := HandleCStatus(&status, "ReduceSearchResultsAndFillData failed"); err != nil {
@@ -71,7 +72,7 @@ func reorganizeSearchResults(searchResults []*SearchResult, numSegments int64) (
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 
-	var cNumSegments = C.long(numSegments)
+	var cNumSegments = C.int64_t(numSegments)
 	var cMarshaledHits C.CMarshaledHits
 
 	status := C.ReorganizeSearchResults(&cMarshaledHits, cSearchResultPtr, cNumSegments)
@@ -95,10 +96,10 @@ func (mh *MarshaledHits) getHitsBlob() ([]byte, error) {
 }
 
 func (mh *MarshaledHits) hitBlobSizeInGroup(groupOffset int64) ([]int64, error) {
-	cGroupOffset := (C.long)(groupOffset)
+	cGroupOffset := (C.int64_t)(groupOffset)
 	numQueries := C.GetNumQueriesPerGroup(mh.cMarshaledHits, cGroupOffset)
 	result := make([]int64, int64(numQueries))
-	cResult := (*C.long)(&result[0])
+	cResult := (*C.int64_t)(&result[0])
 	C.GetHitSizePerQueries(mh.cMarshaledHits, cGroupOffset, cResult)
 	return result, nil
 }
