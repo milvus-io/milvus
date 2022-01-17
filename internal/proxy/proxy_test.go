@@ -23,11 +23,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+
+	"github.com/milvus-io/milvus/internal/util/trace"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -324,8 +333,97 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 	return in
 }
 
+type proxyTestServer struct {
+	*Proxy
+	grpcServer *grpc.Server
+	ch         chan error
+}
+
+func newProxyTestServer(node *Proxy) *proxyTestServer {
+	return &proxyTestServer{
+		Proxy:      node,
+		grpcServer: nil,
+		ch:         make(chan error, 1),
+	}
+}
+
+func (s *proxyTestServer) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+	return s.Proxy.GetComponentStates(ctx)
+}
+
+func (s *proxyTestServer) GetStatisticsChannel(ctx context.Context, request *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
+	return s.Proxy.GetStatisticsChannel(ctx)
+}
+
+func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	var p paramtable.GrpcServerConfig
+	p.InitOnce(typeutil.ProxyRole)
+	Params.InitOnce()
+	Params.ProxyCfg.NetworkAddress = p.GetAddress()
+	Params.ProxyCfg.Refresh()
+
+	var kaep = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
+		PermitWithoutStream: true,            // Allow pings even when there are no active streams
+	}
+
+	var kasp = keepalive.ServerParameters{
+		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
+		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
+	}
+
+	log.Debug("Proxy server listen on tcp", zap.Int("port", p.Port))
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(p.Port))
+	if err != nil {
+		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", p.Port))
+		s.ch <- err
+		return
+	}
+	log.Debug("Proxy server already listen on tcp", zap.Int("port", p.Port))
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	opts := trace.GetInterceptorOpts()
+	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
+		grpc.MaxRecvMsgSize(p.ServerMaxRecvSize),
+		grpc.MaxSendMsgSize(p.ServerMaxSendSize),
+		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
+		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
+	proxypb.RegisterProxyServer(s.grpcServer, s)
+	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
+
+	log.Debug("create Proxy grpc server",
+		zap.Any("enforcement policy", kaep),
+		zap.Any("server parameters", kasp))
+
+	log.Debug("waiting for Proxy grpc server to be ready")
+	go funcutil.CheckGrpcReady(ctx, s.ch)
+
+	log.Debug("Proxy grpc server has been ready, serve grpc requests on listen")
+	if err := s.grpcServer.Serve(lis); err != nil {
+		log.Warn("failed to serve on Proxy's listener", zap.Error(err))
+		s.ch <- err
+	}
+}
+
+func (s *proxyTestServer) waitForGrpcReady() error {
+	return <-s.ch
+}
+
+func (s *proxyTestServer) gracefulStop() {
+	if s.grpcServer != nil {
+		s.grpcServer.GracefulStop()
+	}
+}
+
 func TestProxy(t *testing.T) {
 	var err error
+	var wg sync.WaitGroup
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
 	err = os.Setenv("ROCKSMQ_PATH", path)
@@ -419,6 +517,7 @@ func TestProxy(t *testing.T) {
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
+
 	Params.Init()
 	log.Info("Initialize parameter table of Proxy")
 
@@ -426,6 +525,12 @@ func TestProxy(t *testing.T) {
 	defer etcdcli.Close()
 	assert.NoError(t, err)
 	proxy.SetEtcdClient(etcdcli)
+
+	testServer := newProxyTestServer(proxy)
+	wg.Add(1)
+	go testServer.startGrpc(ctx, &wg)
+	assert.NoError(t, testServer.waitForGrpcReady())
+
 	rootCoordClient, err := rcc.NewClient(ctx, Params.BaseParams.MetaRootPath, etcdcli)
 	assert.NoError(t, err)
 	err = rootCoordClient.Init()
@@ -679,8 +784,6 @@ func TestProxy(t *testing.T) {
 			GuaranteeTimestamp: 0,
 		}
 	}
-
-	var wg sync.WaitGroup
 
 	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
@@ -1249,12 +1352,9 @@ func TestProxy(t *testing.T) {
 			defer wg.Done()
 			req := constructSearchRequest()
 
-			//resp, err := proxy.Search(ctx, req)
-			_, err := proxy.Search(ctx, req)
+			resp, err := proxy.Search(ctx, req)
 			assert.NoError(t, err)
-			// FIXME(dragondriver)
-			// assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			// TODO(dragondriver): compare search result
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		})
 
 		wg.Add(1)
@@ -2564,6 +2664,8 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
+
+	testServer.gracefulStop()
 
 	wg.Wait()
 	cancel()

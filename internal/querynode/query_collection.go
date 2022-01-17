@@ -78,8 +78,9 @@ type queryCollection struct {
 	serviceableTimeMutex sync.RWMutex // guards serviceableTime
 	serviceableTime      Timestamp
 
-	queryMsgStream       msgstream.MsgStream
-	queryResultMsgStream msgstream.MsgStream
+	queryMsgStream msgstream.MsgStream
+	// queryResultMsgStream msgstream.MsgStream
+	sessionManager *SessionManager
 
 	localChunkManager  storage.ChunkManager
 	remoteChunkManager storage.ChunkManager
@@ -87,6 +88,14 @@ type queryCollection struct {
 	localCacheEnabled  bool
 
 	globalSegmentManager *globalSealedSegmentManager
+}
+
+type qcOpt func(*queryCollection)
+
+func qcOptWithSessionManager(s *SessionManager) qcOpt {
+	return func(qc *queryCollection) {
+		qc.sessionManager = s
+	}
 }
 
 func newQueryCollection(releaseCtx context.Context,
@@ -98,12 +107,13 @@ func newQueryCollection(releaseCtx context.Context,
 	localChunkManager storage.ChunkManager,
 	remoteChunkManager storage.ChunkManager,
 	localCacheEnabled bool,
+	opts ...qcOpt,
 ) (*queryCollection, error) {
 
 	unsolvedMsg := make([]queryMsg, 0)
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
-	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
+	// queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
 	condMu := sync.Mutex{}
 
@@ -121,13 +131,17 @@ func newQueryCollection(releaseCtx context.Context,
 
 		unsolvedMsg: unsolvedMsg,
 
-		queryMsgStream:       queryStream,
-		queryResultMsgStream: queryResultStream,
+		queryMsgStream: queryStream,
+		// queryResultMsgStream: queryResultStream,
 
 		localChunkManager:    localChunkManager,
 		remoteChunkManager:   remoteChunkManager,
 		localCacheEnabled:    localCacheEnabled,
 		globalSegmentManager: newGlobalSealedSegmentManager(collectionID),
+	}
+
+	for _, opt := range opts {
+		opt(qc)
 	}
 
 	err := qc.registerCollectionTSafe()
@@ -139,7 +153,7 @@ func newQueryCollection(releaseCtx context.Context,
 
 func (q *queryCollection) start() {
 	go q.queryMsgStream.Start()
-	go q.queryResultMsgStream.Start()
+	// go q.queryResultMsgStream.Start()
 	go q.consumeQuery()
 	go q.doUnsolvedQueryMsg()
 }
@@ -148,9 +162,9 @@ func (q *queryCollection) close() {
 	if q.queryMsgStream != nil {
 		q.queryMsgStream.Close()
 	}
-	if q.queryResultMsgStream != nil {
-		q.queryResultMsgStream.Close()
-	}
+	// if q.queryResultMsgStream != nil {
+	// 	q.queryResultMsgStream.Close()
+	// }
 	q.globalSegmentManager.close()
 }
 
@@ -1089,7 +1103,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 				zap.Any("vChannels", collection.getVChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
-			err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
+			err = q.publishSearchResult(&searchResultMsg.SearchResults, searchMsg.Base.SourceID)
 			if err != nil {
 				return err
 			}
@@ -1196,7 +1210,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 		//	fmt.Println(testHits.IDs)
 		//	fmt.Println(testHits.Scores)
 		//}
-		err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
+		err = q.publishSearchResult(&searchResultMsg.SearchResults, searchMsg.Base.SourceID)
 		if err != nil {
 			return err
 		}
@@ -1309,7 +1323,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 		},
 	}
 
-	err = q.publishQueryResult(retrieveResultMsg, retrieveMsg.CollectionID)
+	err = q.publishRetrieveResult(&retrieveResultMsg.RetrieveResults, retrieveMsg.Base.SourceID)
 	if err != nil {
 		return err
 	}
@@ -1377,31 +1391,28 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 	return ret, nil
 }
 
-func (q *queryCollection) publishQueryResult(msg msgstream.TsMsg, collectionID UniqueID) error {
-	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-	defer span.Finish()
-	msg.SetTraceCtx(ctx)
-	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err := q.queryResultMsgStream.Produce(&msgPack)
-	if err != nil {
-		log.Error(err.Error())
-	}
-
-	return err
+func (q *queryCollection) publishSearchResultWithCtx(ctx context.Context, result *internalpb.SearchResults, nodeID UniqueID) error {
+	return q.sessionManager.SendSearchResult(ctx, nodeID, result)
 }
 
-func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
-	msgType := msg.Type()
-	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-	defer span.Finish()
-	msg.SetTraceCtx(ctx)
-	msgPack := msgstream.MsgPack{}
+func (q *queryCollection) publishSearchResult(result *internalpb.SearchResults, nodeID UniqueID) error {
+	return q.publishSearchResultWithCtx(q.releaseCtx, result, nodeID)
+}
 
-	resultChannelInt := 0
-	baseMsg := msgstream.BaseMsg{
-		HashValues: []uint32{uint32(resultChannelInt)},
-	}
+func (q *queryCollection) publishRetrieveResultWithCtx(ctx context.Context, result *internalpb.RetrieveResults, nodeID UniqueID) error {
+	return q.sessionManager.SendRetrieveResult(ctx, nodeID, result)
+}
+
+func (q *queryCollection) publishRetrieveResult(result *internalpb.RetrieveResults, nodeID UniqueID) error {
+	return q.publishRetrieveResultWithCtx(q.releaseCtx, result, nodeID)
+}
+
+func (q *queryCollection) publishFailedQueryResultWithCtx(ctx context.Context, msg msgstream.TsMsg, errMsg string) error {
+	msgType := msg.Type()
+	span, traceCtx := trace.StartSpanFromContext(msg.TraceCtx())
+	defer span.Finish()
+	msg.SetTraceCtx(traceCtx)
+
 	baseResult := &commonpb.MsgBase{
 		MsgID:     msg.ID(),
 		Timestamp: msg.BeginTs(),
@@ -1412,32 +1423,92 @@ func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg s
 	case commonpb.MsgType_Retrieve:
 		retrieveMsg := msg.(*msgstream.RetrieveMsg)
 		baseResult.MsgType = commonpb.MsgType_RetrieveResult
-		retrieveResultMsg := &msgstream.RetrieveResultMsg{
-			BaseMsg: baseMsg,
-			RetrieveResults: internalpb.RetrieveResults{
-				Base:            baseResult,
-				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-				ResultChannelID: retrieveMsg.ResultChannelID,
-				Ids:             nil,
-				FieldsData:      nil,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, retrieveResultMsg)
+		return q.publishRetrieveResult(&internalpb.RetrieveResults{
+			Base:            baseResult,
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+			ResultChannelID: retrieveMsg.ResultChannelID,
+			Ids:             nil,
+			FieldsData:      nil,
+		}, msg.SourceID())
 	case commonpb.MsgType_Search:
 		searchMsg := msg.(*msgstream.SearchMsg)
 		baseResult.MsgType = commonpb.MsgType_SearchResult
-		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg: baseMsg,
-			SearchResults: internalpb.SearchResults{
-				Base:            baseResult,
-				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-				ResultChannelID: searchMsg.ResultChannelID,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
+		return q.publishSearchResultWithCtx(ctx, &internalpb.SearchResults{
+			Base:            baseResult,
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+			ResultChannelID: searchMsg.ResultChannelID,
+		}, msg.SourceID())
 	default:
 		return fmt.Errorf("publish invalid msgType %d", msgType)
 	}
-
-	return q.queryResultMsgStream.Produce(&msgPack)
 }
+
+func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
+	return q.publishFailedQueryResultWithCtx(q.releaseCtx, msg, errMsg)
+}
+
+// func (q *queryCollection) publishQueryResult(msg msgstream.TsMsg, collectionID UniqueID) error {
+// 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+// 	defer span.Finish()
+// 	msg.SetTraceCtx(ctx)
+// 	msgPack := msgstream.MsgPack{}
+// 	msgPack.Msgs = append(msgPack.Msgs, msg)
+// 	err := q.queryResultMsgStream.Produce(&msgPack)
+// 	if err != nil {
+// 		log.Error(err.Error())
+// 	}
+//
+// 	return err
+// }
+
+// func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
+// 	msgType := msg.Type()
+// 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+// 	defer span.Finish()
+// 	msg.SetTraceCtx(ctx)
+// 	msgPack := msgstream.MsgPack{}
+//
+// 	resultChannelInt := 0
+// 	baseMsg := msgstream.BaseMsg{
+// 		HashValues: []uint32{uint32(resultChannelInt)},
+// 	}
+// 	baseResult := &commonpb.MsgBase{
+// 		MsgID:     msg.ID(),
+// 		Timestamp: msg.BeginTs(),
+// 		SourceID:  msg.SourceID(),
+// 	}
+//
+// 	switch msgType {
+// 	case commonpb.MsgType_Retrieve:
+// 		retrieveMsg := msg.(*msgstream.RetrieveMsg)
+// 		baseResult.MsgType = commonpb.MsgType_RetrieveResult
+// 		retrieveResultMsg := &msgstream.RetrieveResultMsg{
+// 			BaseMsg: baseMsg,
+// 			RetrieveResults: internalpb.RetrieveResults{
+// 				Base:            baseResult,
+// 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+// 				ResultChannelID: retrieveMsg.ResultChannelID,
+// 				Ids:             nil,
+// 				FieldsData:      nil,
+// 			},
+// 		}
+// 		msgPack.Msgs = append(msgPack.Msgs, retrieveResultMsg)
+// 	case commonpb.MsgType_Search:
+// 		searchMsg := msg.(*msgstream.SearchMsg)
+// 		baseResult.MsgType = commonpb.MsgType_SearchResult
+// 		searchResultMsg := &msgstream.SearchResultMsg{
+// 			BaseMsg: baseMsg,
+// 			SearchResults: internalpb.SearchResults{
+// 				Base:            baseResult,
+// 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+// 				ResultChannelID: searchMsg.ResultChannelID,
+// 			},
+// 		}
+// 		msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
+// 	default:
+// 		return fmt.Errorf("publish invalid msgType %d", msgType)
+// 	}
+//
+// 	return q.queryResultMsgStream.Produce(&msgPack)
+// }
+//

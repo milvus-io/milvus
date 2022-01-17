@@ -78,6 +78,8 @@ type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
+	wg sync.WaitGroup
+
 	stateCode atomic.Value
 
 	//call once
@@ -110,7 +112,9 @@ type QueryNode struct {
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
 
-	session *sessionutil.Session
+	session        *sessionutil.Session
+	eventCh        <-chan *sessionutil.SessionEvent
+	sessionManager *SessionManager
 
 	minioKV kv.BaseKV // minio minioKV
 	etcdKV  *etcdkv.EtcdKV
@@ -180,6 +184,72 @@ func (node *QueryNode) InitSegcore() {
 	C.free(unsafe.Pointer(cSimdType))
 }
 
+func (node *QueryNode) initServiceDiscovery() error {
+	if node.session == nil {
+		return errors.New("session is nil")
+	}
+
+	sessions, rev, err := node.session.GetSessions(typeutil.ProxyRole)
+	if err != nil {
+		log.Warn("QueryNode failed to init service discovery", zap.Error(err))
+		return err
+	}
+	log.Debug("QueryNode success to get Proxy sessions", zap.Any("sessions", sessions))
+
+	nodes := make([]*NodeInfo, 0, len(sessions))
+	for _, session := range sessions {
+		info := &NodeInfo{
+			NodeID:  session.ServerID,
+			Address: session.Address,
+		}
+		nodes = append(nodes, info)
+	}
+
+	node.sessionManager.Startup(nodes)
+
+	node.eventCh = node.session.WatchServices(typeutil.ProxyRole, rev+1, nil)
+	return nil
+}
+
+func (node *QueryNode) watchService(ctx context.Context) {
+	defer node.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("watch service shutdown")
+			return
+		case event, ok := <-node.eventCh:
+			if !ok {
+				//TODO add retry logic
+				return
+			}
+			if err := node.handleSessionEvent(ctx, event); err != nil {
+				log.Warn("handleSessionEvent", zap.Error(err))
+			}
+		}
+	}
+}
+
+func (node *QueryNode) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) error {
+	if event == nil {
+		return nil
+	}
+	info := &NodeInfo{
+		NodeID:  event.Session.ServerID,
+		Address: event.Session.Address,
+	}
+	switch event.EventType {
+	case sessionutil.SessionAddEvent:
+		node.sessionManager.AddSession(info)
+	case sessionutil.SessionDelEvent:
+		node.sessionManager.DeleteSession(info)
+	default:
+		log.Warn("receive unknown service event type",
+			zap.Any("type", event.EventType))
+	}
+	return nil
+}
+
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
 	var initError error = nil
@@ -235,6 +305,9 @@ func (node *QueryNode) Init() error {
 			return
 		}
 
+		// TODO: add session creator to node
+		node.sessionManager = NewSessionManager(withSessionCreator(defaultSessionCreator()))
+
 		log.Debug("query node init successfully",
 			zap.Any("queryNodeID", Params.QueryNodeCfg.QueryNodeID),
 			zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
@@ -262,7 +335,8 @@ func (node *QueryNode) Start() error {
 	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
-		node.msFactory)
+		node.msFactory,
+		qsOptWithSessionManager(node.sessionManager))
 
 	// start task scheduler
 	go node.scheduler.Start()
@@ -270,6 +344,14 @@ func (node *QueryNode) Start() error {
 	// start services
 	go node.watchChangeInfo()
 	go node.statsService.start()
+
+	// watch proxy
+	if err := node.initServiceDiscovery(); err != nil {
+		return err
+	}
+
+	node.wg.Add(1)
+	go node.watchService(node.queryNodeLoopCtx)
 
 	Params.QueryNodeCfg.CreatedTime = time.Now()
 	Params.QueryNodeCfg.UpdatedTime = time.Now()
@@ -305,6 +387,7 @@ func (node *QueryNode) Stop() error {
 		node.statsService.close()
 	}
 	node.session.Revoke(time.Second)
+	node.wg.Wait()
 	return nil
 }
 

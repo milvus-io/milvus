@@ -44,15 +44,27 @@ type queryService struct {
 
 	factory msgstream.Factory
 
+	sessionManager *SessionManager
+
 	localChunkManager  storage.ChunkManager
 	remoteChunkManager storage.ChunkManager
 	localCacheEnabled  bool
 }
 
+type qsOpt func(*queryService)
+
+func qsOptWithSessionManager(s *SessionManager) qsOpt {
+	return func(qs *queryService) {
+		qs.sessionManager = s
+	}
+}
+
 func newQueryService(ctx context.Context,
 	historical *historical,
 	streaming *streaming,
-	factory msgstream.Factory) *queryService {
+	factory msgstream.Factory,
+	opts ...qsOpt,
+) *queryService {
 
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
 
@@ -81,7 +93,7 @@ func newQueryService(ctx context.Context,
 	}
 	remoteChunkManager := storage.NewMinioChunkManager(client)
 
-	return &queryService{
+	qs := &queryService{
 		ctx:    queryServiceCtx,
 		cancel: queryServiceCancel,
 
@@ -96,6 +108,12 @@ func newQueryService(ctx context.Context,
 		remoteChunkManager: remoteChunkManager,
 		localCacheEnabled:  localCacheEnabled,
 	}
+
+	for _, opt := range opts {
+		opt(qs)
+	}
+
+	return qs
 }
 
 func (q *queryService) close() {
@@ -129,6 +147,7 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) error {
 		q.localChunkManager,
 		q.remoteChunkManager,
 		q.localCacheEnabled,
+		qcOptWithSessionManager(q.sessionManager),
 	)
 	if err != nil {
 		return err

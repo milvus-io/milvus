@@ -387,12 +387,31 @@ type taskScheduler struct {
 	cancel context.CancelFunc
 
 	msFactory msgstream.Factory
+
+	searchResultCh   chan *internalpb.SearchResults
+	retrieveResultCh chan *internalpb.RetrieveResults
+}
+
+type schedOpt func(*taskScheduler)
+
+func schedOptWithSearchResultCh(ch chan *internalpb.SearchResults) schedOpt {
+	return func(sched *taskScheduler) {
+		sched.searchResultCh = ch
+	}
+}
+
+func schedOptWithRetrieveResultCh(ch chan *internalpb.RetrieveResults) schedOpt {
+	return func(sched *taskScheduler) {
+		sched.retrieveResultCh = ch
+	}
 }
 
 func newTaskScheduler(ctx context.Context,
 	idAllocatorIns idAllocatorInterface,
 	tsoAllocatorIns tsoAllocator,
-	factory msgstream.Factory) (*taskScheduler, error) {
+	factory msgstream.Factory,
+	opts ...schedOpt,
+) (*taskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &taskScheduler{
 		ctx:       ctx1,
@@ -402,6 +421,10 @@ func newTaskScheduler(ctx context.Context,
 	s.ddQueue = newDdTaskQueue(tsoAllocatorIns, idAllocatorIns)
 	s.dmQueue = newDmTaskQueue(tsoAllocatorIns, idAllocatorIns)
 	s.dqQueue = newDqTaskQueue(tsoAllocatorIns, idAllocatorIns)
+
+	for _, opt := range opts {
+		opt(s)
+	}
 
 	return s, nil
 }
@@ -557,6 +580,7 @@ func newSearchResultBuf(msgID UniqueID) *searchResultBuf {
 			receivedSealedSegmentIDsSet: make(map[interface{}]struct{}),
 			receivedGlobalSegmentIDsSet: make(map[interface{}]struct{}),
 			haveError:                   false,
+			msgID:                       msgID,
 		},
 		resultBuf: make([]*internalpb.SearchResults, 0),
 	}
@@ -570,6 +594,7 @@ func newQueryResultBuf(msgID UniqueID) *queryResultBuf {
 			receivedSealedSegmentIDsSet: make(map[interface{}]struct{}),
 			receivedGlobalSegmentIDsSet: make(map[interface{}]struct{}),
 			haveError:                   false,
+			msgID:                       msgID,
 		},
 		resultBuf: make([]*internalpb.RetrieveResults, 0),
 	}
@@ -630,6 +655,161 @@ func (qr *queryResultBuf) addPartialResult(result *internalpb.RetrieveResults) {
 	}
 	qr.resultBufHeader.addPartialResult(result.ChannelIDsRetrieved, result.SealedSegmentIDsRetrieved,
 		result.GlobalSealedSegmentIDs)
+}
+
+func (sched *taskScheduler) collectionResultLoopV2() {
+	defer sched.wg.Done()
+
+	searchResultBufs := make(map[UniqueID]*searchResultBuf)
+	searchResultBufFlags := newIDCache(Params.ProxyCfg.BufFlagExpireTime, Params.ProxyCfg.BufFlagCleanupInterval) // if value is true, we can ignore searchResult
+	queryResultBufs := make(map[UniqueID]*queryResultBuf)
+	queryResultBufFlags := newIDCache(Params.ProxyCfg.BufFlagExpireTime, Params.ProxyCfg.BufFlagCleanupInterval) // if value is true, we can ignore queryResult
+
+	processSearchResult := func(results *internalpb.SearchResults) error {
+		reqID := results.Base.MsgID
+
+		ignoreThisResult, ok := searchResultBufFlags.Get(reqID)
+		if !ok {
+			searchResultBufFlags.Set(reqID, false)
+			ignoreThisResult = false
+		}
+		if ignoreThisResult {
+			log.Debug("got a search result, but we should ignore", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+			return nil
+		}
+
+		log.Debug("got a search result", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+
+		t := sched.getTaskByReqID(reqID)
+
+		if t == nil {
+			log.Debug("got a search result, but not in task scheduler", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+			delete(searchResultBufs, reqID)
+			searchResultBufFlags.Set(reqID, true)
+		}
+
+		st, ok := t.(*searchTask)
+		if !ok {
+			log.Debug("got a search result, but the related task is not of search task", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+			delete(searchResultBufs, reqID)
+			searchResultBufFlags.Set(reqID, true)
+			return nil
+		}
+
+		resultBuf, ok := searchResultBufs[reqID]
+		if !ok {
+			log.Debug("first receive search result of this task", zap.String("role", typeutil.ProxyRole), zap.Int64("reqID", reqID))
+			resultBuf = newSearchResultBuf(reqID)
+			vchans, err := st.getVChannels()
+			if err != nil {
+				delete(searchResultBufs, reqID)
+				log.Warn("failed to get virtual channels", zap.String("role", typeutil.ProxyRole), zap.Error(err), zap.Int64("reqID", reqID))
+				return err
+			}
+			for _, vchan := range vchans {
+				resultBuf.usedVChans[vchan] = struct{}{}
+			}
+			searchResultBufs[reqID] = resultBuf
+		}
+		resultBuf.addPartialResult(results)
+
+		colName := t.(*searchTask).query.CollectionName
+		log.Debug("process search result", zap.String("role", typeutil.ProxyRole), zap.String("collection", colName), zap.Int64("reqID", reqID), zap.Int("answer cnt", len(searchResultBufs[reqID].resultBuf)))
+
+		if resultBuf.readyToReduce() {
+			log.Debug("process search result, ready to reduce", zap.String("role", typeutil.ProxyRole), zap.Int64("reqID", reqID))
+			searchResultBufFlags.Set(reqID, true)
+			st.resultBuf <- resultBuf.resultBuf
+			delete(searchResultBufs, reqID)
+		}
+
+		return nil
+	}
+
+	processRetrieveResult := func(results *internalpb.RetrieveResults) error {
+		reqID := results.Base.MsgID
+
+		ignoreThisResult, ok := queryResultBufFlags.Get(reqID)
+		if !ok {
+			queryResultBufFlags.Set(reqID, false)
+			ignoreThisResult = false
+		}
+		if ignoreThisResult {
+			log.Debug("got a retrieve result, but we should ignore", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+			return nil
+		}
+
+		log.Debug("got a retrieve result", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+
+		t := sched.getTaskByReqID(reqID)
+
+		if t == nil {
+			log.Debug("got a retrieve result, but not in task scheduler", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+			delete(queryResultBufs, reqID)
+			queryResultBufFlags.Set(reqID, true)
+		}
+
+		st, ok := t.(*queryTask)
+		if !ok {
+			log.Debug("got a retrieve result, but the related task is not of retrieve task", zap.String("role", typeutil.ProxyRole), zap.Int64("ReqID", reqID))
+			delete(queryResultBufs, reqID)
+			queryResultBufFlags.Set(reqID, true)
+			return nil
+		}
+
+		resultBuf, ok := queryResultBufs[reqID]
+		if !ok {
+			log.Debug("first receive retrieve result of this task", zap.String("role", typeutil.ProxyRole), zap.Int64("reqID", reqID))
+			resultBuf = newQueryResultBuf(reqID)
+			vchans, err := st.getVChannels()
+			if err != nil {
+				delete(queryResultBufs, reqID)
+				log.Warn("failed to get virtual channels", zap.String("role", typeutil.ProxyRole), zap.Error(err), zap.Int64("reqID", reqID))
+				return err
+			}
+			for _, vchan := range vchans {
+				resultBuf.usedVChans[vchan] = struct{}{}
+			}
+			queryResultBufs[reqID] = resultBuf
+		}
+		resultBuf.addPartialResult(results)
+
+		colName := t.(*queryTask).query.CollectionName
+		log.Debug("process retrieve result", zap.String("role", typeutil.ProxyRole), zap.String("collection", colName), zap.Int64("reqID", reqID), zap.Int("answer cnt", len(queryResultBufs[reqID].resultBuf)))
+
+		if resultBuf.readyToReduce() {
+			log.Debug("process retrieve result, ready to reduce", zap.String("role", typeutil.ProxyRole), zap.Int64("reqID", reqID))
+			queryResultBufFlags.Set(reqID, true)
+			st.resultBuf <- resultBuf.resultBuf
+			delete(queryResultBufs, reqID)
+		}
+
+		return nil
+	}
+
+	for {
+		select {
+		case <-sched.ctx.Done():
+			log.Info("task scheduler's result loop of Proxy exit", zap.String("reason", "context done"))
+			return
+		case sr, ok := <-sched.searchResultCh:
+			if !ok {
+				log.Info("task scheduler's result loop of Proxy exit", zap.String("reason", "search result channel closed"))
+				return
+			}
+			if err := processSearchResult(sr); err != nil {
+				log.Warn("failed to process search result", zap.Error(err))
+			}
+		case rr, ok := <-sched.retrieveResultCh:
+			if !ok {
+				log.Info("task scheduler's result loop of Proxy exit", zap.String("reason", "retrieve result channel closed"))
+				return
+			}
+			if err := processRetrieveResult(rr); err != nil {
+				log.Warn("failed to process retrieve result", zap.Error(err))
+			}
+		}
+	}
 }
 
 func (sched *taskScheduler) collectResultLoop() {
@@ -848,7 +1028,8 @@ func (sched *taskScheduler) Start() error {
 	go sched.queryLoop()
 
 	sched.wg.Add(1)
-	go sched.collectResultLoop()
+	// go sched.collectResultLoop()
+	go sched.collectionResultLoopV2()
 
 	return nil
 }
