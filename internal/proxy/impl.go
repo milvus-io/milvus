@@ -2136,7 +2136,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			},
 			ResultChannelID: strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 		},
-		resultBuf: make(chan []*internalpb.SearchResults),
+		resultBuf: make(chan []*internalpb.SearchResults, 1),
 		query:     request,
 		chMgr:     node.chMgr,
 		qc:        node.queryCoord,
