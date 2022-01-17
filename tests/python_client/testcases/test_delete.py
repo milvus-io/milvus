@@ -399,7 +399,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr=f'{ct.default_int64_field_name} in {[0, tmp_nb]}',
                            check_task=CheckTasks.check_query_empty)
 
-    @pytest.mark.skip("enable this later using session/strong consistency")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_search(self):
         """

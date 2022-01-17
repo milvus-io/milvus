@@ -108,12 +108,13 @@ class ResponseChecker:
 
         if func_name == "connect":
             class_obj = Connect_Object_Name
-            res_obj = type(res).__name__
-            assert res_obj == class_obj
+            #  res_obj = type(res).__name__
+            #  assert res_obj == class_obj
 
-        if func_name == "get_connection":
-            value_content = params.get(ct.value_content, None)
-            res_obj = type(res).__name__ if res is not None else None
+        if func_name == "has_connection":
+
+            value_content = params.get(ct.value_content, False)
+            res_obj = res if res is not None else False
             assert res_obj == value_content
 
         return True

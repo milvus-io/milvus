@@ -66,6 +66,8 @@ github.com/apache/pulsar-client-go v0.6.0 h1:yKX7NsmJxR5mL6uIUxTTatNhMFlhurTASSZ
 github.com/apache/pulsar-client-go v0.6.0/go.mod h1:A1P5VjjljsFKAD13w7/jmU3Dly2gcRvcobiULqQXhz4=
 github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7 h1:mTY6GM1gkiAneYm//bRDYu2/jVqi/BnB5PF6O6Wp9QU=
 github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7/go.mod h1:A1P5VjjljsFKAD13w7/jmU3Dly2gcRvcobiULqQXhz4=
+github.com/apache/pulsar-client-go v0.7.0 h1:sZBkjJPHC7akM8n8DuzkLdwioKPSzyub3efCJ1Ltw9Y=
+github.com/apache/pulsar-client-go v0.7.0/go.mod h1:EauTUv9sTmP9QRznRgK9hxnzCsIVfS8fyhTfGcuJBrE=
 github.com/apache/pulsar-client-go/oauth2 v0.0.0-20201120111947-b8bd55bc02bd h1:P5kM7jcXJ7TaftX0/EMKiSJgvQc/ct+Fw0KMvcH3WuY=
 github.com/apache/pulsar-client-go/oauth2 v0.0.0-20201120111947-b8bd55bc02bd/go.mod h1:0UtvvETGDdvXNDCHa8ZQpxl+w3HbdFtfYZvDHLgWGTY=
 github.com/apache/thrift v0.14.2 h1:hY4rAyg7Eqbb27GB6gkhUKrRAuc8xRjlNtJq+LseKeY=

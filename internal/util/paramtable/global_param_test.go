@@ -357,9 +357,6 @@ func TestGrpcServerParams(t *testing.T) {
 
 	t.Logf("Address = %s", Params.GetAddress())
 
-	assert.NotNil(t, Params.Listener)
-	t.Logf("Listener = %d", Params.Listener)
-
 	assert.NotZero(t, Params.ServerMaxRecvSize)
 	t.Logf("ServerMaxRecvSize = %d", Params.ServerMaxRecvSize)
 
@@ -391,9 +388,6 @@ func TestGrpcClientParams(t *testing.T) {
 
 	t.Logf("Address = %s", Params.GetAddress())
 
-	assert.NotNil(t, Params.Listener)
-	t.Logf("Listener = %d", Params.Listener)
-
 	assert.NotZero(t, Params.ClientMaxRecvSize)
 	t.Logf("ClientMaxRecvSize = %d", Params.ClientMaxRecvSize)
 
@@ -407,12 +401,4 @@ func TestGrpcClientParams(t *testing.T) {
 	Params.Remove(role + ".grpc.clientMaxSendSize")
 	Params.initClientMaxSendSize()
 	assert.Equal(t, Params.ClientMaxSendSize, DefaultClientMaxSendSize)
-}
-
-func TestCheckPortAvailable(t *testing.T) {
-	num := 10
-	for i := 0; i < num; i++ {
-		port := GetAvailablePort()
-		assert.Equal(t, CheckPortAvailable(port), true)
-	}
 }

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -490,6 +491,10 @@ func (it *IndexBuildTask) executeSave(ctx context.Context, blobs []*storage.Blob
 	return nil
 }
 
+func (it *IndexBuildTask) releaseMemory() {
+	debug.FreeOSMemory()
+}
+
 // Execute actually performs the task of building an index.
 func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask Execute ...", zap.Int64("buildId", it.req.IndexBuildID))
@@ -532,5 +537,8 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	it.tr.Elapse("index building all done")
 	log.Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
 		zap.Int64("partition", it.partitionID), zap.Int64("segment", it.segmentID))
+
+	it.releaseMemory()
+
 	return nil
 }

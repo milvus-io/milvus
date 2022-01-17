@@ -77,6 +77,7 @@ const illegalRequestErrStr = "Illegal request"
 // makes sure DataNode implements types.DataNode
 var _ types.DataNode = (*DataNode)(nil)
 
+// Params from config.yaml
 var Params paramtable.GlobalParamTable
 
 // DataNode communicates with outside services and unioun all
@@ -89,9 +90,6 @@ var Params paramtable.GlobalParamTable
 //  `NodeID` is unique to each datanode.
 //  `State` is current statement of this data node, indicating whether it's healthy.
 //
-//  `vchan2SyncService` is a map of vchannlName to dataSyncService, so that datanode
-//  has ability to scale flowgraph.
-//  `vchan2FlushCh` holds flush-signal channels for every flowgraph.
 //  `clearSignal` is a signal channel for releasing the flowgraph resources.
 //  `segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
@@ -101,10 +99,8 @@ type DataNode struct {
 	Role   string
 	State  atomic.Value // internalpb.StateCode_Initializing
 
-	// TODO struct
-	chanMut           sync.RWMutex
-	vchan2SyncService map[string]*dataSyncService // vchannel name
-	vchan2FlushChs    map[string]chan flushMsg    // vchannel name to flush channels
+	flowgraphManager *flowgraphManager
+	eventManagerMap  sync.Map // vchannel name -> channelEventManager
 
 	clearSignal        chan string // vchannel name
 	segmentCache       *Cache
@@ -138,15 +134,14 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
-		vchan2SyncService: make(map[string]*dataSyncService),
-		vchan2FlushChs:    make(map[string]chan flushMsg),
-		clearSignal:       make(chan string, 100),
+		flowgraphManager: newFlowgraphManager(),
+		clearSignal:      make(chan string, 100),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
 }
 
-// Set etcd client
+// SetEtcdClient sets etcd client for DataNode
 func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
 	node.etcdCli = etcdCli
 }
@@ -287,115 +282,124 @@ func (node *DataNode) checkWatchedList() error {
 		return err
 	}
 	for i, val := range values {
-		node.handleWatchInfo(keys[i], []byte(val))
+		node.handleWatchInfo(&event{eventType: putEventType}, keys[i], []byte(val))
 	}
 	return nil
 }
 
 // handleChannelEvt handles event from kv watch event
 func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
+	var e *event
 	switch evt.Type {
 	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
-		log.Debug("DataNode handleChannelEvt EventTypePut", zap.String("key", string(evt.Kv.Key)))
-		node.handleWatchInfo(string(evt.Kv.Key), evt.Kv.Value)
+		e = &event{
+			eventType: putEventType,
+		}
+
 	case clientv3.EventTypeDelete:
-		// guaranteed there is no "/" in channel name
-		parts := strings.Split(string(evt.Kv.Key), "/")
-		vchanName := parts[len(parts)-1]
-		log.Debug("DataNode handleChannelEvt EventTypeDelete",
-			zap.String("key", string(evt.Kv.Key)),
-			zap.String("vChanName", vchanName),
-			zap.Int64("node id", Params.DataNodeCfg.NodeID))
-		node.ReleaseDataSyncService(vchanName)
+		e = &event{
+			eventType: deleteEventType,
+		}
+	}
+	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
+}
+
+func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
+	switch e.eventType {
+	case putEventType:
+		log.Info("DataNode is handling watchInfo put event", zap.String("key", key))
+
+		watchInfo, err := parsePutEventData(data)
+		if err != nil {
+			log.Warn("fail to handle watchInfo", zap.Int("event type", e.eventType), zap.String("key", key), zap.Error(err))
+			return
+		}
+
+		e.info = watchInfo
+		e.vChanName = watchInfo.GetVchan().GetChannelName()
+
+	case deleteEventType:
+		log.Info("DataNode is handling watchInfo delete event", zap.String("key", key))
+		e.vChanName = parseDeleteEventKey(key)
+	}
+
+	actualManager, loaded := node.eventManagerMap.LoadOrStore(e.vChanName, &channelEventManager{
+		eventChan:         make(chan event, 10),
+		closeChan:         make(chan struct{}),
+		handlePutEvent:    node.handlePutEvent,
+		handleDeleteEvent: node.handleDeleteEvent,
+	})
+
+	if !loaded {
+		actualManager.(*channelEventManager).Run()
+	}
+
+	actualManager.(*channelEventManager).handleEvent(*e)
+
+	// Whenever a delete event comes, this eventManger will be removed from map
+	if e.eventType == deleteEventType {
+		if m, loaded := node.eventManagerMap.LoadAndDelete(e.vChanName); loaded {
+			m.(*channelEventManager).Close()
+		}
 	}
 }
 
-func (node *DataNode) handleWatchInfo(key string, data []byte) {
+func parsePutEventData(data []byte) (*datapb.ChannelWatchInfo, error) {
 	watchInfo := datapb.ChannelWatchInfo{}
 	err := proto.Unmarshal(data, &watchInfo)
 	if err != nil {
-		log.Warn("fail to parse ChannelWatchInfo", zap.String("key", key), zap.Error(err))
-		return
+		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, err: %v", err)
 	}
-	log.Debug("DataNode handleWatchInfo Unmarshal success", zap.String("key", key))
+
 	if watchInfo.State == datapb.ChannelWatchState_Complete {
-		log.Warn("DataNode handleWatchInfo State is already ChannelWatchState_Complete", zap.String("key", key))
-		return
+		return nil, fmt.Errorf("invalid event: event state is already ChannelWatchState_Compele")
 	}
+
 	if watchInfo.Vchan == nil {
-		log.Warn("found ChannelWatchInfo with nil VChannelInfo", zap.String("key", key))
-		return
+		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo")
 	}
-	log.Warn("DataNode handleWatchInfo try to NewDataSyncService", zap.String("key", key))
-	err = node.NewDataSyncService(watchInfo.Vchan)
-	if err != nil {
-		log.Warn("fail to create DataSyncService", zap.String("key", key), zap.Error(err))
-		return
-	}
-	log.Warn("DataNode handleWatchInfo NewDataSyncService success", zap.String("key", key))
 
-	watchInfo.State = datapb.ChannelWatchState_Complete
-	v, err := proto.Marshal(&watchInfo)
-	if err != nil {
-		log.Warn("DataNode handleWatchInfo fail to Marshal watchInfo", zap.String("key", key), zap.Error(err))
-		return
-	}
-	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), watchInfo.GetVchan().GetChannelName())
-	log.Warn("DataNode handleWatchInfo try to Save", zap.String("key", key),
-		zap.String("k", k),
-		zap.String("v", string(v)))
-
-	err = node.watchKv.Save(k, string(v))
-	if err != nil {
-		log.Warn("DataNode handleWatchInfo fail to change WatchState to complete", zap.String("key", key), zap.Error(err))
-		node.ReleaseDataSyncService(key)
-	}
+	return &watchInfo, nil
 }
 
-// NewDataSyncService adds a new dataSyncService for new dmlVchannel and starts dataSyncService.
-func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
-	node.chanMut.RLock()
-	if _, ok := node.vchan2SyncService[vchan.GetChannelName()]; ok {
-		node.chanMut.RUnlock()
-		return nil
-	}
-	node.chanMut.RUnlock()
+func parseDeleteEventKey(key string) string {
+	parts := strings.Split(key, "/")
+	vChanName := parts[len(parts)-1]
+	return vChanName
+}
 
-	replica, err := newReplica(node.ctx, node.rootCoord, vchan.CollectionID)
+func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo) error {
+	vChanName := watchInfo.GetVchan().GetChannelName()
+
+	if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
+		return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
+	}
+	log.Debug("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+
+	watchInfo.State = datapb.ChannelWatchState_Complete
+	v, err := proto.Marshal(watchInfo)
 	if err != nil {
-		return err
+		return fmt.Errorf("fail to marshal watchInfo with complete state, vChanName: %s, err: %v", vChanName, err)
 	}
 
-	var alloc allocatorInterface = newAllocator(node.rootCoord)
+	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), vChanName)
+	log.Debug("handle put event: try to save completed state", zap.String("key", k))
 
-	log.Debug("DataNode NewDataSyncService received Vchannel Info",
-		zap.Int64("collectionID", vchan.CollectionID),
-		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
-		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegments())),
-	)
-
-	flushCh := make(chan flushMsg, 100)
-
-	dataSyncService, err := newDataSyncService(node.ctx, flushCh, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord, node.segmentCache, node.blobKv, node.compactionExecutor)
+	err = node.watchKv.Save(k, string(v))
+	// TODO DataNode unable to save into etcd, may need to panic
 	if err != nil {
-		log.Error("DataNode NewDataSyncService newDataSyncService failed",
-			zap.Error(err),
-		)
-		return err
+		node.releaseFlowgraph(vChanName)
+		return fmt.Errorf("fail to update completed state to etcd, vChanName: %s, err: %v", vChanName, err)
 	}
-
-	node.chanMut.Lock()
-	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
-	node.vchan2FlushChs[vchan.GetChannelName()] = flushCh
-	node.chanMut.Unlock()
-
-	log.Info("DataNode NewDataSyncService success",
-		zap.Int64("Collection ID", vchan.GetCollectionID()),
-		zap.String("Vchannel name", vchan.GetChannelName()),
-	)
-	dataSyncService.start()
-
 	return nil
+}
+
+func (node *DataNode) handleDeleteEvent(vChanName string) {
+	node.releaseFlowgraph(vChanName)
+}
+
+func (node *DataNode) releaseFlowgraph(vChanName string) {
+	node.flowgraphManager.release(vChanName)
 }
 
 // BackGroundGC runs in background to release datanode resources
@@ -403,31 +407,14 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 	log.Info("DataNode Background GC Start")
 	for {
 		select {
-		case vChan := <-vChannelCh:
-			log.Info("GC flowgraph", zap.String("vChan", vChan))
-			node.ReleaseDataSyncService(vChan)
+		case vchanName := <-vChannelCh:
+			log.Info("GC flowgraph", zap.String("vChanName", vchanName))
+			node.releaseFlowgraph(vchanName)
 		case <-node.ctx.Done():
 			log.Info("DataNode ctx done")
 			return
 		}
 	}
-}
-
-// ReleaseDataSyncService release flowgraph resources for a vchanName
-func (node *DataNode) ReleaseDataSyncService(vchanName string) {
-	log.Info("Release flowgraph resources begin", zap.String("Vchannel", vchanName))
-
-	node.chanMut.Lock()
-	dss, ok := node.vchan2SyncService[vchanName]
-	delete(node.vchan2SyncService, vchanName)
-	delete(node.vchan2FlushChs, vchanName)
-	node.chanMut.Unlock()
-
-	if ok {
-		// This is a time-consuming process, better to put outside of the lock
-		dss.close()
-	}
-	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
 
 // FilterThreshold is the start time ouf DataNode
@@ -541,50 +528,10 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 	return states, nil
 }
 
-func (node *DataNode) getChannelNamebySegmentID(segID UniqueID) string {
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-	for name, dataSync := range node.vchan2SyncService {
-		if dataSync.replica.hasSegment(segID, true) {
-			return name
-		}
-	}
-	return ""
-}
-
-func (node *DataNode) getChannelNamesbyCollectionID(collID UniqueID) []string {
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-
-	channels := make([]string, 0, len(node.vchan2SyncService))
-	for name, dataSync := range node.vchan2SyncService {
-		if dataSync.collectionID == collID {
-			channels = append(channels, name)
-		}
-	}
-	return channels
-}
-
 // ReadyToFlush tells wether DataNode is ready for flushing
 func (node *DataNode) ReadyToFlush() error {
 	if node.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return errors.New("DataNode not in HEALTHY state")
-	}
-
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-	if len(node.vchan2SyncService) == 0 && len(node.vchan2FlushChs) == 0 {
-		// Healthy but Idle
-		msg := "DataNode HEALTHY but IDLE, please try WatchDmChannels to make it work"
-		log.Warn(msg)
-		return errors.New(msg)
-	}
-
-	if len(node.vchan2SyncService) != len(node.vchan2FlushChs) {
-		// TODO restart
-		msg := "DataNode HEALTHY but abnormal inside, restarting..."
-		log.Warn(msg)
-		return errors.New(msg)
 	}
 	return nil
 }
@@ -600,8 +547,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	if err := node.ReadyToFlush(); err != nil {
-		status.Reason = err.Error()
+	if node.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+		status.Reason = "DataNode not in HEALTHY state"
 		return status, nil
 	}
 
@@ -613,16 +560,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	processSegments := func(segmentIDs []UniqueID, flushed bool) bool {
 		noErr := true
 		for _, id := range segmentIDs {
-			chanName := node.getChannelNamebySegmentID(id)
-			if len(chanName) == 0 {
-				log.Warn("FlushSegments failed, cannot find segment in DataNode replica",
-					zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
-
-				status.Reason = fmt.Sprintf("DataNode replica not find segment %d!", id)
-				noErr = false
-				continue
-			}
-
 			if node.segmentCache.checkIfCached(id) {
 				// Segment in flushing, ignore
 				log.Info("Segment flushing, ignore the flush request until flush is done.",
@@ -633,17 +570,15 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 			node.segmentCache.Cache(id)
 
-			node.chanMut.RLock()
-			flushChs, ok := node.vchan2FlushChs[chanName]
-			node.chanMut.RUnlock()
-			if !ok {
+			flushCh, err := node.flowgraphManager.getFlushCh(id)
+			if err != nil {
 				status.Reason = "DataNode abnormal, restarting"
-				log.Error("DataNode abnormal, no flushCh for a vchannel")
+				log.Error("DataNode abnormal, no flushCh for a vchannel", zap.Error(err))
 				noErr = false
 				continue
 			}
 
-			flushChs <- flushMsg{
+			flushCh <- flushMsg{
 				msgID:        req.Base.MsgID,
 				timestamp:    req.Base.Timestamp,
 				segmentID:    id,
@@ -677,15 +612,7 @@ func (node *DataNode) Stop() error {
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	node.cancel()
-
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-	// close services
-	for _, syncService := range node.vchan2SyncService {
-		if syncService != nil {
-			(*syncService).close()
-		}
-	}
+	node.flowgraphManager.dropAll()
 
 	if node.closer != nil {
 		err := node.closer.Close()
@@ -796,7 +723,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	ds, ok := node.vchan2SyncService[req.GetChannel()]
+	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannel())
 	if !ok {
 		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channel name", req.GetChannel()))
 		status.Reason = errIllegalCompactionPlan.Error()
