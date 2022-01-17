@@ -422,6 +422,7 @@ func (node *Proxy) AddStartCallback(callbacks ...func()) {
 	node.startCallbacks = append(node.startCallbacks, callbacks...)
 }
 
+// lastTick returns the last write timestamp of all pchans in this Proxy.
 func (node *Proxy) lastTick() Timestamp {
 	return node.chTicker.getMinTick()
 }

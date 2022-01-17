@@ -47,7 +47,7 @@ all Approvers are listed under OWNERS_ALIASES file.
 
 - If `[skip e2e]` is tagged, is it safe enough to skip running e2e tests?
   - Notes: it skips running e2e tests, if there is a `[skip e2e]` in the commit message.
-- Does the code will generate similar logs many times in one seconds?
+- Does the code will generate similar logs many times in one second?
 
 ## Things to keep in mind when you are writing a review comment
 
@@ -71,7 +71,7 @@ Besides All the reviewer's responsibility listed above, Approvers should also ma
 
 - Commit message starts with a capital letter and does not end with punctuation
 
-- Commit message is clear and meaningful. You can only have title but no body if the title is self explained
+- Commit message is clear and meaningful. You can only have title without body if the title is self explained
 
 - PR links to the correct issue, which clearly states the problems to be solved and the planned solution
 

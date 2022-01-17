@@ -1003,7 +1003,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 			return err
 		}
 	} else {
-		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.ProxyCfg.DefaultPartitionName)
+		partitionID, err = globalMetaCache.GetPartitionID(ctx, collectionName, Params.CommonCfg.DefaultPartitionName)
 		if err != nil {
 			return err
 		}
@@ -1580,7 +1580,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		travelTimestamp = st.BeginTs()
 	} else {
 		durationSeconds := tsoutil.CalculateDuration(st.BeginTs(), travelTimestamp) / 1000
-		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+		if durationSeconds > Params.CommonCfg.RetentionDuration {
 			duration := time.Second * time.Duration(durationSeconds)
 			return fmt.Errorf("only support to travel back to %s so far", duration.String())
 		}
@@ -2198,7 +2198,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		travelTimestamp = qt.BeginTs()
 	} else {
 		durationSeconds := tsoutil.CalculateDuration(qt.BeginTs(), travelTimestamp) / 1000
-		if durationSeconds > Params.ProxyCfg.RetentionDuration {
+		if durationSeconds > Params.CommonCfg.RetentionDuration {
 			duration := time.Second * time.Duration(durationSeconds)
 			return fmt.Errorf("only support to travel back to %s so far", duration.String())
 		}
@@ -3513,7 +3513,7 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 
 	// only support default index name for now. @2021.02.18
 	if dit.IndexName == "" {
-		dit.IndexName = Params.ProxyCfg.DefaultIndexName
+		dit.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
 	return nil
@@ -3595,7 +3595,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	}
 
 	if dit.IndexName == "" {
-		dit.IndexName = Params.ProxyCfg.DefaultIndexName
+		dit.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
 	return nil
@@ -3699,7 +3699,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	}
 
 	if gibpt.IndexName == "" {
-		gibpt.IndexName = Params.ProxyCfg.DefaultIndexName
+		gibpt.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
 	describeIndexReq := milvuspb.DescribeIndexRequest{
@@ -3920,7 +3920,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	}
 
 	if gist.IndexName == "" {
-		gist.IndexName = Params.ProxyCfg.DefaultIndexName
+		gist.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
 	describeIndexReq := milvuspb.DescribeIndexRequest{
@@ -4897,18 +4897,22 @@ type DropAliasTask struct {
 	result    *commonpb.Status
 }
 
+// TraceCtx returns the context for trace
 func (d *DropAliasTask) TraceCtx() context.Context {
 	return d.ctx
 }
 
+// ID returns the MsgID
 func (d *DropAliasTask) ID() UniqueID {
 	return d.Base.MsgID
 }
 
+// SetID sets the MsgID
 func (d *DropAliasTask) SetID(uid UniqueID) {
 	d.Base.MsgID = uid
 }
 
+// Name returns the name of the task
 func (d *DropAliasTask) Name() string {
 	return DropAliasTaskName
 }

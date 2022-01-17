@@ -1138,13 +1138,14 @@ class TestCollectionDataframe(TestcaseBase):
         method: create collection and insert with dataframe
         expected: collection num entities equal to nb
         """
-        conn = self._connect()
+        self._connect()
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.check_collection_property,
                                                       check_items={exp_name: c_name, exp_schema: default_schema})
-        conn.flush([c_name])
+        # flush
+        self.collection_wrap.num_entities
         assert self.collection_wrap.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -1406,7 +1407,7 @@ class TestCollectionDataframe(TestcaseBase):
         method: create collection with dup name, none schema, dataframe
         expected: two collection object is correct
         """
-        conn = self._connect()
+        self._connect()
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, primary_field=ct.default_int64_field_name,
                                                  check_task=CheckTasks.check_collection_property,
@@ -1415,7 +1416,8 @@ class TestCollectionDataframe(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name,
                                                       check_task=CheckTasks.check_collection_property,
                                                       check_items={exp_name: c_name, exp_schema: default_schema})
-        conn.flush([collection_w.name])
+        # flush
+        self.collection_wrap.num_entities
         assert collection_w.num_entities == ct.default_nb
         assert collection_w.num_entities == self.collection_wrap.num_entities
 

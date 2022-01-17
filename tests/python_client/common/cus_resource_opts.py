@@ -38,9 +38,10 @@ class CustomResourceOperations(object):
         try:
             config.load_kube_config()
             api_instance = client.CustomObjectsApi()
-            data = api_instance.delete_namespaced_custom_object(self.group, self.version, self.namespace, self.plural,
-                                                                metadata_name)
-            log.debug(f"delete custom resource response: {data}")
+            api_response = api_instance.delete_namespaced_custom_object(self.group, self.version, self.namespace,
+                                                                        self.plural,
+                                                                        metadata_name)
+            log.debug(f"delete custom resource response: {api_response}")
         except ApiException as e:
             if raise_ex:
                 log.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
@@ -67,13 +68,13 @@ class CustomResourceOperations(object):
         try:
             config.load_kube_config()
             api_instance = client.CustomObjectsApi()
-            data = api_instance.list_namespaced_custom_object(self.group, self.version, self.namespace,
-                                                              plural=self.plural, pretty=pretty)
-            log.debug(f"list custom resource response: {data}")
+            api_response = api_instance.list_namespaced_custom_object(self.group, self.version, self.namespace,
+                                                                      plural=self.plural, pretty=pretty)
+            log.debug(f"list custom resource response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->list_namespaced_custom_object: %s\n" % e)
             raise Exception(str(e))
-        return data
+        return api_response
 
     def get(self, metadata_name):
         """get a customer resources by name in k8s"""

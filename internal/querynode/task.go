@@ -791,7 +791,6 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release collection failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
-	r.node.historical.removeGlobalSegmentIDsByCollectionID(r.req.CollectionID)
 
 	debug.FreeOSMemory()
 

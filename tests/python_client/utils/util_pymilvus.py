@@ -1,3 +1,4 @@
+import json
 import random
 import string
 import threading
@@ -5,6 +6,7 @@ import traceback
 import time
 import copy
 import numpy as np
+import requests
 from sklearn import preprocessing
 from pymilvus import Milvus, DataType
 from utils.util_log import test_log as log
@@ -1007,6 +1009,99 @@ def compare_list_elements(_first, _second):
     return True
 
 
+def get_token(url):
+    rep = requests.get(url)
+    data = json.loads(rep.text)
+    if 'token' in data:
+        token = data['token']
+    else:
+        token = ''
+        print("Can not get token.")
+    return token
+
+
+def get_tags(url, token):
+    headers = {'Content-type': "application/json",
+               "charset": "UTF-8",
+               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+               "Authorization": "Bearer %s" % token}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+
+        tags = []
+        if 'tags' in data:
+            tags = data["tags"]
+        else:
+            print("Can not get the tag list")
+        return tags
+    except:
+        print("Can not get the tag list")
+        return []
+
+
+def get_master_tags(tags_list):
+    _list = []
+
+    if not isinstance(tags_list, list):
+        print("tags_list is not a list.")
+        return _list
+
+    for tag in tags_list:
+        if "master" in tag and tag != "master-latest":
+            _list.append(tag)
+    return _list
+
+
+def get_config_digest(url, token):
+    headers = {'Content-type': "application/json",
+               "charset": "UTF-8",
+               "Accept": "application/vnd.docker.distribution.manifest.v2+json",
+               "Authorization": "Bearer %s" % token}
+    try:
+        rep = requests.get(url, headers=headers)
+        data = json.loads(rep.text)
+
+        digest = ''
+        if 'config' in data and 'digest' in data["config"]:
+            digest = data["config"]["digest"]
+        else:
+            print("Can not get the digest")
+        return digest
+    except:
+        print("Can not get the digest")
+        return ""
+
+
+def get_latest_tag(limit=100):
+    service = "registry.docker.io"
+    repository = "milvusdb/milvus-dev"
+
+    auth_url = "https://auth.docker.io/token?service=%s&scope=repository:%s:pull" % (service, repository)
+    tags_url = "https://index.docker.io/v2/%s/tags/list" % repository
+    tag_url = "https://index.docker.io/v2/milvusdb/milvus-dev/manifests/"
+
+    master_latest_digest = get_config_digest(tag_url + "master-latest", get_token(auth_url))
+    tags = get_tags(tags_url, get_token(auth_url))
+    tag_list = get_master_tags(tags)
+
+    latest_tag = ""
+    for i in range(1, len(tag_list) + 1):
+        tag_name = str(tag_list[-i])
+        tag_digest = get_config_digest(tag_url + tag_name, get_token(auth_url))
+        if tag_digest == master_latest_digest:
+            latest_tag = tag_name
+            break
+        if i > limit:
+            break
+
+    if latest_tag == "":
+        latest_tag = "master-latest"
+        print("Can't find the latest image name")
+    print("The image name used is %s" % str(latest_tag))
+    return latest_tag
+
+
 class MyThread(threading.Thread):
     def __init__(self, target, args=()):
         threading.Thread.__init__(self, target=target, args=args)
@@ -1023,4 +1118,3 @@ class MyThread(threading.Thread):
         super(MyThread, self).join()
         if self.exc:
             raise self.exc
-

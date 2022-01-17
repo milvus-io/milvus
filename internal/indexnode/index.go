@@ -136,16 +136,17 @@ func (index *CIndex) BuildBinaryVecIndexWithoutIds(vectors []byte) error {
 	return HandleCStatus(&status, "BuildBinaryVecIndexWithoutIds failed")
 }
 
-// Delete removes the pointer to build the index in 'C'.
+// Delete removes the pointer to build the index in 'C'. we can ensure that it is idempotent.
 func (index *CIndex) Delete() error {
 	/*
 		void
 		DeleteIndex(CIndex index);
 	*/
+	if index.close {
+		return nil
+	}
 	C.DeleteIndex(index.indexPtr)
 	index.close = true
-	// TODO: check if index.indexPtr will be released by golang, though it occupies little memory
-	// C.free(index.indexPtr)
 	return nil
 }
 

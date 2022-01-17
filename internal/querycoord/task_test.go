@@ -1299,3 +1299,15 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	err = removeAllSession()
 	assert.Nil(t, err)
 }
+
+func TestShowPartitions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	rootCoord := newRootCoordMock()
+	rootCoord.createCollection(defaultCollectionID)
+	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
+
+	partitionIDs, err := showPartitions(ctx, defaultCollectionID, rootCoord)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(partitionIDs))
+	cancel()
+}

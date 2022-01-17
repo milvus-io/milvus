@@ -174,15 +174,12 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 
 	for _, segmentID := range req.SegmentIDs {
 		state := &datapb.SegmentStateInfo{
-			Status:    &commonpb.Status{},
 			SegmentID: segmentID,
 		}
 		segmentInfo := s.meta.GetSegment(segmentID)
 		if segmentInfo == nil {
-			state.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			state.Status.Reason = fmt.Sprintf("failed to get segment %d", segmentID)
+			state.State = commonpb.SegmentState_NotExist
 		} else {
-			state.Status.ErrorCode = commonpb.ErrorCode_Success
 			state.State = segmentInfo.GetState()
 			state.StartPosition = segmentInfo.GetStartPosition()
 		}

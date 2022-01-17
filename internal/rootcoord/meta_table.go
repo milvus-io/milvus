@@ -715,7 +715,7 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if partitionName == Params.RootCoordCfg.DefaultPartitionName {
+	if partitionName == Params.CommonCfg.DefaultPartitionName {
 		return 0, fmt.Errorf("default partition cannot be deleted")
 	}
 
@@ -954,7 +954,7 @@ func (mt *MetaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, fieldID in
 	if fieldID == -1 && idxName == "" { // return default index
 		for _, seg := range segIdxMap {
 			info, ok := mt.indexID2Meta[seg.IndexID]
-			if ok && info.IndexName == Params.RootCoordCfg.DefaultIndexName {
+			if ok && info.IndexName == Params.CommonCfg.DefaultIndexName {
 				return seg, nil
 			}
 		}

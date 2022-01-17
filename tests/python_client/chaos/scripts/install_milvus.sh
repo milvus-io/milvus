@@ -5,4 +5,4 @@ bash uninstall_milvus.sh ${release} ${ns}|| true
 
 helm repo add milvus https://milvus-io.github.io/milvus-helm/
 helm repo update
-helm install --wait --timeout 360s ${release} milvus/milvus --set service.type=NodePort -f ../cluster-values.yaml --set metrics.serviceMonitor.enabled=true -n=${ns}
+helm install --wait --timeout 360s ${release} milvus/milvus -f ../cluster-values.yaml --set metrics.serviceMonitor.enabled=true -n=${ns}

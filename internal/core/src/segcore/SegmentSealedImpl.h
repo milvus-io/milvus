@@ -32,7 +32,7 @@ namespace milvus::segcore {
 
 class SegmentSealedImpl : public SegmentSealed {
  public:
-    explicit SegmentSealedImpl(SchemaPtr schema);
+    explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -188,11 +188,12 @@ class SegmentSealedImpl : public SegmentSealed {
     aligned_vector<Timestamp> timestamps_;
     TimestampIndex timestamp_index_;
     SchemaPtr schema_;
+    int64_t id_;
 };
 
 inline SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema) {
-    return std::make_unique<SegmentSealedImpl>(schema);
+CreateSealedSegment(SchemaPtr schema, int64_t segment_id = -1) {
+    return std::make_unique<SegmentSealedImpl>(schema, segment_id);
 }
 
 }  // namespace milvus::segcore
