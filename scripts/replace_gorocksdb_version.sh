@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-sed -i .bak 's/github.com\/soothing-rain\/gorocksdb/github.com\/tecbot\/gorocksdb/g' \
+sed -i .bak 's/github.com\/tecbot\/gorocksdb/github.com\/soothing-rain\/gorocksdb/g' \
 internal/kv/rocksdb/rocksdb_kv.go \
 internal/kv/rocksdb/RocksIterator.go \
 internal/util/rocksmq/server/rocksmq/rocksmq_impl.go \
