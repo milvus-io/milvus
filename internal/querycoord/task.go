@@ -538,6 +538,19 @@ func (rct *releaseCollectionTask) timestamp() Timestamp {
 	return rct.Base.Timestamp
 }
 
+func (rct *releaseCollectionTask) updateTaskProcess() {
+	collectionID := rct.CollectionID
+	parentTask := rct.getParentTask()
+	if parentTask == nil {
+		// all queryNodes have successfully released the data, clean up collectionMeta
+		err := rct.meta.releaseCollection(collectionID)
+		if err != nil {
+			log.Error("releaseCollectionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
+			panic(err)
+		}
+	}
+}
+
 func (rct *releaseCollectionTask) preExecute(context.Context) error {
 	collectionID := rct.CollectionID
 	rct.setResultInfo(nil)
@@ -548,7 +561,8 @@ func (rct *releaseCollectionTask) preExecute(context.Context) error {
 }
 
 func (rct *releaseCollectionTask) execute(ctx context.Context) error {
-	defer rct.reduceRetryCount()
+	// cancel the maximum number of retries for queryNode cleaning data until the data is completely freed
+	// defer rct.reduceRetryCount()
 	collectionID := rct.CollectionID
 
 	// if nodeID ==0, it means that the release request has not been assigned to the specified query node
@@ -593,20 +607,12 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 			rct.addChildTask(releaseCollectionTask)
 			log.Debug("releaseCollectionTask: add a releaseCollectionTask to releaseCollectionTask's childTask", zap.Any("task", releaseCollectionTask))
 		}
-
-		//TODO::xige-16 delete collection info from should wait all internal release task execute done
-		// if some query nodes release collection failed, the collection data will can't be removed from query node
-		err = rct.meta.releaseCollection(collectionID)
-		if err != nil {
-			log.Error("releaseCollectionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
-			rct.setResultInfo(err)
-			return err
-		}
 	} else {
 		err := rct.cluster.releaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
 		if err != nil {
-			log.Error("releaseCollectionTask: release collection end, node occur error", zap.Int64("collectionID", collectionID), zap.Int64("nodeID", rct.NodeID))
-			rct.setResultInfo(err)
+			log.Warn("releaseCollectionTask: release collection end, node occur error", zap.Int64("collectionID", collectionID), zap.Int64("nodeID", rct.NodeID))
+			// after release failed, the task will always redo
+			// if the query node happens to be down, the node release was judged to have succeeded
 			return err
 		}
 	}
@@ -911,6 +917,21 @@ func (rpt *releasePartitionTask) timestamp() Timestamp {
 	return rpt.Base.Timestamp
 }
 
+func (rpt *releasePartitionTask) updateTaskProcess() {
+	collectionID := rpt.CollectionID
+	partitionIDs := rpt.PartitionIDs
+	parentTask := rpt.getParentTask()
+	if parentTask == nil {
+		// all queryNodes have successfully released the data, clean up collectionMeta
+		err := rpt.meta.releasePartitions(collectionID, partitionIDs)
+		if err != nil {
+			log.Error("releasePartitionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rpt.Base.MsgID), zap.Error(err))
+			panic(err)
+		}
+
+	}
+}
+
 func (rpt *releasePartitionTask) preExecute(context.Context) error {
 	collectionID := rpt.CollectionID
 	partitionIDs := rpt.PartitionIDs
@@ -923,7 +944,8 @@ func (rpt *releasePartitionTask) preExecute(context.Context) error {
 }
 
 func (rpt *releasePartitionTask) execute(ctx context.Context) error {
-	defer rpt.reduceRetryCount()
+	// cancel the maximum number of retries for queryNode cleaning data until the data is completely freed
+	// defer rpt.reduceRetryCount()
 	collectionID := rpt.CollectionID
 	partitionIDs := rpt.PartitionIDs
 
@@ -944,20 +966,12 @@ func (rpt *releasePartitionTask) execute(ctx context.Context) error {
 			rpt.addChildTask(releasePartitionTask)
 			log.Debug("releasePartitionTask: add a releasePartitionTask to releasePartitionTask's childTask", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rpt.Base.MsgID))
 		}
-
-		//TODO::xige-16 delete partition info from meta should wait all internal release task execute done
-		// if some query nodes release partitions failed, the partition data will can't be removed from query node
-		err := rpt.meta.releasePartitions(collectionID, partitionIDs)
-		if err != nil {
-			log.Error("releasePartitionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rpt.Base.MsgID), zap.Error(err))
-			rpt.setResultInfo(err)
-			return err
-		}
 	} else {
 		err := rpt.cluster.releasePartitions(ctx, rpt.NodeID, rpt.ReleasePartitionsRequest)
 		if err != nil {
 			log.Warn("ReleasePartitionsTask: release partition end, node occur error", zap.Int64("collectionID", collectionID), zap.String("nodeID", fmt.Sprintln(rpt.NodeID)))
-			rpt.setResultInfo(err)
+			// after release failed, the task will always redo
+			// if the query node happens to be down, the node release was judged to have succeeded
 			return err
 		}
 	}
@@ -1286,6 +1300,15 @@ func (wdt *watchDeltaChannelTask) msgBase() *commonpb.MsgBase {
 
 func (wdt *watchDeltaChannelTask) marshal() ([]byte, error) {
 	return proto.Marshal(wdt.WatchDeltaChannelsRequest)
+}
+
+func (wdt *watchDeltaChannelTask) isValid() bool {
+	online, err := wdt.cluster.isOnline(wdt.NodeID)
+	if err != nil {
+		return false
+	}
+
+	return wdt.ctx != nil && online
 }
 
 func (wdt *watchDeltaChannelTask) msgType() commonpb.MsgType {
