@@ -1,6 +1,6 @@
 # Development
 
-This document will help to set up your development environment and run tests. If you encounter a problem, please file an issue.
+This document will help to set up your Milvus development environment and to run tests. Please [file an issue](https://github.com/milvus-io/milvus/issues/new/choose) if there's a problem.
 
 Table of contents
 =================
@@ -14,27 +14,27 @@ Table of contents
     - [Docker & Docker Compose](#docker--docker-compose)
   - [Building Milvus](#building-milvus)
 - [A Quick Start for Testing Milvus](#a-quick-start-for-testing-milvus)
-  - [Presubmission Verification](#presubmission-verification)
+  - [Pre-submission Verification](#pre-submission-verification)
   - [Unit Tests](#unit-tests)
   - [Code coverage](#code-coverage)
   - [E2E Tests](#e2e-tests)
   - [Test on local branch](#test-on-local-branch)
-    - [On Linux](#on-linux)
+    - [With Linux and MacOS](#with-linux-and-macos)
     - [With docker](#with-docker)
 - [GitHub Flow](#github-flow)
 
 
 ## Building Milvus with Docker
 
-Official releases are built with Docker containers. To build Milvus with Docker please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
+Our official Milvus versions are releases as Docker images. To build Milvus Docker on your own, please follow [these instructions](https://github.com/milvus-io/milvus/blob/master/build/README.md).
 
 ## Building Milvus on a local OS/shell environment
 
-The details below outline the hardware and software requirements for building on Linux.
+The details below outline the hardware and software requirements for building on Linux and MacOS.
 
 ### Hardware Requirements
 
-Milvus is written in Go and C++, compiling it can use a lot of resources. We recommend the following for any physical or virtual machine being used for building Milvus.
+The following specification (either physical or virtual machine resources) is recommended for Milvus to build and run from source code.
 
 ```
 - 8GB of RAM
@@ -43,64 +43,23 @@ Milvus is written in Go and C++, compiling it can use a lot of resources. We rec
 
 ### Software Requirements
 
-In fact, all Linux distributions are available to develop Milvus. The following only contains commands on Ubuntu and CentOS, because we mainly use them. If you develop Milvus on other distributions, you are welcome to improve this document.
+All Linux distributions are available for Milvus development. However a majority of our contributor worked with Ubuntu or CentOS systems, with a small portion of Mac (both x86_64 and Apple Silicon) contributors. If you would like Milvus to build and run on other distributions, you are more than welcome to file an issue and contribute!
 
-#### Dependencies
-- Debian/Ubuntu
-- MacOS, both Apple Silicon and Intel Processors are supported.
+Here's a list of verified OS types where Milvus can successfully build and run:
 
+* Debian/Ubuntu
+* CentOS
+* MacOS (x86_64)
+* MacOS (Apple Silicon)
 
-```shell
-$ sudo apt update
-$ sudo apt install -y build-essential ccache gfortran \
-      libssl-dev zlib1g-dev python3-dev libcurl4-openssl-dev libtbb-dev\
-      libboost-regex-dev libboost-program-options-dev libboost-system-dev \
-      libboost-filesystem-dev libboost-serialization-dev libboost-python-dev
+#### Installing Dependencies
+
+In the Milvus repository root, simply run:
+```bash
+$ ./scripts/install_deps.sh
 ```
 
-- CentOS
-
-```shell
-$ sudo yum install -y epel-release centos-release-scl-rh && \
-$ sudo yum install -y git make automake openssl-devel zlib-devel \
-        libcurl-devel python3-devel \
-        devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-        llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
-        ccache lcov
-
-$ echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
-$ echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-$ echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-7.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-$ source "/etc/profile.d/llvm-toolset-7.sh"
-
-# Install tbb
-$ git clone https://github.com/wjakob/tbb.git && \
-      cd tbb/build && \
-      cmake .. && make -j && \
-      sudo make install && \
-      cd ../../ && rm -rf tbb/
-
-# Install boost
-$ wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost_1_65_1.tar.gz && \
-      tar zxf boost_1_65_1.tar.gz && cd boost_1_65_1 && \
-      ./bootstrap.sh --prefix=/usr/local --with-toolset=gcc --without-libraries=python && \
-      sudo ./b2 -j2 --prefix=/usr/local --without-python toolset=gcc install && \
-      cd ../ && rm -rf ./boost_1_65_1*
-
-```
-
-- MacOS
-1. Install the latest version of XCode.
-2. Install required libraries.
-   ```bash
-   brew install boost cmake gfortran libomp llvm ninja openblas tbb
-   ```
-3. Create soft links if libraries cannot be correctly located. For example:
-   ```bash
-   sudo ln -s "$(brew --prefix libomp)/include/omp.h" /usr/local/include/omp.h
-   ```
-
-***CAVEATS*
+#### Caveats
 * [Google Test](https://github.com/google/googletest.git) is automatically cloned from GitHub, which in some case could conflict with your local google test library.
 
 Once you have finished, confirm that `gcc` and `make` are installed:
@@ -119,7 +78,7 @@ Confirm that cmake is available:
 ```shell
 $ cmake --version
 ```
-Note: 3.18 or higher cmake version is required to build Milvus. 
+Note: 3.18 or higher cmake version is required to build Milvus.
 
 #### Go
 
@@ -130,7 +89,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
-Note: go1.15 is required to build Milvus.
+Note: go >= 1.15 is required to build Milvus.
 
 #### Docker & Docker Compose
 
@@ -158,11 +117,11 @@ If you want to know more, you can read Makefile.
 
 ## A Quick Start for Testing Milvus
 
-### Presubmission Verification
+### Pre-submission Verification
 
-Presubmission verification provides a battery of checks and tests to give your pull request the best chance of being accepted. Developers need to run as many verification tests as possible locally.
+Pre-submission verification provides a battery of checks and tests to give your pull request the best chance of being accepted. Developers need to run as many verification tests as possible locally.
 
-To run all presubmission verification tests, use this command:
+To run all pre-submission verification tests, use this command:
 
 ```shell
 $ make verifiers
@@ -170,49 +129,42 @@ $ make verifiers
 
 ### Unit Tests
 
-Pull requests need to pass all unit tests. To run every unit test, use this command:
+It is required that all pull request candidates should pass all Milvus unit tests.
 
+Beforce running unit tests, you need to first bring up the Milvus deployment environment.
+You may set up a local docker environment with our docker compose yaml file to start unit testing.
+For Apple Silicon users (Apple M1):
 ```shell
+$ cd deployments/docker/dev
+$ docker-compose -f docker-compose-apple-silicon.yml up -d
+$ cd ../../../
 $ make unittest
 ```
-
-Before using `make unittest` command, we should run a milvus's deployment environment which helps us to do go test. Here we use local docker environment, use the following commands:
+For others:
 ```shell
-# Using cluster environment
 $ cd deployments/docker/dev
 $ docker-compose up -d
 $ cd ../../../
 $ make unittest
-
-# Or using standalone environment
-$ cd deployments/docker/standalone
-$ docker-compose up -d
-$ cd ../../../
-$ make unittest
 ```
-To run only cpp test, we can use this command:
+To run only cpp test:
 ```shell
-make test-cpp
+$ make test-cpp
 ```
 
-To run only go test, we can use this command:
+To run only go test:
 ```shell
-make test-go
+$ make test-go
 ```
 
-To run single test case, for instance, run TestSearchTask in /internal/proxy directory, use
+To run a single test case (TestSearchTask in /internal/proxy directory, for example):
 ```shell
 $ go test -v ./internal/proxy/ -test.run TestSearchTask
 ```
 
 ### Code coverage
 
-Before submitting your Pull Request, make sure your code change is covered by unit test. Use the following commands to check code coverage rate:
-
-Install lcov(cpp code coverage tool):
-```shell
-$ sudo apt-get install lcov
-```
+Before submitting your pull request, make sure your code change is covered by unit test. Use the following commands to check code coverage rate:
 
 Run unit test and generate code coverage report:
 ```shell
@@ -258,7 +210,7 @@ $ pytest --tags=L0 -n auto
 ```
 
 ### Test on local branch
-#### On Linux
+#### With Linux and MacOS
 After preparing deployment environment, we can start the cluster on your host machine
 
 ```shell
