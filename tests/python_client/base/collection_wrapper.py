@@ -7,7 +7,7 @@ sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
 from utils.util_log import test_log as log
-from pymilvus.grpc_gen.common_pb2 import ConsistencyLevel
+from pymilvus.orm.types import CONSISTENCY_STRONG
 
 TIMEOUT = 20
 
@@ -20,7 +20,7 @@ class ApiCollectionWrapper:
     collection = None
 
     def init_collection(self, name, schema=None, using="default", shards_num=2, check_task=None, check_items=None, **kwargs):
-        consistency_level = kwargs.get("consistency_level", ConsistencyLevel.Strong)
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_STRONG)
         kwargs.update({"consistency_level": consistency_level})
 
         """ In order to distinguish the same name of collection """
