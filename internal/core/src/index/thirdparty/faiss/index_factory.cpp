@@ -30,6 +30,7 @@
 #include <faiss/Index2Layer.h>
 #include <faiss/IndexIVFFlat.h>
 #include <faiss/MetaIndexes.h>
+#include <faiss/impl/ScalarQuantizerOp.h>
 #include <faiss/IndexScalarQuantizer.h>
 #include <faiss/IndexHNSW.h>
 #include <faiss/IndexLattice.h>

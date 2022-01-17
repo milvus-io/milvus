@@ -60,7 +60,7 @@ struct SQDistanceComputer: DistanceComputer {
 extern uint16_t encode_fp16 (float x);
 extern float decode_fp16 (uint16_t x);
 
-extern void train_Uniform(RangeStat rs, float rs_arg,
+void train_Uniform(RangeStat rs, float rs_arg,
                    idx_t n, int k, const float *x,
                    std::vector<float> & trained);
 extern void train_NonUniform(RangeStat rs, float rs_arg,

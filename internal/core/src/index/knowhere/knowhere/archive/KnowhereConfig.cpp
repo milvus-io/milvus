@@ -33,6 +33,7 @@ constexpr int64_t M_BYTE = 1024 * 1024;
 std::string
 KnowhereConfig::SetSimdType(const SimdType simd_type) {
     if (simd_type == SimdType::AUTO) {
+#if 0
         faiss::faiss_use_avx512 = true;
         faiss::faiss_use_avx2 = true;
         faiss::faiss_use_sse4_2 = true;
@@ -52,6 +53,7 @@ KnowhereConfig::SetSimdType(const SimdType simd_type) {
         faiss::faiss_use_avx2 = false;
         faiss::faiss_use_sse4_2 = true;
         LOG_KNOWHERE_DEBUG_ << "FAISS expect simdType::SSE4_2";
+#endif
     }
 
     std::string cpu_flag;

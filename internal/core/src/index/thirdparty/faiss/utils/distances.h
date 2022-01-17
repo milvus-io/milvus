@@ -22,6 +22,10 @@
 
 namespace faiss {
 
+#ifdef __aarch64__
+extern uint8_t lookup8bit[256];
+#endif
+
  /*********************************************************
  * Optimized distance/norm/inner prod computations
  *********************************************************/

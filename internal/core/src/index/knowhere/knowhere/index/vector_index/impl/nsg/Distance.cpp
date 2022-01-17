@@ -10,8 +10,10 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <faiss/FaissHook.h>
+#include <faiss/utils/distances.h>
+#ifdef __AVX__
 #include <immintrin.h>
-
+#endif
 #include "knowhere/index/vector_index/impl/nsg/Distance.h"
 
 namespace milvus {

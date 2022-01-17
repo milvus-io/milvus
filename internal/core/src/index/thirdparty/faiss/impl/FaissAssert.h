@@ -58,6 +58,13 @@
     throw faiss::FaissException(MSG, __PRETTY_FUNCTION__, __FILE__, __LINE__); \
   } while (false)
 
+
+#define FAISS_THROW_MSG_NO(MSG)                                            \
+  do {                                                                  \
+    throw FaissException(MSG, __PRETTY_FUNCTION__, __FILE__, __LINE__); \
+  } while (false)
+
+
 #define FAISS_THROW_FMT(FMT, ...)                                       \
   do {                                                                  \
     std::string __s;                                                    \
@@ -65,6 +72,15 @@
     __s.resize(__size + 1);                                             \
     snprintf(&__s[0], __s.size(), FMT, __VA_ARGS__);                    \
     throw faiss::FaissException(__s, __PRETTY_FUNCTION__, __FILE__, __LINE__); \
+  } while (false)
+
+#define FAISS_THROW_FMT_NO(FMT, ...)                                       \
+  do {                                                                  \
+    std::string __s;                                                    \
+    int __size = snprintf(nullptr, 0, FMT, __VA_ARGS__);                \
+    __s.resize(__size + 1);                                             \
+    snprintf(&__s[0], __s.size(), FMT, __VA_ARGS__);                    \
+    throw FaissException(__s, __PRETTY_FUNCTION__, __FILE__, __LINE__); \
   } while (false)
 
 ///
@@ -75,6 +91,13 @@
   do {                                                  \
     if (!(X)) {                                         \
       FAISS_THROW_FMT("Error: '%s' failed", #X);        \
+    }                                                   \
+  } while (false)
+
+#define FAISS_THROW_IF_NOT_NO(X)                           \
+  do {                                                  \
+    if (!(X)) {                                         \
+      FAISS_THROW_FMT_NO("Error: '%s' failed", #X);        \
     }                                                   \
   } while (false)
 

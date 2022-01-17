@@ -218,6 +218,7 @@ struct HammingComputer64 {
 
 };
 
+#ifdef __AVX__
 struct HammingComputerAVX2 {
     const uint8_t *a;
     int n;
@@ -259,6 +260,7 @@ struct HammingComputerAVX512 {
     }
 
 };
+#endif
 
 struct HammingComputerDefault {
     const uint8_t *a;

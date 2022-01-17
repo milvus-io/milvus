@@ -1,6 +1,7 @@
 
 // -*- c++ -*-
 
+#ifdef __AVX__
 #include <faiss/utils/distances_simd_avx.h>
 
 #include <cstdio>
@@ -480,3 +481,4 @@ jaccard_AVX2(const uint8_t * a, const uint8_t * b, size_t n) {
 }
 
 } // namespace faiss
+#endif

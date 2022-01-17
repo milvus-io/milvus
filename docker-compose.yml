@@ -9,13 +9,15 @@ x-ccache: &ccache
 
 services:
   builder:
-    image: ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${DATE_VERSION}
+    #image: ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${DATE_VERSION}
+    image: ubuntu:latest
     # Build devcontainer
     build:
       context: .
-      dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
+      #dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
       cache_from:
-        - ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${LATEST_DATE_VERSION}
+        - ubuntu:latest
+      #  - ${IMAGE_REPO}/milvus-env:${IMAGE_ARCH}-${OS_NAME}-${LATEST_DATE_VERSION}
     # user: {{ CURRENT_ID }}
     shm_size: 2G
     # expose 19530 port so we can directly access milvus inside build container
@@ -28,43 +30,45 @@ services:
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       CUSTOM_THIRDPARTY_PATH: /tmp/thirdparty
     volumes: &builder-volumes
-      - .:/go/src/github.com/milvus-io/milvus:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod:/go/pkg/mod:delegated
-      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty:/tmp/thirdparty:delegated
+      - .:/go/src/github.com/milvus-io/milvus
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod:/go/pkg/mod
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty:/tmp/thirdparty
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
     working_dir: "/go/src/github.com/milvus-io/milvus"
     # Command
-    command: &builder-command >
-      /bin/bash -c "
-        make check-proto-product && make verifiers && make unittest"
+    #command: &builder-command >
+    #  /bin/bash -c "
+    #    make check-proto-product && make verifiers && make unittest"
 
-  etcd:
-    image: docker.io/bitnami/etcd:3.5.0-debian-10-r24
-    environment:
-      - ALLOW_NONE_AUTHENTICATION=yes
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+    tty: true
 
-  pulsar:
-    image: apachepulsar/pulsar:2.7.3
-    command: bin/pulsar standalone --no-functions-worker --no-stream-storage
-
-  minio:
-    image: minio/minio:RELEASE.2020-12-03T00-03-10Z
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    command: minio server /minio_data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  jaeger:
-    image: jaegertracing/all-in-one:latest
+#  etcd:
+#    image: docker.io/bitnami/etcd:3.5.0-debian-10-r24
+#    environment:
+#      - ALLOW_NONE_AUTHENTICATION=yes
+#      - ETCD_AUTO_COMPACTION_MODE=revision
+#      - ETCD_AUTO_COMPACTION_RETENTION=1000
+#      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+#
+#  pulsar:
+#    image: apachepulsar/pulsar:2.7.3
+#    command: bin/pulsar standalone --no-functions-worker --no-stream-storage
+#
+#  minio:
+#    image: minio/minio:RELEASE.2020-12-03T00-03-10Z
+#    environment:
+#      MINIO_ACCESS_KEY: minioadmin
+#      MINIO_SECRET_KEY: minioadmin
+#    command: minio server /minio_data
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+#      interval: 30s
+#      timeout: 20s
+#      retries: 3
+#
+#  jaeger:
+#    image: jaegertracing/all-in-one:latest
 
 networks:
   default:

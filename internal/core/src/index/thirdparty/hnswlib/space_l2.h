@@ -1,5 +1,7 @@
 #pragma once
+#include "hnswlib.h"
 #include <faiss/FaissHook.h>
+#include <faiss/utils/distances.h>
 
 namespace hnswlib {
 

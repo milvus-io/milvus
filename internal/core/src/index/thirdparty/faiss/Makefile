@@ -7,26 +7,26 @@
 
 HEADERS     = $(wildcard *.h impl/*.h utils/*.h)
 SRC         = $(wildcard *.cpp impl/*.cpp utils/*.cpp)
-AVX_SRC     = $(wildcard *avx.cpp impl/*avx.cpp utils/*avx.cpp)
-AVX512_SRC  = $(wildcard *avx512.cpp impl/*avx512.cpp utils/*avx512.cpp)
+#AVX_SRC     = $(wildcard *avx.cpp impl/*avx.cpp utils/*avx.cpp)
+#AVX512_SRC  = $(wildcard *avx512.cpp impl/*avx512.cpp utils/*avx512.cpp)
 OBJ         = $(SRC:.cpp=.o)
 INSTALLDIRS = $(DESTDIR)$(libdir) $(DESTDIR)$(includedir)/faiss
 
-GPU_HEADERS = $(wildcard gpu/*.h gpu/impl/*.h gpu/impl/*.cuh gpu/utils/*.h gpu/utils/*.cuh)
-GPU_CPPSRC  = $(wildcard gpu/*.cpp gpu/impl/*.cpp gpu/utils/*.cpp)
-GPU_CUSRC   = $(wildcard gpu/*.cu gpu/impl/*.cu gpu/utils/*.cu \
-gpu/utils/nvidia/*.cu gpu/utils/blockselect/*.cu gpu/utils/warpselect/*.cu)
-GPU_SRC     = $(GPU_CPPSRC) $(GPU_CUSRC)
-GPU_CPPOBJ  = $(GPU_CPPSRC:.cpp=.o)
-GPU_CUOBJ   = $(GPU_CUSRC:.cu=.o)
-GPU_OBJ     = $(GPU_CPPOBJ) $(GPU_CUOBJ)
+#GPU_HEADERS = $(wildcard gpu/*.h gpu/impl/*.h gpu/impl/*.cuh gpu/utils/*.h gpu/utils/*.cuh)
+#GPU_CPPSRC  = $(wildcard gpu/*.cpp gpu/impl/*.cpp gpu/utils/*.cpp)
+#GPU_CUSRC   = $(wildcard gpu/*.cu gpu/impl/*.cu gpu/utils/*.cu \
+#gpu/utils/nvidia/*.cu gpu/utils/blockselect/*.cu gpu/utils/warpselect/*.cu)
+#GPU_SRC     = $(GPU_CPPSRC) $(GPU_CUSRC)
+#GPU_CPPOBJ  = $(GPU_CPPSRC:.cpp=.o)
+#GPU_CUOBJ   = $(GPU_CUSRC:.cu=.o)
+#GPU_OBJ     = $(GPU_CPPOBJ) $(GPU_CUOBJ)
 
 ifneq ($(strip $(NVCC)),)
 	OBJ         += $(GPU_OBJ)
 	HEADERS     += $(GPU_HEADERS)
 endif
 
-CPPFLAGS += -I.
+CPPFLAGS += -I. -std=c++11
 NVCCFLAGS += -I.
 
 ############################
@@ -44,16 +44,16 @@ libfaiss.$(SHAREDEXT): $(OBJ)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -c $< -o $@
 
 # support avx
-%avx.o: %avx.cpp
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mf16c -mavx2 -c $< -o $@
+#%avx.o: %avx.cpp
+#	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mf16c -mavx2 -c $< -o $@
+#
+## support avx512
+#%avx512.o: %avx512.cpp
+#	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mf16c -mavx512f -mavx512dq -mavx512bw -c $< -o $@
 
-# support avx512
-%avx512.o: %avx512.cpp
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(CPUFLAGS) -mf16c -mavx512f -mavx512dq -mavx512bw -c $< -o $@
-
-%.o: %.cu
-	$(NVCC) $(NVCCFLAGS) -c $< -o $@
-
+#%.o: %.cu
+#	$(NVCC) $(NVCCFLAGS) -c $< -o $@
+#
 clean:
 	rm -f libfaiss.a libfaiss.$(SHAREDEXT)
 	rm -f $(OBJ)

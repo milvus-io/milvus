@@ -26,6 +26,7 @@ target_link_libraries(milvus_indexbuilder
         milvus_utils
         milvus_proto
         knowhere
+        faiss
         tbb
         log
         dl

@@ -784,7 +784,7 @@ void PolysemousTraining::optimize_reproduce_distances (
 
         for (int i = 0; i < n; i++) {
             for (int j = 0; j < n; j++) {
-                dis_table.push_back (fvec_L2sqr (centroids + i * dsub,
+                dis_table.push_back (fvec_L2sqr(centroids + i * dsub,
                                                  centroids + j * dsub,
                                                  dsub));
             }

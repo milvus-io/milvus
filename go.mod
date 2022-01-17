@@ -14,6 +14,7 @@ require (
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/go-basic/ipv4 v1.0.0
+	github.com/go-delve/delve v1.8.0 // indirect
 	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
@@ -29,6 +30,8 @@ require (
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
+	github.com/quasilyte/go-ruleguard v0.2.1 // indirect
+	github.com/ramya-rao-a/go-outline v0.0.0-20210608161538-9736a4bde949 // indirect
 	github.com/shirou/gopsutil v3.21.8+incompatible
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
@@ -38,6 +41,7 @@ require (
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
 	github.com/uber/jaeger-client-go v2.25.0+incompatible
 	github.com/uber/jaeger-lib v2.4.0+incompatible // indirect
+	github.com/uudashr/gopkgs/v2 v2.1.2 // indirect
 	github.com/yahoo/athenz v1.9.16 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.0
 	go.etcd.io/etcd/client/v3 v3.5.0
@@ -48,9 +52,10 @@ require (
 	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6
 	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/tools v0.1.7 // indirect
+	golang.org/x/tools/gopls v0.7.4 // indirect
 	google.golang.org/grpc v1.38.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
+	honnef.co/go/tools v0.2.2 // indirect
 	stathat.com/c/consistent v1.0.0
 )
 

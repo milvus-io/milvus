@@ -69,7 +69,7 @@ define_option(KNOWHERE_USE_CCACHE "Use ccache when compiling (if available)" ON)
 define_option(KNOWHERE_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
-define_option(KNOWHERE_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" OFF)
+define_option(KNOWHERE_BOOST_USE_SHARED "Rely on boost shared libraries where relevant" ON)
 
 define_option(KNOWHERE_BOOST_VENDORED "Use vendored Boost instead of existing Boost. \
 Note that this requires linking Boost statically" OFF)

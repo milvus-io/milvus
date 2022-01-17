@@ -60,6 +60,14 @@ float fvec_Linf_sse (
         const float * x,
         const float * y,
         size_t d);
+#elif defined(__aarch64__)
+
+float fvec_L2sqr_aarch64(const float* x, const float* y, size_t d); 
+float fvec_inner_product_aarch64(const float* x, const float* y, size_t d);
+float fvec_norm_L2sqr_aarch64(const float* x, size_t d);
+float fvec_L1_aarch64(const float* x, const float* y, size_t d);
+float fvec_Linf_aarch64(const float* x, const float* y, size_t d);
+
 #endif
 
 /* compute ny square L2 distance bewteen x and a set of contiguous y vectors */

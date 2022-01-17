@@ -7,6 +7,7 @@
 
 // -*- c++ -*-
 
+#ifdef __AVX__
 #include <faiss/impl/ScalarQuantizerDC_avx512.h>
 #include <faiss/impl/ScalarQuantizerCodec_avx512.h>
 
@@ -60,3 +61,4 @@ sq_select_inverted_list_scanner_avx512 (MetricType mt, const ScalarQuantizer *sq
 }
 
 } // namespace faiss
+#endif

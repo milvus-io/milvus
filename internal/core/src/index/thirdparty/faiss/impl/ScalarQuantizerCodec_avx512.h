@@ -9,6 +9,7 @@
 
 #pragma once
 
+#ifdef __AVX__
 #include <cstdio>
 #include <algorithm>
 #include <omp.h>
@@ -657,3 +658,4 @@ InvertedListScanner* sel0_InvertedListScanner_avx512 (
 }
 
 } // namespace faiss
+#endif

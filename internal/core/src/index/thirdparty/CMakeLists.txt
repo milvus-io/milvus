@@ -1,4 +1,5 @@
 # Copyright (C) 2019-2020 Zilliz. All rights reserved.
+
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
 # with the License. You may obtain a copy of the License at
@@ -54,6 +55,7 @@ add_subdirectory(NGT)
 # ****************************** Thirdparty Faiss ***************************************
 set(FAISS_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/faiss)
 
+message("build arch is ----->>>> ${CMAKE_SYSTEM_PROCESSOR}")
 macro(build_faiss)
     message(STATUS "Building FAISS-${FAISS_VERSION} from source")
 
@@ -75,6 +77,7 @@ macro(build_faiss)
         set(FAISS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
     endif()
 
+if((${CMAKE_SYSTEM_PROCESSOR} EQUAL aarch64) OR (${CMAKE_SYSTEM_PROCESSOR} EQUAL aarch64) )
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
             "CC=${FAISS_C_COMPILER}"
@@ -83,7 +86,16 @@ macro(build_faiss)
             "CFLAGS=${EP_C_FLAGS}"
             "CXXFLAGS=${EP_CXX_FLAGS} -msse4.2 -O3"
             --without-python)
+else ()
+    set(FAISS_CONFIGURE_ARGS
+            "--prefix=${FAISS_PREFIX}"
+            "CC=${FAISS_C_COMPILER}"
+            "CXX=${FAISS_CXX_COMPILER}"
+            "CFLAGS=${EP_C_FLAGS} -DCPU_ARCH=arm"
+            "CXXFLAGS=${EP_CXX_FLAGS}  -O3 -DCPU_ARCH=arm"
+            --without-python)
 
+endif()
     message(STATUS "${FAISS_CONFIGURE_ARGS}")
 
     message(STATUS "Build Faiss with OpenBlas/LAPACK")
@@ -114,6 +126,7 @@ macro(build_faiss)
 	
     #Notice: there will not set LDFLAGS value
     if (DEFINED ENV{FAISS_SOURCE_URL})
+        message("faiss configure env ENV{FAISS_SOURCE_URL}  ---->>>")
         set(FAISS_SOURCE_URL "$ENV{FAISS_SOURCE_URL}")
         externalproject_add(faiss_ep
                 URL
@@ -131,6 +144,7 @@ macro(build_faiss)
                 BUILD_BYPRODUCTS
                 ${FAISS_STATIC_LIB})
     else ()
+        message("faiss configure down ENV{FAISS_SOURCE_URL}  ${FAISS_CONFIGURE_ARGS}   ---->>>")
         externalproject_add(faiss_ep
                 DOWNLOAD_COMMAND
                 ""
