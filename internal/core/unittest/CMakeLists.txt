@@ -59,7 +59,7 @@ if (LINUX)
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
 
-if (MACOS)
+if ( ${CMAKE_SYSTEM_NAME} MATCHES "Darwin" )
     set(MILVUS_TEST_FILES
             init_gtest.cpp
             test_common.cpp
