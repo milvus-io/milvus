@@ -21,6 +21,7 @@ ARCH := $(shell arch)
 all: build-cpp build-go
 
 pre-build-go:
+	@echo "Running pre-go build"
 ifeq ($(OS),Darwin) # MacOS X
 	@(env bash $(PWD)/scripts/replace_gorocksdb_version.sh)
 endif
@@ -94,7 +95,7 @@ endif
 	#@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
-verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
+verifiers: pre-build-go build-cpp getdeps cppcheck fmt static-check ruleguard
 
 # Build various components locally.
 binlog:

@@ -53,7 +53,7 @@ macro( build_rocksdb )
     if ( APPLE )
         set ( ROCKSDB_URL_MD5 "e4a0625f0cec82060e62c81b787a1124" )
     else ()
-        set ( ROCKSDB_URL_MD5 "e4a0625f0cec82060e62c81b787a1124" )
+        set ( ROCKSDB_URL_MD5 "67f9e04fda62af551dd039c37b1808ac" )
     endif ()
 
     set( ROCKSDB_CMAKE_ARGS
