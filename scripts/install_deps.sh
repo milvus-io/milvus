@@ -19,14 +19,15 @@
 function install_linux_deps() {
   if [[ -x "$(command -v apt)" ]]; then
       # for Ubuntu 18.04
-      sudo apt install -y g++ gcc make ccache libssl-dev zlib1g-dev libboost-regex-dev \
-          libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
-          libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
+      sudo apt update
+      sudo apt install -y build-essential g++ gcc make ccache lcov libssl-dev zlib1g-dev libboost-regex-dev \
+          libboost-program-options-dev libboost-system-dev libboost-filesystem-dev libboost-serialization-dev \
+          python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
   elif [[ -x "$(command -v yum)" ]]; then
       # for CentOS 7
       sudo yum install -y epel-release centos-release-scl-rh && \
       sudo yum install -y git make automake ccache openssl-devel zlib-devel \
-          libcurl-devel python3-devel \
+          lcov libcurl-devel python3-devel \
           devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
           llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra
 
@@ -63,7 +64,7 @@ function install_mac_deps() {
   gvm  use  go1.17.2
 
   sudo xcode-select --install  > /dev/null 2>&1
-  brew install boost libomp ninja tbb cmake llvm
+  brew install boost cmake lcov libomp llvm ninja tbb
   brew uninstall grep
   brew install grep
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
@@ -76,4 +77,3 @@ case "${unameOut}" in
     Darwin*)    install_mac_deps;;
     *)          echo "Unsupported OS:${unameOut}" ; exit 0;
 esac
-
