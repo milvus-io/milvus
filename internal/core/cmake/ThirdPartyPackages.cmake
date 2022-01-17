@@ -22,9 +22,9 @@ endforeach ()
 # ----------------------------------------------------------------------
 # Identify OS
 if (UNIX)
-    if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    if (APPLE)
         set(CMAKE_OS_NAME "osx" CACHE STRING "Operating system name" FORCE)
-    else
+    else (APPLE)
         ## Check for Debian GNU/Linux ________________
         find_file(DEBIAN_FOUND debian_version debconf.conf
                 PATHS /etc
@@ -75,7 +75,7 @@ if (UNIX)
                 endif (UBUNTU_FOUND)
             endif (UBUNTU_EXTRA)
         endif (DEBIAN_FOUND)
-    endif (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    endif (APPLE)
 endif (UNIX)
 
 # ----------------------------------------------------------------------
