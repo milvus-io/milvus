@@ -96,5 +96,17 @@ fi
 exitcode=$?
 # List pod list & pvc list before exit after helm install
 kubectl get pods -n ${MILVUS_HELM_NAMESPACE} -o wide | grep "${MILVUS_HELM_RELEASE_NAME}-"
+
+
+restart_pods=$(kubectl get pods -n ${MILVUS_HELM_NAMESPACE} | grep "${MILVUS_HELM_RELEASE_NAME}-" | grep 'ago)' | awk '{print $1}')
+
+for restart_pod in ${restart_pods}
+do 
+  reason=$(kubectl get pod ${restart_pod} -n milvus-ci -o json | jq .status.containerStatuses[0].lastState.terminated.reason )
+  restart_count=$(kubectl get pod ${restart_pod} -n milvus-ci -o json | jq .status.containerStatuses[0].restartCount )
+  echo "${restart_pod} restarts ${restart_count}, last terminateed reason is ${reason}"
+done
+
+
 kubectl get pvc -n ${MILVUS_HELM_NAMESPACE} |  grep "${MILVUS_HELM_RELEASE_NAME}-" | awk '{$3=null;print $0}'
 exit ${exitcode}
