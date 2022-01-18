@@ -126,7 +126,8 @@ pipeline {
                                                 --set etcd.metrics.enabled=true \
                                                 --set etcd.metrics.podMonitor.enabled=true \
                                                 --set etcd.nodeSelector.disk=fast \
-                                                --set metrics.serviceMonitor.enabled=true" 
+                                                --set metrics.serviceMonitor.enabled=true \
+                                                -f values/pr.yaml" 
                                                 """
                                             }
                                         } else {
