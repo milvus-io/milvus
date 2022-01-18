@@ -59,8 +59,8 @@ var (
 	// TODO: sunby put to config
 	enableTtChecker           = true
 	ttCheckerName             = "dataTtChecker"
-	ttMaxInterval             = 3 * time.Minute
-	ttCheckerWarnMsg          = fmt.Sprintf("we haven't received tt for %f minutes", ttMaxInterval.Minutes())
+	ttMaxInterval             = 2 * time.Minute
+	ttCheckerWarnMsg          = fmt.Sprintf("Datacoord haven't received tt for %f minutes", ttMaxInterval.Minutes())
 	segmentTimedFlushDuration = 10.0
 )
 

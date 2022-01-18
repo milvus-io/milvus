@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -428,21 +429,6 @@ func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[t
 	}
 
 	return segID2PartID, nil
-}
-
-func (c *Core) setDdMsgSendFlag(b bool) error {
-	flag, err := c.MetaTable.txn.Load(DDMsgSendPrefix)
-	if err != nil {
-		return err
-	}
-
-	if (b && flag == "true") || (!b && flag == "false") {
-		log.Debug("DdMsg send flag need not change", zap.String("flag", flag))
-		return nil
-	}
-
-	err = c.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(b))
-	return err
 }
 
 func (c *Core) setMsgStreams() error {
@@ -1043,11 +1029,11 @@ func (c *Core) Init() error {
 		c.proxyManager = newProxyManager(
 			c.ctx,
 			c.etcdCli,
-			c.chanTimeTick.clearSessions,
+			c.chanTimeTick.initSessions,
 			c.proxyClientManager.GetProxyClients,
 		)
-		c.proxyManager.AddSession(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-		c.proxyManager.DelSession(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+		c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+		c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 
 		c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -1066,8 +1052,21 @@ func (c *Core) Init() error {
 func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	if !force {
 		flag, err := c.MetaTable.txn.Load(DDMsgSendPrefix)
-		if err != nil || flag == "true" {
-			log.Debug("No un-successful DdMsg")
+		if err != nil {
+			// TODO, this is super ugly hack but our kv interface does not support loadWithExist
+			// leave it for later
+			if strings.Contains(err.Error(), "there is no value on key") {
+				log.Debug("skip reSendDdMsg with no dd-msg-send key")
+				return nil
+			}
+			return err
+		}
+		value, err := strconv.ParseBool(flag)
+		if err != nil {
+			return err
+		}
+		if value {
+			log.Debug("skip reSendDdMsg with dd-msg-send set to true")
 			return nil
 		}
 	}
@@ -1167,7 +1166,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	}
 
 	// Update DDOperation in etcd
-	return c.setDdMsgSendFlag(true)
+	return c.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // Start start rootcoord

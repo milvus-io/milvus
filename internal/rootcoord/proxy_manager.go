@@ -34,13 +34,13 @@ import (
 
 // proxyManager manages proxy connected to the rootcoord
 type proxyManager struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	lock        sync.Mutex
-	etcdCli     *clientv3.Client
-	getSessions []func([]*sessionutil.Session)
-	addSessions []func(*sessionutil.Session)
-	delSessions []func(*sessionutil.Session)
+	ctx              context.Context
+	cancel           context.CancelFunc
+	lock             sync.Mutex
+	etcdCli          *clientv3.Client
+	initSessionsFunc []func([]*sessionutil.Session)
+	addSessionsFunc  []func(*sessionutil.Session)
+	delSessionsFunc  []func(*sessionutil.Session)
 }
 
 // newProxyManager helper function to create a proxyManager
@@ -54,22 +54,22 @@ func newProxyManager(ctx context.Context, client *clientv3.Client, fns ...func([
 		lock:    sync.Mutex{},
 		etcdCli: client,
 	}
-	p.getSessions = append(p.getSessions, fns...)
+	p.initSessionsFunc = append(p.initSessionsFunc, fns...)
 	return p
 }
 
-// AddSession adds functions to addSessions function list
-func (p *proxyManager) AddSession(fns ...func(*sessionutil.Session)) {
+// AddSessionFunc adds functions to addSessions function list
+func (p *proxyManager) AddSessionFunc(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.addSessions = append(p.addSessions, fns...)
+	p.addSessionsFunc = append(p.addSessionsFunc, fns...)
 }
 
-// DelSession add functions to delSessions function list
-func (p *proxyManager) DelSession(fns ...func(*sessionutil.Session)) {
+// DelSessionFunc add functions to delSessions function list
+func (p *proxyManager) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	p.delSessions = append(p.delSessions, fns...)
+	p.delSessionsFunc = append(p.delSessionsFunc, fns...)
 }
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
@@ -81,8 +81,8 @@ func (p *proxyManager) WatchProxy() error {
 	if err != nil {
 		return err
 	}
-	log.Debug("succeed to get sessions on etcd", zap.Any("sessions", sessions), zap.Int64("revision", rev))
-	for _, f := range p.getSessions {
+	log.Debug("succeed to init sessions on etcd", zap.Any("sessions", sessions), zap.Int64("revision", rev))
+	for _, f := range p.initSessionsFunc {
 		f(sessions)
 	}
 
@@ -136,7 +136,7 @@ func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
 		return err
 	}
 	log.Debug("received proxy put event with session", zap.Any("session", session))
-	for _, f := range p.addSessions {
+	for _, f := range p.addSessionsFunc {
 		f(session)
 	}
 	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Set(1)
@@ -149,7 +149,7 @@ func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
 		return err
 	}
 	log.Debug("received proxy delete event with session", zap.Any("session", session))
-	for _, f := range p.delSessions {
+	for _, f := range p.delSessionsFunc {
 		f(session)
 	}
 	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Set(0)
