@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -41,11 +43,14 @@ var (
 	errIllegalCompactionPlan   = errors.New("compaction plan illegal")
 	errTransferType            = errors.New("transfer intferface to type wrong")
 	errUnknownDataType         = errors.New("unknown shema DataType")
+	errContext                 = errors.New("context done or timeout")
 )
 
 type iterator = storage.Iterator
 
 type compactor interface {
+	start()
+	complete()
 	compact() error
 	stop()
 	getPlanID() UniqueID
@@ -99,6 +104,14 @@ func newCompactionTask(
 		dc:                 dc,
 		plan:               plan,
 	}
+}
+
+func (t *compactionTask) start() {
+	t.wg.Add(1)
+}
+
+func (t *compactionTask) complete() {
+	t.wg.Done()
 }
 
 func (t *compactionTask) stop() {
@@ -265,8 +278,11 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 }
 
 func (t *compactionTask) compact() error {
-	t.wg.Add(1)
-	defer t.wg.Done()
+	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
+		log.Error("compact wrong, task context done or timeout")
+		return errContext
+	}
+
 	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 

@@ -59,13 +59,29 @@ func (c *compactionExecutor) execute(task compactor) {
 	c.taskCh <- task
 }
 
+func (c *compactionExecutor) toExecutingState(task compactor) {
+	task.start()
+	c.executing.Store(task.getPlanID(), task)
+}
+
+func (c *compactionExecutor) toCompleteState(task compactor) {
+	task.complete()
+	c.executing.Delete(task.getPlanID())
+}
+
+// These two func are bounded for waitGroup
+func (c *compactionExecutor) executeWithState(task compactor) {
+	c.toExecutingState(task)
+	go c.executeTask(task)
+}
+
 func (c *compactionExecutor) start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case task := <-c.taskCh:
-			go c.executeTask(task)
+			c.executeWithState(task)
 		}
 	}
 }
@@ -73,10 +89,10 @@ func (c *compactionExecutor) start(ctx context.Context) {
 func (c *compactionExecutor) executeTask(task compactor) {
 	c.parallelCh <- struct{}{}
 	defer func() {
+		c.toCompleteState(task)
 		<-c.parallelCh
 	}()
 
-	c.executing.Store(task.getPlanID(), task)
 	log.Info("start to execute compaction", zap.Int64("planID", task.getPlanID()))
 
 	err := task.compact()
@@ -87,7 +103,6 @@ func (c *compactionExecutor) executeTask(task compactor) {
 		)
 	}
 
-	c.executing.Delete(task.getPlanID())
 	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))
 }
 
