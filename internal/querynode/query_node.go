@@ -290,7 +290,7 @@ func (node *QueryNode) Init() error {
 			node.etcdKV,
 			node.msFactory)
 
-		node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
+		//node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
 
 		node.InitSegcore()
@@ -343,7 +343,7 @@ func (node *QueryNode) Start() error {
 
 	// start services
 	go node.watchChangeInfo()
-	go node.statsService.start()
+	//go node.statsService.start()
 
 	// watch proxy
 	if err := node.initServiceDiscovery(); err != nil {
@@ -383,9 +383,9 @@ func (node *QueryNode) Stop() error {
 	if node.queryService != nil {
 		node.queryService.close()
 	}
-	if node.statsService != nil {
-		node.statsService.close()
-	}
+	//if node.statsService != nil {
+	//	node.statsService.close()
+	//}
 	node.session.Revoke(time.Second)
 	node.wg.Wait()
 	return nil
