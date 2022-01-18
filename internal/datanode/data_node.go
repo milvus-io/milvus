@@ -411,7 +411,7 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 			log.Info("GC flowgraph", zap.String("vChanName", vchanName))
 			node.releaseFlowgraph(vchanName)
 		case <-node.ctx.Done():
-			log.Info("DataNode ctx done")
+			log.Warn("DataNode context done, exiting background GC")
 			return
 		}
 	}
