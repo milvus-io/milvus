@@ -48,7 +48,7 @@ services:
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
 
   pulsar:
-    image: apachepulsar/pulsar:2.7.3
+    image: apachepulsar/pulsar:2.7.4
     command: bin/pulsar standalone --no-functions-worker --no-stream-storage
 
   minio:
