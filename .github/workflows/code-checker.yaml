@@ -63,7 +63,7 @@ jobs:
         run: |
           bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
           source ~/.gvm/scripts/gvm
-          gvm install go1.15.2
+          gvm install go1.17.2
           gvm use go1.17.2
           brew install boost libomp ninja tbb
           make check-proto-product && make verifiers
