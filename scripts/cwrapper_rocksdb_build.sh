@@ -101,5 +101,6 @@ else
       esac
 fi
 
-go env -w CGO_LDFLAGS="$ldflags"
+echo "$(go version)==========go version==="
+go env -w CGO_LDFLAGS="$ldflags" && GO111MODULE=on
 go get github.com/tecbot/gorocksdb
