@@ -34,7 +34,6 @@ import (
 
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("Get QueryNode component states")
 	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -59,7 +58,6 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.Comp
 		StateCode: code,
 	}
 	stats.State = info
-	log.Debug("Get QueryNode component state done", zap.Any("stateCode", info.StateCode))
 	return stats, nil
 }
 

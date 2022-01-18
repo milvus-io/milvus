@@ -81,13 +81,32 @@ func Test_InitRocksMQError(t *testing.T) {
 	once = sync.Once{}
 	dir := "/tmp/milvus/"
 	dummyPath := dir + "dummy"
-	err := os.MkdirAll(dir, os.ModePerm)
-	assert.NoError(t, err)
-	f, err := os.Create(dummyPath)
-	defer f.Close()
-	assert.NoError(t, err)
 	os.Setenv("ROCKSMQ_PATH", dummyPath)
 	defer os.RemoveAll(dir)
+
+	// set some invalid configs
+	os.Setenv("milvus.rocksmq.rocksmqPageSize", "-1")
+	err := InitRocksMQ()
+	assert.Error(t, err)
+	os.Unsetenv("milvus.rocksmq.rocksmqPageSize")
+
+	os.Setenv("milvus.rocksmq.retentionTimeInMinutes", "a")
 	err = InitRocksMQ()
 	assert.Error(t, err)
+	os.Unsetenv("milvus.rocksmq.retentionTimeInMinutes")
+
+	os.Setenv("milvus.rocksmq.retentionSizeInMB", "a")
+	err = InitRocksMQ()
+	assert.Error(t, err)
+	os.Unsetenv("milvus。rocksmq.retentionSizeInMB")
+
+	os.Setenv("milvus.rocksmq.blockSize", "-1")
+	err = InitRocksMQ()
+	assert.Error(t, err)
+	os.Unsetenv("milvus.rocksmq.blockSize")
+
+	os.Setenv("milvus.rocksmq.cacheCapacity", "-1")
+	err = InitRocksMQ()
+	assert.Error(t, err)
+	os.Unsetenv("milvus.rocksmq.cacheCapacity")
 }

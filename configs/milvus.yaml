@@ -38,11 +38,13 @@ pulsar:
   port: 6650 # Port of pulsar
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
 
-rocksmq:
+rocksmq: #only valid under standalone mode
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
-  rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
+  rocksmqPageSize: 268435456 # 256M, 256 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
   retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
+  cacheCapacity: 1073741824 # 1 GB, the block cache size of rocksdb
+  blockSize: 16384 #the block size of rocksdb
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:

@@ -41,7 +41,7 @@ func TestRmqRetention_Basic(t *testing.T) {
 	defer os.RemoveAll(retentionPath)
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreUint64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
 	rocksdbPath := retentionPath
@@ -133,7 +133,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	defer os.RemoveAll(retentionPath)
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
 	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreUint64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
 	rocksdbPath := retentionPath
@@ -238,7 +238,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
 	// retention by secs
 	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 1)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreUint64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_multi_topic"
 	os.RemoveAll(kvPath)
@@ -454,7 +454,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
 	// retention by secs
 	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 5)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreUint64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_com1"
 	os.RemoveAll(kvPath)
@@ -573,7 +573,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	defer os.RemoveAll(retentionPath)
 	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 1)
 	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, -1)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreUint64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_com2"
 	os.RemoveAll(kvPath)

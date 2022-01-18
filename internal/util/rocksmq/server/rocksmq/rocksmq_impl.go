@@ -43,14 +43,17 @@ type UniqueID = typeutil.UniqueID
 type RmqState = int64
 
 // RocksmqPageSize is the size of a message page, default 256MB
-var RocksmqPageSize int64 = 256 << 20
+var RocksmqPageSize uint64 = 256 << 20
+
+// RocksDBLRUCacheCapacity is the size of rocksdb lru cache size, default is 1GB
+var RocksDBLRUCacheCapacity uint64 = 1 << 30
+
+// RocksDBBlockSize is the block cache size, default is 16384
+var RocksDBBlockSize = 16384
 
 // Const variable that will be used in rocksmqs
 const (
 	DefaultMessageID = -1
-
-	// TODO make it configable
-	RocksDBLRUCacheCapacity = 1 << 30
 
 	kvSuffix = "_meta_kv"
 
@@ -156,6 +159,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	}
 	log.Debug("Start rocksmq ", zap.Int("max proc", maxProcs), zap.Int("parallism", parallelism))
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
+	bbto.SetBlockSize(RocksDBBlockSize)
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
 	optsKV := gorocksdb.NewDefaultOptions()
 	optsKV.SetBlockBasedTableFactory(bbto)
@@ -224,7 +228,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	// TODO add this to monitor metrics
 	go func() {
 		for {
-			time.Sleep(5 * time.Minute)
+			time.Sleep(3 * time.Minute)
 			log.Info("Rocksmq stats",
 				zap.String("cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
 				zap.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.size-all-mem-tables")),
@@ -233,6 +237,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 				zap.String("store memtable ", db.GetProperty("rocksdb.size-all-mem-tables")),
 				zap.String("store table readers", db.GetProperty("rocksdb.estimate-table-readers-mem")),
 				zap.String("store pinned", db.GetProperty("rocksdb.block-cache-pinned-usage")),
+				zap.String("file size", db.GetProperty("rocksdb.total-sst-files-size")),
 				zap.String("store l0 file num", db.GetProperty("rocksdb.num-files-at-level0")),
 				zap.String("store l1 file num", db.GetProperty("rocksdb.num-files-at-level1")),
 				zap.String("store l2 file num", db.GetProperty("rocksdb.num-files-at-level2")),
@@ -241,7 +246,6 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 			)
 		}
 	}()
-
 	return rmq, nil
 }
 
@@ -578,7 +582,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 
 	// TODO add this to monitor metrics
 	getProduceTime := time.Since(start).Milliseconds()
-	if getProduceTime > 200 {
+	if getProduceTime > 500 {
 		log.Warn("rocksmq produce too slowly", zap.String("topic", topicName),
 			zap.Int64("get lock elapse", getLockTime),
 			zap.Int64("alloc elapse", allocTime-getLockTime),
@@ -606,7 +610,7 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 	mutateBuffer := make(map[string]string)
 	for _, id := range msgIDs {
 		msgSize := msgSizes[id]
-		if curMsgSize+msgSize > RocksmqPageSize {
+		if curMsgSize+msgSize > int64(RocksmqPageSize) {
 			// Current page is full
 			newPageSize := curMsgSize + msgSize
 			pageEndID := id
@@ -721,7 +725,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 
 	// TODO add this to monitor metrics
 	getConsumeTime := time.Since(start).Milliseconds()
-	if getConsumeTime > 200 {
+	if getConsumeTime > 500 {
 		log.Warn("rocksmq consume too slowly", zap.String("topic", topicName),
 			zap.Int64("get lock elapse", getLockTime),
 			zap.Int64("iterator elapse", iterTime-getLockTime),

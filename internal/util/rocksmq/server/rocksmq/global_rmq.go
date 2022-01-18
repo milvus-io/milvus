@@ -18,6 +18,7 @@ package rocksmq
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -26,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	"go.uber.org/zap"
 )
 
@@ -48,58 +48,82 @@ func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 
 // InitRocksMQ init global rocksmq single instance
 func InitRocksMQ() error {
-	var finalErr error
-	once.Do(func() {
-		params.Init()
-		rocksdbName, _ := params.Load("_RocksmqPath")
-		log.Debug("initializing global rmq", zap.String("path", rocksdbName))
-		var fi os.FileInfo
-		fi, finalErr = os.Stat(rocksdbName)
-		if os.IsNotExist(finalErr) {
-			finalErr = os.MkdirAll(rocksdbName, os.ModePerm)
-			if finalErr != nil {
-				return
-			}
-		} else {
-			if !fi.IsDir() {
-				errMsg := "can't create a directory because there exists a file with the same name"
-				finalErr = errors.New(errMsg)
-				return
-			}
+	params.Init()
+	rocksdbName, _ := params.Load("_RocksmqPath")
+	log.Debug("initializing global rmq", zap.String("path", rocksdbName))
+	rawRmqPageSize, err := params.Load("rocksmq.rocksmqPageSize")
+	if err == nil && rawRmqPageSize != "" {
+		rmqPageSize, err := strconv.ParseUint(rawRmqPageSize, 10, 64)
+		if err != nil {
+			log.Warn("rocksmq.rocksmqPageSize is invalid", zap.String("page size", rawRmqPageSize))
+			return err
 		}
+		atomic.StoreUint64(&RocksmqPageSize, rmqPageSize)
+	}
 
-		rawRmqPageSize, err := params.Load("rocksmq.rocksmqPageSize")
-		if err == nil && rawRmqPageSize != "" {
-			rmqPageSize, err := strconv.ParseInt(rawRmqPageSize, 10, 64)
-			if err == nil {
-				atomic.StoreInt64(&RocksmqPageSize, rmqPageSize)
-			} else {
-				log.Warn("rocksmq.rocksmqPageSize is invalid, using default value 2G")
-			}
+	rawRmqRetentionTimeInMinutes, err := params.Load("rocksmq.retentionTimeInMinutes")
+	fmt.Println("retention", rawRmqRetentionTimeInMinutes)
+	if err == nil && rawRmqRetentionTimeInMinutes != "" {
+		rmqRetentionTimeInMinutes, err := strconv.ParseInt(rawRmqRetentionTimeInMinutes, 10, 64)
+		fmt.Println("retention", rmqRetentionTimeInMinutes)
+		if err != nil {
+			log.Warn("rocksmq.retentionTimeInMinutes is invalid", zap.String("retention time", rawRmqRetentionTimeInMinutes))
+			return err
 		}
-		rawRmqRetentionTimeInMinutes, err := params.Load("rocksmq.retentionTimeInMinutes")
-		if err == nil && rawRmqRetentionTimeInMinutes != "" {
-			rawRmqRetentionTimeInMinutes, err := strconv.ParseInt(rawRmqRetentionTimeInMinutes, 10, 64)
-			if err == nil {
-				atomic.StoreInt64(&RocksmqRetentionTimeInSecs, rawRmqRetentionTimeInMinutes*60)
-			} else {
-				log.Warn("rocksmq.retentionTimeInMinutes is invalid, using default value")
-			}
+		atomic.StoreInt64(&RocksmqRetentionTimeInSecs, rmqRetentionTimeInMinutes*60)
+	}
+	rawRmqRetentionSizeInMB, err := params.Load("rocksmq.retentionSizeInMB")
+	if err == nil && rawRmqRetentionSizeInMB != "" {
+		rmqRetentionSizeInMB, err := strconv.ParseInt(rawRmqRetentionSizeInMB, 10, 64)
+		if err != nil {
+			log.Warn("rocksmq.retentionSizeInMB is invalid", zap.String("retention size", rawRmqRetentionSizeInMB))
+			return err
 		}
-		rawRmqRetentionSizeInMB, err := params.Load("rocksmq.retentionSizeInMB")
-		if err == nil && rawRmqRetentionSizeInMB != "" {
-			rawRmqRetentionSizeInMB, err := strconv.ParseInt(rawRmqRetentionSizeInMB, 10, 64)
-			if err == nil {
-				atomic.StoreInt64(&RocksmqRetentionSizeInMB, rawRmqRetentionSizeInMB)
-			} else {
-				log.Warn("rocksmq.retentionSizeInMB is invalid, using default value 0")
-			}
+		atomic.StoreInt64(&RocksmqRetentionSizeInMB, rmqRetentionSizeInMB)
+	}
+	cacheCapacity, err := params.Load("rocksmq.cacheCapacity")
+	if err == nil && cacheCapacity != "" {
+		cacheCapacityInt, err := strconv.ParseUint(cacheCapacity, 10, 64)
+		if err != nil {
+			log.Warn("rocksmq.cacheCapacity is invalid", zap.String("cache capacity", cacheCapacity))
+			return err
 		}
-		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
-			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
-		Rmq, finalErr = NewRocksMQ(rocksdbName, nil)
-	})
-	return finalErr
+		RocksDBLRUCacheCapacity = cacheCapacityInt
+	}
+	blockSize, err := params.Load("rocksmq.blockSize")
+	if err == nil && blockSize != "" {
+		blockSizeInt, err := strconv.ParseInt(blockSize, 10, 64)
+		if err != nil {
+			log.Warn("rocksmq.blockSize is invalid", zap.String("block size", blockSize))
+			return err
+		}
+		RocksDBBlockSize = int(blockSizeInt)
+	}
+
+	log.Debug("RMQ init successfully", zap.Any("RocksmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
+		zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB),
+		zap.Any("RocksmqPageSize", RocksmqPageSize),
+		zap.Any("RocksmqCacheSize", RocksDBLRUCacheCapacity),
+		zap.Any("RocksmqBlockSize", RocksDBBlockSize),
+	)
+
+	var fi os.FileInfo
+	fi, err = os.Stat(rocksdbName)
+	if os.IsNotExist(err) {
+		err = os.MkdirAll(rocksdbName, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	} else {
+		if !fi.IsDir() {
+			errMsg := "can't create a directory because there exists a file with the same name"
+			err := errors.New(errMsg)
+			return err
+		}
+	}
+
+	Rmq, err = NewRocksMQ(rocksdbName, nil)
+	return err
 }
 
 // CloseRocksMQ is used to close global rocksmq
