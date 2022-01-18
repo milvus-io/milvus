@@ -49,7 +49,13 @@ go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
 go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
-go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast
+
+# TODO: enable ut on mac os
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Linux*)     go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast;;
+    *)          echo "Skip querynode unit tests, unsupported os:${unameOut}";
+esac
 
 go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
 go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast

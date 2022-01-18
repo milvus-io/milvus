@@ -342,29 +342,12 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	defer lct.reduceRetryCount()
 	collectionID := lct.CollectionID
 
-	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_ShowPartitions,
-		},
-		CollectionID: collectionID,
-	}
-	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-	defer cancel2()
-	showPartitionResponse, err := lct.rootCoord.ShowPartitions(ctx2, showPartitionRequest)
+	toLoadPartitionIDs, err := showPartitions(ctx, collectionID, lct.rootCoord)
 	if err != nil {
 		log.Error("loadCollectionTask: showPartition failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
 		lct.setResultInfo(err)
 		return err
 	}
-
-	if showPartitionResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(showPartitionResponse.Status.Reason)
-		log.Error("loadCollectionTask: showPartition failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
-		lct.setResultInfo(err)
-		return err
-	}
-
-	toLoadPartitionIDs := showPartitionResponse.PartitionIDs
 	log.Debug("loadCollectionTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toLoadPartitionIDs), zap.Int64("msgID", lct.Base.MsgID))
 
 	loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
@@ -555,6 +538,19 @@ func (rct *releaseCollectionTask) timestamp() Timestamp {
 	return rct.Base.Timestamp
 }
 
+func (rct *releaseCollectionTask) updateTaskProcess() {
+	collectionID := rct.CollectionID
+	parentTask := rct.getParentTask()
+	if parentTask == nil {
+		// all queryNodes have successfully released the data, clean up collectionMeta
+		err := rct.meta.releaseCollection(collectionID)
+		if err != nil {
+			log.Error("releaseCollectionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
+			panic(err)
+		}
+	}
+}
+
 func (rct *releaseCollectionTask) preExecute(context.Context) error {
 	collectionID := rct.CollectionID
 	rct.setResultInfo(nil)
@@ -565,7 +561,8 @@ func (rct *releaseCollectionTask) preExecute(context.Context) error {
 }
 
 func (rct *releaseCollectionTask) execute(ctx context.Context) error {
-	defer rct.reduceRetryCount()
+	// cancel the maximum number of retries for queryNode cleaning data until the data is completely freed
+	// defer rct.reduceRetryCount()
 	collectionID := rct.CollectionID
 
 	// if nodeID ==0, it means that the release request has not been assigned to the specified query node
@@ -610,20 +607,12 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 			rct.addChildTask(releaseCollectionTask)
 			log.Debug("releaseCollectionTask: add a releaseCollectionTask to releaseCollectionTask's childTask", zap.Any("task", releaseCollectionTask))
 		}
-
-		//TODO::xige-16 delete collection info from should wait all internal release task execute done
-		// if some query nodes release collection failed, the collection data will can't be removed from query node
-		err = rct.meta.releaseCollection(collectionID)
-		if err != nil {
-			log.Error("releaseCollectionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
-			rct.setResultInfo(err)
-			return err
-		}
 	} else {
 		err := rct.cluster.releaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
 		if err != nil {
-			log.Error("releaseCollectionTask: release collection end, node occur error", zap.Int64("collectionID", collectionID), zap.Int64("nodeID", rct.NodeID))
-			rct.setResultInfo(err)
+			log.Warn("releaseCollectionTask: release collection end, node occur error", zap.Int64("collectionID", collectionID), zap.Int64("nodeID", rct.NodeID))
+			// after release failed, the task will always redo
+			// if the query node happens to be down, the node release was judged to have succeeded
 			return err
 		}
 	}
@@ -928,6 +917,21 @@ func (rpt *releasePartitionTask) timestamp() Timestamp {
 	return rpt.Base.Timestamp
 }
 
+func (rpt *releasePartitionTask) updateTaskProcess() {
+	collectionID := rpt.CollectionID
+	partitionIDs := rpt.PartitionIDs
+	parentTask := rpt.getParentTask()
+	if parentTask == nil {
+		// all queryNodes have successfully released the data, clean up collectionMeta
+		err := rpt.meta.releasePartitions(collectionID, partitionIDs)
+		if err != nil {
+			log.Error("releasePartitionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rpt.Base.MsgID), zap.Error(err))
+			panic(err)
+		}
+
+	}
+}
+
 func (rpt *releasePartitionTask) preExecute(context.Context) error {
 	collectionID := rpt.CollectionID
 	partitionIDs := rpt.PartitionIDs
@@ -940,7 +944,8 @@ func (rpt *releasePartitionTask) preExecute(context.Context) error {
 }
 
 func (rpt *releasePartitionTask) execute(ctx context.Context) error {
-	defer rpt.reduceRetryCount()
+	// cancel the maximum number of retries for queryNode cleaning data until the data is completely freed
+	// defer rpt.reduceRetryCount()
 	collectionID := rpt.CollectionID
 	partitionIDs := rpt.PartitionIDs
 
@@ -961,20 +966,12 @@ func (rpt *releasePartitionTask) execute(ctx context.Context) error {
 			rpt.addChildTask(releasePartitionTask)
 			log.Debug("releasePartitionTask: add a releasePartitionTask to releasePartitionTask's childTask", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rpt.Base.MsgID))
 		}
-
-		//TODO::xige-16 delete partition info from meta should wait all internal release task execute done
-		// if some query nodes release partitions failed, the partition data will can't be removed from query node
-		err := rpt.meta.releasePartitions(collectionID, partitionIDs)
-		if err != nil {
-			log.Error("releasePartitionTask: release collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", rpt.Base.MsgID), zap.Error(err))
-			rpt.setResultInfo(err)
-			return err
-		}
 	} else {
 		err := rpt.cluster.releasePartitions(ctx, rpt.NodeID, rpt.ReleasePartitionsRequest)
 		if err != nil {
 			log.Warn("ReleasePartitionsTask: release partition end, node occur error", zap.Int64("collectionID", collectionID), zap.String("nodeID", fmt.Sprintln(rpt.NodeID)))
-			rpt.setResultInfo(err)
+			// after release failed, the task will always redo
+			// if the query node happens to be down, the node release was judged to have succeeded
 			return err
 		}
 	}
@@ -1303,6 +1300,15 @@ func (wdt *watchDeltaChannelTask) msgBase() *commonpb.MsgBase {
 
 func (wdt *watchDeltaChannelTask) marshal() ([]byte, error) {
 	return proto.Marshal(wdt.WatchDeltaChannelsRequest)
+}
+
+func (wdt *watchDeltaChannelTask) isValid() bool {
+	online, err := wdt.cluster.isOnline(wdt.NodeID)
+	if err != nil {
+		return false
+	}
+
+	return wdt.ctx != nil && online
 }
 
 func (wdt *watchDeltaChannelTask) msgType() commonpb.MsgType {
@@ -1690,20 +1696,12 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 
 			var toRecoverPartitionIDs []UniqueID
 			if collectionInfo.LoadType == querypb.LoadType_loadCollection {
-				showPartitionRequest := &milvuspb.ShowPartitionsRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_ShowPartitions,
-					},
-					CollectionID: collectionID,
-				}
-				showPartitionResponse, err := lbt.rootCoord.ShowPartitions(ctx, showPartitionRequest)
+				toRecoverPartitionIDs, err = showPartitions(ctx, collectionID, lbt.rootCoord)
 				if err != nil {
+					log.Error("loadBalanceTask: show collection's partitionIDs failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 					lbt.setResultInfo(err)
-					return err
+					panic(err)
 				}
-				//TODO:: queryNode receive dm message according partitionID cache
-				//TODO:: queryNode add partitionID to cache if receive create partition message from dmChannel
-				toRecoverPartitionIDs = showPartitionResponse.PartitionIDs
 			} else {
 				toRecoverPartitionIDs = collectionInfo.PartitionIDs
 			}
@@ -1714,7 +1712,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 				if err != nil {
 					log.Error("loadBalanceTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 					lbt.setResultInfo(err)
-					return err
+					panic(err)
 				}
 
 				for _, segmentBingLog := range binlogs {
@@ -1756,7 +1754,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					if err != nil {
 						log.Error("loadBalanceTask: generateWatchDeltaChannelInfo failed", zap.Int64("collectionID", collectionID), zap.String("channelName", info.ChannelName), zap.Error(err))
 						lbt.setResultInfo(err)
-						return err
+						panic(err)
 					}
 					deltaChannelInfos = append(deltaChannelInfos, deltaChannel)
 					dmChannelInfos = append(dmChannelInfos, info)
@@ -1769,7 +1767,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 			if err != nil {
 				log.Error("loadBalanceTask: set delta channel info meta failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 				lbt.setResultInfo(err)
-				return err
+				panic(err)
 			}
 
 			mergedDmChannel := mergeDmChannelInfo(dmChannelInfos)
@@ -1794,9 +1792,9 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		}
 		internalTasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs)
 		if err != nil {
-			log.Warn("loadBalanceTask: assign child task failed", zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
+			log.Error("loadBalanceTask: assign child task failed", zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
 			lbt.setResultInfo(err)
-			return err
+			panic(err)
 		}
 		for _, internalTask := range internalTasks {
 			lbt.addChildTask(internalTask)
@@ -1962,7 +1960,11 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 	if lbt.getResultInfo().ErrorCode != commonpb.ErrorCode_Success {
 		lbt.clearChildTasks()
 	}
-	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
+
+	// if loadBalanceTask execute failed after query node down, the lbt.getResultInfo().ErrorCode will be set to commonpb.ErrorCode_UnexpectedError
+	// then the queryCoord will panic, and the nodeInfo should not be removed immediately
+	// after queryCoord recovery, the balanceTask will redo
+	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown && lbt.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
 		for _, id := range lbt.SourceNodeIDs {
 			err := lbt.cluster.removeNodeInfo(id)
 			if err != nil {
@@ -2123,6 +2125,28 @@ func getRecoveryInfo(ctx context.Context, dataCoord types.DataCoord, collectionI
 	}
 
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
+}
+
+func showPartitions(ctx context.Context, collectionID UniqueID, rootCoord types.RootCoord) ([]UniqueID, error) {
+	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel2()
+	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ShowPartitions,
+		},
+		CollectionID: collectionID,
+	}
+	showPartitionResponse, err := rootCoord.ShowPartitions(ctx2, showPartitionRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	if showPartitionResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(showPartitionResponse.Status.Reason)
+		return nil, err
+	}
+
+	return showPartitionResponse.PartitionIDs, nil
 }
 
 func mergeDmChannelInfo(infos []*datapb.VchannelInfo) map[string]*datapb.VchannelInfo {

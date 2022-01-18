@@ -113,10 +113,10 @@ func TestVerifyResponse(t *testing.T) {
 
 func Test_getTimetravelReverseTime(t *testing.T) {
 	Params.Init()
-	Params.DataCoordCfg.RetentionDuration = 43200 // 5 days
+	Params.CommonCfg.RetentionDuration = 43200 // 5 days
 
 	tFixed := time.Date(2021, 11, 15, 0, 0, 0, 0, time.Local)
-	tBefore := tFixed.Add(-time.Duration(Params.DataCoordCfg.RetentionDuration) * time.Second)
+	tBefore := tFixed.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
 
 	type args struct {
 		allocator allocator

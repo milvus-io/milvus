@@ -489,11 +489,11 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
         par = collection_w.partitions
         par_name = par[partition_num].name
+        par[partition_num].load()
         # 2. release partition
-        conn = self.connection_wrap.get_connection()[0]
-        conn.release_partitions(collection_w.name, [par_name])
+        par[partition_num].release()
         # 3. Search the released partition
-        log.info("test_search_release_partition: Searching specifying the released partition")
+        log.info("test_search_release_partition: Searching the released partition")
         limit = 10
         collection_w.search(vectors, default_search_field,
                             default_search_params, limit, default_search_exp,
@@ -2694,7 +2694,7 @@ class TestSearchBase:
         assert abs(res[0][0].distance - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(300)
+    # @pytest.mark.timeout(300)
     def test_search_concurrent_multithreads_single_connection(self, connect, args):
         """
         target: test concurrent search with multi processes

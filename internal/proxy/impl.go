@@ -1962,7 +1962,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.ProxyCfg.DefaultPartitionName
+		it.PartitionName = Params.CommonCfg.DefaultPartitionName
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -2136,7 +2136,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			},
 			ResultChannelID: strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 		},
-		resultBuf: make(chan []*internalpb.SearchResults),
+		resultBuf: make(chan []*internalpb.SearchResults, 1),
 		query:     request,
 		chMgr:     node.chMgr,
 		qc:        node.queryCoord,

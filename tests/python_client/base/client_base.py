@@ -64,7 +64,7 @@ class Base:
 
         try:
             """ Drop collection before disconnect """
-            if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
+            if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
                 self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
                                              port=param_info.param_port)
 
@@ -107,7 +107,7 @@ class TestcaseBase(Base):
     def init_collection_wrap(self, name=None, schema=None, shards_num=2, check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
-        if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
+        if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
             self._connect()
         collection_w = ApiCollectionWrapper()
         collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task, check_items=check_items, **kwargs)
@@ -133,7 +133,7 @@ class TestcaseBase(Base):
                                       check_task=check_task, check_items=check_items,
                                       **kwargs)
         return partition_wrap
- 
+
     def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
                                 auto_id=False, dim=ct.default_dim, is_index=False):
@@ -185,7 +185,7 @@ class TestcaseBase(Base):
         :param half: half of nb
         :return: collection wrap and partition wrap
         """
-        conn = self._connect()
+        self._connect()
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
         # insert [0, half) into partition_w
@@ -194,7 +194,8 @@ class TestcaseBase(Base):
         # insert [half, nb) into _default
         df_default = cf.gen_default_dataframe_data(nb=half, start=half)
         collection_w.insert(df_default)
-        conn.flush([collection_w.name])
+        # flush
+        collection_w.num_entities
         collection_w.load(partition_names=[partition_w.name, "_default"])
         return collection_w, partition_w, df_partition, df_default
 

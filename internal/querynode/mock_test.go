@@ -43,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // ---------- unittest util functions ----------
@@ -887,15 +886,11 @@ func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterf
 }
 
 func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
-	kv, err := genEtcdKV()
-	if err != nil {
-		return nil, err
-	}
 	replica, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
 	}
-	h := newHistorical(ctx, replica, kv, tSafeReplica)
+	h := newHistorical(ctx, replica, tSafeReplica)
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1300,10 +1295,7 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node.etcdCli = etcdCli
-	session := &sessionutil.Session{
-		ServerID: 1,
-	}
-	node.session = session
+	node.initSession()
 
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 	node.etcdKV = etcdKV

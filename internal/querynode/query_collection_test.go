@@ -141,7 +141,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	historicalReplica := newCollectionReplica(etcdKV)
 	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
-	historical := newHistorical(context.Background(), historicalReplica, etcdKV, tsReplica)
+	historical := newHistorical(context.Background(), historicalReplica, tsReplica)
 
 	//add a segment to historical data
 	err = historical.replica.addCollection(0, schema)
@@ -177,8 +177,14 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	queryCollection, err := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
 	assert.NoError(t, err)
 
-	producerChannels := []string{"testResultChannel"}
-	queryCollection.queryResultMsgStream.AsProducer(producerChannels)
+	// producerChannels := []string{"testResultChannel"}
+	// queryCollection.queryResultMsgStream.AsProducer(producerChannels)
+	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+	sessionManager.AddSession(&NodeInfo{
+		NodeID:  1,
+		Address: "",
+	})
+	queryCollection.sessionManager = sessionManager
 
 	dim := 2
 	// generate search rawData
@@ -268,6 +274,13 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 		queryChannel := genQueryChannel()
 		queryCollection.queryMsgStream.AsConsumer([]Channel{queryChannel}, defaultSubName)
 		queryCollection.queryMsgStream.Start()
+
+		sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+		sessionManager.AddSession(&NodeInfo{
+			NodeID:  1,
+			Address: "",
+		})
+		queryCollection.sessionManager = sessionManager
 
 		go queryCollection.consumeQuery()
 
@@ -574,6 +587,13 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 		assert.NoError(t, err)
 
+		sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+		sessionManager.AddSession(&NodeInfo{
+			NodeID:  1,
+			Address: "",
+		})
+		queryCollection.sessionManager = sessionManager
+
 		timestamp := Timestamp(1000)
 		err = updateTSafe(queryCollection, timestamp)
 		assert.NoError(t, err)
@@ -590,6 +610,13 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 	t.Run("test doUnsolvedQueryMsg timeout", func(t *testing.T) {
 		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 		assert.NoError(t, err)
+
+		sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+		sessionManager.AddSession(&NodeInfo{
+			NodeID:  1,
+			Address: "",
+		})
+		queryCollection.sessionManager = sessionManager
 
 		timestamp := Timestamp(1000)
 		err = updateTSafe(queryCollection, timestamp)
@@ -612,9 +639,15 @@ func TestQueryCollection_search(t *testing.T) {
 	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 	assert.NoError(t, err)
 
-	queryChannel := genQueryChannel()
-	queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
-	queryCollection.queryResultMsgStream.Start()
+	// queryChannel := genQueryChannel()
+	// queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+	// queryCollection.queryResultMsgStream.Start()
+	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+	sessionManager.AddSession(&NodeInfo{
+		NodeID:  0,
+		Address: "",
+	})
+	queryCollection.sessionManager = sessionManager
 
 	err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
 	assert.NoError(t, err)
@@ -635,9 +668,15 @@ func TestQueryCollection_receive(t *testing.T) {
 	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 	assert.NoError(t, err)
 
-	queryChannel := genQueryChannel()
-	queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
-	queryCollection.queryResultMsgStream.Start()
+	// queryChannel := genQueryChannel()
+	// queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+	// queryCollection.queryResultMsgStream.Start()
+	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+	sessionManager.AddSession(&NodeInfo{
+		NodeID:  0,
+		Address: "",
+	})
+	queryCollection.sessionManager = sessionManager
 
 	vecCM, err := genVectorChunkManager(ctx)
 	assert.NoError(t, err)
@@ -758,9 +797,15 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 		assert.NoError(t, err)
 
-		queryChannel := genQueryChannel()
-		queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
-		queryCollection.queryResultMsgStream.Start()
+		// queryChannel := genQueryChannel()
+		// queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+		// queryCollection.queryResultMsgStream.Start()
+		sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+		sessionManager.AddSession(&NodeInfo{
+			NodeID:  1,
+			Address: "",
+		})
+		queryCollection.sessionManager = sessionManager
 
 		msg, err := genSimpleSearchMsg()
 		assert.NoError(t, err)
@@ -797,9 +842,15 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 		assert.NoError(t, err)
 
-		queryChannel := genQueryChannel()
-		queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
-		queryCollection.queryResultMsgStream.Start()
+		// queryChannel := genQueryChannel()
+		// queryCollection.queryResultMsgStream.AsProducer([]Channel{queryChannel})
+		// queryCollection.queryResultMsgStream.Start()
+		sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+		sessionManager.AddSession(&NodeInfo{
+			NodeID:  1,
+			Address: "",
+		})
+		queryCollection.sessionManager = sessionManager
 
 		msg, err := genSimpleSearchMsg()
 		assert.NoError(t, err)

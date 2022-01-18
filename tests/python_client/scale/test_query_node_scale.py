@@ -12,6 +12,7 @@ from scale import constants
 from pymilvus import Index, connections
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready
+from utils.util_pymilvus import get_latest_tag
 
 prefix = "search_scale"
 nb = 5000
@@ -36,7 +37,8 @@ class TestQueryNodeScale:
         expected: Verify milvus remains healthy and search successfully during scale
         """
         release_name = "scale-query"
-        image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
+        image_tag = get_latest_tag()
+        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,

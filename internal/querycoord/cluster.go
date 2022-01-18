@@ -103,6 +103,7 @@ type queryNodeCluster struct {
 
 	sync.RWMutex
 	clusterMeta      Meta
+	handler          *channelUnsubscribeHandler
 	nodes            map[int64]Node
 	newNodeFn        newQueryNodeFn
 	segmentAllocator SegmentAllocatePolicy
@@ -110,7 +111,7 @@ type queryNodeCluster struct {
 	segSizeEstimator func(request *querypb.LoadSegmentsRequest, dataKV kv.DataKV) (int64, error)
 }
 
-func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn, session *sessionutil.Session) (Cluster, error) {
+func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn, session *sessionutil.Session, handler *channelUnsubscribeHandler) (Cluster, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	nodes := make(map[int64]Node)
 	c := &queryNodeCluster{
@@ -119,6 +120,7 @@ func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdK
 		client:           kv,
 		session:          session,
 		clusterMeta:      clusterMeta,
+		handler:          handler,
 		nodes:            nodes,
 		newNodeFn:        newNodeFn,
 		segmentAllocator: defaultSegAllocatePolicy(),
@@ -546,6 +548,26 @@ func (c *queryNodeCluster) getMetrics(ctx context.Context, in *milvuspb.GetMetri
 	return ret
 }
 
+// setNodeState update queryNode state, which may be offline, disconnect, online
+// when queryCoord restart, it will call setNodeState via the registerNode function
+// when the new queryNode starts, queryCoord calls setNodeState via the registerNode function
+// when the new queryNode down, queryCoord calls setNodeState via the stopNode function
+func (c *queryNodeCluster) setNodeState(nodeID int64, node Node, state nodeState) {
+	// if query node down, should unsubscribe all channel the node has watched
+	// if not unsubscribe channel, may result in pulsar having too many backlogs
+	if state == offline {
+		// 1. find all the search/dmChannel/deltaChannel the node has watched
+		unsubscribeChannelInfo := c.clusterMeta.getWatchedChannelsByNodeID(nodeID)
+
+		// 2.add unsubscribed channels to handler, handler will auto unsubscribe channel
+		if len(unsubscribeChannelInfo.CollectionChannels) != 0 {
+			c.handler.addUnsubscribeChannelInfo(unsubscribeChannelInfo)
+		}
+	}
+
+	node.setState(state)
+}
+
 func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error {
 	c.Lock()
 	defer c.Unlock()
@@ -566,7 +588,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 			log.Debug("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
-		node.setState(state)
+		c.setNodeState(id, node, state)
 		if state < online {
 			go node.start()
 		}
@@ -614,6 +636,7 @@ func (c *queryNodeCluster) stopNode(nodeID int64) {
 
 	if node, ok := c.nodes[nodeID]; ok {
 		node.stop()
+		c.setNodeState(nodeID, node, offline)
 		log.Debug("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
 	}
 }

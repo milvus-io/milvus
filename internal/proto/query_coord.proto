@@ -308,6 +308,16 @@ message CollectionInfo {
   int64 inMemory_percentage = 7;
 }
 
+message UnsubscribeChannels {
+  int64 collectionID = 1;
+  repeated string channels = 2;
+}
+
+message UnsubscribeChannelInfo {
+  int64 nodeID = 1;
+  repeated UnsubscribeChannels collection_channels = 2;
+}
+
 //---- synchronize messages proto between QueryCoord and QueryNode -----
 message SegmentChangeInfo {
   int64 online_nodeID = 1;

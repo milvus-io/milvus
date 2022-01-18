@@ -11,6 +11,7 @@ from scale import constants
 from pymilvus import connections
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready
+from utils.util_pymilvus import get_latest_tag
 
 prefix = "data_scale"
 default_schema = cf.gen_default_collection_schema()
@@ -35,7 +36,9 @@ class TestDataNodeScale:
                   Average dataNode memory usage
         """
         release_name = "scale-data"
-        image = f'{constants.IMAGE_REPOSITORY}:{constants.IMAGE_TAG}'
+        image_tag = get_latest_tag()
+        image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
+
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,

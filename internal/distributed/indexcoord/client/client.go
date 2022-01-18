@@ -103,6 +103,7 @@ func (c *Client) getIndexCoordAddr() (string, error) {
 	return ms.Address, nil
 }
 
+// newGrpcClient create a new grpc client of IndexCoord.
 func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 	return indexpb.NewIndexCoordClient(cc)
 }

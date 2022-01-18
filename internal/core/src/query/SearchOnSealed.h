@@ -33,6 +33,7 @@ SearchOnSealed(const Schema& schema,
                const void* query_data,
                int64_t num_queries,
                const faiss::BitsetView& view,
-               SearchResult& result);
+               SearchResult& result,
+               int64_t segment_id);
 
 }  // namespace milvus::query

@@ -520,7 +520,14 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(releaseCollectionTask)
 	assert.Nil(t, err)
 
-	waitTaskFinalState(releaseCollectionTask, taskFailed)
+	for {
+		if releaseCollectionTask.getState() == taskDone {
+			break
+		}
+	}
+	node.releaseCollection = returnSuccessResult
+
+	waitTaskFinalState(releaseCollectionTask, taskExpired)
 
 	node.stop()
 	queryCoord.Stop()
@@ -1298,4 +1305,16 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestShowPartitions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	rootCoord := newRootCoordMock()
+	rootCoord.createCollection(defaultCollectionID)
+	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
+
+	partitionIDs, err := showPartitions(ctx, defaultCollectionID, rootCoord)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(partitionIDs))
+	cancel()
 }

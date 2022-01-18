@@ -51,6 +51,7 @@ function error_exit {
     then
         mkdir logs
     fi
+    docker-compose ps
     docker-compose logs > ./logs/${Deploy_Dir}-${Task}-${current}.log 2>&1
     echo "log saved to $(pwd)/logs/${Deploy_Dir}-${Task}-${current}.log"
     popd
@@ -187,9 +188,11 @@ fi
 cat docker-compose.yml|grep milvusdb
 docker-compose up -d
 check_healthy
-# sleep 60s # Todo use `curl http://localhost:9091/healthz` to check health
 docker-compose ps
 popd
+
+# wait for milvus ready
+sleep 120
 
 # test for second deployment
 printf "test for second deployment\n"

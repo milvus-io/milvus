@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime/debug"
-	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/mqclient"
 )
 
@@ -158,7 +158,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 		return err
 	}
 	consumeChannels := []string{r.req.QueryChannel}
-	consumeSubName := Params.QueryNodeCfg.MsgChannelSubName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
+	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 
 	if Params.QueryNodeCfg.SkipQueryChannelRecovery {
 		log.Debug("Skip query channel seek back ", zap.Strings("channels", consumeChannels),
@@ -182,9 +182,9 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	}
 
 	// add result channel
-	producerChannels := []string{r.req.QueryResultChannel}
-	sc.queryResultMsgStream.AsProducer(producerChannels)
-	log.Debug("QueryNode AsProducer", zap.Strings("channels", producerChannels))
+	// producerChannels := []string{r.req.QueryResultChannel}
+	// sc.queryResultMsgStream.AsProducer(producerChannels)
+	// log.Debug("QueryNode AsProducer", zap.Strings("channels", producerChannels))
 
 	// init global sealed segments
 	for _, segment := range r.req.GlobalSealedSegments {
@@ -310,12 +310,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	}
 	log.Debug("watchDMChannel, init replica done", zap.Int64("collectionID", collectionID))
 
-	// get subscription name
-	getUniqueSubName := func() string {
-		prefixName := Params.QueryNodeCfg.MsgChannelSubName
-		return prefixName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
-	}
-	consumeSubName := getUniqueSubName()
+	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 
 	// group channels by to seeking or consuming
 	toSeekChannels := make([]*internalpb.MsgPosition, 0)
@@ -574,12 +569,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	sCol.addVDeltaChannels(vDeltaChannels)
 	sCol.addPDeltaChannels(pDeltaChannels)
 
-	// get subscription name
-	getUniqueSubName := func() string {
-		prefixName := Params.QueryNodeCfg.MsgChannelSubName
-		return prefixName + "-" + strconv.FormatInt(collectionID, 10) + "-" + strconv.Itoa(rand.Int())
-	}
-	consumeSubName := getUniqueSubName()
+	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 
 	// group channels by to seeking or consuming
 	toSubChannels := make([]Channel, 0)
@@ -791,7 +781,6 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release collection failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
-	r.node.historical.removeGlobalSegmentIDsByCollectionID(r.req.CollectionID)
 
 	debug.FreeOSMemory()
 

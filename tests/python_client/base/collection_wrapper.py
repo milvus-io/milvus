@@ -1,4 +1,5 @@
 import sys
+import time
 
 from pymilvus import Collection
 
@@ -6,6 +7,7 @@ sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
 from utils.util_log import test_log as log
+from pymilvus.orm.types import CONSISTENCY_STRONG
 
 TIMEOUT = 20
 
@@ -17,8 +19,10 @@ TIMEOUT = 20
 class ApiCollectionWrapper:
     collection = None
 
-    def init_collection(self, name, schema=None, using="default", shards_num=2, check_task=None, check_items=None,
-                        **kwargs):
+    def init_collection(self, name, schema=None, using="default", shards_num=2, check_task=None, check_items=None, **kwargs):
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_STRONG)
+        kwargs.update({"consistency_level": consistency_level})
+
         """ In order to distinguish the same name of collection """
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([Collection, name, schema, using, shards_num], **kwargs)
@@ -120,6 +124,7 @@ class ApiCollectionWrapper:
 
     def query(self, expr, output_fields=None, partition_names=None, timeout=None, check_task=None, check_items=None,
               **kwargs):
+        # time.sleep(5)
         timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name

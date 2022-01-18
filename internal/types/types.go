@@ -284,10 +284,10 @@ type IndexNode interface {
 type IndexNodeComponent interface {
 	IndexNode
 
-	// SetEtcdClient set etcd client for QueryCoord
+	// SetEtcdClient set etcd client for IndexNodeComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// UpdateStateCode updates state code for QueryCoord
+	// UpdateStateCode updates state code for IndexNodeComponent
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 }
@@ -647,6 +647,9 @@ type Proxy interface {
 	//
 	// error is returned only when some communication issue occurs.
 	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
+
+	SendSearchResult(ctx context.Context, req *internalpb.SearchResults) (*commonpb.Status, error)
+	SendRetrieveResult(ctx context.Context, req *internalpb.RetrieveResults) (*commonpb.Status, error)
 }
 
 // ProxyComponent defines the interface of proxy component.

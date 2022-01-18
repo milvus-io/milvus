@@ -24,10 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -38,83 +35,24 @@ type historical struct {
 
 	replica      ReplicaInterface
 	tSafeReplica TSafeReplicaInterface
-
-	mu                   sync.Mutex // guards globalSealedSegments
-	globalSealedSegments map[UniqueID]*querypb.SegmentInfo
-
-	etcdKV *etcdkv.EtcdKV
 }
 
 // newHistorical returns a new historical
 func newHistorical(ctx context.Context,
 	replica ReplicaInterface,
-	etcdKV *etcdkv.EtcdKV,
 	tSafeReplica TSafeReplicaInterface) *historical {
 
 	return &historical{
-		ctx:                  ctx,
-		replica:              replica,
-		globalSealedSegments: make(map[UniqueID]*querypb.SegmentInfo),
-		etcdKV:               etcdKV,
-		tSafeReplica:         tSafeReplica,
+		ctx:          ctx,
+		replica:      replica,
+		tSafeReplica: tSafeReplica,
 	}
-}
-
-func (h *historical) start() {
 }
 
 // close would release all resources in historical
 func (h *historical) close() {
 	// free collectionReplica
 	h.replica.freeAll()
-}
-
-func (h *historical) getGlobalSegmentIDsByCollectionID(collectionID UniqueID) []UniqueID {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	resIDs := make([]UniqueID, 0)
-	for _, v := range h.globalSealedSegments {
-		if v.CollectionID == collectionID {
-			resIDs = append(resIDs, v.SegmentID)
-		}
-	}
-	return resIDs
-}
-
-func (h *historical) getGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) []UniqueID {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	resIDs := make([]UniqueID, 0)
-	for _, v := range h.globalSealedSegments {
-		for _, partitionID := range partitionIDs {
-			if v.PartitionID == partitionID {
-				resIDs = append(resIDs, v.SegmentID)
-			}
-		}
-	}
-	return resIDs
-}
-
-func (h *historical) removeGlobalSegmentIDsByCollectionID(collectionID UniqueID) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, v := range h.globalSealedSegments {
-		if v.CollectionID == collectionID {
-			delete(h.globalSealedSegments, v.SegmentID)
-		}
-	}
-}
-
-func (h *historical) removeGlobalSegmentIDsByPartitionIds(partitionIDs []UniqueID) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, v := range h.globalSealedSegments {
-		for _, partitionID := range partitionIDs {
-			if v.PartitionID == partitionID {
-				delete(h.globalSealedSegments, v.SegmentID)
-			}
-		}
-	}
 }
 
 // // retrieve will retrieve from the segments in historical

@@ -37,6 +37,7 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
+// createSearchPlan returns a new SearchPlan and error
 func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))

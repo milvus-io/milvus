@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -93,14 +94,14 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 
 func (s *Server) startGrpc() error {
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.Listener)
+	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	return err
 }
 
 // startGrpcLoop starts the grep loop of datanode component.
-func (s *Server) startGrpcLoop(listener net.Listener) {
+func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.wg.Done()
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -110,6 +111,20 @@ func (s *Server) startGrpcLoop(listener net.Listener) {
 	var kasp = keepalive.ServerParameters{
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
+	}
+	var lis net.Listener
+
+	err := retry.Do(s.ctx, func() error {
+		addr := ":" + strconv.Itoa(grpcPort)
+		var err error
+		lis, err = net.Listen("tcp", addr)
+		return err
+	}, retry.Attempts(10))
+
+	if err != nil {
+		log.Error("DataNode GrpcServer:failed to listen", zap.Error(err))
+		s.grpcErrChan <- err
+		return
 	}
 
 	opts := trace.GetInterceptorOpts()
@@ -126,7 +141,7 @@ func (s *Server) startGrpcLoop(listener net.Listener) {
 	defer cancel()
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(listener); err != nil {
+	if err := s.grpcServer.Serve(lis); err != nil {
 		log.Warn("DataNode Start Grpc Failed!")
 		s.grpcErrChan <- err
 	}
@@ -202,7 +217,10 @@ func (s *Server) Stop() error {
 func (s *Server) init() error {
 	ctx := context.Background()
 	Params.InitOnce(typeutil.DataNodeRole)
-
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+		log.Warn("DataNode get available port when init", zap.Int("Port", Params.Port))
+	}
 	dn.Params.InitOnce()
 	dn.Params.DataNodeCfg.Port = Params.Port
 	dn.Params.DataNodeCfg.IP = Params.IP

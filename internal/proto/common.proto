@@ -141,6 +141,7 @@ enum MsgType {
     SegmentInfo = 600;
     SystemInfo = 601;
     GetRecoveryInfo = 602;
+    GetSegmentState = 603;
 
     /* SYSTEM CONTROL */
     TimeTick = 1200;

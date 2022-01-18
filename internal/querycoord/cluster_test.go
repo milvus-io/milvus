@@ -424,12 +424,21 @@ func TestReloadClusterFromKV(t *testing.T) {
 
 	t.Run("Test LoadOfflineNodes", func(t *testing.T) {
 		refreshParams()
+		ctx, cancel := context.WithCancel(context.Background())
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
 		clusterSession := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, etcdCli)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
+		factory := msgstream.NewPmsFactory()
+		handler, err := newChannelUnsubscribeHandler(ctx, kv, factory)
+		assert.Nil(t, err)
+		meta, err := newMeta(ctx, kv, factory, nil)
+		assert.Nil(t, err)
+
 		cluster := &queryNodeCluster{
 			client:           kv,
+			handler:          handler,
+			clusterMeta:      meta,
 			nodes:            make(map[int64]Node),
 			newNodeFn:        newQueryNodeTest,
 			session:          clusterSession,
@@ -454,6 +463,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 
 		err = removeAllSession()
 		assert.Nil(t, err)
+		cancel()
 	})
 }
 
@@ -480,11 +490,15 @@ func TestGrpcRequest(t *testing.T) {
 	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
 	assert.Nil(t, err)
 
+	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	assert.Nil(t, err)
+
 	cluster := &queryNodeCluster{
 		ctx:              baseCtx,
 		cancel:           cancel,
 		client:           kv,
 		clusterMeta:      meta,
+		handler:          handler,
 		nodes:            make(map[int64]Node),
 		newNodeFn:        newQueryNodeTest,
 		session:          clusterSession,
@@ -685,4 +699,72 @@ func TestEstimateSegmentSize(t *testing.T) {
 	size, err = estimateSegmentsSize(loadReq, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(2048), size)
+}
+
+func TestSetNodeState(t *testing.T) {
+	refreshParams()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, etcdCli)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
+	clusterSession.Register()
+	factory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"PulsarAddress":  Params.PulsarCfg.Address,
+		"ReceiveBufSize": 1024,
+		"PulsarBufSize":  1024}
+	err = factory.SetParams(m)
+	assert.Nil(t, err)
+	idAllocator := func() (UniqueID, error) {
+		return 0, nil
+	}
+	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
+	assert.Nil(t, err)
+
+	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	assert.Nil(t, err)
+
+	cluster := &queryNodeCluster{
+		ctx:              baseCtx,
+		cancel:           cancel,
+		client:           kv,
+		clusterMeta:      meta,
+		handler:          handler,
+		nodes:            make(map[int64]Node),
+		newNodeFn:        newQueryNodeTest,
+		session:          clusterSession,
+		segSizeEstimator: segSizeEstimateForTest,
+	}
+
+	node, err := startQueryNodeServer(baseCtx)
+	assert.Nil(t, err)
+	err = cluster.registerNode(baseCtx, node.session, node.queryNodeID, disConnect)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(cluster, node.queryNodeID)
+
+	dmChannelWatchInfo := &querypb.DmChannelWatchInfo{
+		CollectionID: defaultCollectionID,
+		DmChannel:    "test-dmChannel",
+		NodeIDLoaded: node.queryNodeID,
+	}
+	err = meta.setDmChannelInfos([]*querypb.DmChannelWatchInfo{dmChannelWatchInfo})
+	assert.Nil(t, err)
+	deltaChannelInfo := &datapb.VchannelInfo{
+		CollectionID: defaultCollectionID,
+		ChannelName:  "test-deltaChannel",
+	}
+	err = meta.setDeltaChannel(defaultCollectionID, []*datapb.VchannelInfo{deltaChannelInfo})
+	assert.Nil(t, err)
+
+	nodeInfo, err := cluster.getNodeInfoByID(node.queryNodeID)
+	assert.Nil(t, err)
+	cluster.setNodeState(node.queryNodeID, nodeInfo, offline)
+	assert.Equal(t, 1, len(handler.downNodeChan))
+
+	node.stop()
+	removeAllSession()
+	cancel()
 }

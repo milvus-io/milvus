@@ -29,7 +29,7 @@ typedef CProto CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
-NewSegment(CCollection collection, SegmentType seg_type);
+NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -42,7 +42,8 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
-       CSearchResult* result);
+       CSearchResult* result,
+       int64_t segment_id);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);

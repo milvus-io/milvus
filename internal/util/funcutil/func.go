@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-basic/ipv4"
@@ -171,4 +173,30 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 // CheckCtxValid check if the context is valid
 func CheckCtxValid(ctx context.Context) bool {
 	return ctx.Err() != context.DeadlineExceeded && ctx.Err() != context.Canceled
+}
+
+// GenChannelSubName generate subName to watch channel
+func GenChannelSubName(prefix string, collectionID int64, nodeID int64) string {
+	return fmt.Sprintf("%s-%d-%d", prefix, collectionID, nodeID)
+}
+
+// CheckPortAvailable check if a port is available to be listened on
+func CheckPortAvailable(port int) bool {
+	addr := ":" + strconv.Itoa(port)
+	listener, err := net.Listen("tcp", addr)
+	if listener != nil {
+		listener.Close()
+	}
+	return err == nil
+}
+
+// GetAvailablePort return an available port that can be listened on
+func GetAvailablePort() int {
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		panic(err)
+	}
+	defer listener.Close()
+
+	return listener.Addr().(*net.TCPAddr).Port
 }

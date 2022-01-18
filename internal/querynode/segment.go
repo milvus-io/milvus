@@ -94,7 +94,7 @@ type Segment struct {
 	once        sync.Once // guards enableIndex
 	enableIndex bool
 
-	rmMutex          sync.Mutex // guards recentlyModified
+	rmMutex          sync.RWMutex // guards recentlyModified
 	recentlyModified bool
 
 	typeMu      sync.Mutex // guards builtIndex
@@ -143,8 +143,8 @@ func (s *Segment) setRecentlyModified(modify bool) {
 }
 
 func (s *Segment) getRecentlyModified() bool {
-	s.rmMutex.Lock()
-	defer s.rmMutex.Unlock()
+	s.rmMutex.RLock()
+	defer s.rmMutex.RUnlock()
 	return s.recentlyModified
 }
 
@@ -194,9 +194,9 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		log.Warn("illegal segment type when create segment")
 		return nil
 	case segmentTypeSealed:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed)
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(segmentID))
 	case segmentTypeGrowing:
-		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing)
+		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(segmentID))
 	default:
 		log.Warn("illegal segment type when create segment")
 		return nil
@@ -311,7 +311,7 @@ func (s *Segment) search(plan *SearchPlan,
 	cPlaceHolderGroup := cPlaceholderGroups[0]
 
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
-	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult)
+	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult, C.int64_t(s.segmentID))
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}

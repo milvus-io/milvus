@@ -67,7 +67,7 @@ class TestConnectionParams(TestcaseBase):
         self.connection_wrap.connect(alias=alias, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 0, ct.err_msg: cem.AliasType % type(alias)})
 
-    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.skip("get_connection is replaced by has_connection")
     @pytest.mark.parametrize("alias", ct.get_not_string)
     def test_connection_get_alias_param_check(self, alias):
         """
@@ -173,8 +173,8 @@ class TestConnectionOperation(TestcaseBase):
                                             alias2={"host": "192.168.1.1", "port": "123"})
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
-                                            check_items={ct.value_content: None})
+        self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
+                                            check_items={ct.value_content: False})
 
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
@@ -436,7 +436,7 @@ class TestConnectionOperation(TestcaseBase):
         # list all connections and check the response
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING,
-                                                                              ct.Connect_Object_Name)]})
+                                                                              "GrpcHandler")]})
 
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
@@ -458,14 +458,14 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.connect(alias=connect_name, check_task=ct.CheckTasks.ccr)
 
         # get the object of alias
-        res_obj1 = self.connection_wrap.get_connection(alias=connect_name, check_task=ct.CheckTasks.ccr,
+        res_obj1 = self.connection_wrap.has_connection(alias=connect_name, check_task=ct.CheckTasks.ccr,
                                                        check_items={ct.value_content: ct.Connect_Object_Name})[0]
 
         # connect twice with the same params
         self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
 
         # get the object of alias
-        res_obj2 = self.connection_wrap.get_connection(alias=connect_name, check_task=ct.CheckTasks.ccr,
+        res_obj2 = self.connection_wrap.has_connection(alias=connect_name, check_task=ct.CheckTasks.ccr,
                                                        check_items={ct.value_content: ct.Connect_Object_Name})[0]
 
         # check the response of the same alias is equal
@@ -490,12 +490,12 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.connect(alias=connect_name, host=host, port=port, check_task=ct.CheckTasks.ccr)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=connect_name, check_task=ct.CheckTasks.ccr,
+        self.connection_wrap.has_connection(alias=connect_name, check_task=ct.CheckTasks.ccr,
                                             check_items={ct.value_content: ct.Connect_Object_Name})
 
         # list all connections and check the response
-        list_content = [(connect_name, ct.Connect_Object_Name)] if connect_name is DefaultConfig.DEFAULT_USING else \
-            [(DefaultConfig.DEFAULT_USING, None), (connect_name, ct.Connect_Object_Name)]
+        list_content = [(connect_name, "GrpcHandler")] if connect_name is DefaultConfig.DEFAULT_USING else \
+            [(DefaultConfig.DEFAULT_USING, None), (connect_name, "GrpcHandler")]
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: list_content})
 
@@ -558,7 +558,7 @@ class TestConnectionOperation(TestcaseBase):
         method: 1. connect with default alias
                 2. get connection
                 3. disconnect with default alias
-                4. get connection
+                4. has connection
                 5. disconnect again
                 6. list connections and get connection address
         expected: the connection was successfully terminated
@@ -571,15 +571,15 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
+        self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
                                             check_items={ct.value_content: ct.Connect_Object_Name})
 
         # disconnect alias is exist
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
-                                            check_items={ct.value_content: None})
+        self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
+                                            check_items={ct.value_content: False})
 
         # disconnect twice
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
@@ -613,7 +613,7 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.list_connections(check_task=ct.CheckTasks.ccr,
                                               check_items={ct.list_content: [(DefaultConfig.DEFAULT_USING, None),
                                                                              (
-                                                                             test_alias_name, ct.Connect_Object_Name)]})
+                                                                             test_alias_name, "GrpcHandler")]})
 
         # get all addr of alias and check the response
         self.connection_wrap.get_connection_addr(alias=test_alias_name, check_task=ct.CheckTasks.ccr,
@@ -676,8 +676,8 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.remove_connection(alias=connect_name)
 
         # get the object of alias
-        self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
-                                            check_items={ct.value_content: None})
+        self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING, check_task=ct.CheckTasks.ccr,
+                                            check_items={ct.value_content: False})
 
         # list all connections and check the response
         list_content = [] if connect_name == DefaultConfig.DEFAULT_USING else [(DefaultConfig.DEFAULT_USING, None)]
@@ -795,11 +795,8 @@ class TestConnect:
         expected: connected is True
         """
         uri_value = ""
-        if self.local_ip(args):
+        with pytest.raises(Exception) as e:
             milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
-        else:
-            with pytest.raises(Exception) as e:
-                milvus = get_milvus(None, None, uri=uri_value, handler=args["handler"])
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     def test_connect_with_multiprocess(self, args):
