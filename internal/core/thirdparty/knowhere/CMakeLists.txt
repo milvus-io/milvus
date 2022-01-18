@@ -11,36 +11,34 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-if(NOT DEFINED KNOWHERE_VERSION)
-   set(KNOWHERE_VERSION 1.00)
-endif()
-
-if ( DEFINED ENV{KNOWHERE_GIT_URL} )
-    set(KNOWHERE_GIT_URL "$ENV{KNOWHERE_URL}" )
+if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
+    set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
 else ()
-    set(KNOWHERE_GIT_URL "https://github.com/milvus-io/knowhere.git" )
+    set( KNOWHERE_SOURCE_URL
+        "https://github.com/milvus-io/knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
 endif ()
 
 message( STATUS "Building knowhere-${KNOWHERE_VERSION} from source" )
 FetchContent_Declare(
     knowhere
-    GIT_REPOSITORY         ${KNOWHERE_GIT_URL}
-    GIT_TAG                 main
+    URL             ${KNOWHERE_SOURCE_URL}
+    URL_MD5         "6241d0c887abb2c3e22574ff4ff6a893"
     DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
     SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
     BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
     )
 
-set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}")
 FetchContent_GetProperties(knowhere)
 if ( NOT knowhere_POPULATED )
     FetchContent_Populate( knowhere )
     add_subdirectory( ${knowhere_SOURCE_DIR}
-                        ${knowhere_BINARY_DIR}
-                        EXCLUDE_FROM_ALL )
+                      ${knowhere_BINARY_DIR}
+                      EXCLUDE_FROM_ALL )
 endif()
 
-get_target_property( KNOWHERE_INCLUDE_DIR knowhere INCLUDE_DIRECTORIES )
+get_target_property( KNOWHERE_INCLUDE_DIR knowhere INTERFACE_INCLUDE_DIRECTORIES )
+message( STATUS ${KNOWHERE_INCLUDE_DIR} )
+
 get_property( var DIRECTORY "${knowhere_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
-message( STATUS "== Knowhere compile options: ${var}" )
+message( STATUS "knowhere compile options: ${var}" )
 
