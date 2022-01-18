@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9
-	github.com/apache/pulsar-client-go v0.7.0
+	github.com/apache/pulsar-client-go v0.7.1-0.20220112080344-1a8432cfd3aa
 	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/bits-and-blooms/bitset v1.2.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
@@ -32,7 +32,7 @@ require (
 	github.com/shirou/gopsutil v3.21.8+incompatible
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
-	github.com/spf13/viper v1.8.0
+	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.7.0
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
 	github.com/tklauser/go-sysconf v0.3.9 // indirect
