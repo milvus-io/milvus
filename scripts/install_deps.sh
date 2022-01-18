@@ -55,19 +55,19 @@ function install_linux_deps() {
 }
 
 function install_mac_deps() {
+  if [ ! -f ~/.gvm/scripts/gvm ]; then
+     sudo bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
+  fi
+  source ~/.gvm/scripts/gvm
+  gvm install go1.17.2
+  gvm  use  go1.17.2
+
   sudo xcode-select --install  > /dev/null 2>&1
   brew install boost libomp ninja tbb cmake llvm
   brew uninstall grep
   brew install grep
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
-  brew update && brew upgrade && brew cleanup
-
-  if [ ! -f ~/.gvm/scripts/gvm ]; then
-     bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
-  fi
-  source ~/.gvm/scripts/gvm
-  gvm install go1.17.2
-  gvm use go1.17.2
+  brew update && brew upgrade
 }
 
 unameOut="$(uname -s)"
