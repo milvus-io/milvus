@@ -275,6 +275,7 @@ func (s *Server) start() error {
 		log.Error("RootCoord registers service failed", zap.Error(err))
 		return err
 	}
+
 	return nil
 }
 
