@@ -6,7 +6,7 @@ from common import common_func as cf
 from common.common_type import CaseLabel
 from scale import scale_common as sc, constants
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready
+from utils.util_k8s import wait_pods_ready, export_pod_logs
 from utils.util_pymilvus import get_latest_tag
 
 prefix = "proxy_scale"
@@ -56,22 +56,30 @@ class TestProxyScale:
         host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
         # host = "10.98.0.7"
 
-        c_name = cf.gen_unique_str(prefix)
-        self.e2e_milvus_parallel(5, host, c_name)
-        log.info('Milvus test before expand')
+        try:
+            c_name = cf.gen_unique_str(prefix)
+            self.e2e_milvus_parallel(5, host, c_name)
+            log.info('Milvus test before expand')
 
-        # expand proxy replicas from 1 to 5
-        mic.upgrade(release_name, {'spec.components.proxy.replicas': 5}, constants.NAMESPACE)
-        wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
+            # expand proxy replicas from 1 to 5
+            mic.upgrade(release_name, {'spec.components.proxy.replicas': 5}, constants.NAMESPACE)
+            wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
-        self.e2e_milvus_parallel(5, host, c_name)
-        log.info('Milvus test after expand')
+            self.e2e_milvus_parallel(5, host, c_name)
+            log.info('Milvus test after expand')
 
-        # expand proxy replicas from 5 to 2
-        mic.upgrade(release_name, {'spec.components.proxy.replicas': 2}, constants.NAMESPACE)
-        wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
+            # expand proxy replicas from 5 to 2
+            mic.upgrade(release_name, {'spec.components.proxy.replicas': 2}, constants.NAMESPACE)
+            wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
-        self.e2e_milvus_parallel(2, host, c_name)
-        log.info('Milvus test after shrink')
+            self.e2e_milvus_parallel(2, host, c_name)
+            log.info('Milvus test after shrink')
 
-        mic.uninstall(release_name, namespace=constants.NAMESPACE)
+        except Exception as e:
+            raise Exception(str(e))
+
+        finally:
+            label = f"app.kubernetes.io/instance={release_name}"
+            log.info('Start to export milvus pod logs')
+            export_pod_logs(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
+            mic.uninstall(release_name, namespace=constants.NAMESPACE)
