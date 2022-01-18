@@ -69,3 +69,4 @@ services:
 networks:
   default:
     name: milvus_dev
+
