@@ -1033,18 +1033,18 @@ func (c *Core) Init() error {
 
 		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
 		c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.msFactory, chanMap)
-		c.chanTimeTick.addProxy(c.session)
+		c.chanTimeTick.addSession(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 
 		log.Debug("RootCoord, set proxy manager")
 		c.proxyManager = newProxyManager(
 			c.ctx,
 			c.etcdCli,
-			c.chanTimeTick.clearProxy,
+			c.chanTimeTick.clearSessions,
 			c.proxyClientManager.GetProxyClients,
 		)
-		c.proxyManager.AddSession(c.chanTimeTick.addProxy, c.proxyClientManager.AddProxyClient)
-		c.proxyManager.DelSession(c.chanTimeTick.delProxy, c.proxyClientManager.DelProxyClient)
+		c.proxyManager.AddSession(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+		c.proxyManager.DelSession(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 
 		c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 

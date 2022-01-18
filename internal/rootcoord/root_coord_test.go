@@ -756,11 +756,11 @@ func TestRootCoord(t *testing.T) {
 		//assert.True(t, ok)
 		//assert.Greater(t, ddm.Base.Timestamp, uint64(0))
 		core.chanTimeTick.lock.Lock()
-		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
-		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
+		assert.Equal(t, len(core.chanTimeTick.sess2ChanTsMap), 2)
+		pt, ok := core.chanTimeTick.sess2ChanTsMap[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, shardsNum, int32(len(pt.chanTs)))
-		for chanName, ts := range pt.chanTs {
+		assert.Equal(t, shardsNum, int32(len(pt.chanTsMap)))
+		for chanName, ts := range pt.chanTsMap {
 			assert.Contains(t, createMeta.PhysicalChannelNames, chanName)
 			assert.Equal(t, pt.defaultTs, ts)
 		}
@@ -1838,7 +1838,7 @@ func TestRootCoord(t *testing.T) {
 		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
 		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
 		time.Sleep(100 * time.Millisecond)
-		//t.Log(core.chanTimeTick.proxyTimeTick)
+		//t.Log(core.chanTimeTick.sess2ChanTsMap)
 
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1865,7 +1865,7 @@ func TestRootCoord(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		// 2 proxy, 1 rootcoord
-		assert.Equal(t, 3, core.chanTimeTick.getProxyNum())
+		assert.Equal(t, 3, core.chanTimeTick.getSessionNum())
 
 		// add 3 proxy channels
 		assert.Equal(t, 3, core.chanTimeTick.getDmlChannelNum()-numChan)

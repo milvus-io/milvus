@@ -55,7 +55,7 @@ func TestTimetickSync(t *testing.T) {
 		defer wg.Done()
 		ttSync.sendToChannel()
 
-		ttSync.proxyTimeTick[1] = nil
+		ttSync.sess2ChanTsMap[1] = nil
 		ttSync.sendToChannel()
 
 		msg := &internalpb.ChannelTimeTickMsg{
@@ -63,7 +63,7 @@ func TestTimetickSync(t *testing.T) {
 				MsgType: commonpb.MsgType_TimeTick,
 			},
 		}
-		ttSync.proxyTimeTick[1] = newChanTsMsg(msg, 1)
+		ttSync.sess2ChanTsMap[1] = newChanTsMsg(msg, 1)
 		ttSync.sendToChannel()
 	})
 
@@ -97,7 +97,7 @@ func TestTimetickSync(t *testing.T) {
 		msg.Timestamps = append(msg.Timestamps, uint64(2))
 		msg.DefaultTimestamp = uint64(200)
 		cttMsg := newChanTsMsg(msg, 1)
-		ttSync.proxyTimeTick[msg.Base.SourceID] = cttMsg
+		ttSync.sess2ChanTsMap[msg.Base.SourceID] = cttMsg
 
 		ttSync.ddlMinTs = uint64(100)
 		err = ttSync.updateTimeTick(msg, "1")
