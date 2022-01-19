@@ -32,7 +32,7 @@ pipeline {
         string(
             description: 'Image Repository',
             name: 'image_repository',
-            defaultValue: 'milvusdb/milvus-dev'
+            defaultValue: 'harbor.zilliz.cc/dockerhub/milvusdb/milvus-dev'
         )
         string(
             description: 'Image Tag',
@@ -87,6 +87,7 @@ pipeline {
                             }
                             sh "echo ${image_tag_modified}"
                             sh "echo ${params.chaos_type}"
+                            sh "docker pull ${params.image_repository}:${image_tag_modified}"
                             sh "helm repo add milvus https://milvus-io.github.io/milvus-helm"
                             sh "helm repo update"
                             if ("${params.pod_name}" == "standalone"){
@@ -113,6 +114,9 @@ pipeline {
                 }
         }
         stage ('Run e2e test before chaos') {
+            options {
+              timeout(time: 5, unit: 'MINUTES')   // timeout on this stage
+            }            
             steps {
                 container('main') {
                     dir ('tests/python_client/chaos') {
