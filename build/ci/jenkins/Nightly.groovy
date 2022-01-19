@@ -7,7 +7,7 @@ String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 int total_timeout_minutes = 660
 def imageTag=''
-
+def chart_version='2.4.25'
 pipeline {
     triggers {
         cron """${cron_timezone}
@@ -134,6 +134,7 @@ pipeline {
                                                     --set etcd.metrics.enabled=true \
                                                     --set etcd.metrics.podMonitor.enabled=true \
                                                     --set etcd.nodeSelector.disk=fast \
+                                                    --version ${chart_version} \
                                                     --set metrics.serviceMonitor.enabled=true"
                                                     """
                                                 }
