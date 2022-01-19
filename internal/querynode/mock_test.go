@@ -869,10 +869,7 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	}
 	r := newCollectionReplica(kv)
 	schema := genSimpleSegCoreSchema()
-	err = r.addCollection(defaultCollectionID, schema)
-	if err != nil {
-		return nil, err
-	}
+	r.addCollection(defaultCollectionID, schema)
 	err = r.addPartition(defaultCollectionID, defaultPartitionID)
 	return r, err
 }

@@ -270,8 +270,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				}),
 			},
 		}
-		err = loader.historicalReplica.addCollection(defaultCollectionID, schema)
-		assert.NoError(t, err)
+		loader.historicalReplica.addCollection(defaultCollectionID, schema)
 
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{

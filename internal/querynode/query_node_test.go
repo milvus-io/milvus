@@ -147,8 +147,7 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	}
 	collectionMeta := genTestCollectionMeta(collectionID, isBinary)
 
-	var err = node.historical.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.NoError(t, err)
+	node.historical.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
 
 	collection, err := node.historical.replica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
