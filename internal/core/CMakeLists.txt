@@ -241,9 +241,9 @@ add_subdirectory( src )
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
     add_subdirectory(unittest)
-    if (LINUX)
-        add_subdirectory(bench)
-    endif ()
+#    if (LINUX)
+#        add_subdirectory(bench)
+#    endif ()
 endif ()
 
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
@@ -254,6 +254,17 @@ if ( NOT MILVUS_DB_PATH )
 endif ()
 
 set( GPU_ENABLE "false" )
+
+# Install knowhere
+#install(
+#        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/knowhere
+#        DESTINATION include/knowhere
+#        FILES_MATCHING PATTERN "*.h"
+#)
+
+install(FILES ${CMAKE_BINARY_DIR}/thridparty/knowherer/libknowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
+        DESTINATION lib
+        )
 
 # Install segcore
 install(
