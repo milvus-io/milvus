@@ -143,8 +143,6 @@ func TestDataNode(t *testing.T) {
 		err = node1.Start()
 		assert.Nil(t, err)
 		defer func() {
-			// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
-			time.Sleep(200 * time.Millisecond)
 			err := node1.Stop()
 			assert.Nil(t, err)
 		}()
@@ -338,8 +336,6 @@ func TestDataNode(t *testing.T) {
 			if i <= 2 {
 				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName})
 				assert.Nil(t, err)
-				// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
-				time.Sleep(200 * time.Millisecond)
 				vchanNameCh <- test.dmChannelName
 			}
 		}
@@ -413,8 +409,6 @@ func TestWatchChannel(t *testing.T) {
 		exist := node.flowgraphManager.exist(ch)
 		assert.True(t, exist)
 
-		// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
-		time.Sleep(200 * time.Millisecond)
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID))
 		assert.Nil(t, err)
 		//TODO there is not way to sync Release done, use sleep for now
