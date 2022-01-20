@@ -1215,7 +1215,6 @@ func (c *Core) Stop() error {
 // GetComponentStates get states of components
 func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
-	log.Debug("GetComponentStates", zap.String("State Code", internalpb.StateCode_name[int32(code)]))
 
 	nodeID := common.NotRegisteredID
 	if c.session != nil && c.session.Registered() {
@@ -1934,17 +1933,11 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 		}, nil
 	}
 
-	log.Debug("GetMetrics success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("metric_type", metricType), zap.Int64("msgID", in.Base.MsgID))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		ret, err := c.metricsCacheManager.GetSystemInfoMetrics()
 		if err == nil && ret != nil {
 			return ret, nil
 		}
-
-		log.Warn("GetSystemInfoMetrics from cache failed", zap.String("role", typeutil.RootCoordRole),
-			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 
 		systemInfoMetrics, err := c.getSystemInfoMetrics(ctx, in)
 		if err != nil {

@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/logutil"
@@ -641,12 +643,9 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 // GetMetrics returns DataCoord metrics info
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("received get metrics request",
-		zap.Int64("nodeID", Params.DataCoordCfg.NodeID),
-		zap.String("request", req.Request))
-
 	if s.isClosed() {
-		log.Warn("DataCoord.GetMetrics failed",
+		log.Warn("failed to get metrics",
+			zap.String("role", typeutil.DataCoordRole),
 			zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)))
@@ -662,7 +661,8 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("DataCoord.GetMetrics failed to parse metric type",
+		log.Warn("failed to parse metric type",
+			zap.String("role", typeutil.DataCoordRole),
 			zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -676,32 +676,36 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		}, nil
 	}
 
-	log.Debug("DataCoord.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		ret, err := s.metricsCacheManager.GetSystemInfoMetrics()
 		if err == nil && ret != nil {
 			return ret, nil
 		}
-		log.Debug("failed to get system info metrics from cache, recompute instead",
-			zap.Error(err))
 
 		metrics, err := s.getSystemInfoMetrics(ctx, req)
+		if err != nil {
+			log.Warn("failed to get system info metrics",
+				zap.String("role", typeutil.DataCoordRole),
+				zap.Int64("node_id", Params.DataCoordCfg.NodeID),
+				zap.String("req", req.Request),
+				zap.Error(err))
 
-		log.Debug("DataCoord.GetMetrics",
-			zap.Int64("node_id", Params.DataCoordCfg.NodeID),
-			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
-			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
-			zap.Error(err))
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+				Response: "",
+			}, nil
+		}
 
 		s.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
 		return metrics, nil
 	}
 
-	log.Debug("DataCoord.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("failed to get metrics, request metric type is not implemented yet",
+		zap.String("role", typeutil.DataCoordRole),
 		zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))

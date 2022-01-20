@@ -510,7 +510,6 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 // GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -649,14 +648,10 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 }
 
 // GetMetrics return datanode metrics
-// TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("DataNode.GetMetrics",
-		zap.Int64("node_id", Params.DataNodeCfg.NodeID),
-		zap.String("req", req.Request))
-
 	if !node.isHealthy() {
-		log.Warn("DataNode.GetMetrics failed",
+		log.Warn("failed to get metrics",
+			zap.String("role", typeutil.DataNodeRole),
 			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)))
@@ -672,7 +667,8 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("DataNode.GetMetrics failed to parse metric type",
+		log.Warn("failed to parse metric type",
+			zap.String("role", typeutil.DataNodeRole),
 			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -686,23 +682,27 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		}, nil
 	}
 
-	log.Debug("DataNode.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
+		if err != nil {
+			log.Warn("failed to get system info metrics",
+				zap.String("role", typeutil.DataNodeRole),
+				zap.Int64("node_id", Params.DataNodeCfg.NodeID),
+				zap.String("req", req.Request),
+				zap.Error(err))
 
-		log.Debug("DataNode.GetMetrics",
-			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
-			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
-			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
-			zap.Error(err))
-
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+				Response: "",
+			}, nil
+		}
 		return systemInfoMetrics, nil
 	}
 
-	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("failed to get metrics, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))

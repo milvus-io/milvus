@@ -3382,14 +3382,11 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 	}, nil
 }
 
-// TODO(dragondriver): cache the Metrics and set a retention to the cache
+// GetMetrics return all metrics in Milvus cluster.
 func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("Proxy.GetMetrics",
-		zap.Int64("node_id", Params.ProxyCfg.ProxyID),
-		zap.String("req", req.Request))
-
 	if !node.checkHealthy() {
-		log.Warn("Proxy.GetMetrics failed",
+		log.Warn("failed to get metrics",
+			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 			zap.String("req", req.Request),
 			zap.Error(errProxyIsUnhealthy(Params.ProxyCfg.ProxyID)))
@@ -3405,7 +3402,8 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("Proxy.GetMetrics failed to parse metric type",
+		log.Warn("failed to parse metric type",
+			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -3419,13 +3417,11 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		}, nil
 	}
 
-	log.Debug("Proxy.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	msgID := UniqueID(0)
 	msgID, err = node.idAllocator.AllocOne()
 	if err != nil {
-		log.Warn("Proxy.GetMetrics failed to allocate id",
+		log.Warn("failed to allocate id for getting metrics",
+			zap.String("role", typeutil.ProxyRole),
 			zap.Error(err))
 	}
 	req.Base = &commonpb.MsgBase{
@@ -3440,24 +3436,30 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		if err == nil && ret != nil {
 			return ret, nil
 		}
-		log.Debug("failed to get system info metrics from cache, recompute instead",
-			zap.Error(err))
 
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
+		if err != nil {
+			log.Warn("failed to get system info metrics",
+				zap.String("role", typeutil.ProxyRole),
+				zap.Int64("node_id", Params.ProxyCfg.ProxyID),
+				zap.String("req", req.Request),
+				zap.Error(errProxyIsUnhealthy(Params.ProxyCfg.ProxyID)))
 
-		log.Debug("Proxy.GetMetrics",
-			zap.Int64("node_id", Params.ProxyCfg.ProxyID),
-			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
-			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
-			zap.Error(err))
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    msgProxyIsUnhealthy(Params.ProxyCfg.ProxyID),
+				},
+				Response: "",
+			}, nil
+		}
 
 		node.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
-
 		return metrics, nil
 	}
 
-	log.Debug("Proxy.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("failed to get metrics, request metric type is not implemented yet",
+		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("node_id", Params.ProxyCfg.ProxyID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))

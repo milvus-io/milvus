@@ -75,13 +75,12 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 		if dNode.replica.getSegmentNum() != 0 {
 			log.Debug("delete in historical replica",
-				zap.Any("collectionID", delMsg.CollectionID),
-				zap.Any("collectionName", delMsg.CollectionName),
-				zap.Any("pks", delMsg.PrimaryKeys),
-				zap.Any("timestamp", delMsg.Timestamps),
-				zap.Any("timestampBegin", delMsg.BeginTs()),
-				zap.Any("timestampEnd", delMsg.EndTs()),
-			)
+				zap.Int64("collectionID", delMsg.CollectionID),
+				zap.String("collectionName", delMsg.CollectionName),
+				zap.Int("len(pks)", len(delMsg.PrimaryKeys)),
+				zap.Int("len(timestamps)", len(delMsg.Timestamps)),
+				zap.Uint64("timestampBegin", delMsg.BeginTs()),
+				zap.Uint64("timestampEnd", delMsg.EndTs()))
 			processDeleteMessages(dNode.replica, delMsg, delData)
 		}
 	}

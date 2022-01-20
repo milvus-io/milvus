@@ -34,7 +34,6 @@ import (
 
 // GetComponentStates returns information about whether the node is healthy
 func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("Get QueryNode component states")
 	stats := &internalpb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -59,7 +58,6 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.Comp
 		StateCode: code,
 	}
 	stats.State = info
-	log.Debug("Get QueryNode component state done", zap.Any("stateCode", info.StateCode))
 	return stats, nil
 }
 
@@ -537,10 +535,10 @@ func (node *QueryNode) isHealthy() bool {
 }
 
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
-// TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
-		log.Warn("QueryNode.GetMetrics failed",
+		log.Warn("failed to get metrics",
+			zap.String("role", typeutil.QueryNodeRole),
 			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 			zap.String("req", req.Request),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID)))
@@ -556,7 +554,8 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("QueryNode.GetMetrics failed to parse metric type",
+		log.Warn("failed to parse metric type",
+			zap.String("role", typeutil.QueryNodeRole),
 			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -573,17 +572,26 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
-			log.Warn("QueryNode.GetMetrics failed",
+			log.Warn("failed to get system info metrics",
+				zap.String("role", typeutil.QueryNodeRole),
 				zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 				zap.String("req", req.Request),
-				zap.String("metric_type", metricType),
-				zap.Error(err))
+				zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID)))
+
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID),
+				},
+				Response: "",
+			}, nil
 		}
 
 		return metrics, nil
 	}
 
-	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("failed to get metrics, request metric type is not implemented yet",
+		zap.String("role", typeutil.QueryNodeRole),
 		zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))

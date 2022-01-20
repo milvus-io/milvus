@@ -888,11 +888,6 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 
 // GetMetrics returns all the queryCoord's metrics
 func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("getMetricsRequest received",
-		zap.String("role", typeutil.QueryCoordRole),
-		zap.String("req", req.Request),
-		zap.Int64("msgID", req.Base.MsgID))
-
 	getMetricsResponse := &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -917,23 +912,11 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		return getMetricsResponse, nil
 	}
 
-	log.Debug("getMetrics",
-		zap.String("role", typeutil.QueryCoordRole),
-		zap.Int64("msgID", req.Base.MsgID),
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		ret, err := qc.metricsCacheManager.GetSystemInfoMetrics()
 		if err == nil && ret != nil {
-			log.Debug("getMetrics completed",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("msgID", req.Base.MsgID))
 			return ret, nil
 		}
-
-		log.Debug("failed to get system info metrics from cache, recompute instead",
-			zap.String("role", typeutil.QueryCoordRole),
-			zap.Int64("msgID", req.Base.MsgID))
 
 		metrics, err := getSystemInfoMetrics(ctx, req, qc)
 		if err != nil {
@@ -948,10 +931,6 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		// get metric success, the set the status.ErrorCode to success
 		getMetricsResponse.Response = metrics
 		qc.metricsCacheManager.UpdateSystemInfoMetrics(getMetricsResponse)
-		log.Debug("getMetrics completed",
-			zap.String("role", typeutil.QueryCoordRole),
-			zap.String("req", req.Request),
-			zap.Int64("msgID", req.Base.MsgID))
 		getMetricsResponse.Status.ErrorCode = commonpb.ErrorCode_Success
 		return getMetricsResponse, nil
 	}

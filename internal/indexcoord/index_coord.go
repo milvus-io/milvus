@@ -327,8 +327,6 @@ func (i *IndexCoord) isHealthy() bool {
 
 // GetComponentStates gets the component states of IndexCoord.
 func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("get IndexCoord component states ...")
-
 	nodeID := common.NotRegisteredID
 	if i.session != nil && i.session.Registered() {
 		nodeID = i.session.ServerID
@@ -347,7 +345,6 @@ func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.Compon
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-	log.Debug("IndexCoord GetComponentStates", zap.Any("IndexCoord component state", stateInfo))
 	return ret, nil
 }
 
@@ -595,12 +592,9 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 
 // GetMetrics gets the metrics info of IndexCoord.
 func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("IndexCoord.GetMetrics",
-		zap.Int64("node id", i.session.ServerID),
-		zap.String("req", req.Request))
-
 	if !i.isHealthy() {
-		log.Warn("IndexCoord.GetMetrics failed",
+		log.Warn("failed to get metrics",
+			zap.String("role", typeutil.IndexCoordRole),
 			zap.Int64("node id", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.Error(errIndexCoordIsUnhealthy(i.session.ServerID)))
@@ -616,7 +610,8 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Error("IndexCoord.GetMetrics failed to parse metric type",
+		log.Warn("failed to parse metric type",
+			zap.String("role", typeutil.IndexCoordRole),
 			zap.Int64("node id", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -630,32 +625,36 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		}, nil
 	}
 
-	log.Debug("IndexCoord.GetMetrics",
-		zap.String("metric type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		ret, err := i.metricsCacheManager.GetSystemInfoMetrics()
 		if err == nil && ret != nil {
 			return ret, nil
 		}
-		log.Debug("failed to get system info metrics from cache, recompute instead",
-			zap.Error(err))
 
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
+		if err != nil {
+			log.Warn("failed to get system info metrics",
+				zap.String("role", typeutil.IndexCoordRole),
+				zap.Int64("node id", i.session.ServerID),
+				zap.String("req", req.Request),
+				zap.Error(err))
 
-		log.Debug("IndexCoord.GetMetrics",
-			zap.Int64("node id", i.session.ServerID),
-			zap.String("req", req.Request),
-			zap.String("metric type", metricType),
-			zap.String("metrics", metrics.Response), // TODO(dragondriver): necessary? may be very large
-			zap.Error(err))
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+				Response: "",
+			}, nil
+		}
 
 		i.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
 		return metrics, nil
 	}
 
-	log.Debug("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("failed to get metrics, request metric type is not implemented yet",
+		zap.String("role", typeutil.IndexCoordRole),
 		zap.Int64("node id", i.session.ServerID),
 		zap.String("req", req.Request),
 		zap.String("metric type", metricType))

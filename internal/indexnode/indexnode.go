@@ -310,7 +310,6 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 
 // GetComponentStates gets the component states of IndexNode.
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("get IndexNode components states ...")
 	nodeID := common.NotRegisteredID
 	if i.session != nil && i.session.Registered() {
 		nodeID = i.session.ServerID
@@ -329,11 +328,6 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-
-	log.Debug("IndexNode Component states",
-		zap.Any("State", ret.State),
-		zap.Any("Status", ret.Status),
-		zap.Any("SubcomponentStates", ret.SubcomponentStates))
 	return ret, nil
 }
 
@@ -359,10 +353,10 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 }
 
 // GetMetrics gets the metrics info of IndexNode.
-// TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !i.isHealthy() {
-		log.Warn("IndexNode.GetMetrics failed",
+		log.Warn("failed to get metrics",
+			zap.String("role", typeutil.IndexNodeRole),
 			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.NodeID)))
@@ -378,7 +372,8 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("IndexNode.GetMetrics failed to parse metric type",
+		log.Warn("failed to parse metric type",
+			zap.String("role", typeutil.IndexNodeRole),
 			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -394,17 +389,26 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
+		if err != nil {
+			log.Warn("failed to get system info metrics",
+				zap.String("role", typeutil.IndexNodeRole),
+				zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
+				zap.String("req", req.Request),
+				zap.Error(err))
 
-		log.Debug("IndexNode.GetMetrics",
-			zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
-			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
-			zap.Error(err))
-
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+				Response: "",
+			}, nil
+		}
 		return metrics, nil
 	}
 
-	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("failed to get metrics, request metric type is not implemented yet",
+		zap.String("role", typeutil.IndexNodeRole),
 		zap.Int64("node_id", Params.IndexNodeCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
