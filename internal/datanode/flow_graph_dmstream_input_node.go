@@ -44,7 +44,7 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 	//  is virtual channel name, so we need to convert vchannel name into pchannel neme here.
 	pchannelName := rootcoord.ToPhysicalChannel(dmNodeConfig.vChannelName)
 	insertStream.AsConsumer([]string{pchannelName}, consumeSubName)
-	log.Debug("datanode AsConsumer", zap.String("physical channel", pchannelName), zap.String("subName", consumeSubName), zap.Int64("collection ID", dmNodeConfig.collectionID))
+	log.Debug("datanode AsConsumer", zap.String("physical channel", pchannelName), zap.String("subName", consumeSubName), zap.Int64("collection ID", dmNodeConfig.collectionID), zap.Any("seekPos", seekPos))
 
 	if seekPos != nil {
 		seekPos.ChannelName = pchannelName

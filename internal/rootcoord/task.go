@@ -227,6 +227,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 				Data: ids[pchan],
 			})
 		}
+		log.Debug("create collection generated start positions", zap.Int64("collection id", collID), zap.String("collection name", t.Req.CollectionName), zap.Any("startPos", collInfo.StartPositions))
 
 		// update meta table after send dd operation
 		if err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr); err != nil {
