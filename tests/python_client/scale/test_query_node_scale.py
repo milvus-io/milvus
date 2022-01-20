@@ -11,7 +11,7 @@ from common import common_type as ct
 from scale import constants
 from pymilvus import Index, connections
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, export_pod_logs
+from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
 
 prefix = "search_scale"
@@ -128,5 +128,5 @@ class TestQueryNodeScale:
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
             log.info('Start to export milvus pod logs')
-            export_pod_logs(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
+            read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)

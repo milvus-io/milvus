@@ -10,7 +10,7 @@ from customize.milvus_operator import MilvusOperator
 from scale import constants
 from common import common_func as cf
 from common import common_type as ct
-from utils.util_k8s import export_pod_logs
+from utils.util_k8s import read_pod_log
 from utils.util_log import test_log as log
 from utils.util_pymilvus import get_latest_tag
 
@@ -100,7 +100,7 @@ class TestIndexNodeScale:
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
             log.info('Start to export milvus pod logs')
-            export_pod_logs(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
+            read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -181,5 +181,5 @@ class TestIndexNodeScale:
         finally:
             label = f"app.kubernetes.io/instance={release_name}"
             log.info('Start to export milvus pod logs')
-            export_pod_logs(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
+            read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
