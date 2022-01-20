@@ -42,7 +42,9 @@ add_subdirectory( knowhere )
 
 # ****************************** Thirdparty googletest ***************************************
 if ( MILVUS_BUILD_TESTS AND LINUX )
-        add_subdirectory( profiler )
+    add_subdirectory( gtest )
+    add_subdirectory( google_benchmark )
+    add_subdirectory( profiler )
 endif()
 
 
