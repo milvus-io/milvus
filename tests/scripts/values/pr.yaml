@@ -69,6 +69,10 @@ dataNode:
       cpu: "1.2"
       memory: "1.5Gi"
 pulsar:
+  configData:
+    PULSAR_LOG_LEVEL: "debug"
+    PULSAR_LOG_ROOT_LEVEL: "debug"
+    PULSAR_EXTRA_OPTS: "-Dpulsar.log.root.level=debug"
   proxy:
     resources:
       requests:
@@ -86,6 +90,10 @@ pulsar:
         memory: "512Mi"
         cpu: "0.3"
   broker:
+    configData:
+      PULSAR_LOG_LEVEL: "debug"
+      PULSAR_LOG_ROOT_LEVEL: "debug"
+      PULSAR_EXTRA_OPTS: "-Dpulsar.log.root.level=debug"
     resources:
       requests:
         cpu: "1.5"
@@ -94,6 +102,10 @@ pulsar:
         cpu: "1.5"
         memory: "8Gi"
   bookkeeper:
+    configData:
+      PULSAR_LOG_LEVEL: "debug"
+      PULSAR_LOG_ROOT_LEVEL: "debug"
+      PULSAR_EXTRA_OPTS: "-Dpulsar.log.root.level=debug"
     resources:
       requests:
         cpu: 1
@@ -102,6 +114,10 @@ pulsar:
         cpu: 1
         memory: "8Gi"
   bastion:
+    configData:
+      PULSAR_LOG_LEVEL: "debug"
+      PULSAR_LOG_ROOT_LEVEL: "debug"
+      PULSAR_EXTRA_OPTS: "-Dpulsar.log.root.level=debug"
     resources:
       requests:
         cpu: "0.3"
@@ -110,6 +126,10 @@ pulsar:
         cpu: "0.3"
         memory: "50Mi"
   autorecovery:
+    configData:
+      PULSAR_LOG_LEVEL: "debug"
+      PULSAR_LOG_ROOT_LEVEL: "debug"
+      PULSAR_EXTRA_OPTS: "-Dpulsar.log.root.level=debug"
     resources:
       requests:
         cpu: "1"
@@ -118,6 +138,10 @@ pulsar:
         cpu: "1"
         memory: "1Gi"
   zookeeper:
+    configData:
+      PULSAR_LOG_LEVEL: "debug"
+      PULSAR_LOG_ROOT_LEVEL: "debug"
+      PULSAR_EXTRA_OPTS: "-Dpulsar.log.root.level=debug"
     resources:
       requests:
         cpu: "0.3"
