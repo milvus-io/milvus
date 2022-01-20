@@ -98,9 +98,12 @@ pulsar:
         cpu: "1.5"
         memory: "8Gi"
   bookkeeper:
+    volumes:
+      ledgers:
+        existingStorageClassName: local-path
     resources:
       requests:
-        cpu: 1
+        cpu: 0.5
         memory: "4Gi"
       limits:
         cpu: 1
@@ -122,6 +125,9 @@ pulsar:
         cpu: "1"
         memory: "1Gi"
   zookeeper:
+    volumes:
+      data:
+        existingStorageClassName: local-path
     resources:
       requests:
         cpu: "0.3"
