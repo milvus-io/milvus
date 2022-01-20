@@ -134,6 +134,10 @@ pipeline {
                                                     --set etcd.metrics.enabled=true \
                                                     --set etcd.metrics.podMonitor.enabled=true \
                                                     --set etcd.nodeSelector.disk=fast \
+                                                    --set proxy.replicas=2 \
+                                                    --set queryNode.replicas=2 \
+                                                    --set indexNode.replicas=2 \
+                                                    --set dataNode.replicas=2 \
                                                     --version ${chart_version} \
                                                     --set metrics.serviceMonitor.enabled=true"
                                                     """
