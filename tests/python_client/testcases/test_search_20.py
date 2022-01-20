@@ -1,3 +1,5 @@
+import multiprocessing
+
 import pytest
 from time import sleep
 
@@ -1987,6 +1989,45 @@ class TestCollectionSearch(TestcaseBase):
             time.sleep(0.2)
         for t in threads:
             t.join()
+
+    @pytest.mark.skip(reason="Not running for now")
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_insert_in_parallel(self):
+        """
+        target: test search and insert in parallel
+        method: One process do search while other process do insert
+        expected: No exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+
+        def do_insert():
+            df = cf.gen_default_dataframe_data(10000)
+            for i in range(11):
+                collection_w.insert(df)
+                log.info(f'Collection num entities is : {collection_w.num_entities}')
+
+        def do_search():
+            while True:
+                results, _ = collection_w.search(cf.gen_vectors(nq, ct.default_dim), default_search_field,
+                                                 default_search_params, default_limit, default_search_exp, timeout=30)
+                ids = []
+                for res in results:
+                    ids.extend(res.ids)
+                expr = f'{ct.default_int64_field_name} in {ids}'
+                collection_w.query(expr, output_fields=[ct.default_int64_field_name, ct.default_float_field_name],
+                                   timeout=30)
+
+        p_insert = multiprocessing.Process(target=do_insert, args=())
+        p_search = multiprocessing.Process(target=do_search, args=(), daemon=True)
+
+        p_insert.start()
+        p_search.start()
+
+        p_insert.join()
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("round_decimal", [0, 1, 2, 3, 4, 5, 6])
