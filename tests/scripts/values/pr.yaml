@@ -1,4 +1,6 @@
 
+nodeSelector:
+  node-role.kubernetes.io/milvus-d: milvus-ci
 proxy:
   resources:
     requests:
@@ -69,6 +71,8 @@ dataNode:
       cpu: "1.2"
       memory: "1.5Gi"
 pulsar:
+  nodeSelector:
+    node-role.kubernetes.io/pulsar: milvus-ci
   proxy:
     resources:
       requests:
@@ -126,6 +130,8 @@ pulsar:
         cpu: "0.3"
         memory: "2Gi"
 etcd:
+  nodeSelector:
+    node-role.kubernetes.io/etcd: milvus-ci
   resources:
     requests:
       cpu: "0.1"
@@ -134,6 +140,8 @@ etcd:
       cpu: "0.1"
       memory: "300Mi"
 minio:
+  nodeSelector:
+    node-role.kubernetes.io/minio: milvus-ci
   resources:
     requests:
       cpu: "0.3"
@@ -142,6 +150,8 @@ minio:
       cpu: "0.6"
       memory: "512Mi"
 standalone:
+  nodeSelector:
+    node-role.kubernetes.io/milvus-s: milvus-ci
   resources:
     requests:
       cpu: "1"
