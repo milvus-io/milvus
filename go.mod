@@ -5,7 +5,7 @@ go 1.15
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/antonmedv/expr v1.8.9
-	github.com/apache/pulsar-client-go v0.7.0
+	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
 	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/bits-and-blooms/bitset v1.2.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
