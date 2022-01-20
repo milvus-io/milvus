@@ -67,6 +67,15 @@ jobs:
           CHECK_BUILDER: "1"
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make codecov"
+      - name: Get pulsar/minio/etcd logs when ut failed
+        if: ${{ failure() }}
+        run: |
+          echo "-------------logs for pulsar ---------------"
+          docker logs  milvus_pulsar_1
+          echo "-------------logs for minio ----------------"
+          docker logs  milvus_minio_1
+          echo "-------------logs for etcd ----------------"
+          docker logs  milvus_etcd_1
       - name: Upload coverage to Codecov
         if: "github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v2
