@@ -11,36 +11,92 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-if(NOT DEFINED KNOWHERE_VERSION)
-   set(KNOWHERE_VERSION 1.00)
-endif()
+set( KNOWHERE_VERSION v0.2.0 )
+set( KNOWHERE_SOURCE_MD5 "e16603061c81acdc308d9001a87d4993" )
 
-if ( DEFINED ENV{KNOWHERE_GIT_URL} )
-    set(KNOWHERE_GIT_URL "$ENV{KNOWHERE_URL}" )
+if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
+    set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
 else ()
-    set(KNOWHERE_GIT_URL "https://github.com/milvus-io/knowhere.git" )
+    set( KNOWHERE_SOURCE_URL
+        "https://github.com/milvus-io/knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
 endif ()
 
-message( STATUS "Building knowhere-${KNOWHERE_VERSION} from source" )
-FetchContent_Declare(
-    knowhere
-    GIT_REPOSITORY         ${KNOWHERE_GIT_URL}
-    GIT_TAG                 main
-    DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
-    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
-    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
-    )
+#message( STATUS "Building knowhere-${KNOWHERE_VERSION} from source" )
+#FetchContent_Declare(
+#    knowhere
+#    URL             ${KNOWHERE_SOURCE_URL}
+#    URL_MD5         ${KNOWHERE_SOURCE_MD5}
+#    DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH}
+#    SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
+#    BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
+#    )
+#
+#FetchContent_GetProperties(knowhere)
+#if ( NOT knowhere_POPULATED )
+#    FetchContent_Populate( knowhere )
+#    add_subdirectory( ${knowhere_SOURCE_DIR}
+#                      ${knowhere_BINARY_DIR}
+#                      EXCLUDE_FROM_ALL )
+#endif()
+#
+#get_target_property( KNOWHERE_INCLUDE_DIR knowhere INTERFACE_INCLUDE_DIRECTORIES )
+#message( STATUS ${KNOWHERE_INCLUDE_DIR} )
+#
+#get_property( var DIRECTORY "${knowhere_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
+#message( STATUS "knowhere compile options: ${var}" )
+#
 
-set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}")
-FetchContent_GetProperties(knowhere)
-if ( NOT knowhere_POPULATED )
-    FetchContent_Populate( knowhere )
-    add_subdirectory( ${knowhere_SOURCE_DIR}
-                        ${knowhere_BINARY_DIR}
-                        EXCLUDE_FROM_ALL )
-endif()
+macro(build_knowhere)
+    message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
+    set (KNOWHERE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
-get_target_property( KNOWHERE_INCLUDE_DIR knowhere INCLUDE_DIRECTORIES )
-get_property( var DIRECTORY "${knowhere_SOURCE_DIR}" PROPERTY COMPILE_OPTIONS )
-message( STATUS "== Knowhere compile options: ${var}" )
+    set(KNOWHERE_CMAKE_ARGS
+            ${EP_COMMON_CMAKE_ARGS}
+            -DCMAKE_BUILD_TYPE=Release
+            "-DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}"
+            )
 
+    externalproject_add(knowhere_ep
+            URL             ${KNOWHERE_SOURCE_URL}
+            URL_MD5         ${KNOWHERE_SOURCE_MD5}
+            CMAKE_ARGS      ${KNOWHERE_CMAKE_ARGS}
+            BUILD_COMMAND   ${MAKE} ${MAKE_BUILD_ARGS}
+            PREFIX          ${CMAKE_BINARY_DIR}/3rdparty_download/knowhere-subbuild
+            BINARY_DIR      knowhere-bin
+            INSTALL_DIR     ${KNOWHERE_INSTALL_PREFIX}
+            )
+
+    ExternalProject_Get_Property(knowhere_ep INSTALL_DIR)
+    message(STATUS ${INSTALL_DIR})
+
+    if( NOT IS_DIRECTORY ${INSTALL_DIR}/include )
+        file( MAKE_DIRECTORY "${INSTALL_DIR}/include" )
+    endif()
+
+    add_library(knowhere SHARED IMPORTED)
+    set_target_properties( knowhere
+            PROPERTIES
+                IMPORTED_GLOBAL     TRUE
+                IMPORTED_LOCATION   ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
+                INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+
+    add_dependencies(knowhere knowhere_ep)
+endmacro()
+
+set(KNOWHERE_SOURCE "AUTO")
+if (KNOWHERE_SOURCE STREQUAL "AUTO")
+    find_package(knowhere)
+    message(STATUS "knowhere libraries: ${KNOWHERE_LIBRARIES}")
+    message(STATUS "knowhere found: ${KNOWHERE_FOUND}")
+
+    if (KNOWHERE_FOUND)
+        add_library(knowhere)
+    else()
+        build_knowhere()
+    endif()
+elseif (KNOWHERE_SOURCE STREQUAL "BUNDLED")
+    build_knowhere()
+elseif (KNOWHERE_SOURCE STREQUAL "SYSTEM")
+    find_package(knowhere REQUIRED)
+    add_library(knowhere)
+endif ()

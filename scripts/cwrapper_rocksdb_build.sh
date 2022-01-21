@@ -94,9 +94,9 @@ if [ -f "${OUTPUT_LIB}/lib/librocksdb.a" ]; then
       esac
 else
      case "${unameOut}" in
-              Linux*)     ldflags="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz";;
-              Darwin*)    ldflags="-L${OUTPUT_LIB}/lib64 -lrocksdb -stdlib=libc++ -lm -lz -lbz2 -ldl";;
-              *)          echo "UNKNOWN:${unameOut}" ; exit 0;
+          Linux*)     ldflags="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz";;
+          Darwin*)    ldflags="-L${OUTPUT_LIB}/lib64 -lrocksdb -stdlib=libc++ -lm -lz -lbz2 -ldl";;
+          *)          echo "UNKNOWN:${unameOut}" ; exit 0;
       esac
 fi
 
@@ -104,5 +104,5 @@ if [[ $(arch) == 'arm64' ]]; then
   go env -w GOARCH=arm64
 fi
 
-go env -w CGO_LDFLAGS="$ldflags"
-go get github.com/soothing-rain/gorocksdb
+go env -w CGO_LDFLAGS="$ldflags" && GO111MODULE=on
+go get github.com/tecbot/gorocksdb
