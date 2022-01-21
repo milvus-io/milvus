@@ -4,7 +4,7 @@ int total_timeout_minutes = 120
 int e2e_timeout_seconds = 70 * 60
 def imageTag=''
 int case_timeout_seconds = 10 * 60
-def chart_version='2.4.25'
+// def chart_version='2.4.25'
 pipeline {
     options {
         timestamps()
@@ -128,7 +128,6 @@ pipeline {
                                                 --set etcd.metrics.podMonitor.enabled=true \
                                                 --set etcd.nodeSelector.disk=fast \
                                                 --set metrics.serviceMonitor.enabled=true \
-                                                --version ${chart_version} \
                                                 -f values/pr.yaml" 
                                                 """
                                             }
