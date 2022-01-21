@@ -21,4 +21,5 @@ internal/kv/rocksdb/rocksdb_kv.go \
 internal/kv/rocksdb/RocksIterator.go \
 internal/util/rocksmq/server/rocksmq/rocksmq_impl.go \
 internal/util/rocksmq/server/rocksmq/rocksmq_reader.go \
-internal/util/rocksmq/server/rocksmq/rocksmq_retention.go
+internal/util/rocksmq/server/rocksmq/rocksmq_retention.go \
+scripts/cwrapper_rocksdb_build.sh

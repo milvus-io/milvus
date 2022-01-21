@@ -26,7 +26,7 @@ echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 # TODO: "-race" is temporarily disabled for Mac Silicon. Add back when available.
 echo "Running unittest under ./internal"
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  for d in $(go list ./internal... | grep -v -e vendor -e /querycoord -e /metricsinfo -e /proxy -e /indexnode -e /querynode -e /paramtable -e metrics_info_test); do
+  for d in $(go list ./internal... | grep -v -e vendor -e internal/querycoord -e /metricsinfo -e internal/proxy -e internal/querynode); do
       go test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
       if [ -f profile.out ]; then
           sed '1d' profile.out >> ${FILE_COVERAGE_INFO}

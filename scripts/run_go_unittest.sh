@@ -31,24 +31,28 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo "Running go unittest under $MILVUS_DIR"
 
-go test -race -cover "${MILVUS_DIR}/allocator/..." -failfast
-go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
-go test -race -cover "${MILVUS_DIR}/msgstream/..." -failfast
-go test -race -cover "${MILVUS_DIR}/storage" -failfast
-go test -race -cover "${MILVUS_DIR}/tso/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/funcutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/mqclient/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/paramtable/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/retry/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/rocksmq/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/trace/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
+if [[ $(arch) != 'arm64' ]]; then
+  RACE="-race"
+fi
+
+go test ${RACE} -cover "${MILVUS_DIR}/allocator/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/kv/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/msgstream/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/storage" -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/tso/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/funcutil/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/mqclient/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/paramtable/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/retry/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/rocksmq/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/trace/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
 
 # TODO: remove to distributed
-#go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
-go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
-go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
+#go test ${RACE} -cover "${MILVUS_DIR}/proxy/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/datanode/..." -failfast
+go test ${RACE} -cover "${MILVUS_DIR}/indexnode/..." -failfast
 
 # TODO: enable ut on mac os
 unameOut="$(uname -s)"
@@ -57,9 +61,9 @@ case "${unameOut}" in
     *)          echo "Skip querynode unit tests, unsupported os:${unameOut}";
 esac
 
-go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
-go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast
-go test -race -cover -v "${MILVUS_DIR}/datacoord/..." -failfast
-go test -race -cover -v "${MILVUS_DIR}/indexcoord/..." -failfast
+go test ${RACE} -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
+go test ${RACE} -cover -v "${MILVUS_DIR}/rootcoord" -failfast
+go test ${RACE} -cover -v "${MILVUS_DIR}/datacoord/..." -failfast
+go test ${RACE} -cover -v "${MILVUS_DIR}/indexcoord/..." -failfast
 
 echo " Go unittest finished"
