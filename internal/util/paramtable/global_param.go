@@ -911,9 +911,6 @@ type queryNodeConfig struct {
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
-	// recovery
-	SkipQueryChannelRecovery bool
-
 	// memory limit
 	OverloadedMemoryThresholdPercentage float64
 }
@@ -941,7 +938,6 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 
 	p.initSegcoreChunkRows()
 
-	p.initSkipQueryChannelRecovery()
 	p.initOverloadedMemoryThresholdPercentage()
 }
 
@@ -1048,10 +1044,6 @@ func (p *queryNodeConfig) initGracefulTime() {
 
 func (p *queryNodeConfig) initSegcoreChunkRows() {
 	p.ChunkRows = p.BaseParams.ParseInt64WithDefault("queryNode.segcore.chunkRows", 32768)
-}
-
-func (p *queryNodeConfig) initSkipQueryChannelRecovery() {
-	p.SkipQueryChannelRecovery = p.BaseParams.ParseBool("msgChannel.skipQueryChannelRecovery", false)
 }
 
 func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {

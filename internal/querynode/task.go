@@ -32,7 +32,6 @@ import (
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/mqclient"
 )
 
 type task interface {
@@ -160,25 +159,18 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	consumeChannels := []string{r.req.QueryChannel}
 	consumeSubName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 
-	if Params.QueryNodeCfg.SkipQueryChannelRecovery {
-		log.Debug("Skip query channel seek back ", zap.Strings("channels", consumeChannels),
-			zap.String("seek position", string(r.req.SeekPosition.MsgID)),
-			zap.Uint64("ts", r.req.SeekPosition.Timestamp))
-		sc.queryMsgStream.AsConsumerWithPosition(consumeChannels, consumeSubName, mqclient.SubscriptionPositionLatest)
+	sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
+	if r.req.SeekPosition == nil || len(r.req.SeekPosition.MsgID) == 0 {
+		// as consumer
+		log.Debug("QueryNode AsConsumer", zap.Strings("channels", consumeChannels), zap.String("sub name", consumeSubName))
 	} else {
-		sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
-		if r.req.SeekPosition == nil || len(r.req.SeekPosition.MsgID) == 0 {
-			// as consumer
-			log.Debug("QueryNode AsConsumer", zap.Strings("channels", consumeChannels), zap.String("sub name", consumeSubName))
-		} else {
-			// seek query channel
-			err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{r.req.SeekPosition})
-			if err != nil {
-				return err
-			}
-			log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels),
-				zap.String("seek position", string(r.req.SeekPosition.MsgID)))
+		// seek query channel
+		err = sc.queryMsgStream.Seek([]*internalpb.MsgPosition{r.req.SeekPosition})
+		if err != nil {
+			return err
 		}
+		log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels),
+			zap.String("seek position", string(r.req.SeekPosition.MsgID)))
 	}
 
 	// add result channel
