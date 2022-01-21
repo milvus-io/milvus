@@ -46,10 +46,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
-
-	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
-	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 )
 
 var Params paramtable.GrpcServerConfig
@@ -100,37 +96,12 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	s.setClient()
 	var err error
 	s.rootCoord, err = rootcoord.NewCore(s.ctx, factory)
 	if err != nil {
 		return nil, err
 	}
 	return s, err
-}
-
-func (s *Server) setClient() {
-	s.newDataCoordClient = func(etcdMetaRoot string, etcdCli *clientv3.Client) types.DataCoord {
-		dsClient, err := dcc.NewClient(s.ctx, etcdMetaRoot, etcdCli)
-		if err != nil {
-			panic(err)
-		}
-		return dsClient
-	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.IndexCoord {
-		isClient, err := icc.NewClient(s.ctx, metaRootPath, etcdCli)
-		if err != nil {
-			panic(err)
-		}
-		return isClient
-	}
-	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoord {
-		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdCli)
-		if err != nil {
-			panic(err)
-		}
-		return qsClient
-	}
 }
 
 // Run initializes and starts RootCoord's grpc service.
