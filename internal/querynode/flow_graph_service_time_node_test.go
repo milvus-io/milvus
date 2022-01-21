@@ -20,8 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -33,14 +31,10 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 		tSafe := newTSafeReplica()
 		tSafe.addTSafe(defaultDMLChannel)
 
-		fac, err := genFactory()
-		assert.NoError(t, err)
-
 		node := newServiceTimeNode(ctx,
 			tSafe,
 			defaultCollectionID,
-			defaultDMLChannel,
-			fac)
+			defaultDMLChannel)
 		return node
 	}
 
