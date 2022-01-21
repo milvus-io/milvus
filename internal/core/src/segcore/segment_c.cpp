@@ -76,6 +76,7 @@ Search(CSegmentInterface c_segment,
         *result = search_result.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
+        *result = nullptr;
         return milvus::FailureCStatus(UnexpectedError, e.what());
     }
 }
@@ -100,6 +101,7 @@ Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, 
         result->proto_size = size;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
+        result = nullptr;
         return milvus::FailureCStatus(UnexpectedError, e.what());
     }
 }
