@@ -190,30 +190,6 @@ func TestTask_AddQueryChannel(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.Error(t, err)
 	})
-
-	t.Run("test execute skipQueryChannelRecovery", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		position := &internalpb.MsgPosition{
-			ChannelName: genQueryChannel(),
-			MsgID:       []byte{1, 2, 3},
-			MsgGroup:    defaultSubName,
-			Timestamp:   0,
-		}
-
-		task := addQueryChannelTask{
-			req:  genAddQueryChanelRequest(),
-			node: node,
-		}
-
-		task.req.SeekPosition = position
-
-		Params.QueryNodeCfg.SkipQueryChannelRecovery = true
-
-		err = task.Execute(ctx)
-		assert.NoError(t, err)
-	})
 }
 
 func TestTask_watchDmChannelsTask(t *testing.T) {

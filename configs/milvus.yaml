@@ -223,8 +223,6 @@ msgChannel:
     dataCoordStatistic: "datacoord-statistics-channel"
     dataCoordTimeTick: "datacoord-timetick-channel"
     dataCoordSegmentInfo: "segment-info-channel"
-  # skip replay query channel under failure recovery
-  skipQueryChannelRecovery: "false"
 
   # Sub name generation rule: ${subNamePrefix}-${NodeID}
   subNamePrefix:
