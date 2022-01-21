@@ -41,9 +41,12 @@ find_package( Threads REQUIRED )
 add_subdirectory( knowhere )
 
 # ****************************** Thirdparty googletest ***************************************
-if ( MILVUS_BUILD_TESTS AND LINUX )
+if ( MILVUS_BUILD_TESTS)
     add_subdirectory( gtest )
     add_subdirectory( google_benchmark )
+endif()
+
+if ( MILVUS_BUILD_TESTS AND LINUX )
     add_subdirectory( profiler )
 endif()
 
