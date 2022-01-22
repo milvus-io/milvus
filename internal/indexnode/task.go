@@ -216,12 +216,17 @@ func (it *IndexBuildTask) checkIndexMeta(ctx context.Context, pre bool) error {
 		if err != nil {
 			log.Warn("IndexNode checkIndexMeta CompareVersionAndSwap", zap.Error(err))
 		}
-		return nil
+		return err
 	}
 
 	err := retry.Do(ctx, fn, retry.Attempts(3))
 	if err != nil {
 		log.Error("IndexNode failed to checkIndexMeta", zap.Error(err))
+		if !pre {
+			errMsg := fmt.Sprintf("check index meta pre:%v failed, indexBuildID:%v", pre, it.req.IndexBuildID)
+			panic(errMsg)
+
+		}
 	}
 	msg := fmt.Sprintf("check index meta pre: %v", pre)
 	it.tr.Record(msg)
