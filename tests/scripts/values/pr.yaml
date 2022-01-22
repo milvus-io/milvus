@@ -29,10 +29,10 @@ queryCoordinator:
 queryNode:
   resources:
     requests:
-      cpu: "0.2"
+      cpu: "2"
       memory: "500Mi"
     limits:
-      cpu: "0.5"
+      cpu: "2"
       memory: "1.5Gi"
 indexCoordinator:
   resources:
@@ -45,10 +45,10 @@ indexCoordinator:
 indexNode:
   resources:
     requests:
-      cpu: "0.5"
+      cpu: "2"
       memory: "500Mi"
     limits:
-      cpu: "1.1"
+      cpu: "2"
       memory: "800Mi"
 
 dataCoordinator:
