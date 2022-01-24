@@ -48,7 +48,7 @@ indexNode:
       cpu: "2"
       memory: "500Mi"
     limits:
-      cpu: "2"
+      cpu: "4"
       memory: "800Mi"
 
 dataCoordinator:

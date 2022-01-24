@@ -19,7 +19,7 @@ pipeline {
                 label 'milvus-e2e-test-pipeline'
                 inheritFrom 'default'
                 defaultContainer 'main'
-                yamlFile 'build/ci/jenkins/pod/qa/rte.yaml'
+                yamlFile 'build/ci/jenkins/pod/qa/qa-ci.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
             }
     }
@@ -148,7 +148,7 @@ pipeline {
                                     label 'milvus-e2e-test-pr'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
-                                    yamlFile 'build/ci/jenkins/pod/qa/rte.yaml'
+                                    yamlFile 'build/ci/jenkins/pod/qa/qa-ci.yaml'
                                     customWorkspace '/home/jenkins/agent/workspace'
                                 }
                         }
