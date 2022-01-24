@@ -123,6 +123,7 @@ class TestQueryNodeScale:
             log.debug("Shrink querynode test finished")
 
         except Exception as e:
+            log.error(str(e))
             raise Exception(str(e))
 
         finally:

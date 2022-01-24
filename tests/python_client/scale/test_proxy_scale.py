@@ -37,6 +37,7 @@ class TestProxyScale:
         init_replicas = 1
         scale_out_replicas = 5
         scale_in_replicas = 2
+        fail_req = 0
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,
@@ -74,7 +75,7 @@ class TestProxyScale:
             collection_w.load()
 
             def do_insert():
-                for i in range(100):
+                for i in range(50):
                     df = cf.gen_default_dataframe_data()
                     collection_w.insert(df)
                     log.debug(f'After {i+1} insert num entities is {collection_w.num_entities}')
@@ -111,9 +112,12 @@ class TestProxyScale:
             t_insert.join()
 
         except Exception as e:
-            raise Exception(str(e))
+            log.error(str(e))
+            fail_req += 1
+            # raise Exception(str(e))
 
         finally:
+            log.debug(f'Total failed req: {fail_req}')
             label = f"app.kubernetes.io/instance={release_name}"
             log.info('Start to export milvus pod logs')
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
