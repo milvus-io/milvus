@@ -628,7 +628,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		require.True(t, sr.hasSegment(1, true))
 		require.True(t, sr.hasSegment(2, true))
 
-		sr.mergeFlushedSegments(3, 1, 0, []UniqueID{1, 2}, "channel", 15)
+		sr.mergeFlushedSegments(3, 1, 0, 100, []UniqueID{1, 2}, "channel", 15)
 		assert.True(t, sr.hasSegment(3, true))
 		assert.False(t, sr.hasSegment(1, true))
 		assert.False(t, sr.hasSegment(2, true))

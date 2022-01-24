@@ -60,7 +60,7 @@ type Replica interface {
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
 	updateSegmentCheckPoint(segID UniqueID)
 	updateSegmentPKRange(segID UniqueID, rowIDs []int64)
-	mergeFlushedSegments(segID, collID, partID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64)
+	mergeFlushedSegments(segID, collID, partID, planID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64)
 	hasSegment(segID UniqueID, countFlushed bool) bool
 	removeSegments(segID ...UniqueID)
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
@@ -688,7 +688,7 @@ func (replica *SegmentReplica) updateSegmentCheckPoint(segID UniqueID) {
 	log.Warn("There's no segment", zap.Int64("ID", segID))
 }
 
-func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64) {
+func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID, planID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64) {
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
@@ -697,6 +697,7 @@ func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID Unique
 	}
 
 	log.Debug("merge flushed segments",
+		zap.Int64("planID", planID),
 		zap.Int64("compacted To segmentID", segID),
 		zap.Int64s("compacted From segmentIDs", compactedFrom),
 		zap.Int64("partition ID", partID),
