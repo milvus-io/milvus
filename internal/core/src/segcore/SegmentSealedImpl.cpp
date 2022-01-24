@@ -313,27 +313,19 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
                                  Timestamp timestamp,
                                  const BitsetView& bitset,
                                  SearchResult& output) const {
-    // TODO: remove cout logs
-    const std::string log_prefix = "[TODO: remove] debug #14077, segment_id = " + std::to_string(id_) + ", ";
-    std::cout << log_prefix << "SegmentSealedImpl::vector_search begin to search..., vec_count = " << vec_count
-              << ", query_count = " << query_count << ", timestamp = " << timestamp << std::endl;
     AssertInfo(is_system_field_ready(), "System field is not ready");
     auto field_offset = search_info.field_offset_;
     auto& field_meta = schema_->operator[](field_offset);
-    std::cout << log_prefix << "SegmentSealedImpl get field meta done" << std::endl;
 
     AssertInfo(field_meta.is_vector(), "The meta type of vector field is not vector type");
     if (get_bit(vecindex_ready_bitset_, field_offset)) {
         AssertInfo(vecindexs_.is_ready(field_offset),
                    "vector indexes isn't ready for field " + std::to_string(field_offset.get()));
-        std::cout << log_prefix << "SegmentSealedImpl vector indexes is ready for field" << std::endl;
         query::SearchOnSealed(*schema_, vecindexs_, search_info, query_data, query_count, bitset, output, id_);
         return;
     } else if (!get_bit(field_data_ready_bitset_, field_offset)) {
-        std::cout << log_prefix << "SegmentSealedImpl field data is not loaded" << std::endl;
         PanicInfo("Field Data is not loaded");
     }
-    std::cout << log_prefix << "SegmentSealedImpl SearchOnSealed done" << std::endl;
 
     query::dataset::SearchDataset dataset;
     dataset.query_data = query_data;
@@ -344,38 +336,27 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     dataset.dim = field_meta.get_dim();
     dataset.round_decimal = search_info.round_decimal_;
 
-    std::cout << log_prefix << "SegmentSealedImpl dataset assignment done" << std::endl;
-
     AssertInfo(get_bit(field_data_ready_bitset_, field_offset),
                "Can't get bitset element at " + std::to_string(field_offset.get()));
     AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
     auto row_count = row_count_opt_.value();
     auto chunk_data = fields_data_[field_offset.get()].data();
 
-    std::cout << log_prefix << "SegmentSealedImpl get row_count and chunk_data done" << std::endl;
-
     auto sub_qr = [&] {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            std::cout << log_prefix << "SegmentSealedImpl FloatSearchBruteForce ..." << std::endl;
             return query::FloatSearchBruteForce(dataset, chunk_data, row_count, bitset);
         } else {
-            std::cout << log_prefix << "SegmentSealedImpl BinarySearchBruteForce ..." << std::endl;
             return query::BinarySearchBruteForce(dataset, chunk_data, row_count, bitset);
         }
     }();
 
     SearchResult results;
     results.distances_ = std::move(sub_qr.mutable_distances());
-    std::cout << log_prefix << "SegmentSealedImpl results.distances_ done" << std::endl;
     results.ids_ = std::move(sub_qr.mutable_ids());
-    std::cout << log_prefix << "SegmentSealedImpl results.ids_ done" << std::endl;
     results.topk_ = dataset.topk;
-    std::cout << log_prefix << "SegmentSealedImpl results.topk done, topk = " << results.topk_ << std::endl;
     results.num_queries_ = dataset.num_queries;
-    std::cout << log_prefix << "SegmentSealedImpl results.num_queries done, nq = " << results.num_queries_ << std::endl;
 
     output = std::move(results);
-    std::cout << log_prefix << "SegmentSealedImpl move results done" << std::endl;
 }
 
 void
@@ -420,31 +401,24 @@ SegmentSealedImpl::DropIndex(const FieldId field_id) {
 
 void
 SegmentSealedImpl::check_search(const query::Plan* plan) const {
-    const std::string log_prefix = "[TODO: remove] debug #14077, segment_id = " + std::to_string(id_) + ", ";
-    std::cout << log_prefix << "SegmentSealedImpl::check_search check_search..., planPtr = " << plan << std::endl;
     AssertInfo(plan, "Search plan is null");
     AssertInfo(plan->extra_info_opt_.has_value(), "Extra info of search plan doesn't have value");
 
     if (!is_system_field_ready()) {
-        std::cout << log_prefix << "SegmentSealedImpl::check_search is_system_field_ready done" << std::endl;
         PanicInfo("System Field RowID or Timestamp is not loaded");
     }
 
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
-    std::cout << log_prefix << "SegmentSealedImpl::check_search request_fields done" << std::endl;
     auto field_ready_bitset = field_data_ready_bitset_ | vecindex_ready_bitset_;
     AssertInfo(request_fields.size() == field_ready_bitset.size(),
                "Request fields size not equal to field ready bitset size when check search");
     auto absent_fields = request_fields - field_ready_bitset;
-    std::cout << log_prefix << "SegmentSealedImpl::check_search absent_fields done" << std::endl;
 
     if (absent_fields.any()) {
         auto field_offset = FieldOffset(absent_fields.find_first());
         auto& field_meta = schema_->operator[](field_offset);
-        std::cout << log_prefix << "SegmentSealedImpl::check_search field_meta done" << std::endl;
         PanicInfo("User Field(" + field_meta.get_name().get() + ") is not loaded");
     }
-    std::cout << log_prefix << "SegmentSealedImpl::check_search all done" << std::endl;
 }
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
