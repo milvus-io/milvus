@@ -18,11 +18,13 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"go.uber.org/zap"
 	"stathat.com/c/consistent"
@@ -44,6 +46,7 @@ type ChannelManager struct {
 	assignPolicy     ChannelAssignPolicy
 	reassignPolicy   ChannelReassignPolicy
 	bgChecker        ChannelBGChecker
+	msgstreamFactory msgstream.Factory
 }
 
 type channel struct {
@@ -57,8 +60,13 @@ type ChannelManagerOpt func(c *ChannelManager)
 func withFactory(f ChannelPolicyFactory) ChannelManagerOpt {
 	return func(c *ChannelManager) { c.factory = f }
 }
+
 func defaultFactory(hash *consistent.Consistent) ChannelPolicyFactory {
 	return NewConsistentHashChannelPolicyFactory(hash)
+}
+
+func withMsgstreamFactory(f msgstream.Factory) ChannelManagerOpt {
+	return func(c *ChannelManager) { c.msgstreamFactory = f }
 }
 
 // NewChannelManager returns a new ChannelManager
@@ -226,6 +234,13 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	nodeChannelInfo := c.store.GetNode(nodeID)
+	if nodeChannelInfo == nil {
+		return nil
+	}
+
+	c.tryToUnsubscribe(nodeChannelInfo)
+
 	updates := c.deregisterPolicy(c.store, nodeID)
 	log.Debug("deregister node",
 		zap.Int64("unregistered node", nodeID),
@@ -241,6 +256,41 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	}
 	_, err := c.store.Delete(nodeID)
 	return err
+}
+
+func (c *ChannelManager) tryToUnsubscribe(nodeChannelInfo *NodeChannelInfo) {
+	if nodeChannelInfo == nil {
+		return
+	}
+
+	if c.msgstreamFactory == nil {
+		log.Warn("msgstream factory is not set")
+		return
+	}
+
+	nodeID := nodeChannelInfo.NodeID
+	for _, ch := range nodeChannelInfo.Channels {
+		subscriptionName := subscriptionGenerator(ch.CollectionID, nodeID)
+		err := c.unsubscribe(subscriptionName, ch.Name)
+		if err != nil {
+			log.Warn("failed to unsubcribe topic", zap.String("subscription name", subscriptionName), zap.String("channel name", ch.Name))
+		}
+	}
+}
+
+func subscriptionGenerator(collectionID int64, nodeID int64) string {
+	return fmt.Sprintf("%s-%s-%d-%d", Params.DataNodeCfg.MsgChannelSubName, Params.DataNodeCfg.SubscriptionNamePrefix, nodeID, collectionID)
+}
+
+func (c *ChannelManager) unsubscribe(subscriptionName string, channel string) error {
+	msgStream, err := c.msgstreamFactory.NewMsgStream(context.TODO())
+	if err != nil {
+		return err
+	}
+
+	msgStream.AsConsumer([]string{channel}, subscriptionName)
+	msgStream.Close()
+	return nil
 }
 
 // Watch try to add the channel to cluster. If the channel already exists, do nothing

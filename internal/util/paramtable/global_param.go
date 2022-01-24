@@ -1246,6 +1246,8 @@ type dataNodeConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	SubscriptionNamePrefix string
 }
 
 func (p *dataNodeConfig) init(bp *BaseParamTable) {
@@ -1267,6 +1269,7 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 
 	p.initDmlChannelName()
 	p.initDeltaChannelName()
+	p.initSubscriptionNamePrefix()
 }
 
 // Refresh is called after session init
@@ -1362,6 +1365,13 @@ func (p *dataNodeConfig) initDeltaChannelName() {
 	}
 	s := []string{p.ClusterChannelPrefix, config}
 	p.DeltaChannelName = strings.Join(s, "-")
+}
+
+func (p *dataNodeConfig) initSubscriptionNamePrefix() {
+	prefix, err := p.BaseParams.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
+	if err != nil {
+		p.SubscriptionNamePrefix = prefix
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
