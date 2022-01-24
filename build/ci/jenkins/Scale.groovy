@@ -53,7 +53,7 @@ pipeline {
                     dir ('tests/python_client/scale') {
                         script {
                             // pytest run scale case in parallel
-                            sh 'pytest . -n 5 -v -s'
+                            sh 'pytest . --workers 5 -v -s'
                         }
                     }
                 }
