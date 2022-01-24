@@ -91,8 +91,15 @@ class TestIndexNodeScale:
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
             log.info(f'Create index on {expand_replicas} indexNode cost t1: {t1}')
+            collection_w.drop_index()
 
-            assert round(t0 / t1) == 2
+            start = datetime.datetime.now()
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            assert collection_w.has_index()[0]
+            t2 = datetime.datetime.now() - start
+            log.info(f'Create index on {expand_replicas} indexNode cost t2: {t2}')
+
+            assert round(t0 / t2) == 2
 
         except Exception as e:
             raise Exception(str(e))
@@ -156,7 +163,7 @@ class TestIndexNodeScale:
             assert collection_w.has_index()[0]
             t0 = datetime.datetime.now() - start
 
-            log.debug(f'two indexNodes: {t0}')
+            log.info(f'Create index on 2 indexNode cost t0: {t0}')
 
             collection_w.drop_index()
             assert not collection_w.has_index()[0]
@@ -170,10 +177,18 @@ class TestIndexNodeScale:
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
+            log.info(f'Create index on 1 indexNode cost t1: {t1}')
+            collection_w.drop_index()
 
-            log.debug(f'one indexNode: {t1}')
-            log.debug(t1 / t0)
-            assert round(t1 / t0) == 2
+            start = datetime.datetime.now()
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            assert collection_w.has_index()[0]
+            t2 = datetime.datetime.now() - start
+            log.info(f'Create index on 1 indexNode cost t2: {t2}')
+
+            log.debug(f'one indexNode: {t2}')
+            log.debug(t2 / t0)
+            assert round(t2 / t0) == 2
 
         except Exception as e:
             raise Exception(str(e))
