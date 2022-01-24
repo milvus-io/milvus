@@ -16,7 +16,7 @@ pipeline {
     }
     agent {
             kubernetes {
-                label 'milvus-e2e-test-pipeline'
+                label 'milvus-qa-e2e-test-pipeline'
                 inheritFrom 'default'
                 defaultContainer 'main'
                 yamlFile 'build/ci/jenkins/pod/qa/qa-ci.yaml'
@@ -145,7 +145,7 @@ pipeline {
                     stage('E2E Test'){
                         agent {
                                 kubernetes {
-                                    label 'milvus-e2e-test-pr'
+                                    label 'milvus-qa-e2e-test-pr'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
                                     yamlFile 'build/ci/jenkins/pod/qa/qa-ci.yaml'
