@@ -245,6 +245,13 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	err := t.PreExecute(ctx)
 	t.SetError(err)
 
+	if t.GetState() == TaskStateAbandon {
+		log.Info("IndexNode scheduler abandon task",
+			zap.String("TaskState", t.GetState().String()),
+			zap.Int64("taskID", t.ID()))
+		return
+	}
+
 	defer func() {
 		span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
 		err := t.PostExecute(ctx)
