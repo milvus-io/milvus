@@ -847,6 +847,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_LoadBalance)
+	req.BalanceReason = querypb.TriggerCondition_LoadBalance
 	loadBalanceTask := &loadBalanceTask{
 		baseTask:           baseTask,
 		LoadBalanceRequest: req,
