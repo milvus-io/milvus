@@ -31,7 +31,6 @@ project(core)
 include(CheckCXXCompilerFlag)
 if ( APPLE )
     message(STATUS "==============Darwin Environment==============")
-    set(MACOS TRUE)
     check_cxx_compiler_flag(-std=c++11 HAS_STD_CPP11_FLAG)
     if(HAS_STD_CPP11_FLAG)
         add_compile_options(-std=c++11)
@@ -125,7 +124,7 @@ append_flags( CMAKE_CXX_FLAGS
               )
 endif ()
 
-if (MACOS)
+if ( APPLE )
     append_flags( CMAKE_CXX_FLAGS
             FLAGS
             "-fPIC"
