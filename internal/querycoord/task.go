@@ -72,6 +72,7 @@ type task interface {
 	msgType() commonpb.MsgType
 	timestamp() Timestamp
 	getTriggerCondition() querypb.TriggerCondition
+	setTriggerCondition(trigger querypb.TriggerCondition)
 	preExecute(ctx context.Context) error
 	execute(ctx context.Context) error
 	postExecute(ctx context.Context) error
@@ -109,6 +110,7 @@ type baseTask struct {
 
 	taskID           UniqueID
 	triggerCondition querypb.TriggerCondition
+	triggerMu        sync.RWMutex
 	parentTask       task
 	childTasks       []task
 	childTasksMu     sync.RWMutex
@@ -146,7 +148,17 @@ func (bt *baseTask) traceCtx() context.Context {
 }
 
 func (bt *baseTask) getTriggerCondition() querypb.TriggerCondition {
+	bt.triggerMu.RLock()
+	defer bt.triggerMu.RUnlock()
+
 	return bt.triggerCondition
+}
+
+func (bt *baseTask) setTriggerCondition(trigger querypb.TriggerCondition) {
+	bt.triggerMu.Lock()
+	defer bt.triggerMu.Unlock()
+
+	bt.triggerCondition = trigger
 }
 
 func (bt *baseTask) taskPriority() querypb.TriggerCondition {

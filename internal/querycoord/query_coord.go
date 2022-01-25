@@ -343,6 +343,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 				MsgType:  commonpb.MsgType_LoadBalanceSegments,
 				SourceID: qc.session.ServerID,
 			},
+			BalanceReason: querypb.TriggerCondition_NodeDown,
 			SourceNodeIDs: offlineNodeIDs,
 		}
 
