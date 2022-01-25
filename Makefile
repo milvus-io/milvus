@@ -15,8 +15,16 @@ GOPATH 	:= $(shell $(GO) env GOPATH)
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
+OS := $(shell uname -s)
+ARCH := $(shell arch)
 
 all: build-cpp build-go
+
+pre-proc:
+	@echo "Running pre-processing"
+ifeq ($(OS),Darwin) # MacOS X
+	@(env bash $(PWD)/scripts/replace_gorocksdb_version.sh)
+endif
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -72,9 +80,19 @@ ifdef GO_DIFF_FILES
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go $(GO_DIFF_FILES)
 else
 	@echo "Running $@ check"
+ifeq ($(OS),Darwin) # MacOS X
+ifeq ($(ARCH),arm64)
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./cmd/...
+else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
-#	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
+endif
+else
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
+endif
+	#@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
 verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
@@ -103,13 +121,13 @@ milvus: build-cpp print-build-info
 
 build-go: milvus
 
-build-cpp:
+build-cpp: pre-proc
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-with-unittest:
+build-cpp-with-unittest: pre-proc
 	@echo "Building Milvus cpp library with unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")

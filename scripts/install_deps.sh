@@ -68,6 +68,16 @@ function install_mac_deps() {
   source ~/.gvm/scripts/gvm
   gvm install go1.17.2
   gvm use go1.17.2
+
+  if [[ $(arch) == 'arm64' ]]; then
+    sudo mkdir /usr/local/include
+    sudo ln -s "$(brew --prefix llvm)" "/usr/local/opt/llvm"
+    sudo ln -s "$(brew --prefix libomp)/include/omp.h" "/usr/local/include/omp.h"
+    sudo ln -s "$(brew --prefix libomp)" "/usr/local/opt/libomp"
+    sudo ln -s "$(brew --prefix boost)/include/boost" "/usr/local/include/boost"
+    sudo ln -s "$(brew --prefix tbb)/include/tbb" "/usr/local/include/tbb"
+    sudo ln -s "$(brew --prefix tbb)/include/oneapi" "/usr/local/include/oneapi"
+  fi
 }
 
 unameOut="$(uname -s)"
