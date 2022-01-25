@@ -279,7 +279,7 @@ func (c *ChannelManager) tryToUnsubscribe(nodeChannelInfo *NodeChannelInfo) {
 }
 
 func subscriptionGenerator(collectionID int64, nodeID int64) string {
-	return fmt.Sprintf("%s-%s-%d-%d", Params.DataNodeCfg.MsgChannelSubName, Params.DataNodeCfg.SubscriptionNamePrefix, nodeID, collectionID)
+	return fmt.Sprintf("%s-%s-%d-%d", Params.DataNodeCfg.ClusterChannelPrefix, Params.DataNodeCfg.SubscriptionNamePrefix, nodeID, collectionID)
 }
 
 func (c *ChannelManager) unsubscribe(subscriptionName string, channel string) error {
