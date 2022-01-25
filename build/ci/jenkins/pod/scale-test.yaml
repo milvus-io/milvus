@@ -15,10 +15,10 @@ spec:
     resources:
       limits:
         memory: 16Gi
-        cpu: 8.0
+        cpu: 12.0
       requests:
         memory: 12Gi
-        cpu: 8.0
+        cpu: 12.0
     volumeMounts:
     - name: qa-kubeconfig
       mountPath: /root/.kube/
