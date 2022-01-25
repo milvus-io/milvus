@@ -1369,7 +1369,7 @@ func (p *dataNodeConfig) initDeltaChannelName() {
 
 func (p *dataNodeConfig) initSubscriptionNamePrefix() {
 	prefix, err := p.BaseParams.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
-	if err != nil {
+	if err == nil {
 		p.SubscriptionNamePrefix = prefix
 	}
 }
