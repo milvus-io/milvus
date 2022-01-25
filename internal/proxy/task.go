@@ -1920,6 +1920,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
 						Reason:    filterReason,
 					},
+					CollectionID: st.SearchRequest.CollectionID,
 				}
 				return fmt.Errorf("no Available QueryNode result, filter reason %s: id %d", filterReason, st.ID())
 			}
@@ -1943,6 +1944,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 						NumQueries: searchResults[0].NumQueries,
 						Topks:      make([]int64, searchResults[0].NumQueries),
 					},
+					CollectionID: st.SearchRequest.CollectionID,
 				}
 				return nil
 			}
@@ -1951,6 +1953,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			st.result.CollectionID = st.SearchRequest.CollectionID
 
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, st.query.CollectionName)
 			if err != nil {
@@ -2383,6 +2386,7 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    reason,
 				},
+				CollectionID: qt.RetrieveRequest.CollectionID,
 			}
 			log.Debug("Query failed on all querynodes.",
 				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
@@ -2394,6 +2398,7 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		qt.result.CollectionID = qt.RetrieveRequest.CollectionID
 
 		if len(qt.result.FieldsData) > 0 {
 			qt.result.Status = &commonpb.Status{

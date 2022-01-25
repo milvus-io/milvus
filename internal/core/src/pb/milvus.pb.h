@@ -8392,6 +8392,7 @@ class SearchResults :
   enum : int {
     kStatusFieldNumber = 1,
     kResultsFieldNumber = 2,
+    kCollectionIDFieldNumber = 3,
   };
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
@@ -8409,6 +8410,11 @@ class SearchResults :
   ::milvus::proto::schema::SearchResultData* mutable_results();
   void set_allocated_results(::milvus::proto::schema::SearchResultData* results);
 
+  // int64 collectionID = 3;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.SearchResults)
  private:
   class _Internal;
@@ -8416,6 +8422,7 @@ class SearchResults :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::milvus::proto::common::Status* status_;
   ::milvus::proto::schema::SearchResultData* results_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -9122,6 +9129,7 @@ class QueryResults :
   enum : int {
     kFieldsDataFieldNumber = 2,
     kStatusFieldNumber = 1,
+    kCollectionIDFieldNumber = 3,
   };
   // repeated .milvus.proto.schema.FieldData fields_data = 2;
   int fields_data_size() const;
@@ -9142,6 +9150,11 @@ class QueryResults :
   ::milvus::proto::common::Status* mutable_status();
   void set_allocated_status(::milvus::proto::common::Status* status);
 
+  // int64 collectionID = 3;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.QueryResults)
  private:
   class _Internal;
@@ -9149,6 +9162,7 @@ class QueryResults :
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData > fields_data_;
   ::milvus::proto::common::Status* status_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -21300,6 +21314,20 @@ inline void SearchResults::set_allocated_results(::milvus::proto::schema::Search
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.SearchResults.results)
 }
 
+// int64 collectionID = 3;
+inline void SearchResults::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 SearchResults::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchResults.collectionID)
+  return collectionid_;
+}
+inline void SearchResults::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchResults.collectionID)
+}
+
 // -------------------------------------------------------------------
 
 // FlushRequest
@@ -22016,6 +22044,20 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema:
 QueryResults::fields_data() const {
   // @@protoc_insertion_point(field_list:milvus.proto.milvus.QueryResults.fields_data)
   return fields_data_;
+}
+
+// int64 collectionID = 3;
+inline void QueryResults::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 QueryResults::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.QueryResults.collectionID)
+  return collectionid_;
+}
+inline void QueryResults::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.QueryResults.collectionID)
 }
 
 // -------------------------------------------------------------------
