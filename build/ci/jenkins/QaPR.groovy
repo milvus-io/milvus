@@ -4,7 +4,7 @@ int total_timeout_minutes = 120
 int e2e_timeout_seconds = 70 * 60
 def imageTag=''
 int case_timeout_seconds = 10 * 60
-def chart_version='3.0.0'
+def chart_version='2.4.25'
 pipeline {
     options {
         timestamps()
@@ -16,10 +16,10 @@ pipeline {
     }
     agent {
             kubernetes {
-                label 'milvus-e2e-test-pipeline'
+                label 'milvus-qa-e2e-test-pipeline'
                 inheritFrom 'default'
                 defaultContainer 'main'
-                yamlFile 'build/ci/jenkins/pod/rte.yaml'
+                yamlFile 'build/ci/jenkins/pod/qa/rte.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
             }
     }
@@ -30,12 +30,15 @@ pipeline {
         ARTIFACTS = "${env.WORKSPACE}/_artifacts"
         DOCKER_CREDENTIALS_ID = "f0aacc8e-33f2-458a-ba9e-2c44f431b4d2"
         TARGET_REPO = "milvusdb"
-        CI_DOCKER_CREDENTIAL_ID = "ci-docker-registry"
+        // CI_DOCKER_CREDENTIAL_ID = "ci-docker-registry"
+        CI_DOCKER_CREDENTIAL_ID = "qa-ci-docker-registry"
         MILVUS_HELM_NAMESPACE = "milvus-ci"
         DISABLE_KIND = true
-        HUB = 'registry.milvus.io/milvus'
+        // HUB = 'registry.milvus.io/milvus'
+        HUB = 'harbor.zilliz.cc/milvus-ci'
         JENKINS_BUILD_ID = "${env.BUILD_ID}"
         CI_MODE="pr"
+        MIRROR_URL="http://10.201.20.246:5000"
     }
 
     stages {
@@ -124,9 +127,8 @@ pipeline {
                                                 --skip-build-image \
                                                 --install-extra-arg "--set etcd.persistence.storageClass=local-path \
                                                 --set minio.persistence.storageClass=local-path \
-                                                --set etcd.metrics.enabled=true \
-                                                --set etcd.metrics.podMonitor.enabled=true \
-                                                --set etcd.nodeSelector.disk=fast \
+                                                --set etcd.metrics.enabled=false \
+                                                --set etcd.metrics.podMonitor.enabled=false\
                                                 --set metrics.serviceMonitor.enabled=true \
                                                 --version ${chart_version} \
                                                 -f values/pr.yaml" 
@@ -143,10 +145,10 @@ pipeline {
                     stage('E2E Test'){
                         agent {
                                 kubernetes {
-                                    label 'milvus-e2e-test-pr'
+                                    label 'milvus-qa-e2e-test-pr'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
-                                    yamlFile 'build/ci/jenkins/pod/rte.yaml'
+                                    yamlFile 'build/ci/jenkins/pod/qa/rte.yaml'
                                     customWorkspace '/home/jenkins/agent/workspace'
                                 }
                         }
@@ -190,8 +192,8 @@ pipeline {
                             dir ('tests/scripts') {  
                                 script {
                                     def release_name=sh(returnStdout: true, script: './get_release_name.sh')
-                                    sh "./uninstall_milvus.sh --release-name ${release_name}"
-                                    sh "./ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
+                                    sh "./qa/uninstall_milvus.sh --release-name ${release_name}"
+                                    sh "./qa/ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
                                     --release-name ${release_name}"
                                     dir("${env.ARTIFACTS}") {
                                         archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs.tar.gz", allowEmptyArchive: true

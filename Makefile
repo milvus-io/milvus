@@ -120,6 +120,10 @@ build-cpp-with-unittest:
 # Run the tests.
 unittest: test-cpp test-go
 
+test-indexnode:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/indexnode -v
+
 test-proxy:
 	@echo "Running go unittests..."
 	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/proxy -v

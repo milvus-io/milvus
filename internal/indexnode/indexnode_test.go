@@ -305,7 +305,7 @@ func TestIndexNode(t *testing.T) {
 		defer in.etcdKV.RemoveWithPrefix(metaPath2)
 	})
 
-	t.Run("Create Deleted_Index", func(t *testing.T) {
+	t.Run("Create DeletedIndex", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
@@ -398,19 +398,21 @@ func TestIndexNode(t *testing.T) {
 		status, err2 := in.CreateIndex(ctx, req)
 		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
+		time.Sleep(100 * time.Millisecond)
 		strValue, err3 := in.etcdKV.Load(metaPath3)
 		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
 		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
-		for indexMetaTmp.State != commonpb.IndexState_Finished {
-			time.Sleep(100 * time.Millisecond)
-			strValue, err := in.etcdKV.Load(metaPath3)
-			assert.Nil(t, err)
-			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
-			assert.Nil(t, err)
-		}
+		assert.Equal(t, true, indexMetaTmp.MarkDeleted)
+		assert.Equal(t, int64(1), indexMetaTmp.Version)
+		//for indexMetaTmp.State != commonpb.IndexState_Finished {
+		//	time.Sleep(100 * time.Millisecond)
+		//	strValue, err := in.etcdKV.Load(metaPath3)
+		//	assert.Nil(t, err)
+		//	err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
+		//	assert.Nil(t, err)
+		//}
 		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {

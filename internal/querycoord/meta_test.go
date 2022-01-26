@@ -174,7 +174,7 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test AddCollection", func(t *testing.T) {
-		schema := genCollectionSchema(defaultCollectionID, false)
+		schema := genDefaultCollectionSchema(false)
 		err := meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, schema)
 		assert.Nil(t, err)
 	})

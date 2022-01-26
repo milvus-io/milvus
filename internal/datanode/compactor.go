@@ -461,7 +461,7 @@ func (t *compactionTask) compact() error {
 		t.refreshFlushedSegStatistics(targetSegID, numRows)
 		// no need to shorten the PK range of a segment, deleting dup PKs is valid
 	} else {
-		t.mergeFlushedSegments(targetSegID, collID, partID, segIDs, t.plan.GetChannel(), numRows)
+		t.mergeFlushedSegments(targetSegID, collID, partID, t.plan.GetPlanID(), segIDs, t.plan.GetChannel(), numRows)
 	}
 
 	ti.injectDone(true)

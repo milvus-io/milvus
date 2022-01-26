@@ -109,7 +109,7 @@ func (c *compactionExecutor) executeTask(task compactor) {
 func (c *compactionExecutor) stopTask(planID UniqueID) {
 	task, loaded := c.executing.LoadAndDelete(planID)
 	if loaded {
-		log.Warn("compaction executor stop task", zap.Int64("planID", planID))
+		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.(compactor).getChannelName()))
 		task.(compactor).stop()
 	}
 }
@@ -126,7 +126,6 @@ func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string
 		if value.(compactor).getChannelName() == vChannelName {
 			c.stopTask(key.(UniqueID))
 		}
-		log.Warn(value.(compactor).getChannelName())
 		return true
 	})
 }

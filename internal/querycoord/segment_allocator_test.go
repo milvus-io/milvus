@@ -69,7 +69,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	cluster.dataKV, err = minioKV.NewMinIOKV(baseCtx, option)
 	assert.Nil(t, err)
 
-	schema := genCollectionSchema(defaultCollectionID, false)
+	schema := genDefaultCollectionSchema(false)
 	firstReq := &querypb.LoadSegmentsRequest{
 		CollectionID: defaultCollectionID,
 		Schema:       schema,

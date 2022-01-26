@@ -366,6 +366,10 @@ github.com/matttproud/golang_protobuf_extensions v1.0.1/go.mod h1:D8He9yQNgCq6Z5
 github.com/miekg/dns v1.0.14/go.mod h1:W1PPwlIAgtquWBMBEV9nkV9Cazfe8ScdGz/Lj7v3Nrg=
 github.com/milvus-io/pulsar-client-go v0.6.1 h1:7uB71ZDP9aQvB9eQ1WRGh8IA1LMUmVYmRGtxxJDrYvU=
 github.com/milvus-io/pulsar-client-go v0.6.1/go.mod h1:A1P5VjjljsFKAD13w7/jmU3Dly2gcRvcobiULqQXhz4=
+github.com/milvus-io/pulsar-client-go v0.6.4 h1:RAPdcbNU49A7A8q5GciZqj+8EwQ3aMZcghU3/V2vW1M=
+github.com/milvus-io/pulsar-client-go v0.6.4/go.mod h1:A1P5VjjljsFKAD13w7/jmU3Dly2gcRvcobiULqQXhz4=
+github.com/milvus-io/pulsar-client-go v0.6.5 h1:oTKYQObVpW4vXgK6lwYAXHmUXopSohMtH+vgsEb7QBY=
+github.com/milvus-io/pulsar-client-go v0.6.5/go.mod h1:A1P5VjjljsFKAD13w7/jmU3Dly2gcRvcobiULqQXhz4=
 github.com/minio/md5-simd v1.1.0 h1:QPfiOqlZH+Cj9teu0t9b1nTBfPbyTl16Of5MeuShdK4=
 github.com/minio/md5-simd v1.1.0/go.mod h1:XpBqgZULrMYD3R+M28PcmP0CkI7PEMzB3U77ZrKZ0Gw=
 github.com/minio/minio-go/v7 v7.0.10 h1:1oUKe4EOPUEhw2qnPQaPsJ0lmVTYLFu03SiItauXs94=

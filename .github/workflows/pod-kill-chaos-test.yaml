@@ -92,6 +92,14 @@ jobs:
           cat constants.py
           timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
 
+      - name: Result Analysis
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/chaos/reports
+        run: |
+          echo "result analysis"
+          cat ${{ env.RELEASE }}.log || echo "no log file"
+
       - name: Milvus E2E Test
         timeout-minutes: 10
         if: ${{ always() }}

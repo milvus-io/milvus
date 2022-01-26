@@ -4,27 +4,27 @@ proxy:
     requests:
       cpu: "0.3"
       memory: "256Mi"
-    limits:
-      cpu: "0.5"
-      memory: "512Mi"
+    # limits:
+      # cpu: "0.5"
+      # memory: "512Mi"
 
 rootCoordinator:
   resources:
     requests:
       cpu: "0.3"
       memory: "256Mi"
-    limits:
-      cpu: "0.6"
-      memory: "512Mi"
+    # limits:
+      # cpu: "0.6"
+      # memory: "512Mi"
 
 queryCoordinator:
   resources:
     requests:
       cpu: "0.4"
       memory: "100Mi"
-    limits:
-      cpu: "1.1"
-      memory: "256Mi"
+    # limits:
+      # cpu: "1.1"
+      # memory: "256Mi"
 
 queryNode:
   resources:
@@ -32,120 +32,126 @@ queryNode:
       cpu: "2"
       memory: "500Mi"
     limits:
-      cpu: "2"
-      memory: "1.5Gi"
+      # cpu: "2"
+      # memory: "1.5Gi"
 indexCoordinator:
   resources:
     requests:
       cpu: "0.1"
       memory: "50Mi"
-    limits:
-      cpu: "0.1"
-      memory: "100Mi"
+    # limits:
+      # cpu: "0.1"
+      # memory: "100Mi"
 indexNode:
   resources:
     requests:
-      cpu: "2"
+      cpu: "4"
       memory: "500Mi"
-    limits:
-      cpu: "2"
-      memory: "800Mi"
+    # limits:
+      # cpu: "4"
+      # memory: "1.5Gi"
 
 dataCoordinator:
   resources:
     requests:
       cpu: "0.1"
       memory: "50Mi"
-    limits:
-      cpu: "0.2"
-      memory: "100Mi"
+    # limits:
+      # cpu: "0.2"
+      # memory: "100Mi"
 
 dataNode:
   resources:
     requests:
       cpu: "0.5"
       memory: "500Mi"
-    limits:
-      cpu: "1.2"
-      memory: "1.5Gi"
+    # limits:
+      # cpu: "1.2"
+      # memory: "1.5Gi"
 pulsar:
   proxy:
     resources:
       requests:
         cpu: "1"
         memory: "2Gi"
-      limits:
-        cpu: "1"
-        memory: "4Gi"
+      # limits:
+        # cpu: "1"
+        # memory: "4Gi"
   # Resources for the websocket proxy
     wsResources:
       requests:
         memory: "512Mi"
         cpu: "0.3"
-      limits:
-        memory: "512Mi"
-        cpu: "0.3"
+      # limits:
+      #   memory: "512Mi"
+        # cpu: "0.3"
   broker:
     resources:
       requests:
         cpu: "1.5"
         memory: "4Gi"
-      limits:
-        cpu: "1.5"
-        memory: "8Gi"
+      # limits:
+        # cpu: "1.5"
+        # memory: "8Gi"
   bookkeeper:
+    volumes:
+      ledgers:
+        existingStorageClassName: local-path
     resources:
       requests:
         cpu: 1
         memory: "4Gi"
-      limits:
-        cpu: 1
-        memory: "8Gi"
+      # limits:
+        # cpu: 1
+        # memory: "8Gi"
   bastion:
     resources:
       requests:
         cpu: "0.3"
         memory: "50Mi"
-      limits:
-        cpu: "0.3"
-        memory: "50Mi"
+      # limits:
+        # cpu: "0.3"
+        # memory: "50Mi"
   autorecovery:
     resources:
       requests:
         cpu: "1"
         memory: "512Mi"
-      limits:
-        cpu: "1"
-        memory: "1Gi"
+      # limits:
+        # cpu: "1"
+        # memory: "1Gi"
   zookeeper:
+    volumes:
+      data:
+        existingStorageClassName: local-path
     resources:
       requests:
         cpu: "0.3"
         memory: "1Gi"
-      limits:
-        cpu: "0.3"
-        memory: "2Gi"
+      # limits:
+        # cpu: "0.3"
+        # memory: "2Gi"
 etcd:
   resources:
     requests:
       cpu: "0.1"
       memory: "100Mi"
-    limits:
-      cpu: "0.1"
-      memory: "300Mi"
+    # limits:
+      # cpu: "0.1"
+      # memory: "300Mi"
 minio:
   resources:
     requests:
       cpu: "0.3"
       memory: "512Mi"
-    limits:
-      cpu: "0.6"
-      memory: "512Mi"
+    # limits:
+      # cpu: "0.6"
+      # memory: "512Mi"
 standalone:
   resources:
     requests:
       cpu: "1"
       memory: "3.5Gi"
-    limits:
-      cpu: "2.6"
-      memory: "8.5Gi"
+    # limits:
+      # cpu: "2.6"
+      # memory: "8.5Gi"

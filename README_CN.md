@@ -1,4 +1,4 @@
-<img src="https://assets.zilliz.com/readme_ch_69fbf0fc45.png" alt="Milvus banner">
+<img src="https://repository-images.githubusercontent.com/208728772/998c09ca-cfa6-4c01-ac75-3dfad7f4862b" alt="Milvus banner">
 
 <div class="column" align="middle">
   <a href="https://join.slack.com/t/milvusio/shared_invite/zt-e0u4qu3k-bI2GDNys3ZqX1YCJ9OM~GQ">

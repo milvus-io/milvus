@@ -36,7 +36,7 @@ func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCol
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
 		CollectionID: defaultCollectionID,
-		Schema:       genCollectionSchema(defaultCollectionID, false),
+		Schema:       genDefaultCollectionSchema(false),
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	loadCollectionTask := &loadCollectionTask{
@@ -59,7 +59,7 @@ func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *loadPart
 		},
 		CollectionID: defaultCollectionID,
 		PartitionIDs: []UniqueID{defaultPartitionID},
-		Schema:       genCollectionSchema(defaultCollectionID, false),
+		Schema:       genDefaultCollectionSchema(false),
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	loadPartitionTask := &loadPartitionTask{
@@ -132,7 +132,7 @@ func genReleaseSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 }
 
 func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *watchDmChannelTask {
-	schema := genCollectionSchema(defaultCollectionID, false)
+	schema := genDefaultCollectionSchema(false)
 	vChannelInfo := &datapb.VchannelInfo{
 		CollectionID: defaultCollectionID,
 		ChannelName:  "testDmChannel",
@@ -162,7 +162,7 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
 		CollectionID: defaultCollectionID,
-		Schema:       genCollectionSchema(defaultCollectionID, false),
+		Schema:       genDefaultCollectionSchema(false),
 	}
 	baseParentTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	baseParentTask.taskID = 10
@@ -186,7 +186,7 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 }
 func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *loadSegmentTask {
 	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
-	schema := genCollectionSchema(defaultCollectionID, false)
+	schema := genDefaultCollectionSchema(false)
 	segmentInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    defaultSegmentID,
 		PartitionID:  defaultPartitionID,
@@ -216,7 +216,7 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
 		CollectionID: defaultCollectionID,
-		Schema:       genCollectionSchema(defaultCollectionID, false),
+		Schema:       genDefaultCollectionSchema(false),
 	}
 	baseParentTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	baseParentTask.taskID = 10
@@ -672,7 +672,7 @@ func Test_AssignInternalTask(t *testing.T) {
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
-	schema := genCollectionSchema(defaultCollectionID, false)
+	schema := genDefaultCollectionSchema(false)
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
 	loadSegmentRequests := make([]*querypb.LoadSegmentsRequest, 0)
 	binlogs := make([]*datapb.FieldBinlog, 0)
@@ -1253,7 +1253,7 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genCollectionSchema(defaultCollectionID, false))
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
 
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
 	loadCollectionTask := loadSegmentTask.getParentTask()
@@ -1286,7 +1286,7 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genCollectionSchema(defaultCollectionID, false))
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
 
 	watchDmChannel := genWatchDmChannelTask(ctx, queryCoord, node1.queryNodeID)
 	loadCollectionTask := watchDmChannel.getParentTask()

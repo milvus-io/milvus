@@ -296,6 +296,12 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
 
+	//notify query service to release collection
+	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
+		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
+		return err
+	}
+
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddReq.Base.Timestamp = ts
@@ -357,12 +363,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	if err = dropCollectionFn(); err != nil {
-		return err
-	}
-
-	//notify query service to release collection
-	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
-		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
 		return err
 	}
 
