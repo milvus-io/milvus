@@ -1,4 +1,11 @@
 
+metrics:
+  enabled: true
+
+  serviceMonitor:
+    # Set this to `true` to create ServiceMonitor for Prometheus operator
+    enabled: true
+    interval: "2s"
 proxy:
   resources:
     requests:
@@ -69,6 +76,8 @@ dataNode:
       # cpu: "1.2"
       # memory: "1.5Gi"
 pulsar:
+  default_storage:
+    existingStorageClassName: local-path
   proxy:
     resources:
       requests:
@@ -94,6 +103,11 @@ pulsar:
         # cpu: "1.5"
         # memory: "8Gi"
   bookkeeper:
+    volumes:
+      journal:
+        existingStorageClassName: local-path
+      ledgers:
+        existingStorageClassName: local-path
     resources:
       requests:
         cpu: 1
@@ -118,6 +132,9 @@ pulsar:
         # cpu: "1"
         # memory: "1Gi"
   zookeeper:
+    volumes:
+      data:
+        existingStorageClassName: local-path
     resources:
       requests:
         cpu: "0.3"
@@ -142,6 +159,9 @@ minio:
       # cpu: "0.6"
       # memory: "512Mi"
 standalone:
+  persistence:
+    persistentVolumeClaim:
+      storageClass: local-path
   resources:
     requests:
       cpu: "1"
