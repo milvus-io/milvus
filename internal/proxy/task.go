@@ -2085,7 +2085,6 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	log.Info("Validate collection name.", zap.Any("collectionName", collectionName),
 		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
-	// info.collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
