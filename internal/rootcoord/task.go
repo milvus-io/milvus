@@ -446,6 +446,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	t.Rsp.CreatedUtcTimestamp = uint64(createdPhysicalTime)
 	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
 	t.Rsp.StartPositions = collInfo.GetStartPositions()
+	t.Rsp.CollectionName = t.Rsp.Schema.Name
 	return nil
 }
 
