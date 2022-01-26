@@ -52,7 +52,7 @@ const (
 	defaultVecFieldID       = 101
 )
 
-func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.CollectionSchema {
+func genDefaultCollectionSchema(isBinary bool) *schemapb.CollectionSchema {
 	var fieldVec schemapb.FieldSchema
 	if isBinary {
 		fieldVec = schemapb.FieldSchema{
@@ -106,7 +106,7 @@ func genCollectionSchema(collectionID UniqueID, isBinary bool) *schemapb.Collect
 }
 
 func genETCDCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionMeta {
-	schema := genCollectionSchema(collectionID, isBinary)
+	schema := genDefaultCollectionSchema(isBinary)
 	collectionMeta := etcdpb.CollectionMeta{
 		ID:           collectionID,
 		Schema:       schema,
