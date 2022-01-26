@@ -542,7 +542,7 @@ func TestGrpcRequest(t *testing.T) {
 		loadSegmentReq := &querypb.LoadSegmentsRequest{
 			DstNodeID:    nodeID,
 			Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
-			Schema:       genCollectionSchema(defaultCollectionID, false),
+			Schema:       genDefaultCollectionSchema(false),
 			CollectionID: defaultCollectionID,
 		}
 		err := cluster.loadSegments(baseCtx, nodeID, loadSegmentReq)
