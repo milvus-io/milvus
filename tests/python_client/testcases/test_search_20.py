@@ -285,6 +285,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 15409")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
@@ -631,6 +632,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "PartitonName: %s not found" % partition_name})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 15407")
     def test_search_param_invalid_binary(self):
         """
         target: test search within binary data (invalid parameter)
@@ -652,6 +654,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "unsupported"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 15407")
     def test_search_binary_flat_with_L2(self):
         """
         target: search binary collection using FlAT with L2
