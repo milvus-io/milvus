@@ -222,7 +222,6 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	rand.Read(id)
 	id2 := make([]byte, 10)
 	rand.Read(id2)
-	rand.Read(id)
 	m.flushBufferData(nil, 2, true, false, &internalpb.MsgPosition{
 		MsgID: id,
 	})
@@ -235,16 +234,14 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	})
 	m.injectFlush(ti, 2, 3)
 
-	go func() {
-		<-ti.injected
-		ti.injectDone(true)
-	}()
 	m.flushDelData(nil, 2, &internalpb.MsgPosition{
 		MsgID: id,
 	})
 	m.flushDelData(nil, 3, &internalpb.MsgPosition{
 		MsgID: id2,
 	})
+	<-ti.Injected()
+	ti.injectDone(true)
 
 	finish.Wait()
 	assert.EqualValues(t, size+2, counter.Load())
