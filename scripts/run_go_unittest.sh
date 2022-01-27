@@ -57,9 +57,9 @@ case "${unameOut}" in
     *)          echo "Skip querynode unit tests, unsupported os:${unameOut}";
 esac
 
-go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
-go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast
-go test -race -cover -v "${MILVUS_DIR}/datacoord/..." -failfast
-go test -race -cover -v "${MILVUS_DIR}/indexcoord/..." -failfast
+go test -race -cover "${MILVUS_DIR}/distributed/rootcoord" -failfast
+go test -race -cover "${MILVUS_DIR}/rootcoord" -failfast
+go test -race -cover "${MILVUS_DIR}/datacoord/..." -failfast
+go test -race -cover "${MILVUS_DIR}/indexcoord/..." -failfast
 
 echo " Go unittest finished"
