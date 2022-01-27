@@ -149,7 +149,7 @@ func (t *timetickSync) sendToChannel() {
 	if len(idleSessionList) > 0 {
 		// give warning every 2 second if not get ttMsg from source sessions
 		if maxCnt%10 == 0 {
-			log.Warn("session idle for long time", zap.Any("idle session list", idleSessionList),
+			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),
 				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.Milliseconds()*maxCnt))
 		}
 		return
@@ -273,11 +273,12 @@ func (t *timetickSync) delSession(sess *sessionutil.Session) {
 	}
 }
 
-func (t *timetickSync) clearSessions(sess []*sessionutil.Session) {
+func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	for _, s := range sess {
 		t.sess2ChanTsMap[s.ServerID] = nil
+		log.Debug("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))
 	}
 }
 
@@ -302,17 +303,14 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 				log.Debug("timetickSync sendChan closed")
 				return
 			}
-
+			if enableTtChecker {
+				checker.Check()
+			}
 			// reduce each channel to get min timestamp
 			local := sessTimetick[t.sourceID]
 			if len(local.chanTsMap) == 0 {
 				continue
 			}
-
-			if enableTtChecker {
-				checker.Check()
-			}
-
 			hdr := fmt.Sprintf("send ts to %d channels", len(local.chanTsMap))
 			tr := timerecord.NewTimeRecorder(hdr)
 			wg := sync.WaitGroup{}

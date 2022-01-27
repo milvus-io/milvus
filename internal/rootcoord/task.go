@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
@@ -254,7 +255,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // DropCollectionReqTask drop collection request task
@@ -370,7 +371,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	t.core.ExpireMetaCache(ctx, aliases, ts)
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // HasCollectionReqTask has collection request task
@@ -564,7 +565,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // DropPartitionReqTask drop partition request task
@@ -658,7 +659,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	//}
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // HasPartitionReqTask has partition request task

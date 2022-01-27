@@ -76,8 +76,8 @@ func TestProxyManager(t *testing.T) {
 		assert.Equal(t, int64(100), sess.ServerID)
 		t.Log("del session", sess)
 	}
-	pm.AddSession(fa)
-	pm.DelSession(fd)
+	pm.AddSessionFunc(fa)
+	pm.DelSessionFunc(fd)
 
 	err = pm.WatchProxy()
 	assert.Nil(t, err)
