@@ -1334,12 +1334,13 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 type searchTask struct {
 	Condition
 	*internalpb.SearchRequest
-	ctx       context.Context
-	resultBuf chan []*internalpb.SearchResults
-	result    *milvuspb.SearchResults
-	query     *milvuspb.SearchRequest
-	chMgr     channelsMgr
-	qc        types.QueryCoord
+	ctx            context.Context
+	resultBuf      chan []*internalpb.SearchResults
+	result         *milvuspb.SearchResults
+	query          *milvuspb.SearchRequest
+	chMgr          channelsMgr
+	qc             types.QueryCoord
+	collectionName string
 }
 
 func (st *searchTask) TraceCtx() context.Context {
@@ -1659,14 +1660,15 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	msgPack.Msgs[0] = tsMsg
 
 	collectionName := st.query.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+	st.collectionName = info.schema.Name
 
-	stream, err := st.chMgr.getDQLStream(collID)
+	stream, err := st.chMgr.getDQLStream(info.collID)
 	if err != nil {
-		err = st.chMgr.createDQLStream(collID)
+		err = st.chMgr.createDQLStream(info.collID)
 		if err != nil {
 			st.result = &milvuspb.SearchResults{
 				Status: &commonpb.Status{
@@ -1676,7 +1678,7 @@ func (st *searchTask) Execute(ctx context.Context) error {
 			}
 			return err
 		}
-		stream, err = st.chMgr.getDQLStream(collID)
+		stream, err = st.chMgr.getDQLStream(info.collID)
 		if err != nil {
 			st.result = &milvuspb.SearchResults{
 				Status: &commonpb.Status{
@@ -1920,6 +1922,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
 						Reason:    filterReason,
 					},
+					CollectionName: st.collectionName,
 				}
 				return fmt.Errorf("no Available QueryNode result, filter reason %s: id %d", filterReason, st.ID())
 			}
@@ -1943,6 +1946,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 						NumQueries: searchResults[0].NumQueries,
 						Topks:      make([]int64, searchResults[0].NumQueries),
 					},
+					CollectionName: st.collectionName,
 				}
 				return nil
 			}
@@ -1951,6 +1955,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			st.result.CollectionName = st.collectionName
 
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, st.query.CollectionName)
 			if err != nil {
@@ -1975,13 +1980,14 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 type queryTask struct {
 	Condition
 	*internalpb.RetrieveRequest
-	ctx       context.Context
-	resultBuf chan []*internalpb.RetrieveResults
-	result    *milvuspb.QueryResults
-	query     *milvuspb.QueryRequest
-	chMgr     channelsMgr
-	qc        types.QueryCoord
-	ids       *schemapb.IDs
+	ctx            context.Context
+	resultBuf      chan []*internalpb.RetrieveResults
+	result         *milvuspb.QueryResults
+	query          *milvuspb.QueryRequest
+	chMgr          channelsMgr
+	qc             types.QueryCoord
+	ids            *schemapb.IDs
+	collectionName string
 }
 
 func (qt *queryTask) TraceCtx() context.Context {
@@ -2079,12 +2085,13 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	log.Info("Validate collection name.", zap.Any("collectionName", collectionName),
 		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
 			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 		return err
 	}
+	qt.collectionName = info.schema.Name
 	log.Info("Get collection id by name.", zap.Any("collectionName", collectionName),
 		zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
 
@@ -2116,11 +2123,11 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Debug("QueryCoord show collections",
 		zap.Any("collections", showResp.CollectionIDs),
-		zap.Any("collID", collectionID))
+		zap.Any("collID", info.collID))
 
 	collectionLoaded := false
 	for _, collID := range showResp.CollectionIDs {
-		if collectionID == collID {
+		if info.collID == collID {
 			collectionLoaded = true
 			break
 		}
@@ -2217,7 +2224,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	qt.ResultChannelID = Params.ProxyCfg.RetrieveResultChannelNames[0]
 	qt.DbID = 0 // todo(yukun)
 
-	qt.CollectionID = collectionID
+	qt.CollectionID = info.collID
 	qt.PartitionIDs = make([]UniqueID, 0)
 
 	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
@@ -2383,6 +2390,7 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    reason,
 				},
+				CollectionName: qt.collectionName,
 			}
 			log.Debug("Query failed on all querynodes.",
 				zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
@@ -2394,6 +2402,7 @@ func (qt *queryTask) PostExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		qt.result.CollectionName = qt.collectionName
 
 		if len(qt.result.FieldsData) > 0 {
 			qt.result.Status = &commonpb.Status{
