@@ -62,13 +62,6 @@ function install_mac_deps() {
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
   brew update && brew upgrade && brew cleanup
 
-  if [ ! -f ~/.gvm/scripts/gvm ]; then
-     bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
-  fi
-  source ~/.gvm/scripts/gvm
-  gvm install go1.17.2
-  gvm use go1.17.2
-
   if [[ $(arch) == 'arm64' ]]; then
     sudo mkdir /usr/local/include
     sudo ln -s "$(brew --prefix llvm)" "/usr/local/opt/llvm"
@@ -79,6 +72,18 @@ function install_mac_deps() {
     sudo ln -s "$(brew --prefix tbb)/include/oneapi" "/usr/local/include/oneapi"
   fi
 }
+
+if ! command -v go &> /dev/null
+then
+    echo "go could not be found, please install it"
+    exit
+fi
+
+if ! command -v cmake &> /dev/null
+then
+    echo "cmake could not be found, please install it"
+    exit
+fi
 
 unameOut="$(uname -s)"
 case "${unameOut}" in
