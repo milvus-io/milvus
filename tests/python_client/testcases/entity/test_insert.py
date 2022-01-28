@@ -535,6 +535,7 @@ class TestInsertBase:
             connect.insert(collection, tmp_entity)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 15416")
     # @pytest.mark.timeout(30)
     def test_collection_insert_rows_count_multi_threading(self, args, collection):
         """
