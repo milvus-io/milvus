@@ -67,11 +67,18 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 Check the requirements first.
 
+Linux systems (Ubuntu 18.04 or later recommended):
 ```bash
-go: 1.15
-cmake: >=3.18
+go: >= 1.15
+cmake: >= 3.18
 gcc: 7.5
-protobuf: >=3.7
+```
+
+MacOS systems (MacOS Big Sur 11.5 or later recommended):
+```bash
+go: >= 1.15
+cmake: >= 3.18
+llvm: >= 12
 ```
 
 Clone Milvus repo and build.
