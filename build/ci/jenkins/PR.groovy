@@ -175,17 +175,20 @@ pipeline {
                                 }
                             }
                         }
-
+                        post{
+                            always {
+                                container('pytest'){
+                                    dir("${env.ARTIFACTS}") {
+                                            sh "tar -zcvf ${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
+                                            archiveArtifacts artifacts: "${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ", allowEmptyArchive: true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 post{
                     always {
-                        container('pytest'){
-                            dir("${env.ARTIFACTS}") {
-                                    sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
-                                    archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ", allowEmptyArchive: true
-                            }
-                        }
                         container('main') {
                             dir ('tests/scripts') {  
                                 script {
