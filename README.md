@@ -74,11 +74,18 @@ cmake: >= 3.18
 gcc: 7.5
 ```
 
-MacOS systems (MacOS Big Sur 11.5 or later recommended):
+MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
 go: >= 1.15
 cmake: >= 3.18
 llvm: >= 12
+```
+
+MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
+```bash
+go: >= 1.17 (Arch=ARM64)
+cmake: >= 3.18
+llvm: >= 13
 ```
 
 Clone Milvus repo and build.
