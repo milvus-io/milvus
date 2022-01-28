@@ -23,7 +23,8 @@ all: build-cpp build-go
 pre-proc:
 	@echo "Running pre-processing"
 ifeq ($(OS),Darwin) # MacOS X
-	@(env bash $(PWD)/scripts/replace_gorocksdb_version.sh)
+	@echo "MacOS system identified. Switching to customized gorocksdb fork..."
+	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@latest
 endif
 
 get-build-deps:
