@@ -7,7 +7,7 @@ String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 int total_timeout_minutes = 660
 def imageTag=''
-def chart_version='3.0.0'
+def chart_version='3.0.1'
 pipeline {
     triggers {
         cron """${cron_timezone}
@@ -139,6 +139,7 @@ pipeline {
                                                     --set indexNode.replicas=2 \
                                                     --set dataNode.replicas=2 \
                                                     --version ${chart_version} \
+                                                    -f values/nightly.yaml \
                                                     --set metrics.serviceMonitor.enabled=true"
                                                     """
                                                 }
