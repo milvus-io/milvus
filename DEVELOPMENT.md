@@ -52,6 +52,29 @@ Here's a list of verified OS types where Milvus can successfully build and run:
 * MacOS (x86_64)
 * MacOS (Apple Silicon)
 
+#### Prerequisites
+Linux systems (Recommend Ubuntu 18.04 or later):
+```bash
+go: >= 1.15
+cmake: >= 3.18
+gcc: 7.5
+```
+
+MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
+```bash
+go: >= 1.15
+cmake: >= 3.18
+llvm: >= 12
+```
+
+MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
+```bash
+go: >= 1.17 (Arch=ARM64)
+cmake: >= 3.18
+llvm: >= 13
+```
+
+
 #### Installing Dependencies
 
 In the Milvus repository root, simply run:
@@ -232,3 +255,29 @@ $ install with docker compose
 ## GitHub Flow
 
 To check out code to work on, please refer to the [GitHub Flow](https://guides.github.com/introduction/flow/).
+
+## FAQs
+Q: The go building phase fails on Apple Silicon (Mac M1) machines.
+
+A: Please double-check that you have [right Go version](https://go.dev/dl/) installed, i.e. with OS=macOS and Arch=ARM64.
+
+---
+Q: "make" fails with "*ld: library not found for -lSystem*" on MacOS.
+
+A: There are a couple of things you could try:
+1. Use **Software Update** (from **About this Mac** -> **Overview**) to install updates.
+2. Try the following commands:
+```bash
+sudo rm -rf /Library/Developer/CommandLineTools
+sudo xcode-select --install
+```
+
+---
+Q: Rocksdb fails to compile with "*ld: warning: object file was built for newer macOS version (11.6) than being linked (11.0).*" on MacOS.
+
+A: Use **Software Update** (from **About this Mac** -> **Overview**) to install updates.
+
+---
+Q: Some Go unit tests failed.
+
+A: We are aware that some tests can be flaky occasionally. If there's something you believe is abnormal (i.e. tests that fail every single time). You are more than welcome to [file an issue](https://github.com/milvus-io/milvus/issues/new/choose)!
