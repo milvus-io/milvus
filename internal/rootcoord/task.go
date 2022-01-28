@@ -303,17 +303,23 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	// drop all indices
+	if err = t.core.RemoveIndex(ctx, t.Req.CollectionName, ""); err != nil {
+		return err
+	}
+
+	// Allocate a new ts to make sure the channel timetick is consistent.
+	ts, err = t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddReq.Base.Timestamp = ts
 	ddOpStr, err := EncodeDdOperation(&ddReq, DropCollectionDDType)
 	if err != nil {
 		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
-	}
-
-	// drop all indices
-	if err = t.core.RemoveIndex(ctx, t.Req.CollectionName, ""); err != nil {
-		return err
 	}
 
 	// get all aliases before meta table updated
