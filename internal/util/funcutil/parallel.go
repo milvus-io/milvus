@@ -77,7 +77,6 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 			for idx := begin; idx < end; idx++ {
 				err = f(idx)
 				if err != nil {
-					log.Debug(fname, zap.Error(err), zap.Any("idx", idx))
 					break
 				}
 			}
@@ -97,8 +96,6 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 
 		routineNum++
 	}
-
-	log.Debug(fname, zap.Any("NumOfGoRoutines", routineNum))
 
 	if routineNum <= 0 {
 		return nil

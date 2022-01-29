@@ -352,6 +352,7 @@ func (it *IndexBuildTask) loadVector(ctx context.Context) (storage.FieldID, stor
 		keys[idx] = toLoadDataPaths[idx]
 		blob, err := getBlobByPath(toLoadDataPaths[idx])
 		if err != nil {
+			log.Warn("failed to load from blob storage",zap.String("blob path", toLoadDataPaths[idx]))
 			return err
 		}
 		blobs[idx] = blob
@@ -362,7 +363,7 @@ func (it *IndexBuildTask) loadVector(ctx context.Context) (storage.FieldID, stor
 	// gomaxproc will be set by `automaxproc`, passing 0 will just retrieve the value
 	err := funcutil.ProcessFuncParallel(len(toLoadDataPaths), runtime.GOMAXPROCS(0), loadKey, "loadKey")
 	if err != nil {
-		log.Warn("loadKey from minio failed", zap.Error(err))
+		log.Warn("loadKey from blob storage failed", zap.Error(err))
 		it.internalErr = err
 		// In this case, it.internalErr is no longer nil and err does not need to be returned, otherwise it.err will also be assigned.
 		return storage.InvalidUniqueID, nil, err
