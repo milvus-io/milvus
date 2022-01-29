@@ -88,12 +88,12 @@ func (c *Client) getRootCoordAddr() (string, error) {
 		log.Debug("RootCoordClient GetSessions failed", zap.Any("key", key))
 		return "", err
 	}
-	log.Debug("RootCoordClient GetSessions success")
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("RootCoordClient mess key not exist", zap.Any("key", key))
+		log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
 		return "", fmt.Errorf("number of RootCoord is incorrect, %d", len(msess))
 	}
+	log.Debug("RootCoordClient GetSessions success", zap.String("address", ms.Address))
 	return ms.Address, nil
 }
 
