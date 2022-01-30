@@ -36,14 +36,14 @@ func TestEtcdConfigLoad(te *testing.T) {
 	// TODO, not sure if the relative path works for ci environment
 	param.BaseTable.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	param.BaseTable.Save("etcd.data.dir", "etcd.test.data.dir")
-	param.LoadCfgToMemory()
+	param.EtcdCfg.LoadCfgToMemory()
 	//clean up data
 	defer func() {
 		os.RemoveAll("etcd.test.data.dir")
 	}()
 	te.Run("Etcd Config", func(t *testing.T) {
 		rootPath := "/test"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		require.NoError(te, err)
 		assert.NotNil(te, metaKv)
 		require.NoError(t, err)

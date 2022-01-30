@@ -35,10 +35,10 @@ import (
 func TestReloadFromKV(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	defer etcdCli.Close()
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta, err := newMeta(baseCtx, kv, nil, nil)
 	assert.Nil(t, err)
 
@@ -91,10 +91,10 @@ func TestReloadFromKV(t *testing.T) {
 func TestCheckIndexLoop(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	defer etcdCli.Close()
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 
@@ -157,10 +157,10 @@ func TestCheckIndexLoop(t *testing.T) {
 func TestHandoffNotExistSegment(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	defer etcdCli.Close()
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 
@@ -206,11 +206,11 @@ func TestHandoffNotExistSegment(t *testing.T) {
 func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 	taskScheduler := &TaskScheduler{
@@ -219,7 +219,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		client:           kv,
 		triggerTaskQueue: NewTaskQueue(),
 	}
-	idAllocatorKV := tsoutil.NewTSOKVBase(etcdCli, Params.BaseParams.KvRootPath, "queryCoordTaskID")
+	idAllocatorKV := tsoutil.NewTSOKVBase(etcdCli, Params.EtcdCfg.KvRootPath, "queryCoordTaskID")
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 	err = idAllocator.Initialize()
 	assert.Nil(t, err)

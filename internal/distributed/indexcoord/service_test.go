@@ -35,7 +35,7 @@ func TestIndexCoordinateServer(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 	Params.Init()
-	etcd, err := etcd.GetEtcdClient(&Params.BaseParamTable)
+	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	indexCoordClient := &indexcoord.Mock{}
 	indexCoordClient.SetEtcdClient(etcd)

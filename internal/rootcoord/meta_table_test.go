@@ -222,7 +222,7 @@ func TestMetaTable(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	require.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -1142,7 +1142,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 		vtso++
 		return vtso
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -1299,7 +1299,7 @@ func TestFixIssue10540(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 

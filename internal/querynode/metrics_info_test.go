@@ -35,10 +35,10 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.BaseParams.MetaRootPath, etcdCli)
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
 
 	req := &milvuspb.GetMetricsRequest{
 		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),

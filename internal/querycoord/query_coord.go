@@ -117,19 +117,19 @@ func (qc *QueryCoord) Register() error {
 }
 
 func (qc *QueryCoord) initSession() error {
-	qc.session = sessionutil.NewSession(qc.loopCtx, Params.BaseParams.MetaRootPath, qc.etcdCli)
+	qc.session = sessionutil.NewSession(qc.loopCtx, Params.EtcdCfg.MetaRootPath, qc.etcdCli)
 	if qc.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	qc.session.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, true)
 	Params.QueryCoordCfg.NodeID = uint64(qc.session.ServerID)
-	Params.BaseParams.SetLogger(qc.session.ServerID)
+	Params.SetLogger(qc.session.ServerID)
 	return nil
 }
 
 // Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
-	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.BaseParams.MetaRootPath), zap.String("address", Params.QueryCoordCfg.Address))
+	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath), zap.String("address", Params.QueryCoordCfg.Address))
 	var initError error
 	qc.initOnce.Do(func() {
 		err := qc.initSession()
@@ -139,12 +139,12 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 		log.Debug("queryCoord try to connect etcd")
-		etcdKV := etcdkv.NewEtcdKV(qc.etcdCli, Params.BaseParams.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(qc.etcdCli, Params.EtcdCfg.MetaRootPath)
 		qc.kvClient = etcdKV
 		log.Debug("query coordinator try to connect etcd success")
 
 		// init id allocator
-		idAllocatorKV := tsoutil.NewTSOKVBase(qc.etcdCli, Params.BaseParams.KvRootPath, "queryCoordTaskID")
+		idAllocatorKV := tsoutil.NewTSOKVBase(qc.etcdCli, Params.EtcdCfg.KvRootPath, "queryCoordTaskID")
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 		initError = idAllocator.Initialize()
 		if initError != nil {

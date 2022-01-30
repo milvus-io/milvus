@@ -193,14 +193,14 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.BaseParams.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
 	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
 	Params.DataNodeCfg.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
-	Params.BaseParams.SetLogger(Params.DataNodeCfg.NodeID)
+	Params.SetLogger(Params.DataNodeCfg.NodeID)
 	return nil
 }
 
@@ -438,7 +438,7 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.BaseParams.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
 		node.watchKv = etcdKV
 		return nil
 	}

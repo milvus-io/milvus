@@ -263,7 +263,7 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -315,7 +315,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -391,7 +391,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)

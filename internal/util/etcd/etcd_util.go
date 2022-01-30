@@ -31,10 +31,10 @@ import (
 var EtcdServer *embed.Etcd
 
 // InitEtcdServer initializes embedded etcd server singleton.
-func InitEtcdServer(pt *paramtable.BaseParamTable) error {
-	if pt.UseEmbedEtcd {
-		path := pt.EtcdConfigPath
-		fmt.Println("path", path, "data", pt.EtcdDataDir)
+func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
+	if etcdCfg.UseEmbedEtcd {
+		path := etcdCfg.ConfigPath
+		fmt.Println("path", path, "data", etcdCfg.DataDir)
 		var cfg *embed.Config
 		if len(path) > 0 {
 			cfgFromFile, err := embed.ConfigFromFile(path)
@@ -45,7 +45,7 @@ func InitEtcdServer(pt *paramtable.BaseParamTable) error {
 		} else {
 			cfg = embed.NewConfig()
 		}
-		cfg.Dir = pt.EtcdDataDir
+		cfg.Dir = etcdCfg.DataDir
 		e, err := embed.StartEtcd(cfg)
 		if err != nil {
 			return err
@@ -64,11 +64,11 @@ func StopEtcdServer() {
 }
 
 // GetEtcdClient returns etcd client
-func GetEtcdClient(pt *paramtable.BaseParamTable) (*clientv3.Client, error) {
-	if pt.UseEmbedEtcd {
+func GetEtcdClient(cfg *paramtable.EtcdConfig) (*clientv3.Client, error) {
+	if cfg.UseEmbedEtcd {
 		return GetEmbedEtcdClient()
 	}
-	return GetRemoteEtcdClient(pt.EtcdEndpoints)
+	return GetRemoteEtcdClient(cfg.Endpoints)
 }
 
 // GetEmbedEtcdClient returns client of embed etcd server

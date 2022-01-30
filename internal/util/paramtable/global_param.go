@@ -48,12 +48,8 @@ const (
 // GlobalParamTable is a derived struct of BaseParamTable.
 // It is used to quickly and easily access global system configuration.
 type GlobalParamTable struct {
-	once       sync.Once
-	BaseParams BaseParamTable
-
-	PulsarCfg  pulsarConfig
-	RocksmqCfg rocksmqConfig
-	MinioCfg   minioConfig
+	BaseParamTable
+	once sync.Once
 
 	CommonCfg     commonConfig
 	KnowhereCfg   knowhereConfig
@@ -78,162 +74,26 @@ func (p *GlobalParamTable) InitOnce() {
 
 // Init initialize the global param table
 func (p *GlobalParamTable) Init() {
-	p.BaseParams.Init()
+	p.BaseParamTable.Init()
 
-	p.PulsarCfg.init(&p.BaseParams)
-	p.RocksmqCfg.init(&p.BaseParams)
-	p.MinioCfg.init(&p.BaseParams)
+	p.CommonCfg.init(&p.BaseParamTable)
+	p.KnowhereCfg.init(&p.BaseParamTable)
+	p.MsgChannelCfg.init(&p.BaseParamTable)
 
-	p.CommonCfg.init(&p.BaseParams)
-	p.KnowhereCfg.init(&p.BaseParams)
-	p.MsgChannelCfg.init(&p.BaseParams)
-
-	p.RootCoordCfg.init(&p.BaseParams)
-	p.ProxyCfg.init(&p.BaseParams)
-	p.QueryCoordCfg.init(&p.BaseParams)
-	p.QueryNodeCfg.init(&p.BaseParams)
-	p.DataCoordCfg.init(&p.BaseParams)
-	p.DataNodeCfg.init(&p.BaseParams)
-	p.IndexCoordCfg.init(&p.BaseParams)
-	p.IndexNodeCfg.init(&p.BaseParams)
+	p.RootCoordCfg.init(&p.BaseParamTable)
+	p.ProxyCfg.init(&p.BaseParamTable)
+	p.QueryCoordCfg.init(&p.BaseParamTable)
+	p.QueryNodeCfg.init(&p.BaseParamTable)
+	p.DataCoordCfg.init(&p.BaseParamTable)
+	p.DataNodeCfg.init(&p.BaseParamTable)
+	p.IndexCoordCfg.init(&p.BaseParamTable)
+	p.IndexNodeCfg.init(&p.BaseParamTable)
 }
 
 // SetLogConfig set log config with given role
 func (p *GlobalParamTable) SetLogConfig(role string) {
-	p.BaseParams.RoleName = role
-	p.BaseParams.SetLogConfig()
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- pulsar ---
-type pulsarConfig struct {
-	BaseParams *BaseParamTable
-
-	Address        string
-	MaxMessageSize int
-}
-
-func (p *pulsarConfig) init(bp *BaseParamTable) {
-	p.BaseParams = bp
-
-	p.initAddress()
-	p.initMaxMessageSize()
-}
-
-func (p *pulsarConfig) initAddress() {
-	addr, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = addr
-}
-
-func (p *pulsarConfig) initMaxMessageSize() {
-	maxMessageSizeStr, err := p.BaseParams.Load("pulsar.maxMessageSize")
-	if err != nil {
-		p.MaxMessageSize = SuggestPulsarMaxMessageSize
-	} else {
-		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
-		if err != nil {
-			p.MaxMessageSize = SuggestPulsarMaxMessageSize
-		} else {
-			p.MaxMessageSize = maxMessageSize
-		}
-	}
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- rocksmq ---
-type rocksmqConfig struct {
-	BaseParams *BaseParamTable
-
-	Path string
-}
-
-func (p *rocksmqConfig) init(bp *BaseParamTable) {
-	p.BaseParams = bp
-
-	p.initPath()
-}
-
-func (p *rocksmqConfig) initPath() {
-	path, err := p.BaseParams.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.Path = path
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- minio ---
-type minioConfig struct {
-	BaseParams *BaseParamTable
-
-	Address         string
-	AccessKeyID     string
-	SecretAccessKey string
-	UseSSL          bool
-	BucketName      string
-	RootPath        string
-}
-
-func (p *minioConfig) init(bp *BaseParamTable) {
-	p.BaseParams = bp
-
-	p.initAddress()
-	p.initAccessKeyID()
-	p.initSecretAccessKey()
-	p.initUseSSL()
-	p.initBucketName()
-	p.initRootPath()
-}
-
-func (p *minioConfig) initAddress() {
-	endpoint, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = endpoint
-}
-
-func (p *minioConfig) initAccessKeyID() {
-	keyID, err := p.BaseParams.Load("_MinioAccessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.AccessKeyID = keyID
-}
-
-func (p *minioConfig) initSecretAccessKey() {
-	key, err := p.BaseParams.Load("_MinioSecretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.SecretAccessKey = key
-}
-
-func (p *minioConfig) initUseSSL() {
-	usessl, err := p.BaseParams.Load("_MinioUseSSL")
-	if err != nil {
-		panic(err)
-	}
-	p.UseSSL, _ = strconv.ParseBool(usessl)
-}
-
-func (p *minioConfig) initBucketName() {
-	bucketName, err := p.BaseParams.Load("_MinioBucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.BucketName = bucketName
-}
-
-func (p *minioConfig) initRootPath() {
-	rootPath, err := p.BaseParams.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RootPath = rootPath
+	p.BaseTable.RoleName = role
+	p.BaseTable.SetLogConfig()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -302,7 +162,6 @@ type msgChannelConfig struct {
 	QueryCoordTimeTick     string
 	QueryNodeStats         string
 
-	DataCoordInsert      string
 	DataCoordStatistic   string
 	DataCoordTimeTick    string
 	DataCoordSegmentInfo string
@@ -326,7 +185,6 @@ func (p *msgChannelConfig) init(bp *BaseParamTable) {
 	p.initQueryCoordTimeTick()
 	p.initQueryNodeStats()
 
-	p.initDataCoordInsert()
 	p.initDataCoordStatistic()
 	p.initDataCoordTimeTick()
 	p.initDataCoordSegmentInfo()
@@ -390,10 +248,6 @@ func (p *msgChannelConfig) initQueryNodeStats() {
 }
 
 // --- datacoord ---
-func (p *msgChannelConfig) initDataCoordInsert() {
-	p.DataCoordInsert = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordInsertChannel")
-}
-
 func (p *msgChannelConfig) initDataCoordStatistic() {
 	p.DataCoordStatistic = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordStatistic")
 }

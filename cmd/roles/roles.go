@@ -364,9 +364,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 		defer stopRocksmq()
 
-		if Params.BaseParams.UseEmbedEtcd {
+		if Params.EtcdCfg.UseEmbedEtcd {
 			// start etcd server
-			etcd.InitEtcdServer(&Params.BaseParams)
+			etcd.InitEtcdServer(&Params.EtcdCfg)
 			defer etcd.StopEtcdServer()
 		}
 	} else {

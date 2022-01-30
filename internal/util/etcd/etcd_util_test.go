@@ -26,22 +26,22 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.BaseParamTable
 
 func TestEtcd(t *testing.T) {
 	Params.Init()
-	Params.BaseParams.UseEmbedEtcd = true
-	Params.BaseParams.EtcdDataDir = "/tmp/data"
-	err := InitEtcdServer(&Params.BaseParams)
+	Params.EtcdCfg.UseEmbedEtcd = true
+	Params.EtcdCfg.DataDir = "/tmp/data"
+	err := InitEtcdServer(&Params.EtcdCfg)
 	assert.NoError(t, err)
-	defer os.RemoveAll(Params.BaseParams.EtcdDataDir)
+	defer os.RemoveAll(Params.EtcdCfg.DataDir)
 	defer StopEtcdServer()
 
 	// port is binded
-	err = InitEtcdServer(&Params.BaseParams)
+	err = InitEtcdServer(&Params.EtcdCfg)
 	assert.Error(t, err)
 
-	etcdCli, err := GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 
 	key := path.Join("test", "test")

@@ -107,7 +107,7 @@ func makeNewChannelNames(names []string, suffix string) []string {
 }
 
 func clearEtcd(rootPath string) error {
-	client, err := etcd.GetEtcdClient(&Params.BaseParams)
+	client, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		return err
 	}
