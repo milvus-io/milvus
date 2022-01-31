@@ -209,7 +209,7 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 
 	var newCollection = newCollection(collectionID, schema)
 	colReplica.collections[collectionID] = newCollection
-
+	log.Debug("Successfully add collection ", zap.Int64("collectionID", collectionID))
 	return newCollection
 }
 
