@@ -115,7 +115,7 @@ func (pc *PulsarConsumer) Close() {
 		err := retry.Do(context.Background(), func() error {
 			//TODO need to check error retryable
 			return pc.c.Unsubscribe()
-		}, retry.MaxSleepTime(50*time.Millisecond), retry.Attempts(6))
+		}, retry.MaxSleepTime(200*time.Millisecond), retry.Attempts(10))
 		if err != nil {
 			log.Error("failed to unsubscribe", zap.String("subscription", pc.Subscription()), zap.Error(err))
 			panic(err)

@@ -522,7 +522,7 @@ func TestQueryCollection_waitNewTSafe(t *testing.T) {
 	err = updateTSafe(queryCollection, timestamp)
 	assert.NoError(t, err)
 
-	resTimestamp, err := queryCollection.waitNewTSafe()
+	resTimestamp, _, err := queryCollection.waitNewTSafe()
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, resTimestamp)
 }

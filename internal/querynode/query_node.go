@@ -523,6 +523,8 @@ func (node *QueryNode) removeSegments(segmentChangeInfos *querypb.SealedSegments
 			if hasGrowingSegment {
 				err := node.streaming.replica.removeSegment(segmentInfo.SegmentID)
 				if err != nil {
+					log.Warn("failed to remove growing segment", zap.Int64("CollectionId", segmentInfo.CollectionID),
+						zap.Int64("SegmentId", segmentInfo.SegmentID), zap.Error(err))
 					return err
 				}
 				log.Debug("remove growing segment in removeSegments",
@@ -539,6 +541,8 @@ func (node *QueryNode) removeSegments(segmentChangeInfos *querypb.SealedSegments
 			if info.OfflineNodeID == Params.QueryNodeCfg.QueryNodeID {
 				err := node.historical.replica.removeSegment(segmentInfo.SegmentID)
 				if err != nil {
+					log.Warn("failed to remove sealed segment", zap.Int64("CollectionId", segmentInfo.CollectionID),
+						zap.Int64("SegmentId", segmentInfo.SegmentID), zap.Error(err))
 					return err
 				}
 				log.Debug("remove sealed segment", zap.Any("collectionID", segmentInfo.CollectionID),

@@ -311,8 +311,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			if len(local.chanTsMap) == 0 {
 				continue
 			}
-			hdr := fmt.Sprintf("send ts to %d channels", len(local.chanTsMap))
-			tr := timerecord.NewTimeRecorder(hdr)
+
 			wg := sync.WaitGroup{}
 			for chanName, ts := range local.chanTsMap {
 				wg.Add(1)
@@ -324,19 +323,20 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 							mints = currTs
 						}
 					}
+					tr := timerecord.NewTimeRecorder("send ts to channel")
 					if err := t.sendTimeTickToChannel([]string{chanName}, mints); err != nil {
 						log.Debug("SendTimeTickToChannel fail", zap.Error(err))
+					}
+					span := tr.ElapseSpan()
+					// rootcoord send tt msg to all channels every 200ms by default
+					if span > Params.ProxyCfg.TimeTickInterval {
+						log.Warn("rootcoord send tt to channel too slowly",
+							zap.String("channel name", chanName), zap.Int64("span", span.Milliseconds()))
 					}
 					wg.Done()
 				}(chanName, ts)
 			}
 			wg.Wait()
-			span := tr.ElapseSpan()
-			// rootcoord send tt msg to all channels every 200ms by default
-			if span > Params.ProxyCfg.TimeTickInterval {
-				log.Warn("rootcoord send tt to all channels too slowly",
-					zap.Int("chanNum", len(local.chanTsMap)), zap.Int64("span", span.Milliseconds()))
-			}
 		}
 	}
 }

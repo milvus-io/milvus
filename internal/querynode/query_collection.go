@@ -276,13 +276,13 @@ func (q *queryCollection) popAllUnsolvedMsg() []queryMsg {
 	return ret
 }
 
-func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
+func (q *queryCollection) waitNewTSafe() (Timestamp, string, error) {
 	q.watcherCond.L.Lock()
 	for !q.tSafeUpdate {
 		q.watcherCond.Wait()
 		err := q.releaseCtx.Err()
 		if err != nil {
-			return 0, err
+			return 0, "", err
 		}
 	}
 	q.tSafeUpdate = false
@@ -291,22 +291,19 @@ func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
 	q.tSafeWatchersMu.RLock()
 	defer q.tSafeWatchersMu.RUnlock()
 	t := Timestamp(math.MaxInt64)
+	var slowchannel string
 	for channel := range q.tSafeWatchers {
 		ts, err := q.streaming.tSafeReplica.getTSafe(channel)
 		if err != nil {
-			return 0, err
+			return 0, "", err
 		}
 		if ts <= t {
+			slowchannel = channel
 			t = ts
 		}
 	}
-	//p, _ := tsoutil.ParseTS(t)
-	//log.Debug("waitNewTSafe",
-	//	zap.Any("collectionID", q.collectionID),
-	//	zap.Any("tSafe", t),
-	//	zap.Any("tSafe_p", p),
-	//)
-	return t, nil
+
+	return t, slowchannel, nil
 }
 
 func (q *queryCollection) getServiceableTime() Timestamp {
@@ -332,17 +329,20 @@ func (q *queryCollection) setServiceableTime(t Timestamp) {
 
 func (q *queryCollection) checkTimeout(msg queryMsg) bool {
 	curTime := tsoutil.GetCurrentTime()
-	curTimePhysical, _ := tsoutil.ParseTS(curTime)
-	timeoutTsPhysical, _ := tsoutil.ParseTS(msg.TimeoutTs())
-	log.Debug("check if query timeout",
-		zap.Int64("collectionID", q.collectionID),
-		zap.Int64("msgID", msg.ID()),
-		zap.Uint64("TimeoutTs", msg.TimeoutTs()),
-		zap.Uint64("curTime", curTime),
-		zap.Time("timeoutTsPhysical", timeoutTsPhysical),
-		zap.Time("curTimePhysical", curTimePhysical),
-	)
-	return msg.TimeoutTs() > typeutil.ZeroTimestamp && curTime >= msg.TimeoutTs()
+	timeout := msg.TimeoutTs() > typeutil.ZeroTimestamp && curTime >= msg.TimeoutTs()
+	if timeout {
+		curTimePhysical, _ := tsoutil.ParseTS(curTime)
+		timeoutTsPhysical, _ := tsoutil.ParseTS(msg.TimeoutTs())
+		log.Warn("query timout",
+			zap.Int64("collectionID", q.collectionID),
+			zap.Int64("msgID", msg.ID()),
+			zap.Uint64("TimeoutTs", msg.TimeoutTs()),
+			zap.Uint64("curTime", curTime),
+			zap.Time("timeoutTsPhysical", timeoutTsPhysical),
+			zap.Time("curTimePhysical", curTimePhysical),
+		)
+	}
+	return timeout
 }
 
 func (q *queryCollection) consumeQuery() {
@@ -589,7 +589,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			return
 		default:
 			//time.Sleep(10 * time.Millisecond)
-			serviceTime, err := q.waitNewTSafe()
+			serviceTime, slowchannel, err := q.waitNewTSafe()
 			if err != nil {
 				if err == q.releaseCtx.Err() {
 					continue
@@ -625,7 +625,6 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					err := errors.New(fmt.Sprintln("do query failed in doUnsolvedQueryMsg because timeout"+
 						", collectionID = ", q.collectionID,
 						", msgID = ", m.ID()))
-					log.Warn(err.Error())
 					publishErr := q.publishFailedQueryResult(m, err.Error())
 					if publishErr != nil {
 						log.Error(publishErr.Error())
@@ -641,6 +640,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					zap.Any("collectionID", q.collectionID),
 					zap.Any("sm.BeginTs", gt),
 					zap.Any("serviceTime", st),
+					zap.String("slow channel", slowchannel),
 					zap.Any("delta seconds", (guaranteeTs-serviceTime)/(1000*1000*1000)),
 					zap.Any("msgID", m.ID()),
 				)
