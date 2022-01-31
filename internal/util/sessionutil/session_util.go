@@ -223,6 +223,22 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 
 		if !txnResp.Succeeded {
+			if s.Exclusive {
+				// check if session is same as current server
+				sessions, _, err := s.GetSessions(key)
+				if err != nil {
+					return err
+				}
+				session, ok := sessions[key]
+				if ok {
+					log.Info("failed to compare and swap because key exist", zap.String("registered", session.Address),
+						zap.String("current", s.Address))
+					if session.Address == s.Address {
+						// ignore error and response because we just deliver our best effor
+						s.etcdCli.Delete(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
+					}
+				}
+			}
 			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
 		}
 
@@ -230,7 +246,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		s.keepAliveCancel = keepAliveCancel
 		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
 		if err != nil {
-			fmt.Printf("keep alive error %s\n", err)
+			log.Warn("keep alive error", zap.Error(err))
 			return err
 		}
 		log.Debug("Session register successfully", zap.Int64("ServerID", s.ServerID))

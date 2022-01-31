@@ -399,3 +399,24 @@ func TestSession_Registered(t *testing.T) {
 	session.UpdateRegistered(true)
 	assert.True(t, session.Registered())
 }
+
+func TestSessionFastRevoke(t *testing.T) {
+	ctx := context.Background()
+	Params.Init()
+
+	endpoints, err := Params.Load("_EtcdEndpoints")
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+	if err != nil {
+		panic(err)
+	}
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	require.NoError(t, err)
+	singleS := NewSession(ctx, metaRoot, etcdCli)
+	singleS.Init("test", "testAddr", true, false)
+	singleS.Register()
+
+	singleS.Init("test", "testAddr", true, false)
+	singleS.Register()
+}
