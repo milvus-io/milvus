@@ -214,7 +214,6 @@ msgChannel:
     rootCoordDelta: "rootcoord-delta"
     search: "search"
     searchResult: "searchResult"
-    proxyTimeTick: "proxyTimeTick"
     queryTimeTick: "queryTimeTick"
     queryNodeStats: "query-node-stats"
     # Cmd for loadIndex, flush, etc...

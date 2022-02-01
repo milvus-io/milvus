@@ -58,8 +58,8 @@ func getSystemInfoMetrics(
 				ID:          qc.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
-				SearchChannelPrefix:       Params.QueryCoordCfg.SearchChannelPrefix,
-				SearchResultChannelPrefix: Params.QueryCoordCfg.SearchResultChannelPrefix,
+				SearchChannelPrefix:       Params.MsgChannelCfg.QueryCoordSearch,
+				SearchResultChannelPrefix: Params.MsgChannelCfg.QueryCoordSearchResult,
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),

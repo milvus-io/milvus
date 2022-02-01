@@ -82,9 +82,9 @@ func TestGrpcService(t *testing.T) {
 	rootcoord.Params.Init()
 	rootcoord.Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 	rootcoord.Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	rootcoord.Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
-	rootcoord.Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	rootcoord.Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
+	rootcoord.Params.MsgChannelCfg.RootCoordSubName = fmt.Sprintf("msgChannel%d", randVal)
+	rootcoord.Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("timeTick%d", randVal)
+	rootcoord.Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("stateChannel%d", randVal)
 
 	rootcoord.Params.RootCoordCfg.MaxPartitionNum = 64
 	rootcoord.Params.CommonCfg.DefaultPartitionName = "_default"

@@ -50,7 +50,7 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 
 	const receiveBufSize = 1024
 	// start pulsar
-	producerChannels := []string{Params.QueryNodeCfg.StatsChannelName}
+	producerChannels := []string{Params.MsgChannelCfg.QueryNodeStats}
 
 	msFactory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{

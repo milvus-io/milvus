@@ -71,7 +71,7 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.QueryNodeCfg.QueryTimeTickChannelName,
+		Value: Params.MsgChannelCfg.QueryCoordTimeTick,
 	}, nil
 }
 
@@ -83,7 +83,7 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.QueryNodeCfg.StatsChannelName,
+		Value: Params.MsgChannelCfg.QueryNodeStats,
 	}, nil
 }
 

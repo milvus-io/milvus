@@ -132,7 +132,7 @@ func (csh *channelUnsubscribeHandler) handleChannelUnsubscribeLoop() {
 			nodeID := channelInfo.NodeID
 			for _, collectionChannels := range channelInfo.CollectionChannels {
 				collectionID := collectionChannels.CollectionID
-				subName := funcutil.GenChannelSubName(Params.QueryNodeCfg.MsgChannelSubName, collectionID, nodeID)
+				subName := funcutil.GenChannelSubName(Params.QueryNodeCfg.QueryNodeSubName, collectionID, nodeID)
 				err := unsubscribeChannels(csh.ctx, csh.factory, subName, collectionChannels.Channels)
 				if err != nil {
 					log.Debug("unsubscribe channels failed", zap.Int64("nodeID", nodeID))
