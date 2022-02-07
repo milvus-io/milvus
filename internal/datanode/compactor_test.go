@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -235,27 +236,114 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test merge", func(t *testing.T) {
-		iData := genInsertData()
-		meta := NewMetaFactory().GetCollectionMeta(1, "test")
+		t.Run("Merge without expiration", func(t *testing.T) {
+			Params.DataCoordCfg.CompactionEntityExpiration = math.MaxInt64
+			iData := genInsertDataWithExpiredTS()
+			meta := NewMetaFactory().GetCollectionMeta(1, "test")
 
-		iblobs, err := getInsertBlobs(100, iData, meta)
-		require.NoError(t, err)
+			iblobs, err := getInsertBlobs(100, iData, meta)
+			require.NoError(t, err)
 
-		iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
-		require.NoError(t, err)
+			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
+			require.NoError(t, err)
 
-		mitr := storage.NewMergeIterator([]iterator{iitr})
+			mitr := storage.NewMergeIterator([]iterator{iitr})
 
-		dm := map[UniqueID]Timestamp{
-			1: 10000,
-		}
+			dm := map[UniqueID]Timestamp{
+				1: 10000,
+			}
 
-		ct := &compactionTask{}
-		idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema())
-		assert.NoError(t, err)
-		assert.Equal(t, int64(1), numOfRow)
-		assert.Equal(t, 1, len(idata))
+			ct := &compactionTask{}
+			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			assert.NoError(t, err)
+			assert.Equal(t, int64(1), numOfRow)
+			assert.Equal(t, 1, len(idata))
+			assert.NotEmpty(t, idata[0].Data)
+		})
+		t.Run("Merge with expiration", func(t *testing.T) {
+			Params.DataCoordCfg.CompactionEntityExpiration = 864000 // 10 days in seconds
+			iData := genInsertDataWithExpiredTS()
+			meta := NewMetaFactory().GetCollectionMeta(1, "test")
 
+			iblobs, err := getInsertBlobs(100, iData, meta)
+			require.NoError(t, err)
+
+			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
+			require.NoError(t, err)
+
+			mitr := storage.NewMergeIterator([]iterator{iitr})
+
+			dm := map[UniqueID]Timestamp{
+				1: 10000,
+			}
+
+			ct := &compactionTask{}
+			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
+			assert.NoError(t, err)
+			assert.Equal(t, int64(0), numOfRow)
+			assert.Equal(t, 1, len(idata))
+			assert.Empty(t, idata[0].Data)
+		})
+	})
+
+	t.Run("Test isExpiredEntity", func(t *testing.T) {
+		t.Run("When CompactionEntityExpiration is set math.MaxInt64", func(t *testing.T) {
+			Params.DataCoordCfg.CompactionEntityExpiration = math.MaxInt64
+
+			ct := &compactionTask{}
+			res := ct.isExpiredEntity(0, genTimestamp())
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, genTimestamp())
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(0, math.MaxInt64)
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, math.MaxInt64)
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, 0)
+			assert.Equal(t, false, res)
+		})
+		t.Run("When CompactionEntityExpiration is set MAX_ENTITY_EXPIRATION = 9223372036", func(t *testing.T) {
+			Params.DataCoordCfg.CompactionEntityExpiration = 9223372036 // math.MaxInt64 / time.Second
+
+			ct := &compactionTask{}
+			res := ct.isExpiredEntity(0, genTimestamp())
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, genTimestamp())
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(0, math.MaxInt64)
+			assert.Equal(t, true, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, math.MaxInt64)
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, 0)
+			assert.Equal(t, false, res)
+		})
+		t.Run("When CompactionEntityExpiration is set 10 days", func(t *testing.T) {
+			Params.DataCoordCfg.CompactionEntityExpiration = 864000 // 10 days in seconds
+
+			ct := &compactionTask{}
+			res := ct.isExpiredEntity(0, genTimestamp())
+			assert.Equal(t, true, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, genTimestamp())
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(0, math.MaxInt64)
+			assert.Equal(t, true, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, math.MaxInt64)
+			assert.Equal(t, false, res)
+
+			res = ct.isExpiredEntity(math.MaxInt64, 0)
+			assert.Equal(t, false, res)
+		})
 	})
 }
 
@@ -285,6 +373,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		Field2StatslogPaths: nil,
 		Deltalogs:           nil,
 	}}
+	Params.DataCoordCfg.CompactionEntityExpiration = math.MaxInt64 // Turn off auto expiration
 
 	t.Run("Test compact invalid", func(t *testing.T) {
 		invalidAlloc := NewAllocatorFactory(-1)
