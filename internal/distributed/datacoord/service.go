@@ -89,7 +89,7 @@ func (s *Server) init() error {
 	datacoord.Params.DataCoordCfg.Port = Params.Port
 	datacoord.Params.DataCoordCfg.Address = Params.GetAddress()
 
-	etcdCli, err := etcd.GetEtcdClient(&datacoord.Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&datacoord.Params.EtcdCfg)
 	if err != nil {
 		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
 		return err

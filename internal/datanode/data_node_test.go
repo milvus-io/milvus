@@ -64,7 +64,7 @@ func TestDataNode(t *testing.T) {
 	defer cancel()
 
 	node := newIDLEDataNodeMock(ctx)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
@@ -346,7 +346,7 @@ func TestDataNode(t *testing.T) {
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
@@ -361,7 +361,7 @@ func TestWatchChannel(t *testing.T) {
 
 	t.Run("test watch channel", func(t *testing.T) {
 		// GOOSE TODO
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
 		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))

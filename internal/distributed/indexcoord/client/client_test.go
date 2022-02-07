@@ -43,9 +43,9 @@ func TestIndexCoordClient(t *testing.T) {
 	err = server.Run()
 	assert.Nil(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
 	assert.Nil(t, err)
-	icc, err := NewClient(ctx, indexcoord.Params.BaseParams.MetaRootPath, etcdCli)
+	icc, err := NewClient(ctx, indexcoord.Params.EtcdCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 	assert.NotNil(t, icc)
 

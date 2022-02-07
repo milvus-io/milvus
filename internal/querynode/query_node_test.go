@@ -46,7 +46,7 @@ type queryCoordMock struct {
 func setup() {
 	os.Setenv("QUERY_NODE_ID", "1")
 	Params.Init()
-	Params.BaseParams.MetaRootPath = "/etcd/test/root/querynode"
+	Params.EtcdCfg.MetaRootPath = "/etcd/test/root/querynode"
 }
 
 func genTestCollectionSchema(collectionID UniqueID, isBinary bool, dim int) *schemapb.CollectionSchema {
@@ -187,11 +187,11 @@ func newQueryNodeMock() *QueryNode {
 			cancel()
 		}()
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		panic(err)
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 	msFactory, err := newMessageStreamFactory()
 	if err != nil {
@@ -271,7 +271,7 @@ func TestQueryNode_register(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdcli.Close()
 	node.SetEtcdClient(etcdcli)
@@ -289,7 +289,7 @@ func TestQueryNode_init(t *testing.T) {
 
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
-	etcdcli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdcli.Close()
 	node.SetEtcdClient(etcdcli)

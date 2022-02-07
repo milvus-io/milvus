@@ -64,10 +64,10 @@ func (tk *testKv) Load(key string) (string, error) {
 
 func TestReplica_Release(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta, err := newMeta(context.Background(), etcdKV, nil, nil)
 	assert.Nil(t, err)
 	err = meta.addCollection(1, querypb.LoadType_loadCollection, nil)
@@ -96,10 +96,10 @@ func TestReplica_Release(t *testing.T) {
 
 func TestMetaFunc(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 	nodeID := defaultQueryNodeID
 	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
@@ -290,10 +290,10 @@ func TestMetaFunc(t *testing.T) {
 
 func TestReloadMetaFromKV(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta := &MetaReplica{
 		client:            kv,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},

@@ -31,7 +31,7 @@ var Params paramtable.GlobalParamTable
 
 func TestGlobalTSOAllocator_All(t *testing.T) {
 	Params.Init()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := tsoutil.NewTSOKVBase(etcdCli, "/test/root/kv", "gidTest")

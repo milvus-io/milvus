@@ -480,7 +480,7 @@ func TestImpl_GetMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 
@@ -490,7 +490,7 @@ func TestImpl_GetMetrics(t *testing.T) {
 		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.BaseParams.MetaRootPath, etcdCli)
+		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
 
 		metricReq := make(map[string]string)
 		metricReq[metricsinfo.MetricTypeKey] = "system_info"

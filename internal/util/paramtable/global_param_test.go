@@ -32,41 +32,6 @@ func TestGlobalParamTable(t *testing.T) {
 	var GlobalParams GlobalParamTable
 	GlobalParams.Init()
 
-	t.Run("test pulsarConfig", func(t *testing.T) {
-		Params := GlobalParams.PulsarCfg
-
-		assert.NotEqual(t, Params.Address, "")
-		t.Logf("pulsar address = %s", Params.Address)
-
-		assert.Equal(t, Params.MaxMessageSize, SuggestPulsarMaxMessageSize)
-	})
-
-	t.Run("test rocksmqConfig", func(t *testing.T) {
-		Params := GlobalParams.RocksmqCfg
-
-		assert.NotEqual(t, Params.Path, "")
-		t.Logf("rocksmq path = %s", Params.Path)
-	})
-
-	t.Run("test minioConfig", func(t *testing.T) {
-		Params := GlobalParams.MinioCfg
-
-		addr := Params.Address
-		equal := addr == "localhost:9000" || addr == "minio:9000"
-		assert.Equal(t, equal, true)
-		t.Logf("minio address = %s", Params.Address)
-
-		assert.Equal(t, Params.AccessKeyID, "minioadmin")
-
-		assert.Equal(t, Params.SecretAccessKey, "minioadmin")
-
-		assert.Equal(t, Params.UseSSL, false)
-
-		t.Logf("Minio BucketName = %s", Params.BucketName)
-
-		t.Logf("Minio rootpath = %s", Params.RootPath)
-	})
-
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := GlobalParams.CommonCfg
 
@@ -120,9 +85,6 @@ func TestGlobalParamTable(t *testing.T) {
 		t.Logf("querynode stats channel = %s", Params.QueryNodeStats)
 
 		// -- datacoord --
-		assert.Equal(t, Params.DataCoordInsert, "by-dev-insert-channel-")
-		t.Logf("datacoord insert channel = %s", Params.DataCoordInsert)
-
 		assert.Equal(t, Params.DataCoordTimeTick, "by-dev-datacoord-timetick-channel")
 		t.Logf("datacoord timetick channel = %s", Params.DataCoordTimeTick)
 

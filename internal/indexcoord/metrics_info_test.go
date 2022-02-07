@@ -32,7 +32,7 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	defer etcdCli.Close()
 	assert.NoError(t, err)
 

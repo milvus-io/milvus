@@ -218,7 +218,6 @@ msgChannel:
     queryNodeStats: "query-node-stats"
     # Cmd for loadIndex, flush, etc...
     cmd: "cmd"
-    dataCoordInsertChannel: "insert-channel-"
     dataCoordStatistic: "datacoord-statistics-channel"
     dataCoordTimeTick: "datacoord-timetick-channel"
     dataCoordSegmentInfo: "segment-info-channel"

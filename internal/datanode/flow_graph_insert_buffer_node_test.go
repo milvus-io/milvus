@@ -61,7 +61,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseParams.MetaRootPath = testPath
+	Params.EtcdCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -151,7 +151,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseParams.MetaRootPath = testPath
+	Params.EtcdCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -352,7 +352,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseParams.MetaRootPath = testPath
+	Params.EtcdCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -626,7 +626,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
-	Params.BaseParams.MetaRootPath = testPath
+	Params.EtcdCfg.MetaRootPath = testPath
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
