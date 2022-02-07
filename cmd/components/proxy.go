@@ -33,15 +33,11 @@ type Proxy struct {
 
 // NewProxy creates a new Proxy
 func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
-	var err error
-	n := &Proxy{}
-
 	svr, err := grpcproxy.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err
 	}
-	n.svr = svr
-	return n, nil
+	return &Proxy{svr: svr}, nil
 }
 
 // Run starts service

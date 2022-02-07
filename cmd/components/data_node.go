@@ -48,7 +48,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) (*DataNode, err
 // Run starts service
 func (d *DataNode) Run() error {
 	if err := d.svr.Run(); err != nil {
-		panic(err)
+		return err
 	}
 	log.Debug("Datanode successfully started")
 	return nil

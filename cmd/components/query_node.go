@@ -49,7 +49,7 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) (*QueryNode, e
 // Run starts service
 func (q *QueryNode) Run() error {
 	if err := q.svr.Run(); err != nil {
-		panic(err)
+		return err
 	}
 	log.Debug("QueryNode successfully started")
 	return nil

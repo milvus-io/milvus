@@ -95,12 +95,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 
 	wg.Add(1)
 	go func() {
-		rootcoord.Params.InitOnce()
-		if localMsg {
-			rootcoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			rootcoord.Params.SetLogConfig(typeutil.RootCoordRole)
-		}
+		mr.initParams(rootcoord.Params, localMsg, typeutil.RootCoordRole, "")
 
 		factory := newMsgFactory(localMsg)
 		var err error
@@ -126,13 +121,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 
 	wg.Add(1)
 	go func() {
-		proxy.Params.ProxyCfg.InitAlias(alias)
-		proxy.Params.InitOnce()
-		if localMsg {
-			proxy.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			proxy.Params.SetLogConfig(typeutil.ProxyRole)
-		}
+		mr.initParams(proxy.Params, localMsg, typeutil.ProxyRole, alias)
 
 		factory := newMsgFactory(localMsg)
 		var err error
@@ -158,12 +147,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 
 	wg.Add(1)
 	go func() {
-		querycoord.Params.InitOnce()
-		if localMsg {
-			querycoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			querycoord.Params.SetLogConfig(typeutil.QueryCoordRole)
-		}
+		mr.initParams(querycoord.Params, localMsg, typeutil.QueryCoordRole, "")
 
 		factory := newMsgFactory(localMsg)
 		var err error
@@ -189,13 +173,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 
 	wg.Add(1)
 	go func() {
-		querynode.Params.QueryNodeCfg.InitAlias(alias)
-		querynode.Params.InitOnce()
-		if localMsg {
-			querynode.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			querynode.Params.SetLogConfig(typeutil.QueryNodeRole)
-		}
+		mr.initParams(querynode.Params, localMsg, typeutil.QueryNodeRole, alias)
 
 		factory := newMsgFactory(localMsg)
 		var err error
@@ -221,15 +199,9 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 
 	wg.Add(1)
 	go func() {
-		datacoord.Params.InitOnce()
-		if localMsg {
-			datacoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			datacoord.Params.SetLogConfig(typeutil.DataCoordRole)
-		}
+		mr.initParams(datacoord.Params, localMsg, typeutil.DataCoordRole, "")
 
 		factory := newMsgFactory(localMsg)
-
 		dctx := logutil.WithModule(ctx, "DataCoord")
 		var err error
 		ds, err = components.NewDataCoord(dctx, factory)
@@ -254,13 +226,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 
 	wg.Add(1)
 	go func() {
-		datanode.Params.DataNodeCfg.InitAlias(alias)
-		datanode.Params.InitOnce()
-		if localMsg {
-			datanode.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			datanode.Params.SetLogConfig(typeutil.DataNodeRole)
-		}
+		mr.initParams(datanode.Params, localMsg, typeutil.DataNodeRole, alias)
 
 		factory := newMsgFactory(localMsg)
 		var err error
@@ -286,12 +252,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 
 	wg.Add(1)
 	go func() {
-		indexcoord.Params.InitOnce()
-		if localMsg {
-			indexcoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			indexcoord.Params.SetLogConfig(typeutil.IndexCoordRole)
-		}
+		mr.initParams(indexcoord.Params, localMsg, typeutil.IndexCoordRole, "")
 
 		var err error
 		is, err = components.NewIndexCoord(ctx)
@@ -316,13 +277,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 
 	wg.Add(1)
 	go func() {
-		indexnode.Params.IndexNodeCfg.InitAlias(alias)
-		indexnode.Params.InitOnce()
-		if localMsg {
-			indexnode.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			indexnode.Params.SetLogConfig(typeutil.IndexNodeRole)
-		}
+		mr.initParams(indexnode.Params, localMsg, typeutil.IndexNodeRole, alias)
 
 		var err error
 		in, err = components.NewIndexNode(ctx)
@@ -341,16 +296,13 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 	return in
 }
 
-// Run Milvus components.
-func (mr *MilvusRoles) Run(local bool, alias string) {
+func (mr *MilvusRoles) init(local bool) {
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
 		if closer != nil {
 			defer closer.Close()
 		}
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	// only standalone enable localMsg
 	if local {
@@ -374,6 +326,33 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 	}
+}
+
+func (mr *MilvusRoles) initParams(params paramtable.GlobalParamTable, local bool, role string, alias string) {
+	params.InitOnce()
+	if local {
+		params.SetLogConfig(typeutil.StandaloneRole)
+	} else {
+		switch role {
+		case typeutil.ProxyRole:
+			params.ProxyCfg.InitAlias(alias)
+		case typeutil.QueryNodeRole:
+			params.QueryNodeCfg.InitAlias(alias)
+		case typeutil.DataNodeRole:
+			params.DataNodeCfg.InitAlias(alias)
+		case typeutil.IndexNodeRole:
+			params.IndexNodeCfg.InitAlias(alias)
+		default:
+			// skip
+		}
+		params.SetLogConfig(role)
+	}
+}
+
+// Run Milvus components.
+func (mr *MilvusRoles) Run(local bool, alias string) {
+	mr.init(local)
+	ctx, cancel := context.WithCancel(context.Background())
 
 	var rc *components.RootCoord
 	if mr.EnableRootCoord {

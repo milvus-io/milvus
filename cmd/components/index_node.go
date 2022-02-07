@@ -32,15 +32,12 @@ type IndexNode struct {
 
 // NewIndexNode creates a new IndexNode
 func NewIndexNode(ctx context.Context) (*IndexNode, error) {
-	var err error
-	n := &IndexNode{}
 	svr, err := grpcindexnode.NewServer(ctx)
 	if err != nil {
 		return nil, err
 	}
-	n.svr = svr
-	return n, nil
 
+	return &IndexNode{svr: svr}, nil
 }
 
 // Run starts service

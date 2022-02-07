@@ -36,7 +36,7 @@ type QueryCoord struct {
 func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
 	svr, err := grpcquerycoord.NewServer(ctx, factory)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return &QueryCoord{
@@ -48,7 +48,7 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 // Run starts service
 func (qs *QueryCoord) Run() error {
 	if err := qs.svr.Run(); err != nil {
-		panic(err)
+		return err
 	}
 	log.Debug("QueryCoord successfully started")
 	return nil
