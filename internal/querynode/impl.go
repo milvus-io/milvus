@@ -489,10 +489,14 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		}
 		return res, nil
 	}
-	infos := make([]*queryPb.SegmentInfo, 0)
+	var segmentInfos []*queryPb.SegmentInfo
+
+	segmentIDs := make(map[int64]struct{})
+	for _, segmentID := range in.GetSegmentIDs() {
+		segmentIDs[segmentID] = struct{}{}
+	}
 
 	// get info from historical
-	// node.historical.replica.printReplica()
 	historicalSegmentInfos, err := node.historical.replica.getSegmentInfosByColID(in.CollectionID)
 	if err != nil {
 		log.Debug("GetSegmentInfo: get historical segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
@@ -504,10 +508,9 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		}
 		return res, nil
 	}
-	infos = append(infos, historicalSegmentInfos...)
+	segmentInfos = append(segmentInfos, filterSegmentInfo(historicalSegmentInfos, segmentIDs)...)
 
 	// get info from streaming
-	// node.streaming.replica.printReplica()
 	streamingSegmentInfos, err := node.streaming.replica.getSegmentInfosByColID(in.CollectionID)
 	if err != nil {
 		log.Debug("GetSegmentInfo: get streaming segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
@@ -519,15 +522,30 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		}
 		return res, nil
 	}
-	infos = append(infos, streamingSegmentInfos...)
-	// log.Debug("GetSegmentInfo: get segment info from query node", zap.Int64("nodeID", node.session.ServerID), zap.Any("segment infos", infos))
+	segmentInfos = append(segmentInfos, filterSegmentInfo(streamingSegmentInfos, segmentIDs)...)
 
 	return &queryPb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Infos: infos,
+		Infos: segmentInfos,
 	}, nil
+}
+
+// filterSegmentInfo returns segment info which segment id in segmentIDs map
+func filterSegmentInfo(segmentInfos []*queryPb.SegmentInfo, segmentIDs map[int64]struct{}) []*queryPb.SegmentInfo {
+	if len(segmentIDs) == 0 {
+		return segmentInfos
+	}
+	filtered := make([]*queryPb.SegmentInfo, 0, len(segmentIDs))
+	for _, info := range segmentInfos {
+		_, ok := segmentIDs[info.GetSegmentID()]
+		if !ok {
+			continue
+		}
+		filtered = append(filtered, info)
+	}
+	return filtered
 }
 
 // isHealthy checks if QueryNode is healthy
