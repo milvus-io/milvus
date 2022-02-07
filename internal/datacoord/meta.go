@@ -163,7 +163,6 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	return nil
 }
 
-// Deprecated
 // DropSegment remove segment with provided id, etcd persistence also removed
 func (m *meta) DropSegment(segmentID UniqueID) error {
 	m.Lock()
