@@ -156,6 +156,9 @@ func (p *commonConfig) initClusterPrefix() {
 	if err != nil {
 		panic(err)
 	}
+	if len(str) == 0 {
+		panic("chanNamePrefix.cluster not set")
+	}
 	p.ClusterPrefix = str
 }
 
@@ -163,6 +166,9 @@ func (p *commonConfig) initChanNamePrefix(key1 string, key2 string) string {
 	value, err := p.BaseParams.Load2(key1, key2)
 	if err != nil {
 		panic(err)
+	}
+	if len(value) == 0 {
+		panic(key1 + " not set")
 	}
 	s := []string{p.ClusterPrefix, value}
 	return strings.Join(s, "-")
