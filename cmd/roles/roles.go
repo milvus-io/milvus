@@ -52,7 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 func newMsgFactory(localMsg bool) msgstream.Factory {
 	if localMsg {

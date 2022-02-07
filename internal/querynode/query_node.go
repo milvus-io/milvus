@@ -65,7 +65,7 @@ var _ types.QueryNode = (*QueryNode)(nil)
 // make sure QueryNode implements types.QueryNodeComponent
 var _ types.QueryNodeComponent = (*QueryNode)(nil)
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // QueryNode communicates with outside services and union all
 // services in querynode package.

@@ -79,7 +79,7 @@ func metricProxy(v int64) string {
 	return fmt.Sprintf("client_%d", v)
 }
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // Core root coordinator core
 type Core struct {
