@@ -27,6 +27,11 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
+unameOut="$(uname -s)"
+if [[ "$unameOut" == "Darwin" ]]; then
+  export MallocNanoZone=0
+fi
+
 # ignore MinIO,S3 unittes
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo "Running go unittest under $MILVUS_DIR"
@@ -51,7 +56,6 @@ go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
 
 # TODO: enable ut on mac os
-unameOut="$(uname -s)"
 case "${unameOut}" in
     Linux*)     go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast;;
     *)          echo "Skip querynode unit tests, unsupported os:${unameOut}";
