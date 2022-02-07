@@ -55,7 +55,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			RetrievePulsarBufSize:        Params.QueryNodeCfg.RetrievePulsarBufSize,
 			RetrieveResultReceiveBufSize: Params.QueryNodeCfg.RetrieveResultReceiveBufSize,
 
-			SimdType: Params.KnowhereCfg.SimdType,
+			SimdType: Params.CommonCfg.SimdType,
 		},
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)

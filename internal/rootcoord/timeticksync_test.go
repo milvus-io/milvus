@@ -45,8 +45,8 @@ func TestTimetickSync(t *testing.T) {
 	//}
 
 	Params.RootCoordCfg.DmlChannelNum = 2
-	Params.MsgChannelCfg.RootCoordDml = "rootcoord-dml"
-	Params.MsgChannelCfg.RootCoordDelta = "rootcoord-delta"
+	Params.CommonCfg.RootCoordDml = "rootcoord-dml"
+	Params.CommonCfg.RootCoordDelta = "rootcoord-delta"
 	ttSync := newTimeTickSync(ctx, sourceID, factory, nil)
 
 	var wg sync.WaitGroup

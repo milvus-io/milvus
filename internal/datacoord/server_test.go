@@ -58,7 +58,7 @@ func TestGetSegmentInfoChannel(t *testing.T) {
 		resp, err := svr.GetSegmentInfoChannel(context.TODO())
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, Params.MsgChannelCfg.DataCoordSegmentInfo, resp.Value)
+		assert.EqualValues(t, Params.CommonCfg.DataCoordSegmentInfo, resp.Value)
 	})
 }
 
@@ -245,7 +245,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	resp, err := svr.GetTimeTickChannel(context.TODO())
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.EqualValues(t, Params.MsgChannelCfg.DataCoordTimeTick, resp.Value)
+	assert.EqualValues(t, Params.CommonCfg.DataCoordTimeTick, resp.Value)
 }
 
 func TestGetSegmentStates(t *testing.T) {
@@ -1062,7 +1062,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.MsgChannelCfg.DataCoordTimeTick})
+		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
@@ -1130,7 +1130,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		})
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.MsgChannelCfg.DataCoordTimeTick})
+		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
@@ -1212,7 +1212,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.MsgChannelCfg.DataCoordTimeTick})
+		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
 		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		node := &NodeInfo{
@@ -2232,7 +2232,7 @@ func TestGetFlushState(t *testing.T) {
 
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
 	Params.Init()
-	Params.MsgChannelCfg.DataCoordTimeTick = Params.MsgChannelCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{

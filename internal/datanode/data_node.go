@@ -207,7 +207,7 @@ func (node *DataNode) initSession() error {
 // Init function does nothing now.
 func (node *DataNode) Init() error {
 	log.Debug("DataNode Init",
-		zap.String("TimeTickChannelName", Params.MsgChannelCfg.DataCoordTimeTick),
+		zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick),
 	)
 	if err := node.initSession(); err != nil {
 		log.Error("DataNode init session failed", zap.Error(err))

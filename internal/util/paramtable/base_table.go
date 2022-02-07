@@ -246,6 +246,15 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
+// Load2 loads an object with @key1, if failed loads with @key2.
+// this is to compatible with old configuration file
+func (gp *BaseTable) Load2(key1, key2 string) (string, error) {
+	if str, err := gp.params.Load(strings.ToLower(key1)); err == nil {
+		return str, err
+	}
+	return gp.params.Load(strings.ToLower(key2))
+}
+
 // LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
 func (gp *BaseTable) LoadWithDefault(key, defaultValue string) string {
 	return gp.params.LoadWithDefault(strings.ToLower(key), defaultValue)

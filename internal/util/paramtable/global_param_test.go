@@ -35,25 +35,6 @@ func TestGlobalParamTable(t *testing.T) {
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := GlobalParams.CommonCfg
 
-		assert.NotEqual(t, Params.DefaultPartitionName, "")
-		t.Logf("default partition name = %s", Params.DefaultPartitionName)
-
-		assert.NotEqual(t, Params.DefaultIndexName, "")
-		t.Logf("default index name = %s", Params.DefaultIndexName)
-
-		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
-	})
-
-	t.Run("test knowhereConfig", func(t *testing.T) {
-		Params := GlobalParams.KnowhereCfg
-
-		assert.NotEqual(t, Params.SimdType, "")
-		t.Logf("knowhere simd type = %s", Params.SimdType)
-	})
-
-	t.Run("test knowhereConfig", func(t *testing.T) {
-		Params := GlobalParams.MsgChannelCfg
-
 		// -- rootcoord --
 		assert.Equal(t, Params.RootCoordTimeTick, "by-dev-rootcoord-timetick")
 		t.Logf("rootcoord timetick channel = %s", Params.RootCoordTimeTick)
@@ -93,6 +74,18 @@ func TestGlobalParamTable(t *testing.T) {
 
 		assert.Equal(t, Params.DataCoordSubName, "by-dev-dataCoord")
 		t.Logf("datacoord subname = %s", Params.DataCoordSubName)
+
+		assert.NotEqual(t, Params.DefaultPartitionName, "")
+		t.Logf("default partition name = %s", Params.DefaultPartitionName)
+
+		// -- other --
+		assert.NotEqual(t, Params.DefaultIndexName, "")
+		t.Logf("default index name = %s", Params.DefaultIndexName)
+
+		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
+
+		assert.NotEqual(t, Params.SimdType, "")
+		t.Logf("knowhere simd type = %s", Params.SimdType)
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
