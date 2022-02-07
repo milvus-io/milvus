@@ -173,6 +173,42 @@ class TestCompactionParams(TestcaseBase):
                            check_items={'exp_res': res})
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_compact_after_delete_index(self):
+        """
+        target: test delete and create index and compact
+        method: 1.create with shard_num=1
+                2.delete half entities and build index
+                3.compact
+                4. load and query deleted entities
+        expected: Verify compact result
+        """
+        # create, insert without flush
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        insert_res, _ = collection_w.insert(df)
+
+        # delete and flush
+        expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
+        collection_w.delete(expr)
+        # assert collection_w.num_entities == nb
+
+        # build index
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        log.debug(collection_w.index())
+
+        # compact, get plan
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed()
+        c_plans = collection_w.get_compaction_plans()[0]
+
+        collection_w.load()
+        collection_w.query(expr, check_items=CheckTasks.check_query_empty)
+
+        res = df.iloc[-1:, :1].to_dict('records')
+        collection_w.query(f'{ct.default_int64_field_name} in {insert_res.primary_keys[-1:]}',
+                           check_items={'exp_res': res})
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_delete_ratio(self):
         """
         target: test delete entities reaches ratio and auto-compact
