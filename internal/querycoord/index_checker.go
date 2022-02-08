@@ -18,7 +18,6 @@ package querycoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -28,12 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/types"
 )
 
 // IndexChecker checks index
@@ -52,16 +46,12 @@ type IndexChecker struct {
 	scheduler *TaskScheduler
 	cluster   Cluster
 
-	rootCoord  types.RootCoord
-	indexCoord types.IndexCoord
-	dataCoord  types.DataCoord
+	broker *globalMetaBroker
 
 	wg sync.WaitGroup
 }
 
-func newIndexChecker(ctx context.Context,
-	client kv.MetaKv, meta Meta, cluster Cluster, scheduler *TaskScheduler,
-	root types.RootCoord, index types.IndexCoord, data types.DataCoord) (*IndexChecker, error) {
+func newIndexChecker(ctx context.Context, client kv.MetaKv, meta Meta, cluster Cluster, scheduler *TaskScheduler, broker *globalMetaBroker) (*IndexChecker, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	reqChan := make(chan *querypb.SegmentInfo, 1024)
 	unIndexChan := make(chan *querypb.SegmentInfo, 1024)
@@ -80,9 +70,7 @@ func newIndexChecker(ctx context.Context,
 		scheduler: scheduler,
 		cluster:   cluster,
 
-		rootCoord:  root,
-		indexCoord: index,
-		dataCoord:  data,
+		broker: broker,
 	}
 	err := checker.reloadFromKV()
 	if err != nil {
@@ -192,7 +180,7 @@ func (ic *IndexChecker) checkIndexLoop() {
 			for {
 				validHandoffReq, collectionInfo := ic.verifyHandoffReqValid(segmentInfo)
 				if validHandoffReq && Params.QueryCoordCfg.AutoHandoff {
-					indexInfo, err := getIndexInfo(ic.ctx, segmentInfo, collectionInfo.Schema, ic.rootCoord, ic.indexCoord)
+					indexInfo, err := ic.broker.getIndexInfo(ic.ctx, segmentInfo.CollectionID, segmentInfo.SegmentID, collectionInfo.Schema)
 					if err == nil {
 						// if index exist or not enableIndex, ready to load
 						segmentInfo.IndexInfos = indexInfo
@@ -201,7 +189,7 @@ func (ic *IndexChecker) checkIndexLoop() {
 					}
 
 					// if segment has not been compacted and dropped, continue to wait for the build index to complete
-					segmentState, err := getSegmentStates(ic.ctx, segmentInfo.SegmentID, ic.dataCoord)
+					segmentState, err := ic.broker.getSegmentStates(ic.ctx, segmentInfo.SegmentID)
 					if err != nil {
 						log.Warn("checkIndexLoop: get segment state failed", zap.Int64("segmentID", segmentInfo.SegmentID), zap.Error(err))
 						continue
@@ -252,7 +240,7 @@ func (ic *IndexChecker) processHandoffAfterIndexDone() {
 			handoffTask := &handoffTask{
 				baseTask:               baseTask,
 				HandoffSegmentsRequest: handoffReq,
-				dataCoord:              ic.dataCoord,
+				broker:                 ic.broker,
 				cluster:                ic.cluster,
 				meta:                   ic.meta,
 			}
@@ -281,98 +269,4 @@ func (ic *IndexChecker) processHandoffAfterIndexDone() {
 			}
 		}
 	}
-}
-
-func getIndexInfo(ctx context.Context, info *querypb.SegmentInfo, schema *schemapb.CollectionSchema, root types.RootCoord, index types.IndexCoord) ([]*querypb.VecFieldIndexInfo, error) {
-	// TODO:: collection has multi vec field, and build index for every vec field, get indexInfo by fieldID
-	// Currently, each collection can only have one vector field
-	vecFieldIDs := getVecFieldIDs(schema)
-	if len(vecFieldIDs) != 1 {
-		err := fmt.Errorf("collection %d has multi vec field, num of vec fields = %d", info.CollectionID, len(vecFieldIDs))
-		log.Error("get index info failed", zap.Int64("collectionID", info.CollectionID), zap.Int64("segmentID", info.SegmentID), zap.Error(err))
-		return nil, err
-	}
-	indexInfo := &querypb.VecFieldIndexInfo{
-		FieldID: vecFieldIDs[0],
-	}
-	// check the buildID of the segment's index whether exist on rootCoord
-	req := &milvuspb.DescribeSegmentRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeSegment,
-		},
-		CollectionID: info.CollectionID,
-		SegmentID:    info.SegmentID,
-	}
-	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-	defer cancel2()
-	response, err := root.DescribeSegment(ctx2, req)
-	if err != nil {
-		return nil, err
-	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, errors.New(response.Status.Reason)
-	}
-
-	// if the segment.EnableIndex == false, then load the segment immediately
-	if !response.EnableIndex {
-		indexInfo.EnableIndex = false
-	} else {
-		indexInfo.BuildID = response.BuildID
-		indexInfo.EnableIndex = true
-		// if index created done on indexNode, then handoff start
-		indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
-			IndexBuildIDs: []UniqueID{response.BuildID},
-		}
-		ctx3, cancel3 := context.WithTimeout(ctx, timeoutForRPC)
-		defer cancel3()
-		pathResponse, err2 := index.GetIndexFilePaths(ctx3, indexFilePathRequest)
-		if err2 != nil {
-			return nil, err2
-		}
-
-		if pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, errors.New(pathResponse.Status.Reason)
-		}
-
-		if len(pathResponse.FilePaths) != 1 {
-			return nil, errors.New("illegal index file paths, there should be only one vector column")
-		}
-
-		fieldPathInfo := pathResponse.FilePaths[0]
-		if len(fieldPathInfo.IndexFilePaths) == 0 {
-			return nil, errors.New("empty index paths")
-		}
-
-		indexInfo.IndexFilePaths = fieldPathInfo.IndexFilePaths
-		indexInfo.IndexSize = int64(fieldPathInfo.SerializedSize)
-	}
-	return []*querypb.VecFieldIndexInfo{indexInfo}, nil
-}
-
-func getSegmentStates(ctx context.Context, segmentID UniqueID, dataCoord types.DataCoord) (*datapb.SegmentStateInfo, error) {
-	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-	defer cancel2()
-
-	req := &datapb.GetSegmentStatesRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_GetSegmentState,
-		},
-		SegmentIDs: []UniqueID{segmentID},
-	}
-	resp, err := dataCoord.GetSegmentStates(ctx2, req)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(resp.Status.Reason)
-		return nil, err
-	}
-
-	if len(resp.States) != 1 {
-		err = errors.New("the length of segmentStates result should be 1")
-		return nil, err
-	}
-
-	return resp.States[0], nil
 }

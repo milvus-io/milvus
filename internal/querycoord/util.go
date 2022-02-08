@@ -18,7 +18,8 @@ package querycoord
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
@@ -30,15 +31,47 @@ func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
 	return compareMap
 }
 
-func getVecFieldIDs(schema *schemapb.CollectionSchema) []int64 {
-	var vecFieldIDs []int64
-	for _, field := range schema.Fields {
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
-			vecFieldIDs = append(vecFieldIDs, field.FieldID)
+func estimateSegmentSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
+	segmentSize := int64(0)
+
+	vecFieldID2IndexInfo := make(map[int64]*querypb.VecFieldIndexInfo)
+	for _, fieldIndexInfo := range segmentLoadInfo.IndexInfos {
+		if fieldIndexInfo.EnableIndex {
+			fieldID := fieldIndexInfo.FieldID
+			vecFieldID2IndexInfo[fieldID] = fieldIndexInfo
 		}
 	}
 
-	return vecFieldIDs
+	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
+		fieldID := fieldBinlog.FieldID
+		if FieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
+			segmentSize += FieldIndexInfo.IndexSize
+		} else {
+			segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+		}
+	}
+
+	// get size of state data
+	for _, fieldBinlog := range segmentLoadInfo.Statslogs {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	// get size of delete data
+	for _, fieldBinlog := range segmentLoadInfo.Deltalogs {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	return segmentSize
+}
+
+func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
+	fieldSize := int64(0)
+	for _, binlog := range fieldBinlog.Binlogs {
+		fieldSize += binlog.LogSize
+	}
+
+	return fieldSize
+
 }
 
 func getDstNodeIDByTask(t task) int64 {

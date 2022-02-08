@@ -317,22 +317,12 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		seg, err := node.streaming.replica.getSegmentByID(defaultSegmentID)
 		assert.NoError(t, err)
 
-		seg.setType(segmentTypeInvalid)
+		seg.setType(segmentTypeSealed)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 
-		seg.setType(segmentTypeSealed)
-		rsp, err = node.GetSegmentInfo(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
-
 		seg.setType(segmentTypeGrowing)
-		rsp, err = node.GetSegmentInfo(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
-
-		seg.setType(segmentTypeIndexing)
 		rsp, err = node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
@@ -350,10 +340,12 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		seg, err := node.historical.replica.getSegmentByID(defaultSegmentID)
 		assert.NoError(t, err)
 
-		seg.setIndexInfo(simpleVecField.id, &indexInfo{
-			indexName: "query-node-test",
-			indexID:   UniqueID(0),
-			buildID:   UniqueID(0),
+		seg.setVectorFieldInfo(simpleVecField.id, &VectorFieldInfo{
+			indexInfo: &queryPb.VecFieldIndexInfo{
+				IndexName: "query-node-test",
+				IndexID:   UniqueID(0),
+				BuildID:   UniqueID(0),
+			},
 		})
 
 		req := &queryPb.GetSegmentInfoRequest{

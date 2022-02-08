@@ -43,19 +43,18 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-type segmentType int32
+type segmentType = commonpb.SegmentState
 
 const (
-	segmentTypeInvalid segmentType = iota
-	segmentTypeGrowing
-	segmentTypeSealed
-	segmentTypeIndexing
+	segmentTypeGrowing = commonpb.SegmentState_Growing
+	segmentTypeSealed  = commonpb.SegmentState_Sealed
 )
 
 const (
@@ -66,12 +65,7 @@ const (
 // VectorFieldInfo contains binlog info of vector field
 type VectorFieldInfo struct {
 	fieldBinlog *datapb.FieldBinlog
-}
-
-func newVectorFieldInfo(fieldBinlog *datapb.FieldBinlog) *VectorFieldInfo {
-	return &VectorFieldInfo{
-		fieldBinlog: fieldBinlog,
-	}
+	indexInfo   *querypb.VecFieldIndexInfo
 }
 
 // Segment is a wrapper of the underlying C-structure segment.
@@ -89,17 +83,11 @@ type Segment struct {
 	lastMemSize  int64
 	lastRowCount int64
 
-	once        sync.Once // guards enableIndex
-	enableIndex bool
-
 	rmMutex          sync.RWMutex // guards recentlyModified
 	recentlyModified bool
 
 	typeMu      sync.Mutex // guards builtIndex
 	segmentType segmentType
-
-	paramMutex sync.RWMutex // guards index
-	indexInfos map[FieldID]*indexInfo
 
 	idBinlogRowSizes []int64
 
@@ -112,18 +100,6 @@ type Segment struct {
 // ID returns the identity number.
 func (s *Segment) ID() UniqueID {
 	return s.segmentID
-}
-
-func (s *Segment) setEnableIndex(enable bool) {
-	setOnce := func() {
-		s.enableIndex = enable
-	}
-
-	s.once.Do(setOnce)
-}
-
-func (s *Segment) getEnableIndex() bool {
-	return s.enableIndex
 }
 
 func (s *Segment) setIDBinlogRowSizes(sizes []int64) {
@@ -173,34 +149,55 @@ func (s *Segment) setVectorFieldInfo(fieldID UniqueID, info *VectorFieldInfo) {
 }
 
 func (s *Segment) getVectorFieldInfo(fieldID UniqueID) (*VectorFieldInfo, error) {
-	s.vectorFieldMutex.Lock()
-	defer s.vectorFieldMutex.Unlock()
+	s.vectorFieldMutex.RLock()
+	defer s.vectorFieldMutex.RUnlock()
 	if info, ok := s.vectorFieldInfos[fieldID]; ok {
-		return info, nil
+		return &VectorFieldInfo{
+			fieldBinlog: info.fieldBinlog,
+			indexInfo:   info.indexInfo,
+		}, nil
 	}
 	return nil, errors.New("Invalid fieldID " + strconv.Itoa(int(fieldID)))
 }
 
-func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) *Segment {
+func (s *Segment) hasLoadIndexForVecField(fieldID int64) bool {
+	s.vectorFieldMutex.RLock()
+	defer s.vectorFieldMutex.RUnlock()
+
+	if fieldInfo, ok := s.vectorFieldInfos[fieldID]; ok {
+		return fieldInfo.indexInfo != nil && fieldInfo.indexInfo.EnableIndex
+	}
+
+	return false
+}
+
+func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) (*Segment, error) {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
 	*/
 	var segmentPtr C.CSegmentInterface
 	switch segType {
-	case segmentTypeInvalid:
-		log.Warn("illegal segment type when create segment")
-		return nil
 	case segmentTypeSealed:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.Sealed, C.int64_t(segmentID))
 	case segmentTypeGrowing:
 		segmentPtr = C.NewSegment(collection.collectionPtr, C.Growing, C.int64_t(segmentID))
 	default:
-		log.Warn("illegal segment type when create segment")
-		return nil
+		err := fmt.Errorf("illegal segment type %d when create segment  %d", segType, segmentID)
+		log.Error("create new segment error",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64("partitionID", partitionID),
+			zap.Int64("segmentID", segmentID),
+			zap.Int32("segment type", int32(segType)),
+			zap.Error(err))
+		return nil, err
 	}
 
-	log.Debug("create segment", zap.Int64("segmentID", segmentID), zap.Int32("segmentType", int32(segType)))
+	log.Debug("create segment",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64("segmentID", segmentID),
+		zap.Int32("segmentType", int32(segType)))
 
 	var segment = &Segment{
 		segmentPtr:       segmentPtr,
@@ -210,13 +207,12 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		collectionID:     collectionID,
 		vChannelID:       vChannelID,
 		onService:        onService,
-		indexInfos:       make(map[int64]*indexInfo),
 		vectorFieldInfos: make(map[UniqueID]*VectorFieldInfo),
 
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 	}
 
-	return segment
+	return segment, nil
 }
 
 func deleteSegment(segment *Segment) {
@@ -362,7 +358,7 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 
 		// If the vector field doesn't have indexed. Vector data is in memory for
 		// brute force search. No need to download data from remote.
-		if _, ok := s.indexInfos[fieldData.FieldId]; !ok {
+		if !s.hasLoadIndexForVecField(fieldData.FieldId) {
 			continue
 		}
 
@@ -410,145 +406,6 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 		}
 	}
 	return nil
-}
-
-//-------------------------------------------------------------------------------------- index info interface
-func (s *Segment) setIndexName(fieldID int64, name string) error {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return errors.New("index info hasn't been init")
-	}
-	s.indexInfos[fieldID].setIndexName(name)
-	return nil
-}
-
-func (s *Segment) setIndexParam(fieldID int64, indexParams map[string]string) error {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	if indexParams == nil {
-		return errors.New("empty loadIndexMsg's indexParam")
-	}
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return errors.New("index info hasn't been init")
-	}
-	s.indexInfos[fieldID].setIndexParams(indexParams)
-	return nil
-}
-
-func (s *Segment) setIndexPaths(fieldID int64, indexPaths []string) error {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return errors.New("index info hasn't been init")
-	}
-	s.indexInfos[fieldID].setIndexPaths(indexPaths)
-	return nil
-}
-
-func (s *Segment) setIndexID(fieldID int64, id UniqueID) error {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return errors.New("index info hasn't been init")
-	}
-	s.indexInfos[fieldID].setIndexID(id)
-	return nil
-}
-
-func (s *Segment) setBuildID(fieldID int64, id UniqueID) error {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return errors.New("index info hasn't been init")
-	}
-	s.indexInfos[fieldID].setBuildID(id)
-	return nil
-}
-
-func (s *Segment) getIndexName(fieldID int64) string {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return ""
-	}
-	return s.indexInfos[fieldID].getIndexName()
-}
-
-func (s *Segment) getIndexID(fieldID int64) UniqueID {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return -1
-	}
-	return s.indexInfos[fieldID].getIndexID()
-}
-
-func (s *Segment) getBuildID(fieldID int64) UniqueID {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return -1
-	}
-	return s.indexInfos[fieldID].getBuildID()
-}
-
-func (s *Segment) getIndexPaths(fieldID int64) []string {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return nil
-	}
-	return s.indexInfos[fieldID].getIndexPaths()
-}
-
-func (s *Segment) getIndexParams(fieldID int64) map[string]string {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return nil
-	}
-	return s.indexInfos[fieldID].getIndexParams()
-}
-
-func (s *Segment) matchIndexParam(fieldID int64, indexParams indexParam) bool {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return false
-	}
-	fieldIndexParam := s.indexInfos[fieldID].getIndexParams()
-	if fieldIndexParam == nil {
-		return false
-	}
-	paramSize := len(s.indexInfos[fieldID].indexParams)
-	matchCount := 0
-	for k, v := range indexParams {
-		value, ok := fieldIndexParam[k]
-		if !ok {
-			return false
-		}
-		if v != value {
-			return false
-		}
-		matchCount++
-	}
-	return paramSize == matchCount
-}
-
-func (s *Segment) setIndexInfo(fieldID int64, info *indexInfo) {
-	s.paramMutex.Lock()
-	defer s.paramMutex.Unlock()
-	s.indexInfos[fieldID] = info
-}
-
-func (s *Segment) checkIndexReady(fieldID int64) bool {
-	s.paramMutex.RLock()
-	defer s.paramMutex.RUnlock()
-	if _, ok := s.indexInfos[fieldID]; !ok {
-		return false
-	}
-	return s.indexInfos[fieldID].getReadyLoad()
 }
 
 func (s *Segment) updateBloomFilter(pks []int64) {
@@ -808,50 +665,14 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []IntPrimaryKey, timestam
 	return nil
 }
 
-func (s *Segment) dropFieldData(fieldID int64) error {
-	/*
-		CStatus
-		DropFieldData(CSegmentInterface c_segment, int64_t field_id);
-	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
-	if s.segmentType != segmentTypeIndexing {
-		errMsg := fmt.Sprintln("dropFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
-
-	status := C.DropFieldData(s.segmentPtr, C.int64_t(fieldID))
-	if err := HandleCStatus(&status, "DropFieldData failed"); err != nil {
-		return err
-	}
-
-	log.Debug("dropFieldData done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
-
-	return nil
-}
-
-func (s *Segment) updateSegmentIndex(bytesIndex [][]byte, fieldID UniqueID) error {
+func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.VecFieldIndexInfo) error {
 	loadIndexInfo, err := newLoadIndexInfo()
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
 		return err
 	}
-	err = loadIndexInfo.appendFieldInfo(fieldID)
-	if err != nil {
-		return err
-	}
-	indexParams := s.getIndexParams(fieldID)
-	for k, v := range indexParams {
-		err = loadIndexInfo.appendIndexParam(k, v)
-		if err != nil {
-			return err
-		}
-	}
-	indexPaths := s.getIndexPaths(fieldID)
-	err = loadIndexInfo.appendIndex(bytesIndex, indexPaths)
+
+	err = loadIndexInfo.appendIndexInfo(bytesIndex, indexInfo)
 	if err != nil {
 		return err
 	}
@@ -872,33 +693,7 @@ func (s *Segment) updateSegmentIndex(bytesIndex [][]byte, fieldID UniqueID) erro
 		return err
 	}
 
-	s.setType(segmentTypeIndexing)
 	log.Debug("updateSegmentIndex done", zap.Int64("segmentID", s.ID()))
-
-	return nil
-}
-
-func (s *Segment) dropSegmentIndex(fieldID int64) error {
-	/*
-		CStatus
-		DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
-	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
-	if s.segmentPtr == nil {
-		return errors.New("null seg core pointer")
-	}
-	if s.segmentType != segmentTypeIndexing {
-		errMsg := fmt.Sprintln("dropFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
-
-	status := C.DropSealedSegmentIndex(s.segmentPtr, C.int64_t(fieldID))
-	if err := HandleCStatus(&status, "DropSealedSegmentIndex failed"); err != nil {
-		return err
-	}
-
-	log.Debug("dropSegmentIndex done", zap.Int64("fieldID", fieldID), zap.Int64("segmentID", s.ID()))
 
 	return nil
 }

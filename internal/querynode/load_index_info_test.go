@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 func TestLoadIndexInfo(t *testing.T) {
@@ -42,13 +43,14 @@ func TestLoadIndexInfo(t *testing.T) {
 
 	loadIndexInfo, err := newLoadIndexInfo()
 	assert.Nil(t, err)
-	for _, indexParam := range indexParams {
-		err = loadIndexInfo.appendIndexParam(indexParam.Key, indexParam.Value)
-		assert.NoError(t, err)
+
+	indexInfo := &querypb.VecFieldIndexInfo{
+		FieldID:        UniqueID(0),
+		IndexParams:    indexParams,
+		IndexFilePaths: indexPaths,
 	}
-	err = loadIndexInfo.appendFieldInfo(0)
-	assert.NoError(t, err)
-	err = loadIndexInfo.appendIndex(indexBytes, indexPaths)
+
+	err = loadIndexInfo.appendIndexInfo(indexBytes, indexInfo)
 	assert.NoError(t, err)
 
 	deleteLoadIndexInfo(loadIndexInfo)

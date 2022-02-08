@@ -32,22 +32,17 @@ type statsService struct {
 
 	replica ReplicaInterface
 
-	fieldStatsChan chan []*internalpb.FieldStats
-	statsStream    msgstream.MsgStream
-	msFactory      msgstream.Factory
+	statsStream msgstream.MsgStream
+	msFactory   msgstream.Factory
 }
 
-func newStatsService(ctx context.Context, replica ReplicaInterface, fieldStatsChan chan []*internalpb.FieldStats, factory msgstream.Factory) *statsService {
+func newStatsService(ctx context.Context, replica ReplicaInterface, factory msgstream.Factory) *statsService {
 
 	return &statsService{
-		ctx: ctx,
-
-		replica: replica,
-
-		fieldStatsChan: fieldStatsChan,
-		statsStream:    nil,
-
-		msFactory: factory,
+		ctx:         ctx,
+		replica:     replica,
+		statsStream: nil,
+		msFactory:   factory,
 	}
 }
 
@@ -74,8 +69,6 @@ func (sService *statsService) start() {
 			return
 		case <-time.After(time.Duration(sleepTimeInterval) * time.Millisecond):
 			sService.publicStatistic(nil)
-		case fieldStats := <-sService.fieldStatsChan:
-			sService.publicStatistic(fieldStats)
 		}
 	}
 }

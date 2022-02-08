@@ -1077,24 +1077,6 @@ type QueryNodeComponent interface {
 
 	// SetEtcdClient set etcd client for QueryNode
 	SetEtcdClient(etcdClient *clientv3.Client)
-
-	// SetRootCoord set RootCoord for QueryNode
-	// `rootCoord` is a client of root coordinator. Pass to segmentLoader.
-	//
-	// Return a generic error in status:
-	//     If the rootCoord is nil.
-	// Return nil in status:
-	//     The rootCoord is not nil.
-	SetRootCoord(rootCoord RootCoord) error
-
-	// SetIndexCoord set IndexCoord for QueryNode
-	//  `indexCoord` is a client of index coordinator. Pass to segmentLoader.
-	//
-	// Return a generic error in status:
-	//     If the indexCoord is nil.
-	// Return nil in status:
-	//     The indexCoord is not nil.
-	SetIndexCoord(indexCoord IndexCoord) error
 }
 
 // QueryCoord is the interface `querycoord` package implements

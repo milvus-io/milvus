@@ -31,6 +31,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
@@ -53,6 +55,25 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
 
+func (li *LoadIndexInfo) appendIndexInfo(bytesIndex [][]byte, indexInfo *querypb.VecFieldIndexInfo) error {
+	fieldID := indexInfo.FieldID
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+	indexPaths := indexInfo.IndexFilePaths
+
+	err := li.appendFieldInfo(fieldID)
+	if err != nil {
+		return err
+	}
+	for key, value := range indexParams {
+		err = li.appendIndexParam(key, value)
+		if err != nil {
+			return err
+		}
+	}
+	err = li.appendIndexData(bytesIndex, indexPaths)
+	return err
+}
+
 // appendIndexParam append indexParam to index
 func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) error {
 	cIndexKey := C.CString(indexKey)
@@ -70,8 +91,8 @@ func (li *LoadIndexInfo) appendFieldInfo(fieldID FieldID) error {
 	return HandleCStatus(&status, "AppendFieldInfo failed")
 }
 
-// appendIndex appends binarySet index to cLoadIndexInfo
-func (li *LoadIndexInfo) appendIndex(bytesIndex [][]byte, indexKeys []string) error {
+// appendIndexData appends binarySet index to cLoadIndexInfo
+func (li *LoadIndexInfo) appendIndexData(bytesIndex [][]byte, indexKeys []string) error {
 	var cBinarySet C.CBinarySet
 	status := C.NewBinarySet(&cBinarySet)
 	defer C.DeleteBinarySet(cBinarySet)

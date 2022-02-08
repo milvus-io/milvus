@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -231,21 +233,46 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
 	node := newQueryNodeMock()
 	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
+	collection := node.historical.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
+	node.historical.replica.addPartition(collectionID, defaultPartitionID)
 
-	err := node.historical.replica.addSegment(UniqueID(1), defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	// test get indexed segment info
+	vectorFieldIDDs, err := node.historical.replica.getVecFieldIDsByCollectionID(collectionID)
 	assert.NoError(t, err)
-	err = node.historical.replica.addSegment(UniqueID(2), defaultPartitionID, collectionID, "", segmentTypeSealed, true)
-	assert.NoError(t, err)
-	err = node.historical.replica.addSegment(UniqueID(3), defaultPartitionID, collectionID, "", segmentTypeSealed, true)
-	assert.NoError(t, err)
-	segment, err := node.historical.replica.getSegmentByID(UniqueID(3))
-	assert.NoError(t, err)
-	segment.segmentType = segmentTypeIndexing
+	assert.Equal(t, 1, len(vectorFieldIDDs))
+	fieldID := vectorFieldIDDs[0]
 
-	targetSeg, err := node.historical.replica.getSegmentInfosByColID(collectionID)
+	indexID := UniqueID(10000)
+	indexInfo := &VectorFieldInfo{
+		indexInfo: &querypb.VecFieldIndexInfo{
+			IndexName:   "test-index-name",
+			IndexID:     indexID,
+			EnableIndex: true,
+		},
+	}
+
+	segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.NoError(t, err)
-	assert.Equal(t, 4, len(targetSeg))
+	err = node.historical.replica.setSegment(segment1)
+	assert.NoError(t, err)
+
+	segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, collectionID, "", segmentTypeSealed, true)
+	assert.NoError(t, err)
+	segment2.setVectorFieldInfo(fieldID, indexInfo)
+	err = node.historical.replica.setSegment(segment2)
+	assert.NoError(t, err)
+
+	targetSegs, err := node.historical.replica.getSegmentInfosByColID(collectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(targetSegs))
+	for _, segment := range targetSegs {
+		if segment.GetSegmentState() == segmentTypeGrowing {
+			assert.Equal(t, UniqueID(0), segment.IndexID)
+		} else {
+			assert.Equal(t, indexID, segment.IndexID)
+		}
+	}
 
 	err = node.Stop()
 	assert.NoError(t, err)

@@ -571,9 +571,7 @@ func TestLoadBalanceTask(t *testing.T) {
 			triggerCondition: querypb.TriggerCondition_NodeDown,
 		},
 		LoadBalanceRequest: loadBalanceSegment,
-		rootCoord:          queryCoord.rootCoordClient,
-		dataCoord:          queryCoord.dataCoordClient,
-		indexCoord:         queryCoord.indexCoordClient,
+		broker:             queryCoord.broker,
 		cluster:            queryCoord.cluster,
 		meta:               queryCoord.meta,
 	}

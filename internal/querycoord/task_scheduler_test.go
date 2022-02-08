@@ -80,6 +80,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 				CollectionID: defaultCollectionID,
 				BinlogPaths:  binlogs,
 			}
+			segmentInfo.SegmentSize = estimateSegmentSize(segmentInfo)
 			req := &querypb.LoadSegmentsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadSegments,
@@ -467,7 +468,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 		ctx:              baseCtx,
 		cancel:           cancel,
 		client:           kv,
-		triggerTaskQueue: NewTaskQueue(),
+		triggerTaskQueue: newTaskQueue(),
 	}
 
 	kvs := make(map[string]string)
