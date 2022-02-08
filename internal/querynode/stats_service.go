@@ -55,7 +55,7 @@ func (sService *statsService) start() {
 	sleepTimeInterval := Params.QueryNodeCfg.StatsPublishInterval
 
 	// start pulsar
-	producerChannels := []string{Params.QueryNodeCfg.StatsChannelName}
+	producerChannels := []string{Params.MsgChannelCfg.QueryNodeStats}
 
 	statsStream, _ := sService.msFactory.NewMsgStream(sService.ctx)
 	statsStream.AsProducer(producerChannels)

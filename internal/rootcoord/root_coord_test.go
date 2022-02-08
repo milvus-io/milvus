@@ -435,7 +435,7 @@ func TestRootCoordInit(t *testing.T) {
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 
@@ -445,8 +445,8 @@ func TestRootCoordInit(t *testing.T) {
 	core.SetEtcdClient(etcdCli)
 	randVal := rand.Int()
 
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
 
 	err = core.Init()
 	assert.Nil(t, err)
@@ -461,8 +461,8 @@ func TestRootCoordInit(t *testing.T) {
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		return nil, retry.Unrecoverable(errors.New("injected"))
@@ -481,11 +481,11 @@ func TestRootCoordInit(t *testing.T) {
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
 
 	core.kvBaseCreate = func(root string) (kv.TxnKV, error) {
-		if root == Params.BaseParams.MetaRootPath {
+		if root == Params.EtcdCfg.MetaRootPath {
 			return nil, retry.Unrecoverable(errors.New("injected"))
 		}
 		return memkv.NewMemoryKV(), nil
@@ -504,8 +504,8 @@ func TestRootCoordInit(t *testing.T) {
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		return nil, nil
@@ -524,8 +524,8 @@ func TestRootCoordInit(t *testing.T) {
 	assert.Nil(t, err)
 	randVal = rand.Int()
 
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		kv := memkv.NewMemoryKV()
@@ -559,19 +559,19 @@ func TestRootCoord(t *testing.T) {
 	core, err := NewCore(ctx, coreFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
-	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-	Params.RootCoordCfg.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
-	Params.RootCoordCfg.DeltaChannelName = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.MsgChannelCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	Params.MsgChannelCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 
-	sessKey := path.Join(Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	defer func() {
@@ -626,7 +626,7 @@ func TestRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
@@ -723,7 +723,7 @@ func TestRootCoord(t *testing.T) {
 
 		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
-		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.RootCoordCfg.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.MsgChannelCfg.RootCoordSubName)
 		dmlStream.Start()
 
 		pChanMap := core.MetaTable.ListCollectionPhysicalChannels()
@@ -756,11 +756,11 @@ func TestRootCoord(t *testing.T) {
 		//assert.True(t, ok)
 		//assert.Greater(t, ddm.Base.Timestamp, uint64(0))
 		core.chanTimeTick.lock.Lock()
-		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
-		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
+		assert.Equal(t, len(core.chanTimeTick.sess2ChanTsMap), 2)
+		pt, ok := core.chanTimeTick.sess2ChanTsMap[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, shardsNum, int32(len(pt.chanTs)))
-		for chanName, ts := range pt.chanTs {
+		assert.Equal(t, shardsNum, int32(len(pt.chanTsMap)))
+		for chanName, ts := range pt.chanTsMap {
 			assert.Contains(t, createMeta.PhysicalChannelNames, chanName)
 			assert.Equal(t, pt.defaultTs, ts)
 		}
@@ -1838,7 +1838,7 @@ func TestRootCoord(t *testing.T) {
 		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
 		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
 		time.Sleep(100 * time.Millisecond)
-		//t.Log(core.chanTimeTick.proxyTimeTick)
+		//t.Log(core.chanTimeTick.sess2ChanTsMap)
 
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1865,7 +1865,7 @@ func TestRootCoord(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		// 2 proxy, 1 rootcoord
-		assert.Equal(t, 3, core.chanTimeTick.getProxyNum())
+		assert.Equal(t, 3, core.chanTimeTick.getSessionNum())
 
 		// add 3 proxy channels
 		assert.Equal(t, 3, core.chanTimeTick.getDmlChannelNum()-numChan)
@@ -2305,17 +2305,17 @@ func TestRootCoord2(t *testing.T) {
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
 	randVal := rand.Int()
 
-	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.MsgChannelCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2361,7 +2361,7 @@ func TestRootCoord2(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
@@ -2404,7 +2404,7 @@ func TestRootCoord2(t *testing.T) {
 		collInfo, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		dmlStream, _ := msFactory.NewMsgStream(ctx)
-		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.RootCoordCfg.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.MsgChannelCfg.RootCoordSubName)
 		dmlStream.Start()
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
@@ -2589,11 +2589,11 @@ func TestCheckFlushedSegments(t *testing.T) {
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.MsgChannelCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2620,7 +2620,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 		return nil, nil
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	core.SetEtcdClient(etcdCli)
@@ -2642,7 +2642,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
@@ -2755,11 +2755,11 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
-	Params.RootCoordCfg.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.RootCoordCfg.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.BaseParams.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.MetaRootPath)
-	Params.BaseParams.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.BaseParams.KvRootPath)
-	Params.RootCoordCfg.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.MsgChannelCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.MsgChannelCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.MsgChannelCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2786,7 +2786,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 		return nil, nil
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 
@@ -2809,7 +2809,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.RootCoordCfg.TimeTickChannel}, Params.RootCoordCfg.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.MsgChannelCfg.RootCoordTimeTick}, Params.MsgChannelCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)

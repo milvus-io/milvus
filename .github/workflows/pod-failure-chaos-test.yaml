@@ -95,7 +95,15 @@ jobs:
           sed -i "s/CHAOS_DURATION =.*/CHAOS_DURATION = 80/g" constants.py
           sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${{ env.RELEASE }}\'/g" constants.py
           cat constants.py
-          pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
+
+      - name: Result Analysis
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/chaos/reports
+        run: |
+          echo "result analysis"
+          cat ${{ env.RELEASE }}.log || echo "no log file"
 
       - name: Milvus E2E Test
         timeout-minutes: 10

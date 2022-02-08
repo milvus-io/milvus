@@ -31,6 +31,7 @@ pipeline {
         TEST_TYPE = "scale-test"
 //        SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         ARTIFACTS = "${env.WORKSPACE}/_artifacts"
+        MILVUS_LOGS = "/tmp/milvus_logs/*"
     }
 
     stages {
@@ -77,7 +78,16 @@ pipeline {
                     script {
                         dir("${env.ARTIFACTS}") {
                             sh "tar -zcvf artifacts-${PROJECT_NAME}-${TEST_TYPE}-pytest-logs.tar.gz /tmp/ci_logs --remove-files || true"
-                            archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${TEST_TYPE}-pytest-logs.tar.gz ", allowEmptyArchive: true                        }
+                            archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${TEST_TYPE}-pytest-logs.tar.gz ", allowEmptyArchive: true
+                            DIR_LIST = sh(returnStdout: true, script: 'ls -d1 ${MILVUS_LOGS}').trim()
+                            for (d in DIR_LIST.tokenize("\n")) {
+                                sh "echo $d"
+                                def release_name = d.split('/')[-1]
+                                sh "tar -zcvf artifacts-${PROJECT_NAME}-${TEST_TYPE}-${release_name}-logs.tar.gz ${d} --remove-files || true"
+                                archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${TEST_TYPE}-${release_name}-logs.tar.gz ", allowEmptyArchive: true
+
+                            }
+                        }
                     }
                 }
             }

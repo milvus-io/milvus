@@ -10,6 +10,7 @@ from customize.milvus_operator import MilvusOperator
 from scale import constants
 from common import common_func as cf
 from common import common_type as ct
+from utils.util_k8s import read_pod_log
 from utils.util_log import test_log as log
 from utils.util_pymilvus import get_latest_tag
 
@@ -90,13 +91,23 @@ class TestIndexNodeScale:
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
             log.info(f'Create index on {expand_replicas} indexNode cost t1: {t1}')
+            collection_w.drop_index()
 
-            assert round(t0 / t1) == 2
+            start = datetime.datetime.now()
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            assert collection_w.has_index()[0]
+            t2 = datetime.datetime.now() - start
+            log.info(f'Create index on {expand_replicas} indexNode cost t2: {t2}')
+
+            assert round(t0 / t2) == 2
 
         except Exception as e:
             raise Exception(str(e))
 
         finally:
+            label = f"app.kubernetes.io/instance={release_name}"
+            log.info('Start to export milvus pod logs')
+            read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -152,7 +163,7 @@ class TestIndexNodeScale:
             assert collection_w.has_index()[0]
             t0 = datetime.datetime.now() - start
 
-            log.debug(f'two indexNodes: {t0}')
+            log.info(f'Create index on 2 indexNode cost t0: {t0}')
 
             collection_w.drop_index()
             assert not collection_w.has_index()[0]
@@ -166,13 +177,24 @@ class TestIndexNodeScale:
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
+            log.info(f'Create index on 1 indexNode cost t1: {t1}')
+            collection_w.drop_index()
 
-            log.debug(f'one indexNode: {t1}')
-            log.debug(t1 / t0)
-            assert round(t1 / t0) == 2
+            start = datetime.datetime.now()
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            assert collection_w.has_index()[0]
+            t2 = datetime.datetime.now() - start
+            log.info(f'Create index on 1 indexNode cost t2: {t2}')
+
+            log.debug(f'one indexNode: {t2}')
+            log.debug(t2 / t0)
+            assert round(t2 / t0) == 2
 
         except Exception as e:
             raise Exception(str(e))
 
         finally:
+            label = f"app.kubernetes.io/instance={release_name}"
+            log.info('Start to export milvus pod logs')
+            read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)

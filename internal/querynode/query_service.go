@@ -69,11 +69,11 @@ func newQueryService(ctx context.Context,
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
 
 	//TODO godchen: change this to configuration
-	path, err := Params.BaseParams.Load("localStorage.Path")
+	path, err := Params.Load("localStorage.Path")
 	if err != nil {
 		path = "/tmp/milvus/data"
 	}
-	enabled, _ := Params.BaseParams.Load("localStorage.enabled")
+	enabled, _ := Params.Load("localStorage.enabled")
 	localCacheEnabled, _ := strconv.ParseBool(enabled)
 
 	localChunkManager := storage.NewLocalChunkManager(path)

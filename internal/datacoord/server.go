@@ -59,8 +59,8 @@ var (
 	// TODO: sunby put to config
 	enableTtChecker           = true
 	ttCheckerName             = "dataTtChecker"
-	ttMaxInterval             = 3 * time.Minute
-	ttCheckerWarnMsg          = fmt.Sprintf("we haven't received tt for %f minutes", ttMaxInterval.Minutes())
+	ttMaxInterval             = 2 * time.Minute
+	ttCheckerWarnMsg          = fmt.Sprintf("Datacoord haven't received tt for %f minutes", ttMaxInterval.Minutes())
 	segmentTimedFlushDuration = 10.0
 )
 
@@ -230,13 +230,13 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) initSession() error {
-	s.session = sessionutil.NewSession(s.ctx, Params.BaseParams.MetaRootPath, s.etcdCli)
+	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath, s.etcdCli)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
 	s.session.Init(typeutil.DataCoordRole, Params.DataCoordCfg.Address, true, true)
 	Params.DataCoordCfg.NodeID = s.session.ServerID
-	Params.BaseParams.SetLogger(Params.DataCoordCfg.NodeID)
+	Params.SetLogger(Params.DataCoordCfg.NodeID)
 	return nil
 }
 
@@ -307,7 +307,7 @@ func (s *Server) initCluster() error {
 	}
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.kvClient, s.handler)
+	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.msFactory))
 	if err != nil {
 		return err
 	}
@@ -417,7 +417,7 @@ func (s *Server) startSegmentManager() {
 }
 
 func (s *Server) initMeta() error {
-	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.BaseParams.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath)
 	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
 		var err error
@@ -447,11 +447,11 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		return
 	}
-	ttMsgStream.AsConsumerWithPosition([]string{Params.DataCoordCfg.TimeTickChannelName},
-		Params.DataCoordCfg.DataCoordSubscriptionName, mqclient.SubscriptionPositionLatest)
+	ttMsgStream.AsConsumerWithPosition([]string{Params.MsgChannelCfg.DataCoordTimeTick},
+		Params.MsgChannelCfg.DataCoordSubName, mqclient.SubscriptionPositionLatest)
 	log.Debug("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", Params.DataCoordCfg.TimeTickChannelName),
-		zap.String("subscription", Params.DataCoordCfg.DataCoordSubscriptionName))
+		zap.String("timeTickChannel", Params.MsgChannelCfg.DataCoordTimeTick),
+		zap.String("subscription", Params.MsgChannelCfg.DataCoordSubName))
 	ttMsgStream.Start()
 
 	go func() {
@@ -731,7 +731,7 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.BaseParams.MetaRootPath, s.etcdCli); err != nil {
+	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.EtcdCfg.MetaRootPath, s.etcdCli); err != nil {
 		return err
 	}
 	if err = s.rootCoordClient.Init(); err != nil {

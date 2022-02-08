@@ -38,7 +38,7 @@ def wait_pods_ready(namespace, label_selector, expected_num=None, timeout=360):
                 for item in api_response.items:
                     if item.status.phase != 'Running':
                         all_pos_ready_flag = False
-                        break 
+                        break
                     for c in item.status.container_statuses:
                         log.info(f"{c.name} status is {c.ready}")
                         if c.ready is False:
@@ -82,7 +82,7 @@ def get_pod_list(namespace, label_selector):
         raise Exception(str(e))
 
 
-def export_pod_logs(namespace, label_selector):
+def export_pod_logs(namespace, label_selector, release_name=None):
     """
     export pod logs with label selector to '/tmp/milvus'
 
@@ -92,10 +92,19 @@ def export_pod_logs(namespace, label_selector):
     :param label_selector: labels to restrict which pods logs to export
     :type label_selector: str
 
+    :param release_name: use the release name as server logs director name
+    :type label_selector: str
+
     :example:
             >>> export_pod_logs("chaos-testing", "app.kubernetes.io/instance=mic-milvus")
     """
-    pod_log_path = '/tmp/milvus_logs'
+    if isinstance(release_name, str):
+        if len(release_name.strip()) == 0:
+            raise ValueError("Got an unexpected space release_name")
+    else:
+        raise TypeError("Got an unexpected non-string release_name")
+    pod_log_path = '/tmp/milvus_logs' if release_name is None else f'/tmp/milvus_logs/{release_name}'
+
     if not os.path.isdir(pod_log_path):
         os.makedirs(pod_log_path)
 
@@ -107,6 +116,30 @@ def export_pod_logs(namespace, label_selector):
             os.system(f'kubectl logs {pod_name} > {pod_log_path}/{pod_name}.log 2>&1')
     except Exception as e:
         log.error(f"Exception when export pod {pod_name} logs: %s\n" % e)
+        raise Exception(str(e))
+
+
+def read_pod_log(namespace, label_selector, release_name):
+    config.load_kube_config()
+    items = get_pod_list(namespace, label_selector=label_selector)
+
+    try:
+        # export log to /tmp/release_name path
+        pod_log_path = f'/tmp/milvus_logs/{release_name}'
+        if not os.path.isdir(pod_log_path):
+            os.makedirs(pod_log_path)
+
+        api_instance = client.CoreV1Api()
+
+        for item in items:
+            pod = item.metadata.name
+            log.debug(f'Start to read {pod} log')
+            logs = api_instance.read_namespaced_pod_log(name=pod, namespace=namespace, async_req=True)
+            with open(f'{pod_log_path}/{pod}.log', "w") as f:
+                f.write(logs.get())
+
+    except ApiException as e:
+        log.error(f"Exception when read pod {pod} logs: %s\n" % e)
         raise Exception(str(e))
 
 

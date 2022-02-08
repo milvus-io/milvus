@@ -149,7 +149,7 @@ func (s *Server) init() error {
 		return err
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&indexnode.Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&indexnode.Params.EtcdCfg)
 	if err != nil {
 		log.Debug("IndexNode connect to etcd failed", zap.Error(err))
 		return err

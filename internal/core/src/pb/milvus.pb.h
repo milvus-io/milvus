@@ -2032,6 +2032,7 @@ class DescribeCollectionResponse :
     kPhysicalChannelNamesFieldNumber = 5,
     kAliasesFieldNumber = 9,
     kStartPositionsFieldNumber = 10,
+    kCollectionNameFieldNumber = 12,
     kStatusFieldNumber = 1,
     kSchemaFieldNumber = 2,
     kCollectionIDFieldNumber = 3,
@@ -2102,6 +2103,17 @@ class DescribeCollectionResponse :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair >&
       start_positions() const;
 
+  // string collection_name = 12;
+  void clear_collection_name();
+  const std::string& collection_name() const;
+  void set_collection_name(const std::string& value);
+  void set_collection_name(std::string&& value);
+  void set_collection_name(const char* value);
+  void set_collection_name(const char* value, size_t size);
+  std::string* mutable_collection_name();
+  std::string* release_collection_name();
+  void set_allocated_collection_name(std::string* collection_name);
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -2152,6 +2164,7 @@ class DescribeCollectionResponse :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> physical_channel_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> aliases_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyDataPair > start_positions_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::Status* status_;
   ::milvus::proto::schema::CollectionSchema* schema_;
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
@@ -8390,9 +8403,21 @@ class SearchResults :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kCollectionNameFieldNumber = 3,
     kStatusFieldNumber = 1,
     kResultsFieldNumber = 2,
   };
+  // string collection_name = 3;
+  void clear_collection_name();
+  const std::string& collection_name() const;
+  void set_collection_name(const std::string& value);
+  void set_collection_name(std::string&& value);
+  void set_collection_name(const char* value);
+  void set_collection_name(const char* value, size_t size);
+  std::string* mutable_collection_name();
+  std::string* release_collection_name();
+  void set_allocated_collection_name(std::string* collection_name);
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -8414,6 +8439,7 @@ class SearchResults :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::Status* status_;
   ::milvus::proto::schema::SearchResultData* results_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -9121,6 +9147,7 @@ class QueryResults :
 
   enum : int {
     kFieldsDataFieldNumber = 2,
+    kCollectionNameFieldNumber = 3,
     kStatusFieldNumber = 1,
   };
   // repeated .milvus.proto.schema.FieldData fields_data = 2;
@@ -9133,6 +9160,17 @@ class QueryResults :
   ::milvus::proto::schema::FieldData* add_fields_data();
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >&
       fields_data() const;
+
+  // string collection_name = 3;
+  void clear_collection_name();
+  const std::string& collection_name() const;
+  void set_collection_name(const std::string& value);
+  void set_collection_name(std::string&& value);
+  void set_collection_name(const char* value);
+  void set_collection_name(const char* value, size_t size);
+  std::string* mutable_collection_name();
+  std::string* release_collection_name();
+  void set_allocated_collection_name(std::string* collection_name);
 
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
@@ -9148,6 +9186,7 @@ class QueryResults :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData > fields_data_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::Status* status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -14929,6 +14968,57 @@ inline void DescribeCollectionResponse::set_consistency_level(::milvus::proto::c
   
   consistency_level_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.consistency_level)
+}
+
+// string collection_name = 12;
+inline void DescribeCollectionResponse::clear_collection_name() {
+  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& DescribeCollectionResponse::collection_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
+  return collection_name_.GetNoArena();
+}
+inline void DescribeCollectionResponse::set_collection_name(const std::string& value) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
+}
+inline void DescribeCollectionResponse::set_collection_name(std::string&& value) {
+  
+  collection_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
+}
+inline void DescribeCollectionResponse::set_collection_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
+}
+inline void DescribeCollectionResponse::set_collection_name(const char* value, size_t size) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
+}
+inline std::string* DescribeCollectionResponse::mutable_collection_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
+  return collection_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* DescribeCollectionResponse::release_collection_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
+  
+  return collection_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void DescribeCollectionResponse::set_allocated_collection_name(std::string* collection_name) {
+  if (collection_name != nullptr) {
+    
+  } else {
+    
+  }
+  collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.DescribeCollectionResponse.collection_name)
 }
 
 // -------------------------------------------------------------------
@@ -21300,6 +21390,57 @@ inline void SearchResults::set_allocated_results(::milvus::proto::schema::Search
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.SearchResults.results)
 }
 
+// string collection_name = 3;
+inline void SearchResults::clear_collection_name() {
+  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& SearchResults::collection_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchResults.collection_name)
+  return collection_name_.GetNoArena();
+}
+inline void SearchResults::set_collection_name(const std::string& value) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchResults.collection_name)
+}
+inline void SearchResults::set_collection_name(std::string&& value) {
+  
+  collection_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.SearchResults.collection_name)
+}
+inline void SearchResults::set_collection_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.SearchResults.collection_name)
+}
+inline void SearchResults::set_collection_name(const char* value, size_t size) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.SearchResults.collection_name)
+}
+inline std::string* SearchResults::mutable_collection_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.SearchResults.collection_name)
+  return collection_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* SearchResults::release_collection_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.SearchResults.collection_name)
+  
+  return collection_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void SearchResults::set_allocated_collection_name(std::string* collection_name) {
+  if (collection_name != nullptr) {
+    
+  } else {
+    
+  }
+  collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.SearchResults.collection_name)
+}
+
 // -------------------------------------------------------------------
 
 // FlushRequest
@@ -22016,6 +22157,57 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema:
 QueryResults::fields_data() const {
   // @@protoc_insertion_point(field_list:milvus.proto.milvus.QueryResults.fields_data)
   return fields_data_;
+}
+
+// string collection_name = 3;
+inline void QueryResults::clear_collection_name() {
+  collection_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& QueryResults::collection_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.QueryResults.collection_name)
+  return collection_name_.GetNoArena();
+}
+inline void QueryResults::set_collection_name(const std::string& value) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.QueryResults.collection_name)
+}
+inline void QueryResults::set_collection_name(std::string&& value) {
+  
+  collection_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.QueryResults.collection_name)
+}
+inline void QueryResults::set_collection_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.QueryResults.collection_name)
+}
+inline void QueryResults::set_collection_name(const char* value, size_t size) {
+  
+  collection_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.QueryResults.collection_name)
+}
+inline std::string* QueryResults::mutable_collection_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.QueryResults.collection_name)
+  return collection_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* QueryResults::release_collection_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.QueryResults.collection_name)
+  
+  return collection_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void QueryResults::set_allocated_collection_name(std::string* collection_name) {
+  if (collection_name != nullptr) {
+    
+  } else {
+    
+  }
+  collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.QueryResults.collection_name)
 }
 
 // -------------------------------------------------------------------

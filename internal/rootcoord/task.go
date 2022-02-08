@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
@@ -146,7 +147,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 
 		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
-		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DeltaChannelName)
+		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
 		if err1 != nil || deltaChanName != deltaChanNames[i] {
 			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
 		}
@@ -254,7 +255,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // DropCollectionReqTask drop collection request task
@@ -296,17 +297,29 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
 
+	//notify query service to release collection
+	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
+		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
+		return err
+	}
+
+	// drop all indices
+	if err = t.core.RemoveIndex(ctx, t.Req.CollectionName, ""); err != nil {
+		return err
+	}
+
+	// Allocate a new ts to make sure the channel timetick is consistent.
+	ts, err = t.core.TSOAllocator(1)
+	if err != nil {
+		return fmt.Errorf("TSO alloc fail, error = %w", err)
+	}
+
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddReq.Base.Timestamp = ts
 	ddOpStr, err := EncodeDdOperation(&ddReq, DropCollectionDDType)
 	if err != nil {
 		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
-	}
-
-	// drop all indices
-	if err = t.core.RemoveIndex(ctx, t.Req.CollectionName, ""); err != nil {
-		return err
 	}
 
 	// get all aliases before meta table updated
@@ -348,7 +361,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// remove delta channels
 		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
 		for i, chanName := range collMeta.PhysicalChannelNames {
-			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.RootCoordCfg.DmlChannelName, Params.RootCoordCfg.DeltaChannelName); err != nil {
+			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta); err != nil {
 				return err
 			}
 		}
@@ -360,17 +373,11 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	//notify query service to release collection
-	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
-		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
-		return err
-	}
-
 	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
 	t.core.ExpireMetaCache(ctx, aliases, ts)
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // HasCollectionReqTask has collection request task
@@ -446,6 +453,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	t.Rsp.CreatedUtcTimestamp = uint64(createdPhysicalTime)
 	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
 	t.Rsp.StartPositions = collInfo.GetStartPositions()
+	t.Rsp.CollectionName = t.Rsp.Schema.Name
 	return nil
 }
 
@@ -564,7 +572,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // DropPartitionReqTask drop partition request task
@@ -658,7 +666,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	//}
 
 	// Update DDOperation in etcd
-	return t.core.setDdMsgSendFlag(true)
+	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // HasPartitionReqTask has partition request task

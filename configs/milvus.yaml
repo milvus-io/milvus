@@ -161,10 +161,11 @@ dataCoord:
   segment:
     maxSize: 512 # Maximum size of a segment in MB
     sealProportion: 0.75 # It's the minimum proportion for a segment which can be sealed
-    assignmentExpiration: 2000 # The time of the assignment expiration in ms 
+    assignmentExpiration: 2000 # The time of the assignment expiration in ms
 
   compaction:
     enableAutoCompaction: true
+    entityExpiration: 9223372037 # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and 9223372037 is the maximum value of entityExpiration
 
   gc:
     interval: 3600 # gc interval in seconds
@@ -214,17 +215,13 @@ msgChannel:
     rootCoordDelta: "rootcoord-delta"
     search: "search"
     searchResult: "searchResult"
-    proxyTimeTick: "proxyTimeTick"
     queryTimeTick: "queryTimeTick"
     queryNodeStats: "query-node-stats"
     # Cmd for loadIndex, flush, etc...
     cmd: "cmd"
-    dataCoordInsertChannel: "insert-channel-"
     dataCoordStatistic: "datacoord-statistics-channel"
     dataCoordTimeTick: "datacoord-timetick-channel"
     dataCoordSegmentInfo: "segment-info-channel"
-  # skip replay query channel under failure recovery
-  skipQueryChannelRecovery: "false"
 
   # Sub name generation rule: ${subNamePrefix}-${NodeID}
   subNamePrefix:

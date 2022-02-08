@@ -36,14 +36,14 @@ func TestEmbedEtcd(te *testing.T) {
 	param.BaseTable.Save("etcd.use.embed", "true")
 	param.BaseTable.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	param.BaseTable.Save("etcd.data.dir", "etcd.test.data.dir")
-	param.LoadCfgToMemory()
+	param.EtcdCfg.LoadCfgToMemory()
 	//clean up data
 	defer func() {
 		os.RemoveAll("etcd.test.data.dir")
 	}()
 	te.Run("EtcdKV SaveAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandload"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		require.NoError(te, err)
 		assert.NotNil(te, metaKv)
 		require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("EtcdKV LoadWithRevision", func(t *testing.T) {
 		rootPath := "/etcd/test/root/LoadWithRevision"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.Nil(t, err)
 
 		defer metaKv.Close()
@@ -198,7 +198,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("EtcdKV MultiSaveAndMultiLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_save_and_multi_load"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.Nil(t, err)
 
 		defer metaKv.Close()
@@ -307,7 +307,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("EtcdKV MultiRemoveWithPrefix", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_remove_with_prefix"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		require.NoError(t, err)
 
 		defer metaKv.Close()
@@ -395,7 +395,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("EtcdKV Watch", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.Nil(t, err)
 
 		defer metaKv.Close()
@@ -412,7 +412,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("Etcd Revision", func(t *testing.T) {
 		rootPath := "/etcd/test/root/watch"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.Nil(t, err)
 
 		defer metaKv.Close()
@@ -463,7 +463,7 @@ func TestEmbedEtcd(te *testing.T) {
 
 	te.Run("Etcd Lease", func(t *testing.T) {
 		rootPath := "/etcd/test/root/lease"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, param)
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.Nil(t, err)
 
 		defer metaKv.Close()

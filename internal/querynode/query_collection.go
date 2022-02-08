@@ -1011,6 +1011,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 			return err
 		}
 	}
+
+	defer plan.delete()
+
 	topK := plan.getTopK()
 	if topK == 0 {
 		return fmt.Errorf("limit must be greater than 0, msgID = %d", searchMsg.ID())
@@ -1023,6 +1026,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
+	defer searchReq.delete()
+
 	queryNum := searchReq.getNumOfQuery()
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
@@ -1048,7 +1053,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	searchResults := make([]*SearchResult, 0)
-
+	defer func() {
+		deleteSearchResults(searchResults)
+	}()
 	// historical search
 	log.Debug("historical search start", zap.Int64("msgID", searchMsg.ID()))
 	hisSearchResults, sealedSegmentSearched, sealedPartitionSearched, err := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
@@ -1061,7 +1068,6 @@ func (q *queryCollection) search(msg queryMsg) error {
 
 	log.Debug("streaming search start", zap.Int64("msgID", searchMsg.ID()))
 	for _, channel := range collection.getVChannels() {
-		var strSearchResults []*SearchResult
 		strSearchResults, growingSegmentSearched, growingPartitionSearched, err := q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
 		if err != nil {
 			return err
@@ -1128,6 +1134,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
+	defer deleteMarshaledHits(marshaledHits)
 
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	sp.LogFields(oplog.String("statistical time", "getHitsBlob end"))
@@ -1216,13 +1223,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 		}
 		tr.Record(fmt.Sprintf("publish search result, msgID = %d", searchMsg.ID()))
 	}
-
-	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
-	deleteSearchResults(searchResults)
-	deleteMarshaledHits(marshaledHits)
 	sp.LogFields(oplog.String("statistical time", "stats done"))
-	plan.delete()
-	searchReq.delete()
 	tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))
 	return nil
 }

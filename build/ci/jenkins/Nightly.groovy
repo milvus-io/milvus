@@ -7,7 +7,7 @@ String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
 
 int total_timeout_minutes = 660
 def imageTag=''
-
+def chart_version='3.0.1'
 pipeline {
     triggers {
         cron """${cron_timezone}
@@ -134,6 +134,12 @@ pipeline {
                                                     --set etcd.metrics.enabled=true \
                                                     --set etcd.metrics.podMonitor.enabled=true \
                                                     --set etcd.nodeSelector.disk=fast \
+                                                    --set proxy.replicas=2 \
+                                                    --set queryNode.replicas=2 \
+                                                    --set indexNode.replicas=2 \
+                                                    --set dataNode.replicas=2 \
+                                                    --version ${chart_version} \
+                                                    -f values/nightly.yaml \
                                                     --set metrics.serviceMonitor.enabled=true"
                                                     """
                                                 }
@@ -155,33 +161,42 @@ pipeline {
                                     customWorkspace '/home/jenkins/agent/workspace'
                                 }
                         }
-                            steps {
-                                container('pytest') {
-                                    dir ('tests/scripts') {
-                                        script {
-                                                    def release_name=sh(returnStdout: true, script: './get_release_name.sh')
-                                                    def clusterEnabled = "false"
-                                                    int e2e_timeout_seconds = 6 * 60 * 60
-                                                    if ("${MILVUS_SERVER_TYPE}" == "distributed") {
-                                                        clusterEnabled = "true"
-                                                        e2e_timeout_seconds = 10 * 60 * 60
-                                                    }
-                                                    if ("${MILVUS_CLIENT}" == "pymilvus") {
-                                                        sh """ 
-                                                        MILVUS_HELM_RELEASE_NAME="${release_name}" \
-                                                        MILVUS_HELM_NAMESPACE="milvus-ci" \
-                                                        MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
-                                                        TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                                        ./ci_e2e.sh  "--workers 4 --tags L0 L1 L2 --repeat-scope=session --random-order-bucket=global"
-                                                        """
-                                                    } else {
-                                                    error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
-                                                    }
-                                        }
+                        steps {
+                            container('pytest') {
+                                dir ('tests/scripts') {
+                                    script {
+                                                def release_name=sh(returnStdout: true, script: './get_release_name.sh')
+                                                def clusterEnabled = "false"
+                                                int e2e_timeout_seconds = 6 * 60 * 60
+                                                if ("${MILVUS_SERVER_TYPE}" == "distributed") {
+                                                    clusterEnabled = "true"
+                                                    e2e_timeout_seconds = 10 * 60 * 60
+                                                }
+                                                if ("${MILVUS_CLIENT}" == "pymilvus") {
+                                                    sh """ 
+                                                    MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                    MILVUS_HELM_NAMESPACE="milvus-ci" \
+                                                    MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
+                                                    TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                    ./ci_e2e.sh  "--workers 4 --tags L0 L1 L2 --repeat-scope=session --random-order-bucket=global"
+                                                    """
+                                                } else {
+                                                error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
+                                                }
                                     }
                                 }
                             }
-
+                        }
+                        post{
+                            always {
+                                container('pytest'){
+                                    dir("${env.ARTIFACTS}") {
+                                            sh "tar -zcvf ${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
+                                            archiveArtifacts artifacts: "${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ", allowEmptyArchive: true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 post {
@@ -215,12 +230,6 @@ pipeline {
                         }
                     }
                     always {
-                        container('pytest'){
-                            dir("${env.ARTIFACTS}") {
-                                    sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
-                                    archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ", allowEmptyArchive: true
-                            }
-                        }
                         container('main') {
                             dir ('tests/scripts') {
                                 script {
@@ -234,7 +243,6 @@ pipeline {
                                 }
                             }
                         }
-                    
                     }
                 }
             }

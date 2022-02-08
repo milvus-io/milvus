@@ -193,21 +193,21 @@ func (node *DataNode) Register() error {
 }
 
 func (node *DataNode) initSession() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.BaseParams.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
 	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
 	Params.DataNodeCfg.NodeID = node.session.ServerID
 	node.NodeID = node.session.ServerID
-	Params.BaseParams.SetLogger(Params.DataNodeCfg.NodeID)
+	Params.SetLogger(Params.DataNodeCfg.NodeID)
 	return nil
 }
 
 // Init function does nothing now.
 func (node *DataNode) Init() error {
 	log.Debug("DataNode Init",
-		zap.String("TimeTickChannelName", Params.DataNodeCfg.TimeTickChannelName),
+		zap.String("TimeTickChannelName", Params.MsgChannelCfg.DataCoordTimeTick),
 	)
 	if err := node.initSession(); err != nil {
 		log.Error("DataNode init session failed", zap.Error(err))
@@ -227,7 +227,7 @@ func (node *DataNode) Init() error {
 		return err
 	}
 	log.Debug("DataNode Init",
-		zap.String("MsgChannelSubName", Params.DataNodeCfg.MsgChannelSubName))
+		zap.String("MsgChannelSubName", Params.DataNodeCfg.DataNodeSubName))
 
 	return nil
 }
@@ -411,7 +411,7 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 			log.Info("GC flowgraph", zap.String("vChanName", vchanName))
 			node.releaseFlowgraph(vchanName)
 		case <-node.ctx.Done():
-			log.Info("DataNode ctx done")
+			log.Warn("DataNode context done, exiting background GC")
 			return
 		}
 	}
@@ -438,7 +438,7 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.BaseParams.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
 		node.watchKv = etcdKV
 		return nil
 	}

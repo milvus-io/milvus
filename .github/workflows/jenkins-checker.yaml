@@ -7,6 +7,7 @@ on:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'build/ci/jenkins/**'
+      - '.github/workflows/jenkins-checker.yaml'
 jobs:
   check-jenkinsfile:
     name: Jenkinsfile Checker
@@ -23,7 +24,7 @@ jobs:
 
           function validate(){
             local file_path=${1:-Jenkinsfile}
-            response=$(curl -X POST -H $JENKINS_CRUMB -F "jenkinsfile=<${file_path}" $JENKINS_URL/pipeline-model-converter/validate)
+            response=$(curl --max-time 10 --retry 5 --retry-delay 0 --retry-max-time 40  -X POST -H $JENKINS_CRUMB -F "jenkinsfile=<${file_path}" $JENKINS_URL/pipeline-model-converter/validate)
             
             if [[ ${response} =~ "Error"  ]]
             then

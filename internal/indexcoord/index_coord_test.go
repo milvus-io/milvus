@@ -43,7 +43,7 @@ func TestIndexCoord(t *testing.T) {
 	ctx := context.Background()
 	inm0 := &indexnode.Mock{}
 	Params.Init()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	inm0.SetEtcdClient(etcdCli)
 	err = inm0.Init()

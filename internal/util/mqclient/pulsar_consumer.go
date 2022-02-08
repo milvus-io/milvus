@@ -17,11 +17,15 @@
 package mqclient
 
 import (
+	"context"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.uber.org/zap"
 )
 
 // PulsarConsumer consumes from pulsar
@@ -108,8 +112,12 @@ func (pc *PulsarConsumer) Close() {
 	pc.closeOnce.Do(func() {
 		defer pc.c.Close()
 		// Unsubscribe for the consumer
-		err := pc.c.Unsubscribe()
+		err := retry.Do(context.Background(), func() error {
+			//TODO need to check error retryable
+			return pc.c.Unsubscribe()
+		}, retry.MaxSleepTime(50*time.Millisecond), retry.Attempts(6))
 		if err != nil {
+			log.Error("failed to unsubscribe", zap.String("subscription", pc.Subscription()), zap.Error(err))
 			panic(err)
 		}
 		close(pc.closeCh)

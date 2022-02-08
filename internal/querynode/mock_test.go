@@ -369,11 +369,11 @@ func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
 }
 
 func genEtcdKV() (*etcdkv.EtcdKV, error) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		return nil, err
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	return etcdKV, nil
 }
 
@@ -406,7 +406,7 @@ func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 }
 
 func genLocalChunkManager() (storage.ChunkManager, error) {
-	p, err := Params.BaseParams.Load("storage.path")
+	p, err := Params.Load("storage.path")
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +426,7 @@ func genRemoteChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 }
 
 func genVectorChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	p, err := Params.BaseParams.Load("storage.path")
+	p, err := Params.Load("storage.path")
 	if err != nil {
 		return nil, err
 	}
@@ -869,10 +869,7 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	}
 	r := newCollectionReplica(kv)
 	schema := genSimpleSegCoreSchema()
-	err = r.addCollection(defaultCollectionID, schema)
-	if err != nil {
-		return nil, err
-	}
+	r.addCollection(defaultCollectionID, schema)
 	err = r.addPartition(defaultCollectionID, defaultPartitionID)
 	return r, err
 }
@@ -1290,14 +1287,14 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 		return nil, err
 	}
 	node := NewQueryNode(ctx, fac)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		return nil, err
 	}
 	node.etcdCli = etcdCli
 	node.initSession()
 
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	node.etcdKV = etcdKV
 
 	node.tSafeReplica = newTSafeReplica()

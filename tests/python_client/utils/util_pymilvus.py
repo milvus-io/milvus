@@ -59,7 +59,7 @@ default_index_params = [
     # {"search_length": 50, "out_degree": 40, "candidate_pool_size": 100, "knng": 50},
     {"n_trees": 50},
     {"M": 48, "efConstruction": 500},
-    {"M": 48, "efConstruction": 500, "PQM": 64},
+    {"M": 48, "efConstruction": 500, "PQM": 8},
     {"M": 48, "efConstruction": 500},
     {"nlist": 128},
     {"nlist": 128}

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -430,36 +431,21 @@ func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[t
 	return segID2PartID, nil
 }
 
-func (c *Core) setDdMsgSendFlag(b bool) error {
-	flag, err := c.MetaTable.txn.Load(DDMsgSendPrefix)
-	if err != nil {
-		return err
-	}
-
-	if (b && flag == "true") || (!b && flag == "false") {
-		log.Debug("DdMsg send flag need not change", zap.String("flag", flag))
-		return nil
-	}
-
-	err = c.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(b))
-	return err
-}
-
 func (c *Core) setMsgStreams() error {
 	if Params.PulsarCfg.Address == "" {
 		return fmt.Errorf("pulsar address is empty")
 	}
-	if Params.RootCoordCfg.MsgChannelSubName == "" {
-		return fmt.Errorf("msgChannelSubName is empty")
+	if Params.MsgChannelCfg.RootCoordSubName == "" {
+		return fmt.Errorf("RootCoordSubName is empty")
 	}
 
 	// rootcoord time tick channel
-	if Params.RootCoordCfg.TimeTickChannel == "" {
+	if Params.MsgChannelCfg.RootCoordTimeTick == "" {
 		return fmt.Errorf("timeTickChannel is empty")
 	}
 	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
-	timeTickStream.AsProducer([]string{Params.RootCoordCfg.TimeTickChannel})
-	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.RootCoordCfg.TimeTickChannel))
+	timeTickStream.AsProducer([]string{Params.MsgChannelCfg.RootCoordTimeTick})
+	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.MsgChannelCfg.RootCoordTimeTick))
 
 	c.SendTimeTick = func(t typeutil.Timestamp, reason string) error {
 		msgPack := ms.MsgPack{}
@@ -937,6 +923,9 @@ func (c *Core) Register() error {
 			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 		}
 	})
+
+	c.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 
@@ -946,12 +935,12 @@ func (c *Core) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
 func (c *Core) initSession() error {
-	c.session = sessionutil.NewSession(c.ctx, Params.BaseParams.MetaRootPath, c.etcdCli)
+	c.session = sessionutil.NewSession(c.ctx, Params.EtcdCfg.MetaRootPath, c.etcdCli)
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	c.session.Init(typeutil.RootCoordRole, Params.RootCoordCfg.Address, true, true)
-	Params.BaseParams.SetLogger(c.session.ServerID)
+	Params.SetLogger(c.session.ServerID)
 	return nil
 }
 
@@ -970,18 +959,18 @@ func (c *Core) Init() error {
 			return
 		}
 		connectEtcdFn := func() error {
-			if c.kvBase, initError = c.kvBaseCreate(Params.BaseParams.KvRootPath); initError != nil {
+			if c.kvBase, initError = c.kvBaseCreate(Params.EtcdCfg.KvRootPath); initError != nil {
 				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
 			}
 			var metaKV kv.TxnKV
-			metaKV, initError = c.kvBaseCreate(Params.BaseParams.MetaRootPath)
+			metaKV, initError = c.kvBaseCreate(Params.EtcdCfg.MetaRootPath)
 			if initError != nil {
 				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
 			}
 			var ss *suffixSnapshot
-			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.BaseParams.MetaRootPath, "snapshots"); initError != nil {
+			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
 				log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
 				return initError
 			}
@@ -992,14 +981,14 @@ func (c *Core) Init() error {
 
 			return nil
 		}
-		log.Debug("RootCoord, Connecting to Etcd", zap.String("kv root", Params.BaseParams.KvRootPath), zap.String("meta root", Params.BaseParams.MetaRootPath))
+		log.Debug("RootCoord, Connecting to Etcd", zap.String("kv root", Params.EtcdCfg.KvRootPath), zap.String("meta root", Params.EtcdCfg.MetaRootPath))
 		err := retry.Do(c.ctx, connectEtcdFn, retry.Attempts(300))
 		if err != nil {
 			return
 		}
 
 		log.Debug("RootCoord, Setting TSO and ID Allocator")
-		kv := tsoutil.NewTSOKVBase(c.etcdCli, Params.BaseParams.KvRootPath, "gid")
+		kv := tsoutil.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath, "gid")
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", kv)
 		if initError = idAllocator.Initialize(); initError != nil {
 			return
@@ -1011,7 +1000,7 @@ func (c *Core) Init() error {
 			return idAllocator.UpdateID()
 		}
 
-		kv = tsoutil.NewTSOKVBase(c.etcdCli, Params.BaseParams.KvRootPath, "tso")
+		kv = tsoutil.NewTSOKVBase(c.etcdCli, Params.EtcdCfg.KvRootPath, "tso")
 		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", kv)
 		if initError = tsoAllocator.Initialize(); initError != nil {
 			return
@@ -1032,19 +1021,19 @@ func (c *Core) Init() error {
 		}
 
 		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
-		c.chanTimeTick = newTimeTickSync(c.ctx, c.session, c.msFactory, chanMap)
-		c.chanTimeTick.addProxy(c.session)
+		c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.msFactory, chanMap)
+		c.chanTimeTick.addSession(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 
 		log.Debug("RootCoord, set proxy manager")
 		c.proxyManager = newProxyManager(
 			c.ctx,
 			c.etcdCli,
-			c.chanTimeTick.getProxy,
+			c.chanTimeTick.initSessions,
 			c.proxyClientManager.GetProxyClients,
 		)
-		c.proxyManager.AddSession(c.chanTimeTick.addProxy, c.proxyClientManager.AddProxyClient)
-		c.proxyManager.DelSession(c.chanTimeTick.delProxy, c.proxyClientManager.DelProxyClient)
+		c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+		c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 
 		c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -1063,8 +1052,21 @@ func (c *Core) Init() error {
 func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	if !force {
 		flag, err := c.MetaTable.txn.Load(DDMsgSendPrefix)
-		if err != nil || flag == "true" {
-			log.Debug("No un-successful DdMsg")
+		if err != nil {
+			// TODO, this is super ugly hack but our kv interface does not support loadWithExist
+			// leave it for later
+			if strings.Contains(err.Error(), "there is no value on key") {
+				log.Debug("skip reSendDdMsg with no dd-msg-send key")
+				return nil
+			}
+			return err
+		}
+		value, err := strconv.ParseBool(flag)
+		if err != nil {
+			return err
+		}
+		if value {
+			log.Debug("skip reSendDdMsg with dd-msg-send set to true")
 			return nil
 		}
 	}
@@ -1164,7 +1166,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	}
 
 	// Update DDOperation in etcd
-	return c.setDdMsgSendFlag(true)
+	return c.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
 // Start start rootcoord
@@ -1175,7 +1177,7 @@ func (c *Core) Start() error {
 	}
 
 	log.Debug(typeutil.RootCoordRole, zap.Int64("node id", c.session.ServerID))
-	log.Debug(typeutil.RootCoordRole, zap.String("time tick channel name", Params.RootCoordCfg.TimeTickChannel))
+	log.Debug(typeutil.RootCoordRole, zap.String("time tick channel name", Params.MsgChannelCfg.RootCoordTimeTick))
 
 	c.startOnce.Do(func() {
 		if err := c.proxyManager.WatchProxy(); err != nil {
@@ -1194,9 +1196,6 @@ func (c *Core) Start() error {
 		go c.checkFlushedSegmentsLoop()
 		Params.RootCoordCfg.CreatedTime = time.Now()
 		Params.RootCoordCfg.UpdatedTime = time.Now()
-
-		c.UpdateStateCode(internalpb.StateCode_Healthy)
-		log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	})
 
 	return nil
@@ -1253,7 +1252,7 @@ func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.RootCoordCfg.TimeTickChannel,
+		Value: Params.MsgChannelCfg.RootCoordTimeTick,
 	}, nil
 }
 
@@ -1264,7 +1263,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.RootCoordCfg.StatisticsChannel,
+		Value: Params.MsgChannelCfg.RootCoordStatistics,
 	}, nil
 }
 

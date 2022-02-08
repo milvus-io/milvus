@@ -1,10 +1,11 @@
 import json
+import os
 import time
 from benedict import benedict
 from utils.util_log import test_log as log
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 
-template_yaml = 'template/default.yaml'
+template_yaml = os.path.join(os.path.dirname(__file__), 'template/default.yaml')
 MILVUS_GRP = 'milvus.io'
 MILVUS_VER = 'v1alpha1'
 MILVUS_PLURAL = 'milvusclusters'
@@ -31,7 +32,9 @@ class MilvusOperator(object):
             return None
 
         if template is None:
-            d_configs = benedict()
+            # d_configs = benedict()
+            log.debug(f'template yaml {template_yaml}')
+            d_configs = benedict.from_yaml(template_yaml)
             d_configs['apiVersion'] = f'{MILVUS_GRP}/{MILVUS_VER}'
             d_configs['kind'] = MILVUS_KIND
         else:

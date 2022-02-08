@@ -33,13 +33,13 @@ import (
 func TestProxyManager(t *testing.T) {
 	Params.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sessKey := path.Join(Params.BaseParams.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	defer etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	s1 := sessionutil.Session{
@@ -76,8 +76,8 @@ func TestProxyManager(t *testing.T) {
 		assert.Equal(t, int64(100), sess.ServerID)
 		t.Log("del session", sess)
 	}
-	pm.AddSession(fa)
-	pm.DelSession(fd)
+	pm.AddSessionFunc(fa)
+	pm.DelSessionFunc(fd)
 
 	err = pm.WatchProxy()
 	assert.Nil(t, err)

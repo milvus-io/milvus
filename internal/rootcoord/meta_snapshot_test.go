@@ -37,7 +37,7 @@ func TestMetaSnapshot(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -177,7 +177,7 @@ func TestGetRevOnEtcd(t *testing.T) {
 	tsKey := "timestamp"
 	key := path.Join(rootPath, tsKey)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -221,7 +221,7 @@ func TestLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -269,7 +269,7 @@ func TestMultiSave(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -333,7 +333,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -411,7 +411,7 @@ func TestTsBackward(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
@@ -438,7 +438,7 @@ func TestFix7150(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 

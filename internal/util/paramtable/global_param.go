@@ -48,16 +48,12 @@ const (
 // GlobalParamTable is a derived struct of BaseParamTable.
 // It is used to quickly and easily access global system configuration.
 type GlobalParamTable struct {
-	once       sync.Once
-	BaseParams BaseParamTable
+	BaseParamTable
+	once sync.Once
 
-	PulsarCfg  pulsarConfig
-	RocksmqCfg rocksmqConfig
-	MinioCfg   minioConfig
-
-	CommonCfg   commonConfig
-	KnowhereCfg knowhereConfig
-	//MsgChannelCfg msgChannelConfig
+	CommonCfg     commonConfig
+	KnowhereCfg   knowhereConfig
+	MsgChannelCfg msgChannelConfig
 
 	RootCoordCfg  rootCoordConfig
 	ProxyCfg      proxyConfig
@@ -78,162 +74,26 @@ func (p *GlobalParamTable) InitOnce() {
 
 // Init initialize the global param table
 func (p *GlobalParamTable) Init() {
-	p.BaseParams.Init()
+	p.BaseParamTable.Init()
 
-	p.PulsarCfg.init(&p.BaseParams)
-	p.RocksmqCfg.init(&p.BaseParams)
-	p.MinioCfg.init(&p.BaseParams)
+	p.CommonCfg.init(&p.BaseParamTable)
+	p.KnowhereCfg.init(&p.BaseParamTable)
+	p.MsgChannelCfg.init(&p.BaseParamTable)
 
-	p.CommonCfg.init(&p.BaseParams)
-	p.KnowhereCfg.init(&p.BaseParams)
-	//p.MsgChannelCfg.init(&p.BaseParams)
-
-	p.RootCoordCfg.init(&p.BaseParams)
-	p.ProxyCfg.init(&p.BaseParams)
-	p.QueryCoordCfg.init(&p.BaseParams)
-	p.QueryNodeCfg.init(&p.BaseParams)
-	p.DataCoordCfg.init(&p.BaseParams)
-	p.DataNodeCfg.init(&p.BaseParams)
-	p.IndexCoordCfg.init(&p.BaseParams)
-	p.IndexNodeCfg.init(&p.BaseParams)
+	p.RootCoordCfg.init(&p.BaseParamTable)
+	p.ProxyCfg.init(&p.BaseParamTable)
+	p.QueryCoordCfg.init(&p.BaseParamTable)
+	p.QueryNodeCfg.init(&p.BaseParamTable)
+	p.DataCoordCfg.init(&p.BaseParamTable)
+	p.DataNodeCfg.init(&p.BaseParamTable)
+	p.IndexCoordCfg.init(&p.BaseParamTable)
+	p.IndexNodeCfg.init(&p.BaseParamTable)
 }
 
 // SetLogConfig set log config with given role
 func (p *GlobalParamTable) SetLogConfig(role string) {
-	p.BaseParams.RoleName = role
-	p.BaseParams.SetLogConfig()
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- pulsar ---
-type pulsarConfig struct {
-	BaseParams *BaseParamTable
-
-	Address        string
-	MaxMessageSize int
-}
-
-func (p *pulsarConfig) init(bp *BaseParamTable) {
-	p.BaseParams = bp
-
-	p.initAddress()
-	p.initMaxMessageSize()
-}
-
-func (p *pulsarConfig) initAddress() {
-	addr, err := p.BaseParams.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = addr
-}
-
-func (p *pulsarConfig) initMaxMessageSize() {
-	maxMessageSizeStr, err := p.BaseParams.Load("pulsar.maxMessageSize")
-	if err != nil {
-		p.MaxMessageSize = SuggestPulsarMaxMessageSize
-	} else {
-		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
-		if err != nil {
-			p.MaxMessageSize = SuggestPulsarMaxMessageSize
-		} else {
-			p.MaxMessageSize = maxMessageSize
-		}
-	}
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- rocksmq ---
-type rocksmqConfig struct {
-	BaseParams *BaseParamTable
-
-	Path string
-}
-
-func (p *rocksmqConfig) init(bp *BaseParamTable) {
-	p.BaseParams = bp
-
-	p.initPath()
-}
-
-func (p *rocksmqConfig) initPath() {
-	path, err := p.BaseParams.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.Path = path
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- minio ---
-type minioConfig struct {
-	BaseParams *BaseParamTable
-
-	Address         string
-	AccessKeyID     string
-	SecretAccessKey string
-	UseSSL          bool
-	BucketName      string
-	RootPath        string
-}
-
-func (p *minioConfig) init(bp *BaseParamTable) {
-	p.BaseParams = bp
-
-	p.initAddress()
-	p.initAccessKeyID()
-	p.initSecretAccessKey()
-	p.initUseSSL()
-	p.initBucketName()
-	p.initRootPath()
-}
-
-func (p *minioConfig) initAddress() {
-	endpoint, err := p.BaseParams.Load("_MinioAddress")
-	if err != nil {
-		panic(err)
-	}
-	p.Address = endpoint
-}
-
-func (p *minioConfig) initAccessKeyID() {
-	keyID, err := p.BaseParams.Load("_MinioAccessKeyID")
-	if err != nil {
-		panic(err)
-	}
-	p.AccessKeyID = keyID
-}
-
-func (p *minioConfig) initSecretAccessKey() {
-	key, err := p.BaseParams.Load("_MinioSecretAccessKey")
-	if err != nil {
-		panic(err)
-	}
-	p.SecretAccessKey = key
-}
-
-func (p *minioConfig) initUseSSL() {
-	usessl, err := p.BaseParams.Load("_MinioUseSSL")
-	if err != nil {
-		panic(err)
-	}
-	p.UseSSL, _ = strconv.ParseBool(usessl)
-}
-
-func (p *minioConfig) initBucketName() {
-	bucketName, err := p.BaseParams.Load("_MinioBucketName")
-	if err != nil {
-		panic(err)
-	}
-	p.BucketName = bucketName
-}
-
-func (p *minioConfig) initRootPath() {
-	rootPath, err := p.BaseParams.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.RootPath = rootPath
+	p.BaseTable.RoleName = role
+	p.BaseTable.SetLogConfig()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -286,155 +146,123 @@ func (p *knowhereConfig) initSimdType() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- msgChannel ---
-//type msgChannelConfig struct {
-//	BaseParams *BaseParamTable
-//
-//	ClusterPrefix          string
-//	RootCoordTimeTick      string
-//	RootCoordStatistics    string
-//	RootCoordDml           string
-//	RootCoordDelta         string
-//	QueryCoordSearch       string
-//	QueryCoordSearchResult string
-//	ProxyTimeTick          string
-//	QueryTimeTick          string
-//	QueryNodeStats         string
-//	Cmd                    string
-//	DataCoordInsertChannel string
-//	DataCoordStatistic     string
-//	DataCoordTimeTick      string
-//	DataCoordSegmentInfo   string
-//
-//	SkipQueryChannelRecovery string
-//
-//	RootCoordSubNamePrefix string
-//	ProxySubNamePrefix     string
-//	QueryNodeSubNamePrefix string
-//	DataNodeSubNamePrefix  string
-//	DataCoordSubNamePrefix string
-//}
-//
-//func (p *msgChannelConfig) init(bp *BaseParamTable) {
-//	p.BaseParams = bp
-//
-//	// must init cluster prefix first
-//	p.initClusterPrefix()
-//	p.initRootCoordTimeTick()
-//	p.initRootCoordStatistics()
-//	p.initRootCoordDml()
-//	p.initRootCoordDelta()
-//	p.initQueryCoordSearch()
-//	p.initQueryCoordSearchResult()
-//	p.initProxyTimeTick()
-//	p.initQueryTimeTick()
-//	p.initQueryNodeStats()
-//	p.initMsgChannelCmd()
-//	p.initDataCoordInsertChannel()
-//	p.initDataCoordStatistic()
-//	p.initDataCoordTimeTick()
-//	p.initDataCoordSegmentInfo()
-//
-//	p.initRootCoordSubNamePrefix()
-//	p.initProxySubNamePrefix()
-//	p.initQueryNodeSubNamePrefix()
-//	p.initDataNodeSubNamePrefix()
-//	p.initDataCoordSubNamePrefix()
-//}
-//
-//func (p *msgChannelConfig) initClusterPrefix() {
-//	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
-//	if err != nil {
-//		panic(err)
-//	}
-//	p.ClusterPrefix = config
-//}
-//
-//func (p *msgChannelConfig) initChanNamePrefix(cfg string) string {
-//	value, err := p.BaseParams.Load(cfg)
-//	if err != nil {
-//		panic(err)
-//	}
-//	s := []string{p.ClusterPrefix, value}
-//	return strings.Join(s, "-")
-//}
-//
-//// --- msgChannel.chanNamePrefix ---
-//func (p *msgChannelConfig) initRootCoordTimeTick() {
-//	p.RootCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordTimeTick")
-//}
-//
-//func (p *msgChannelConfig) initRootCoordStatistics() {
-//	p.RootCoordStatistics = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordStatistics")
-//}
-//
-//func (p *msgChannelConfig) initRootCoordDml() {
-//	p.RootCoordDml = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDml")
-//}
-//
-//func (p *msgChannelConfig) initRootCoordDelta() {
-//	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDelta")
-//}
-//
-//func (p *msgChannelConfig) initQueryCoordSearch() {
-//	p.QueryCoordSearch = p.initChanNamePrefix("msgChannel.chanNamePrefix.search")
-//}
-//
-//func (p *msgChannelConfig) initQueryCoordSearchResult() {
-//	p.QueryCoordSearchResult = p.initChanNamePrefix("msgChannel.chanNamePrefix.searchResult")
-//}
-//
-//func (p *msgChannelConfig) initProxyTimeTick() {
-//	p.ProxyTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.proxyTimeTick")
-//}
-//
-//func (p *msgChannelConfig) initQueryTimeTick() {
-//	p.QueryTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryTimeTick")
-//}
-//
-//func (p *msgChannelConfig) initQueryNodeStats() {
-//	p.QueryNodeStats = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryNodeStats")
-//}
-//
-//func (p *msgChannelConfig) initMsgChannelCmd() {
-//	p.Cmd = p.initChanNamePrefix("msgChannel.chanNamePrefix.cmd")
-//}
-//
-//func (p *msgChannelConfig) initDataCoordInsertChannel() {
-//	p.DataCoordInsertChannel = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordInsertChannel")
-//}
-//
-//func (p *msgChannelConfig) initDataCoordStatistic() {
-//	p.DataCoordStatistic = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordStatistic")
-//}
-//
-//func (p *msgChannelConfig) initDataCoordTimeTick() {
-//	p.DataCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordTimeTick")
-//}
-//
-//func (p *msgChannelConfig) initDataCoordSegmentInfo() {
-//	p.DataCoordSegmentInfo = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
-//}
-//
-//// --- msgChannel.subNamePrefix ---
-//func (p *msgChannelConfig) initRootCoordSubNamePrefix() {
-//	p.RootCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
-//}
-//
-//func (p *msgChannelConfig) initProxySubNamePrefix() {
-//	p.ProxySubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.proxySubNamePrefix")
-//}
-//
-//func (p *msgChannelConfig) initQueryNodeSubNamePrefix() {
-//	p.QueryNodeSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
-//}
-//
-//func (p *msgChannelConfig) initDataNodeSubNamePrefix() {
-//	p.DataNodeSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
-//}
-//
-//func (p *msgChannelConfig) initDataCoordSubNamePrefix() {
-//	p.DataCoordSubNamePrefix = p.initChanNamePrefix("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
-//}
+type msgChannelConfig struct {
+	BaseParams *BaseParamTable
+
+	ClusterPrefix string
+
+	RootCoordTimeTick   string
+	RootCoordStatistics string
+	RootCoordDml        string
+	RootCoordDelta      string
+	RootCoordSubName    string
+
+	QueryCoordSearch       string
+	QueryCoordSearchResult string
+	QueryCoordTimeTick     string
+	QueryNodeStats         string
+
+	DataCoordStatistic   string
+	DataCoordTimeTick    string
+	DataCoordSegmentInfo string
+	DataCoordSubName     string
+}
+
+func (p *msgChannelConfig) init(bp *BaseParamTable) {
+	p.BaseParams = bp
+
+	// must init cluster prefix first
+	p.initClusterPrefix()
+
+	p.initRootCoordTimeTick()
+	p.initRootCoordStatistics()
+	p.initRootCoordDml()
+	p.initRootCoordDelta()
+	p.initRootCoordSubName()
+
+	p.initQueryCoordSearch()
+	p.initQueryCoordSearchResult()
+	p.initQueryCoordTimeTick()
+	p.initQueryNodeStats()
+
+	p.initDataCoordStatistic()
+	p.initDataCoordTimeTick()
+	p.initDataCoordSegmentInfo()
+	p.initDataCoordSubName()
+}
+
+func (p *msgChannelConfig) initClusterPrefix() {
+	str, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
+	if err != nil {
+		panic(err)
+	}
+	p.ClusterPrefix = str
+}
+
+func (p *msgChannelConfig) initChanNamePrefix(cfg string) string {
+	value, err := p.BaseParams.Load(cfg)
+	if err != nil {
+		panic(err)
+	}
+	s := []string{p.ClusterPrefix, value}
+	return strings.Join(s, "-")
+}
+
+// --- rootcoord ---
+func (p *msgChannelConfig) initRootCoordTimeTick() {
+	p.RootCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordTimeTick")
+}
+
+func (p *msgChannelConfig) initRootCoordStatistics() {
+	p.RootCoordStatistics = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordStatistics")
+}
+
+func (p *msgChannelConfig) initRootCoordDml() {
+	p.RootCoordDml = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDml")
+}
+
+func (p *msgChannelConfig) initRootCoordDelta() {
+	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDelta")
+}
+
+func (p *msgChannelConfig) initRootCoordSubName() {
+	p.RootCoordSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
+}
+
+// --- querycoord ---
+func (p *msgChannelConfig) initQueryCoordSearch() {
+	p.QueryCoordSearch = p.initChanNamePrefix("msgChannel.chanNamePrefix.search")
+}
+
+func (p *msgChannelConfig) initQueryCoordSearchResult() {
+	p.QueryCoordSearchResult = p.initChanNamePrefix("msgChannel.chanNamePrefix.searchResult")
+}
+
+func (p *msgChannelConfig) initQueryCoordTimeTick() {
+	p.QueryCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryTimeTick")
+}
+
+// --- querynode ---
+func (p *msgChannelConfig) initQueryNodeStats() {
+	p.QueryNodeStats = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryNodeStats")
+}
+
+// --- datacoord ---
+func (p *msgChannelConfig) initDataCoordStatistic() {
+	p.DataCoordStatistic = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordStatistic")
+}
+
+func (p *msgChannelConfig) initDataCoordTimeTick() {
+	p.DataCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordTimeTick")
+}
+
+func (p *msgChannelConfig) initDataCoordSegmentInfo() {
+	p.DataCoordSegmentInfo = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
+}
+
+func (p *msgChannelConfig) initDataCoordSubName() {
+	p.DataCoordSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- rootcoord ---
@@ -443,13 +271,6 @@ type rootCoordConfig struct {
 
 	Address string
 	Port    int
-
-	ClusterChannelPrefix string
-	MsgChannelSubName    string
-	TimeTickChannel      string
-	StatisticsChannel    string
-	DmlChannelName       string
-	DeltaChannelName     string
 
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
@@ -462,70 +283,9 @@ type rootCoordConfig struct {
 func (p *rootCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	// Has to init global msgchannel prefix before other channel names
-	p.initClusterMsgChannelPrefix()
-	p.initMsgChannelSubName()
-	p.initTimeTickChannel()
-	p.initStatisticsChannelName()
-	p.initDmlChannelName()
-	p.initDeltaChannelName()
-
 	p.initDmlChannelNum()
 	p.initMaxPartitionNum()
 	p.initMinSegmentSizeToEnableIndex()
-}
-
-func (p *rootCoordConfig) initClusterMsgChannelPrefix() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
-	if err != nil {
-		panic(err)
-	}
-	p.ClusterChannelPrefix = config
-}
-
-func (p *rootCoordConfig) initMsgChannelSubName() {
-	config, err := p.BaseParams.Load("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.MsgChannelSubName = strings.Join(s, "-")
-}
-
-func (p *rootCoordConfig) initTimeTickChannel() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.TimeTickChannel = strings.Join(s, "-")
-}
-
-func (p *rootCoordConfig) initStatisticsChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordStatistics")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.StatisticsChannel = strings.Join(s, "-")
-}
-
-func (p *rootCoordConfig) initDmlChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DmlChannelName = strings.Join(s, "-")
-}
-
-func (p *rootCoordConfig) initDeltaChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDelta")
-	if err != nil {
-		config = "rootcoord-delta"
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DeltaChannelName = strings.Join(s, "-")
 }
 
 func (p *rootCoordConfig) initDmlChannelNum() {
@@ -563,9 +323,7 @@ type proxyConfig struct {
 	BufFlagCleanupInterval   time.Duration
 
 	// --- Channels ---
-	ClusterChannelPrefix      string
-	ProxyTimeTickChannelNames []string
-	ProxySubName              string
+	ProxySubName string
 
 	// required from QueryCoord
 	SearchResultChannelNames   []string
@@ -582,10 +340,8 @@ func (p *proxyConfig) init(bp *BaseParamTable) {
 
 	p.initTimeTickInterval()
 
-	// Has to init global msgchannel prefix before other channel names
-	p.initClusterMsgChannelPrefix()
 	p.initProxySubName()
-	p.initProxyTimeTickChannelNames()
+
 	p.initMsgStreamTimeTickBufSize()
 	p.initMaxNameLength()
 	p.initMaxFieldNum()
@@ -612,31 +368,17 @@ func (p *proxyConfig) initTimeTickInterval() {
 	p.TimeTickInterval = time.Duration(interval) * time.Millisecond
 }
 
-func (p *proxyConfig) initClusterMsgChannelPrefix() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
-	if err != nil {
-		panic(err)
-	}
-	p.ClusterChannelPrefix = config
-}
-
 func (p *proxyConfig) initProxySubName() {
-	config, err := p.BaseParams.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
+	cluster, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
 	if err != nil {
 		panic(err)
 	}
-	s := []string{p.ClusterChannelPrefix, config, strconv.FormatInt(p.ProxyID, 10)}
+	subname, err := p.BaseParams.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
+	if err != nil {
+		panic(err)
+	}
+	s := []string{cluster, subname, strconv.FormatInt(p.ProxyID, 10)}
 	p.ProxySubName = strings.Join(s, "-")
-}
-
-func (p *proxyConfig) initProxyTimeTickChannelNames() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.proxyTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config, "0"}
-	prefix := strings.Join(s, "-")
-	p.ProxyTimeTickChannelNames = []string{prefix}
 }
 
 func (p *proxyConfig) initMsgStreamTimeTickBufSize() {
@@ -704,22 +446,8 @@ type queryCoordConfig struct {
 	Port         int
 	QueryCoordID UniqueID
 
-	// stats
-	StatsChannelName string
-
-	// timetick
-	TimeTickChannelName string
-
-	// channels
-	ClusterChannelPrefix      string
-	SearchChannelPrefix       string
-	SearchResultChannelPrefix string
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
-
-	DmlChannelPrefix   string
-	DeltaChannelPrefix string
 
 	//---- Handoff ---
 	AutoHandoff bool
@@ -734,69 +462,14 @@ type queryCoordConfig struct {
 func (p *queryCoordConfig) init(bp *BaseParamTable) {
 	p.BaseParams = bp
 
-	// --- Channels ---
-	p.initClusterMsgChannelPrefix()
-	p.initSearchChannelPrefix()
-	p.initSearchResultChannelPrefix()
-	p.initStatsChannelName()
-	p.initTimeTickChannelName()
-
 	//---- Handoff ---
 	p.initAutoHandoff()
-
-	p.initDmlChannelName()
-	p.initDeltaChannelName()
 
 	//---- Balance ---
 	p.initAutoBalance()
 	p.initOverloadedMemoryThresholdPercentage()
 	p.initBalanceIntervalSeconds()
 	p.initMemoryUsageMaxDifferencePercentage()
-}
-
-func (p *queryCoordConfig) initClusterMsgChannelPrefix() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
-	if err != nil {
-		panic(err)
-	}
-	p.ClusterChannelPrefix = config
-}
-
-func (p *queryCoordConfig) initSearchChannelPrefix() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.search")
-	if err != nil {
-		log.Error(err.Error())
-	}
-
-	s := []string{p.ClusterChannelPrefix, config}
-	p.SearchChannelPrefix = strings.Join(s, "-")
-}
-
-func (p *queryCoordConfig) initSearchResultChannelPrefix() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.searchResult")
-	if err != nil {
-		log.Error(err.Error())
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.SearchResultChannelPrefix = strings.Join(s, "-")
-}
-
-func (p *queryCoordConfig) initStatsChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.queryNodeStats")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.StatsChannelName = strings.Join(s, "-")
-}
-
-func (p *queryCoordConfig) initTimeTickChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.queryTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.TimeTickChannelName = strings.Join(s, "-")
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
@@ -846,24 +519,6 @@ func (p *queryCoordConfig) initMemoryUsageMaxDifferencePercentage() {
 	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
 }
 
-func (p *queryCoordConfig) initDmlChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
-	if err != nil {
-		config = "rootcoord-dml"
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DmlChannelPrefix = strings.Join(s, "-")
-}
-
-func (p *queryCoordConfig) initDeltaChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDelta")
-	if err != nil {
-		config = "rootcoord-delta"
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DeltaChannelPrefix = strings.Join(s, "-")
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
@@ -877,10 +532,7 @@ type queryNodeConfig struct {
 	CacheSize int64 // deprecated
 
 	// channel prefix
-	ClusterChannelPrefix     string
-	QueryTimeTickChannelName string
-	StatsChannelName         string
-	MsgChannelSubName        string
+	QueryNodeSubName string
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -911,9 +563,6 @@ type queryNodeConfig struct {
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
-	// recovery
-	SkipQueryChannelRecovery bool
-
 	// memory limit
 	OverloadedMemoryThresholdPercentage float64
 }
@@ -931,17 +580,12 @@ func (p *queryNodeConfig) init(bp *BaseParamTable) {
 	p.initSearchPulsarBufSize()
 	p.initSearchResultReceiveBufSize()
 
-	// Has to init global msgchannel prefix before other channel names
-	p.initClusterMsgChannelPrefix()
-	p.initQueryTimeTickChannelName()
-	p.initStatsChannelName()
-	p.initMsgChannelSubName()
+	p.initQueryNodeSubName()
 
 	p.initStatsPublishInterval()
 
 	p.initSegcoreChunkRows()
 
-	p.initSkipQueryChannelRecovery()
 	p.initOverloadedMemoryThresholdPercentage()
 }
 
@@ -952,7 +596,7 @@ func (p *queryNodeConfig) InitAlias(alias string) {
 
 // Refresh is called after session init
 func (p *queryNodeConfig) Refresh() {
-	p.initMsgChannelSubName()
+	p.initQueryNodeSubName()
 }
 
 func (p *queryNodeConfig) initCacheSize() {
@@ -1005,40 +649,18 @@ func (p *queryNodeConfig) initSearchResultReceiveBufSize() {
 }
 
 // ------------------------  channel names
-func (p *queryNodeConfig) initClusterMsgChannelPrefix() {
-	name, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
+func (p *queryNodeConfig) initQueryNodeSubName() {
+	cluster, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
 	if err != nil {
 		panic(err)
 	}
-	p.ClusterChannelPrefix = name
-}
-
-func (p *queryNodeConfig) initQueryTimeTickChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.queryTimeTick")
-	if err != nil {
-		log.Warn(err.Error())
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.QueryTimeTickChannelName = strings.Join(s, "-")
-}
-
-func (p *queryNodeConfig) initMsgChannelSubName() {
-	namePrefix, err := p.BaseParams.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
+	subname, err := p.BaseParams.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
 	if err != nil {
 		log.Warn(err.Error())
 	}
 
-	s := []string{p.ClusterChannelPrefix, namePrefix}
-	p.MsgChannelSubName = strings.Join(s, "-")
-}
-
-func (p *queryNodeConfig) initStatsChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.queryNodeStats")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.StatsChannelName = strings.Join(s, "-")
+	s := []string{cluster, subname}
+	p.QueryNodeSubName = strings.Join(s, "-")
 }
 
 func (p *queryNodeConfig) initGracefulTime() {
@@ -1048,10 +670,6 @@ func (p *queryNodeConfig) initGracefulTime() {
 
 func (p *queryNodeConfig) initSegcoreChunkRows() {
 	p.ChunkRows = p.BaseParams.ParseInt64WithDefault("queryNode.segcore.chunkRows", 32768)
-}
-
-func (p *queryNodeConfig) initSkipQueryChannelRecovery() {
-	p.SkipQueryChannelRecovery = p.BaseParams.ParseBool("msgChannel.skipQueryChannelRecovery", false)
 }
 
 func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {
@@ -1082,19 +700,15 @@ type dataCoordConfig struct {
 	SegmentSealProportion   float64
 	SegAssignmentExpiration int64
 
-	// --- Channels ---
-	ClusterChannelPrefix      string
-	InsertChannelPrefixName   string
-	TimeTickChannelName       string
-	SegmentInfoChannelName    string
-	DataCoordSubscriptionName string
-
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
 	EnableCompaction        bool
 	EnableAutoCompaction    bool
 	EnableGarbageCollection bool
+
+	RetentionDuration          int64
+	CompactionEntityExpiration int64
 
 	// Garbage Collection
 	GCInterval         time.Duration
@@ -1111,15 +725,9 @@ func (p *dataCoordConfig) init(bp *BaseParamTable) {
 	p.initSegmentSealProportion()
 	p.initSegAssignmentExpiration()
 
-	// Has to init global msgchannel prefix before other channel names
-	p.initClusterMsgChannelPrefix()
-	p.initInsertChannelPrefixName()
-	p.initTimeTickChannelName()
-	p.initSegmentInfoChannelName()
-	p.initDataCoordSubscriptionName()
-
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
+	p.initCompactionEntityExpiration()
 
 	p.initEnableGarbageCollection()
 	p.initGCInterval()
@@ -1139,50 +747,6 @@ func (p *dataCoordConfig) initSegAssignmentExpiration() {
 	p.SegAssignmentExpiration = p.BaseParams.ParseInt64WithDefault("dataCoord.segment.assignmentExpiration", 2000)
 }
 
-func (p *dataCoordConfig) initClusterMsgChannelPrefix() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
-	if err != nil {
-		panic(err)
-	}
-	p.ClusterChannelPrefix = config
-}
-
-func (p *dataCoordConfig) initInsertChannelPrefixName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.dataCoordInsertChannel")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.InsertChannelPrefixName = strings.Join(s, "-")
-}
-
-func (p *dataCoordConfig) initTimeTickChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.dataCoordTimeTick")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.TimeTickChannelName = strings.Join(s, "-")
-}
-
-func (p *dataCoordConfig) initSegmentInfoChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.SegmentInfoChannelName = strings.Join(s, "-")
-}
-
-func (p *dataCoordConfig) initDataCoordSubscriptionName() {
-	config, err := p.BaseParams.Load("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DataCoordSubscriptionName = strings.Join(s, "-")
-}
-
 func (p *dataCoordConfig) initChannelWatchPrefix() {
 	// WARN: this value should not be put to milvus.yaml. It's a default value for channel watch path.
 	// This will be removed after we reconstruct our config module.
@@ -1194,7 +758,6 @@ func (p *dataCoordConfig) initEnableCompaction() {
 }
 
 // -- GC --
-
 func (p *dataCoordConfig) initEnableGarbageCollection() {
 	p.EnableGarbageCollection = p.BaseParams.ParseBool("dataCoord.enableGarbageCollection", false)
 }
@@ -1213,6 +776,16 @@ func (p *dataCoordConfig) initGCDropTolerance() {
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
 	p.EnableAutoCompaction = p.BaseParams.ParseBool("dataCoord.compaction.enableAutoCompaction", false)
+}
+
+func (p *dataCoordConfig) initCompactionEntityExpiration() {
+	p.CompactionEntityExpiration = p.BaseParams.ParseInt64WithDefault("dataCoord.compaction.entityExpiration", math.MaxInt64)
+	p.CompactionEntityExpiration = func(x, y int64) int64 {
+		if x > y {
+			return x
+		}
+		return y
+	}(p.CompactionEntityExpiration, p.RetentionDuration)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1236,18 +809,8 @@ type dataNodeConfig struct {
 	DeleteBinlogRootPath    string
 	Alias                   string // Different datanode in one machine
 
-	// Channel Name
-	DmlChannelName   string
-	DeltaChannelName string
-
-	// Cluster channels
-	ClusterChannelPrefix string
-
-	// Timetick channel
-	TimeTickChannelName string
-
 	// Channel subscribition name -
-	MsgChannelSubName string
+	DataNodeSubName string
 
 	// etcd
 	ChannelWatchSubPath string
@@ -1266,20 +829,13 @@ func (p *dataNodeConfig) init(bp *BaseParamTable) {
 	p.initStatsBinlogRootPath()
 	p.initDeleteBinlogRootPath()
 
-	// Must init global msgchannel prefix before other channel names
-	p.initClusterMsgChannelPrefix()
-	p.initTimeTickChannelName()
-	p.initMsgChannelSubName()
-
+	p.initDataNodeSubName()
 	p.initChannelWatchPath()
-
-	p.initDmlChannelName()
-	p.initDeltaChannelName()
 }
 
 // Refresh is called after session init
 func (p *dataNodeConfig) Refresh() {
-	p.initMsgChannelSubName()
+	p.initDataNodeSubName()
 }
 
 // InitAlias init this DataNode alias
@@ -1324,52 +880,21 @@ func (p *dataNodeConfig) initDeleteBinlogRootPath() {
 	p.DeleteBinlogRootPath = path.Join(rootPath, "delta_log")
 }
 
-func (p *dataNodeConfig) initClusterMsgChannelPrefix() {
-	name, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
+func (p *dataNodeConfig) initDataNodeSubName() {
+	cluster, err := p.BaseParams.Load("msgChannel.chanNamePrefix.cluster")
 	if err != nil {
 		panic(err)
 	}
-	p.ClusterChannelPrefix = name
-}
-
-func (p *dataNodeConfig) initTimeTickChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.dataCoordTimeTick")
+	subname, err := p.BaseParams.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
 	if err != nil {
 		panic(err)
 	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.TimeTickChannelName = strings.Join(s, "-")
-}
-
-func (p *dataNodeConfig) initMsgChannelSubName() {
-	config, err := p.BaseParams.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config, strconv.FormatInt(p.NodeID, 10)}
-	p.MsgChannelSubName = strings.Join(s, "-")
+	s := []string{cluster, subname, strconv.FormatInt(p.NodeID, 10)}
+	p.DataNodeSubName = strings.Join(s, "-")
 }
 
 func (p *dataNodeConfig) initChannelWatchPath() {
 	p.ChannelWatchSubPath = "channelwatch"
-}
-
-func (p *dataNodeConfig) initDmlChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDml")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DmlChannelName = strings.Join(s, "-")
-}
-
-func (p *dataNodeConfig) initDeltaChannelName() {
-	config, err := p.BaseParams.Load("msgChannel.chanNamePrefix.rootCoordDelta")
-	if err != nil {
-		config = "rootcoord-delta"
-	}
-	s := []string{p.ClusterChannelPrefix, config}
-	p.DeltaChannelName = strings.Join(s, "-")
 }
 
 ///////////////////////////////////////////////////////////////////////////////

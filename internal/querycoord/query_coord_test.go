@@ -46,11 +46,11 @@ func setup() {
 func refreshParams() {
 	rand.Seed(time.Now().UnixNano())
 	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
-	Params.QueryCoordCfg.StatsChannelName = Params.QueryCoordCfg.StatsChannelName + suffix
-	Params.QueryCoordCfg.TimeTickChannelName = Params.QueryCoordCfg.TimeTickChannelName + suffix
-	Params.BaseParams.MetaRootPath = Params.BaseParams.MetaRootPath + suffix
-	Params.QueryCoordCfg.DmlChannelPrefix = "Dml"
-	Params.QueryCoordCfg.DeltaChannelPrefix = "delta"
+	Params.MsgChannelCfg.QueryNodeStats = Params.MsgChannelCfg.QueryNodeStats + suffix
+	Params.MsgChannelCfg.QueryCoordTimeTick = Params.MsgChannelCfg.QueryCoordTimeTick + suffix
+	Params.EtcdCfg.MetaRootPath = Params.EtcdCfg.MetaRootPath + suffix
+	Params.MsgChannelCfg.RootCoordDml = "Dml"
+	Params.MsgChannelCfg.RootCoordDelta = "delta"
 	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
 }
 
@@ -92,7 +92,7 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
 	coord.SetIndexCoord(indexCoord)
-	etcd, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
-	etcd, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -156,12 +156,12 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 func TestWatchNodeLoop(t *testing.T) {
 	baseCtx := context.Background()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	t.Run("Test OfflineNodes", func(t *testing.T) {
 		refreshParams()
 
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 		kvs := make(map[string]string)
 		session := &sessionutil.Session{
@@ -548,7 +548,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{partitionID},
-			Schema:       genCollectionSchema(defaultCollectionID, false),
+			Schema:       genDefaultCollectionSchema(false),
 		}
 		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_GrpcRequest)
 		loadPartitionTask := &loadPartitionTask{

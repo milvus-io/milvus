@@ -138,13 +138,13 @@ func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
 }
 
 func (node *QueryNode) initSession() error {
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.BaseParams.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodeCfg.QueryNodePort, 10), false, true)
 	Params.QueryNodeCfg.QueryNodeID = node.session.ServerID
-	Params.BaseParams.SetLogger(Params.QueryNodeCfg.QueryNodeID)
+	Params.SetLogger(Params.QueryNodeCfg.QueryNodeID)
 	log.Debug("QueryNode", zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID), zap.String("node address", node.session.Address))
 	return nil
 }
@@ -256,7 +256,7 @@ func (node *QueryNode) Init() error {
 	var initError error = nil
 	node.initOnce.Do(func() {
 		//ctx := context.Background()
-		log.Debug("QueryNode session info", zap.String("metaPath", Params.BaseParams.MetaRootPath))
+		log.Debug("QueryNode session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath))
 		err := node.initSession()
 		if err != nil {
 			log.Error("QueryNode init session failed", zap.Error(err))
@@ -265,8 +265,8 @@ func (node *QueryNode) Init() error {
 		}
 		Params.QueryNodeCfg.Refresh()
 
-		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.BaseParams.MetaRootPath)
-		log.Debug("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.BaseParams.MetaRootPath))
+		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
+		log.Debug("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 		node.tSafeReplica = newTSafeReplica()
 
 		streamingReplica := newCollectionReplica(node.etcdKV)
@@ -291,7 +291,7 @@ func (node *QueryNode) Init() error {
 			node.etcdKV,
 			node.msFactory)
 
-		node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
+		//node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
 
 		node.InitSegcore()
@@ -344,7 +344,7 @@ func (node *QueryNode) Start() error {
 
 	// start services
 	go node.watchChangeInfo()
-	go node.statsService.start()
+	//go node.statsService.start()
 
 	// watch proxy
 	if err := node.initServiceDiscovery(); err != nil {
@@ -384,9 +384,9 @@ func (node *QueryNode) Stop() error {
 	if node.queryService != nil {
 		node.queryService.close()
 	}
-	if node.statsService != nil {
-		node.statsService.close()
-	}
+	//if node.statsService != nil {
+	//	node.statsService.close()
+	//}
 	node.session.Revoke(time.Second)
 	node.wg.Wait()
 	return nil
