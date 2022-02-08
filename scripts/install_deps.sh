@@ -64,6 +64,7 @@ function install_mac_deps() {
 
   if [[ $(arch) == 'arm64' ]]; then
     sudo mkdir /usr/local/include
+    sudo mkdir /usr/local/opt
     sudo ln -s "$(brew --prefix llvm)" "/usr/local/opt/llvm"
     sudo ln -s "$(brew --prefix libomp)/include/omp.h" "/usr/local/include/omp.h"
     sudo ln -s "$(brew --prefix libomp)" "/usr/local/opt/libomp"
