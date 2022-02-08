@@ -16,7 +16,7 @@
 #include <tuple>
 #include <vector>
 
-#include "index/knowhere/knowhere/index/IndexType.h"
+#include "knowhere/index/IndexType.h"
 
 namespace milvus::indexbuilder {
 

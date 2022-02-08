@@ -15,13 +15,13 @@
 #include <cstring>
 #include <memory>
 #include <random>
+#include <knowhere/index/vector_index/VecIndex.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
+#include <knowhere/index/vector_index/IndexIVF.h>
 
 #include "Constants.h"
 #include "common/Schema.h"
-#include "knowhere/index/vector_index/VecIndex.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "query/SearchOnIndex.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"

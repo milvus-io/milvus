@@ -23,7 +23,6 @@ while [ -h $SOURCE ]; do # resolve $SOURCE until the file is no longer a symlink
   [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 DIR=$( cd -P $( dirname $SOURCE ) && pwd )
-# echo $DIR
 
 
 CMAKE_BUILD=${DIR}/../cwrapper_rocksdb_build
@@ -67,23 +66,43 @@ echo "CUSTOM_THIRDPARTY_PATH: " $CUSTOM_THIRDPARTY_PATH
 
 pushd ${CMAKE_BUILD}
 CMAKE_CMD="cmake \
--DCMAKE_BUILD_TYPE=${BUILD_TYPE}
+-DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_INSTALL_PREFIX=${OUTPUT_LIB} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} ${SRC_DIR}"
 
 ${CMAKE_CMD}
 echo ${CMAKE_CMD}
 
+unameOut="$(uname -s)"
 if [[ ! ${jobs+1} ]]; then
-    jobs=$(nproc)
+  case "${unameOut}" in
+      Linux*)     jobs=$(nproc);;
+      Darwin*)    jobs=$(sysctl -n hw.physicalcpu);;
+      *)          echo "UNKNOWN:${unameOut}"; exit 0;
+  esac
 fi
+
 make -j ${jobs}
 
 go env -w CGO_CFLAGS="-I${OUTPUT_LIB}/include"
+ldflags=""
 if [ -f "${OUTPUT_LIB}/lib/librocksdb.a" ]; then
-    go env -w CGO_LDFLAGS="-L${OUTPUT_LIB}/lib -l:librocksdb.a -lstdc++ -lm -lz"
+     case "${unameOut}" in
+          Linux*)     ldflags="-L${OUTPUT_LIB}/lib -l:librocksdb.a -lstdc++ -lm -lz";;
+          Darwin*)    ldflags="-L${OUTPUT_LIB}/lib -lrocksdb -stdlib=libc++ -lm -lz -lbz2 -ldl";;
+          *)          echo "UNKNOWN:${unameOut}"; exit 0;
+      esac
 else
-    go env -w CGO_LDFLAGS="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz"
+     case "${unameOut}" in
+          Linux*)     ldflags="-L${OUTPUT_LIB}/lib64 -l:librocksdb.a -lstdc++ -lm -lz";;
+          Darwin*)    ldflags="-L${OUTPUT_LIB}/lib64 -lrocksdb -stdlib=libc++ -lm -lz -lbz2 -ldl";;
+          *)          echo "UNKNOWN:${unameOut}" ; exit 0;
+      esac
 fi
 
+if [[ $(arch) == 'arm64' ]]; then
+  go env -w GOARCH=arm64
+fi
+
+go env -w CGO_LDFLAGS="$ldflags" && GO111MODULE=on
 go get github.com/tecbot/gorocksdb

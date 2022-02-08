@@ -32,6 +32,7 @@ add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}
         )
 
+find_library(TBB NAMES tbb)
 set(PLATFORM_LIBS dl)
 if (MSYS)
 set(PLATFORM_LIBS )
@@ -41,7 +42,7 @@ target_link_libraries(milvus_segcore
         ${PLATFORM_LIBS}
         log
         pthread
-        tbb
+        ${TBB}
         ${OpenMP_CXX_FLAGS}
         knowhere
         milvus_common

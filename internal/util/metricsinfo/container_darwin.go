@@ -9,11 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <gtest/gtest.h>
+package metricsinfo
 
-#include "value/config/ServerConfig.h"
+import (
+	"errors"
+)
 
-TEST(ServerConfigTest, parse_invalid_devices) {
-    auto collections = milvus::ParseGPUDevices("gpu0,gpu1");
-    ASSERT_EQ(collections.size(), 0);
+// inContainer checks if the service is running inside a container
+// It should be always false while under windows.
+func inContainer() (bool, error) {
+	return false, nil
+}
+
+// getContainerMemLimit returns memory limit and error
+func getContainerMemLimit() (uint64, error) {
+	return 0, errors.New("Not supported")
+}
+
+// getContainerMemUsed returns memory usage and error
+func getContainerMemUsed() (uint64, error) {
+	return 0, errors.New("Not supported")
 }
