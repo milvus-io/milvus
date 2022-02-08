@@ -19,12 +19,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBaseParamTable(t *testing.T) {
-	var BaseParams BaseParamTable
-	BaseParams.Init()
+func TestServiceParam(t *testing.T) {
+	var SParams ServiceParam
+	SParams.Init()
 
 	t.Run("test etcdConfig", func(t *testing.T) {
-		Params := BaseParams.EtcdCfg
+		Params := SParams.EtcdCfg
 
 		assert.NotZero(t, len(Params.Endpoints))
 		t.Logf("etcd endpoints = %s", Params.Endpoints)
@@ -45,7 +45,7 @@ func TestBaseParamTable(t *testing.T) {
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {
-		Params := BaseParams.PulsarCfg
+		Params := SParams.PulsarCfg
 
 		assert.NotEqual(t, Params.Address, "")
 		t.Logf("pulsar address = %s", Params.Address)
@@ -54,14 +54,14 @@ func TestBaseParamTable(t *testing.T) {
 	})
 
 	t.Run("test rocksmqConfig", func(t *testing.T) {
-		Params := BaseParams.RocksmqCfg
+		Params := SParams.RocksmqCfg
 
 		assert.NotEqual(t, Params.Path, "")
 		t.Logf("rocksmq path = %s", Params.Path)
 	})
 
 	t.Run("test minioConfig", func(t *testing.T) {
-		Params := BaseParams.MinioCfg
+		Params := SParams.MinioCfg
 
 		addr := Params.Address
 		equal := addr == "localhost:9000" || addr == "minio:9000"

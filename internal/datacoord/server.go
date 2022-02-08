@@ -89,7 +89,7 @@ type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdCli
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // Server implements `types.Datacoord`
 // handles Data Cooridinator related jobs

@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,12 +27,12 @@ func shouldPanic(t *testing.T, name string, f func()) {
 	t.Errorf("%s should have panicked", name)
 }
 
-func TestGlobalParamTable(t *testing.T) {
-	var GlobalParams GlobalParamTable
-	GlobalParams.Init()
+func TestComponentParam(t *testing.T) {
+	var CParams ComponentParam
+	CParams.Init()
 
 	t.Run("test commonConfig", func(t *testing.T) {
-		Params := GlobalParams.CommonCfg
+		Params := CParams.CommonCfg
 
 		assert.NotEqual(t, Params.DefaultPartitionName, "")
 		t.Logf("default partition name = %s", Params.DefaultPartitionName)
@@ -45,14 +44,14 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test knowhereConfig", func(t *testing.T) {
-		Params := GlobalParams.KnowhereCfg
+		Params := CParams.KnowhereCfg
 
 		assert.NotEqual(t, Params.SimdType, "")
 		t.Logf("knowhere simd type = %s", Params.SimdType)
 	})
 
 	t.Run("test knowhereConfig", func(t *testing.T) {
-		Params := GlobalParams.MsgChannelCfg
+		Params := CParams.MsgChannelCfg
 
 		// -- rootcoord --
 		assert.Equal(t, Params.RootCoordTimeTick, "by-dev-rootcoord-timetick")
@@ -96,7 +95,7 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
-		Params := GlobalParams.RootCoordCfg
+		Params := CParams.RootCoordCfg
 
 		assert.NotEqual(t, Params.MaxPartitionNum, 0)
 		t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum)
@@ -111,7 +110,7 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test proxyConfig", func(t *testing.T) {
-		Params := GlobalParams.ProxyCfg
+		Params := CParams.ProxyCfg
 
 		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
 
@@ -132,50 +131,50 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test proxyConfig panic", func(t *testing.T) {
-		Params := GlobalParams.ProxyCfg
+		Params := CParams.ProxyCfg
 
 		shouldPanic(t, "proxy.timeTickInterval", func() {
-			Params.BaseParams.Save("proxy.timeTickInterval", "")
+			Params.Base.Save("proxy.timeTickInterval", "")
 			Params.initTimeTickInterval()
 		})
 
 		shouldPanic(t, "proxy.msgStream.timeTick.bufSize", func() {
-			Params.BaseParams.Save("proxy.msgStream.timeTick.bufSize", "abc")
+			Params.Base.Save("proxy.msgStream.timeTick.bufSize", "abc")
 			Params.initMsgStreamTimeTickBufSize()
 		})
 
 		shouldPanic(t, "proxy.maxNameLength", func() {
-			Params.BaseParams.Save("proxy.maxNameLength", "abc")
+			Params.Base.Save("proxy.maxNameLength", "abc")
 			Params.initMaxNameLength()
 		})
 
 		shouldPanic(t, "proxy.maxFieldNum", func() {
-			Params.BaseParams.Save("proxy.maxFieldNum", "abc")
+			Params.Base.Save("proxy.maxFieldNum", "abc")
 			Params.initMaxFieldNum()
 		})
 
 		shouldPanic(t, "proxy.maxShardNum", func() {
-			Params.BaseParams.Save("proxy.maxShardNum", "abc")
+			Params.Base.Save("proxy.maxShardNum", "abc")
 			Params.initMaxShardNum()
 		})
 
 		shouldPanic(t, "proxy.maxDimension", func() {
-			Params.BaseParams.Save("proxy.maxDimension", "-asdf")
+			Params.Base.Save("proxy.maxDimension", "-asdf")
 			Params.initMaxDimension()
 		})
 
 		shouldPanic(t, "proxy.maxTaskNum", func() {
-			Params.BaseParams.Save("proxy.maxTaskNum", "-asdf")
+			Params.Base.Save("proxy.maxTaskNum", "-asdf")
 			Params.initMaxTaskNum()
 		})
 	})
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
-		//Params := GlobalParams.QueryCoordCfg
+		//Params := CParams.QueryCoordCfg
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
-		Params := GlobalParams.QueryNodeCfg
+		Params := CParams.QueryNodeCfg
 
 		cacheSize := Params.CacheSize
 		assert.Equal(t, int64(32), cacheSize)
@@ -213,11 +212,11 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
-		//Params := GlobalParams.DataCoordCfg
+		//Params := CParams.DataCoordCfg
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
-		Params := GlobalParams.DataNodeCfg
+		Params := CParams.DataNodeCfg
 
 		Params.NodeID = 2
 		Params.Refresh()
@@ -256,7 +255,7 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test indexCoordConfig", func(t *testing.T) {
-		Params := GlobalParams.IndexCoordCfg
+		Params := CParams.IndexCoordCfg
 
 		t.Logf("Address: %v", Params.Address)
 
@@ -272,7 +271,7 @@ func TestGlobalParamTable(t *testing.T) {
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
-		Params := GlobalParams.IndexNodeCfg
+		Params := CParams.IndexNodeCfg
 
 		t.Logf("IP: %v", Params.IP)
 
@@ -292,66 +291,4 @@ func TestGlobalParamTable(t *testing.T) {
 
 		t.Logf("IndexStorageRootPath: %v", Params.IndexStorageRootPath)
 	})
-}
-
-func TestGrpcServerParams(t *testing.T) {
-	role := typeutil.DataNodeRole
-	var Params GrpcServerConfig
-	Params.InitOnce(role)
-
-	assert.Equal(t, Params.Domain, role)
-	t.Logf("Domain = %s", Params.Domain)
-
-	assert.NotEqual(t, Params.IP, "")
-	t.Logf("IP = %s", Params.IP)
-
-	assert.NotZero(t, Params.Port)
-	t.Logf("Port = %d", Params.Port)
-
-	t.Logf("Address = %s", Params.GetAddress())
-
-	assert.NotZero(t, Params.ServerMaxRecvSize)
-	t.Logf("ServerMaxRecvSize = %d", Params.ServerMaxRecvSize)
-
-	Params.Remove(role + ".grpc.serverMaxRecvSize")
-	Params.initServerMaxRecvSize()
-	assert.Equal(t, Params.ServerMaxRecvSize, DefaultServerMaxRecvSize)
-
-	assert.NotZero(t, Params.ServerMaxSendSize)
-	t.Logf("ServerMaxSendSize = %d", Params.ServerMaxSendSize)
-
-	Params.Remove(role + ".grpc.serverMaxSendSize")
-	Params.initServerMaxSendSize()
-	assert.Equal(t, Params.ServerMaxSendSize, DefaultServerMaxSendSize)
-}
-
-func TestGrpcClientParams(t *testing.T) {
-	role := typeutil.DataNodeRole
-	var Params GrpcClientConfig
-	Params.InitOnce(role)
-
-	assert.Equal(t, Params.Domain, role)
-	t.Logf("Domain = %s", Params.Domain)
-
-	assert.NotEqual(t, Params.IP, "")
-	t.Logf("IP = %s", Params.IP)
-
-	assert.NotZero(t, Params.Port)
-	t.Logf("Port = %d", Params.Port)
-
-	t.Logf("Address = %s", Params.GetAddress())
-
-	assert.NotZero(t, Params.ClientMaxRecvSize)
-	t.Logf("ClientMaxRecvSize = %d", Params.ClientMaxRecvSize)
-
-	Params.Remove(role + ".grpc.clientMaxRecvSize")
-	Params.initClientMaxRecvSize()
-	assert.Equal(t, Params.ClientMaxRecvSize, DefaultClientMaxRecvSize)
-
-	assert.NotZero(t, Params.ClientMaxSendSize)
-	t.Logf("ClientMaxSendSize = %d", Params.ClientMaxSendSize)
-
-	Params.Remove(role + ".grpc.clientMaxSendSize")
-	Params.initClientMaxSendSize()
-	assert.Equal(t, Params.ClientMaxSendSize, DefaultClientMaxSendSize)
 }

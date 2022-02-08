@@ -25,9 +25,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
+const (
+	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
+	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
+)
+
 // BaseParamTable is a derived struct of BaseTable. It achieves Composition by
 // embedding BaseTable. It is used to quickly and easily access the system configuration.
-type BaseParamTable struct {
+type ServiceParam struct {
 	BaseTable
 
 	EtcdCfg    EtcdConfig
@@ -38,7 +43,7 @@ type BaseParamTable struct {
 
 // Init is an override method of BaseTable's Init. It mainly calls the
 // Init of BaseTable and do some other initialization.
-func (p *BaseParamTable) Init() {
+func (p *ServiceParam) Init() {
 	p.BaseTable.Init()
 
 	p.EtcdCfg.init(&p.BaseTable)

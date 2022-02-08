@@ -35,7 +35,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-var ParamsGlobal paramtable.GlobalParamTable
+var ParamsGlobal paramtable.ComponentParam
 
 func Test_NewClient(t *testing.T) {
 	ClientParams.InitOnce(typeutil.IndexNodeRole)

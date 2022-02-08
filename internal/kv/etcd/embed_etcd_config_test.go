@@ -30,7 +30,7 @@ import (
 
 func TestEtcdConfigLoad(te *testing.T) {
 	os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
-	param := new(paramtable.BaseParamTable)
+	param := new(paramtable.ServiceParam)
 	param.Init()
 	param.BaseTable.Save("etcd.use.embed", "true")
 	// TODO, not sure if the relative path works for ci environment

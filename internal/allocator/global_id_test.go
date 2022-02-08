@@ -27,7 +27,7 @@ import (
 
 var gTestIDAllocator *GlobalIDAllocator
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 func TestGlobalTSOAllocator_All(t *testing.T) {
 	Params.Init()

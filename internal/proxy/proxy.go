@@ -54,7 +54,7 @@ type Timestamp = typeutil.Timestamp
 // make sure Proxy implements types.Proxy
 var _ types.Proxy = (*Proxy)(nil)
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // Proxy of milvus
 type Proxy struct {

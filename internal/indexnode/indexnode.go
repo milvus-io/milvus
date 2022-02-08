@@ -68,7 +68,7 @@ var _ types.IndexNode = (*IndexNode)(nil)
 var _ types.IndexNodeComponent = (*IndexNode)(nil)
 
 // Params is a GlobalParamTable singleton of indexnode
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {
