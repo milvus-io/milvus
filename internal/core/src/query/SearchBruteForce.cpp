@@ -71,7 +71,7 @@ raw_search(MetricType metric_type,
         PanicInfo(msg);
     }
 #else
-#error "Unsupported OS environment!";
+    PanicInfo("Unsupported brute force for binary search on current OS environment!");
 #endif
 }
 
