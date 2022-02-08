@@ -17,6 +17,9 @@
 #include "log/Log.h"
 INITIALIZE_EASYLOGGINGPP
 
+#ifdef WIN32
+#include <Windows.h>
+#endif
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -71,6 +74,8 @@ get_now_timestamp() {
     return std::chrono::duration_cast<std::chrono::seconds>(now).count();
 }
 
+#ifndef WIN32
+
 int64_t
 get_system_boottime() {
     FILE* uptime = fopen("/proc/uptime", "r");
@@ -124,5 +129,25 @@ get_thread_start_timestamp() {
         return 0;
     }
 }
+
+#else
+
+#define WINDOWS_TICK 10000000
+#define SEC_TO_UNIX_EPOCH 11644473600LL
+
+int64_t
+get_thread_start_timestamp() {
+    FILETIME dummy;
+    FILETIME ret;
+
+    if (GetThreadTimes(GetCurrentThread(), &ret, &dummy, &dummy, &dummy)) {
+        auto ticks = Int64ShllMod32(ret.dwHighDateTime, 32) | ret.dwLowDateTime;
+        auto thread_started = ticks / WINDOWS_TICK - SEC_TO_UNIX_EPOCH;
+        return get_now_timestamp() - thread_started;
+    }
+    return 0;
+}
+
+#endif
 
 // }  // namespace milvus

@@ -54,7 +54,7 @@ func TestMain(t *testing.M) {
 	Params.DataNodeCfg.InitAlias("datanode-alias-1")
 	Params.Init()
 	// change to specific channel for test
-	Params.DataNodeCfg.TimeTickChannelName = Params.DataNodeCfg.TimeTickChannelName + strconv.Itoa(rand.Int())
+	Params.MsgChannelCfg.DataCoordTimeTick = Params.MsgChannelCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	code := t.Run()
 	os.Exit(code)
 }
@@ -64,7 +64,7 @@ func TestDataNode(t *testing.T) {
 	defer cancel()
 
 	node := newIDLEDataNodeMock(ctx)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
@@ -143,8 +143,6 @@ func TestDataNode(t *testing.T) {
 		err = node1.Start()
 		assert.Nil(t, err)
 		defer func() {
-			// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
-			time.Sleep(200 * time.Millisecond)
 			err := node1.Stop()
 			assert.Nil(t, err)
 		}()
@@ -338,8 +336,6 @@ func TestDataNode(t *testing.T) {
 			if i <= 2 {
 				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName})
 				assert.Nil(t, err)
-				// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
-				time.Sleep(200 * time.Millisecond)
 				vchanNameCh <- test.dmChannelName
 			}
 		}
@@ -350,7 +346,7 @@ func TestDataNode(t *testing.T) {
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
@@ -365,7 +361,7 @@ func TestWatchChannel(t *testing.T) {
 
 	t.Run("test watch channel", func(t *testing.T) {
 		// GOOSE TODO
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
 		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))
@@ -413,8 +409,6 @@ func TestWatchChannel(t *testing.T) {
 		exist := node.flowgraphManager.exist(ch)
 		assert.True(t, exist)
 
-		// TODO: wait for reconnecting to Pulsar, delete sleep after Seek wouldn't lead to disconnect with Pulsar
-		time.Sleep(200 * time.Millisecond)
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID))
 		assert.Nil(t, err)
 		//TODO there is not way to sync Release done, use sleep for now

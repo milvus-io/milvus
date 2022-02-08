@@ -21,7 +21,8 @@
 set -e
 
 # Use nexus as docker mirror registry
-MIRROR_URL="http://nexus-nexus-repository-manager-docker-5000.nexus:5000"
+MIRROR_URL="${MIRROR_URL:-http://nexus-nexus-repository-manager-docker-5000.nexus:5000}"
+#MIRROR_URL="http://nexus-nexus-repository-manager-docker-5000.nexus:5000"
 
 # Add registry mirror config into docker daemon
 set_daemon_json_file(){

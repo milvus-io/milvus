@@ -322,11 +322,11 @@ type IndexCoord interface {
 type IndexCoordComponent interface {
 	IndexCoord
 
-	// SetEtcdClient set etcd client for QueryCoord
+	// SetEtcdClient set etcd client for IndexCoordComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	// UpdateStateCode updates state code for QueryCoord
-	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
+	// UpdateStateCode updates state code for IndexCoordComponent
+	//  `stateCode` is current statement of this IndexCoordComponent, indicating whether it's healthy.
 	UpdateStateCode(stateCode internalpb.StateCode)
 }
 

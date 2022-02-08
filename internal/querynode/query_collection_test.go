@@ -132,10 +132,10 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	factory := msgstream.NewPmsFactory()
 	err := factory.SetParams(m)
 	assert.Nil(t, err)
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 	schema := genTestCollectionSchema(0, false, 2)
 	historicalReplica := newCollectionReplica(etcdKV)
@@ -144,8 +144,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	historical := newHistorical(context.Background(), historicalReplica, tsReplica)
 
 	//add a segment to historical data
-	err = historical.replica.addCollection(0, schema)
-	assert.Nil(t, err)
+	historical.replica.addCollection(0, schema)
 	err = historical.replica.addPartition(0, 1)
 	assert.Nil(t, err)
 	err = historical.replica.addSegment(2, 1, 0, "testChannel", segmentTypeSealed, true)
@@ -168,8 +167,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 
 	//create a streaming
 	streaming := newStreaming(ctx, streamingReplica, factory, etcdKV, tsReplica)
-	err = streaming.replica.addCollection(0, schema)
-	assert.Nil(t, err)
+	streaming.replica.addCollection(0, schema)
 	err = streaming.replica.addPartition(0, 1)
 	assert.Nil(t, err)
 

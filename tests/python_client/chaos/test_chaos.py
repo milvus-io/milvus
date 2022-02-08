@@ -40,7 +40,7 @@ def record_results(checkers):
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
-        res += f"{str(k)} succ rate {succ_rate}, total: {total}\n"
+        res += f"{str(k):10} succ rate: {succ_rate:.2f}  total: {total:02d}\n"
     return res
 
 

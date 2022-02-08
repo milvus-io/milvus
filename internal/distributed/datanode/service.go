@@ -225,7 +225,7 @@ func (s *Server) init() error {
 	dn.Params.DataNodeCfg.Port = Params.Port
 	dn.Params.DataNodeCfg.IP = Params.IP
 
-	etcdCli, err := etcd.GetEtcdClient(&dn.Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&dn.Params.EtcdCfg)
 	if err != nil {
 		log.Debug("DataNode connect to etcd failed", zap.Error(err))
 		return err
@@ -245,7 +245,7 @@ func (s *Server) init() error {
 	// --- RootCoord Client ---
 	if s.newRootCoordClient != nil {
 		log.Debug("Init root coord client ...")
-		rootCoordClient, err := s.newRootCoordClient(dn.Params.BaseParams.MetaRootPath, s.etcdCli)
+		rootCoordClient, err := s.newRootCoordClient(dn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("DataNode newRootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -272,7 +272,7 @@ func (s *Server) init() error {
 	// --- Data Server Client ---
 	if s.newDataCoordClient != nil {
 		log.Debug("DataNode Init data service client ...")
-		dataCoordClient, err := s.newDataCoordClient(dn.Params.BaseParams.MetaRootPath, s.etcdCli)
+		dataCoordClient, err := s.newDataCoordClient(dn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("DataNode newDataCoordClient failed", zap.Error(err))
 			panic(err)

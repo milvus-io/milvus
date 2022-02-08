@@ -184,8 +184,7 @@ func (q *orderFlushQueue) inject(inject *taskInjection) {
 		return
 	}
 	// otherwise just handle injection here
-
-	q.handleInject(inject)
+	go q.handleInject(inject)
 }
 
 func (q *orderFlushQueue) handleInject(inject *taskInjection) {
@@ -194,6 +193,8 @@ func (q *orderFlushQueue) handleInject(inject *taskInjection) {
 	ok := <-inject.injectOver
 	// apply injection
 	if ok {
+		q.injectMut.Lock()
+		defer q.injectMut.Unlock()
 		q.postInjection = inject.postInjection
 	}
 }
@@ -455,7 +456,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 func (m *rendezvousFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
 	go injection.waitForInjected()
 	for _, segmentID := range segments {
-		go m.getFlushQueue(segmentID).inject(injection)
+		m.getFlushQueue(segmentID).inject(injection)
 	}
 }
 

@@ -34,7 +34,7 @@ func TestCompactionExecutor(t *testing.T) {
 	t.Run("Test stopTask", func(t *testing.T) {
 		ex := newCompactionExecutor()
 		mc := newMockCompactor(true)
-		ex.executing.Store(UniqueID(1), mc)
+		ex.executeWithState(mc)
 		ex.stopTask(UniqueID(1))
 	})
 
@@ -45,7 +45,7 @@ func TestCompactionExecutor(t *testing.T) {
 		go ex.start(ctx)
 	})
 
-	t.Run("Test excuteTask", func(t *testing.T) {
+	t.Run("Test executeTask", func(t *testing.T) {
 		tests := []struct {
 			isvalid bool
 
@@ -59,9 +59,11 @@ func TestCompactionExecutor(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					ex.executeTask(newMockCompactor(true))
+					validTask := newMockCompactor(true)
+					ex.executeWithState(validTask)
 				} else {
-					ex.executeTask(newMockCompactor(false))
+					invalidTask := newMockCompactor(false)
+					ex.executeWithState(invalidTask)
 				}
 			})
 		}
@@ -98,10 +100,7 @@ func TestCompactionExecutor(t *testing.T) {
 		// wait for task enqueued
 		found := false
 		for !found {
-			ex.executing.Range(func(key, value interface{}) bool {
-				found = true
-				return true
-			})
+			_, found = ex.executing.Load(mc.getPlanID())
 		}
 
 		ex.stopExecutingtaskByVChannelName("mock")
@@ -125,18 +124,25 @@ func newMockCompactor(isvalid bool) *mockCompactor {
 }
 
 type mockCompactor struct {
-	sync.WaitGroup
 	ctx           context.Context
 	cancel        context.CancelFunc
 	isvalid       bool
 	alwaysWorking bool
+
+	wg sync.WaitGroup
 }
 
 var _ compactor = (*mockCompactor)(nil)
 
+func (mc *mockCompactor) start() {
+	mc.wg.Add(1)
+}
+
+func (mc *mockCompactor) complete() {
+	mc.wg.Done()
+}
+
 func (mc *mockCompactor) compact() error {
-	mc.Add(1)
-	defer mc.Done()
 	if !mc.isvalid {
 		return errStart
 	}
@@ -154,7 +160,7 @@ func (mc *mockCompactor) getPlanID() UniqueID {
 func (mc *mockCompactor) stop() {
 	if mc.cancel != nil {
 		mc.cancel()
-		mc.Wait()
+		mc.wg.Wait()
 	}
 }
 

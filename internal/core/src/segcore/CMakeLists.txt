@@ -33,8 +33,13 @@ add_library(milvus_segcore SHARED
         )
 
 find_library(TBB NAMES tbb)
+set(PLATFORM_LIBS dl)
+if (MSYS)
+set(PLATFORM_LIBS )
+endif ()
+
 target_link_libraries(milvus_segcore
-        dl
+        ${PLATFORM_LIBS}
         log
         pthread
         ${TBB}

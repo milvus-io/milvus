@@ -54,7 +54,7 @@ type ReplicaInterface interface {
 	// getCollectionIDs returns all collection ids in the collectionReplica
 	getCollectionIDs() []UniqueID
 	// addCollection creates a new collection and add it to collectionReplica
-	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error
+	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection
 	// removeCollection removes the collection from collectionReplica
 	removeCollection(collectionID UniqueID) error
 	// getCollectionByID gets the collection which id is collectionID
@@ -200,18 +200,18 @@ func (colReplica *collectionReplica) getCollectionIDs() []UniqueID {
 }
 
 // addCollection creates a new collection and add it to collectionReplica
-func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) error {
+func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	if ok := colReplica.hasCollectionPrivate(collectionID); ok {
-		return fmt.Errorf("collection has been loaded, id %d", collectionID)
+	if col, ok := colReplica.collections[collectionID]; ok {
+		return col
 	}
 
 	var newCollection = newCollection(collectionID, schema)
 	colReplica.collections[collectionID] = newCollection
 
-	return nil
+	return newCollection
 }
 
 // removeCollection removes the collection from collectionReplica

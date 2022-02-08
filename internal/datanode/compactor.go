@@ -32,6 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -41,11 +45,14 @@ var (
 	errIllegalCompactionPlan   = errors.New("compaction plan illegal")
 	errTransferType            = errors.New("transfer intferface to type wrong")
 	errUnknownDataType         = errors.New("unknown shema DataType")
+	errContext                 = errors.New("context done or timeout")
 )
 
 type iterator = storage.Iterator
 
 type compactor interface {
+	start()
+	complete()
 	compact() error
 	stop()
 	getPlanID() UniqueID
@@ -99,6 +106,14 @@ func newCompactionTask(
 		dc:                 dc,
 		plan:               plan,
 	}
+}
+
+func (t *compactionTask) start() {
+	t.wg.Add(1)
+}
+
+func (t *compactionTask) complete() {
+	t.wg.Done()
 }
 
 func (t *compactionTask) stop() {
@@ -166,13 +181,14 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 	return pk2ts, dbuff, nil
 }
 
-func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, schema *schemapb.CollectionSchema) ([]*InsertData, int64, error) {
+func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, schema *schemapb.CollectionSchema, currentTs Timestamp) ([]*InsertData, int64, error) {
 
 	var (
-		dim int // dimension of vector field
-		num int // numOfRows in each binlog
-		n   int // binlog number
-		err error
+		dim     int   // dimension of vector field
+		num     int   // numOfRows in each binlog
+		n       int   // binlog number
+		expired int64 // the number of expired entity
+		err     error
 
 		iDatas      = make([]*InsertData, 0)
 		fID2Type    = make(map[UniqueID]schemapb.DataType)
@@ -196,6 +212,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		}
 	}
 
+	expired = 0
 	for mergeItr.HasNext() {
 		//  no error if HasNext() returns true
 		vInter, _ := mergeItr.Next()
@@ -207,6 +224,13 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 		}
 
 		if _, ok := delta[v.PK]; ok {
+			continue
+		}
+
+		ts := Timestamp(v.Timestamp)
+		// Filtering expired entity
+		if t.isExpiredEntity(ts, currentTs) {
+			expired++
 			continue
 		}
 
@@ -260,13 +284,16 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 
 	}
 
-	log.Debug("merge end", zap.Int64("planID", t.getPlanID()), zap.Int64("remaining insert numRows", numRows))
+	log.Debug("merge end", zap.Int64("planID", t.getPlanID()), zap.Int64("remaining insert numRows", numRows), zap.Int64("expired entities", expired))
 	return iDatas, numRows, nil
 }
 
 func (t *compactionTask) compact() error {
-	t.wg.Add(1)
-	defer t.wg.Done()
+	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
+		log.Error("compact wrong, task context done or timeout")
+		return errContext
+	}
+
 	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
@@ -399,7 +426,7 @@ func (t *compactionTask) compact() error {
 		return err
 	}
 
-	iDatas, numRows, err := t.merge(mergeItr, deltaPk2Ts, meta.GetSchema())
+	iDatas, numRows, err := t.merge(mergeItr, deltaPk2Ts, meta.GetSchema(), t.GetCurrentTime())
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return err
@@ -445,7 +472,7 @@ func (t *compactionTask) compact() error {
 		t.refreshFlushedSegStatistics(targetSegID, numRows)
 		// no need to shorten the PK range of a segment, deleting dup PKs is valid
 	} else {
-		t.mergeFlushedSegments(targetSegID, collID, partID, segIDs, t.plan.GetChannel(), numRows)
+		t.mergeFlushedSegments(targetSegID, collID, partID, t.plan.GetPlanID(), segIDs, t.plan.GetChannel(), numRows)
 	}
 
 	ti.injectDone(true)
@@ -630,4 +657,27 @@ func (t *compactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID, *et
 
 func (t *compactionTask) getCollection() UniqueID {
 	return t.getCollectionID()
+}
+
+func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {
+	return tsoutil.GetCurrentTime()
+}
+
+func (t *compactionTask) isExpiredEntity(ts, now Timestamp) bool {
+	const MaxEntityExpiration = 9223372036 // the value was setup by math.MaxInt64 / time.Second
+	// Check calculable range of milvus config value
+	if Params.DataCoordCfg.CompactionEntityExpiration > MaxEntityExpiration {
+		return false
+	}
+
+	duration := time.Duration(Params.DataCoordCfg.CompactionEntityExpiration) * time.Second
+	// Prevent from duration overflow value
+	if duration < 0 {
+		return false
+	}
+
+	pts, _ := tsoutil.ParseTS(ts)
+	pnow, _ := tsoutil.ParseTS(now)
+	expireTime := pts.Add(duration)
+	return expireTime.Before(pnow)
 }

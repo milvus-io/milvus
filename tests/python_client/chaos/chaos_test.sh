@@ -1,9 +1,10 @@
+#!/bin/bash
 set -e
 set -x
 
 
 echo "check os env"
-platform='unknown'
+platform='Linux'
 unamestr=$(uname)
 if [[ "$unamestr" == 'Linux' ]]; then
    platform='Linux'
@@ -15,7 +16,8 @@ echo "platform: $platform"
 ns="chaos-testing"
 
 # switch namespace
-kubectl config set-context --current --namespace=${ns}
+# kubectl config set-context --current --namespace=${ns}
+# kubectl get pod
 
 # set parameters
 pod=${1:-"querynode"}
@@ -24,8 +26,13 @@ chaos_task=${3:-"chaos-test"} # chaos-test or data-consist-test
 node_num=${4:-1} # cluster_1_node or cluster_n_nodes
 
 cur_time=$(date +%H-%M-%S)
-release="test"-${pod}-${chaos_type/_/-}-${cur_time} # replace pod_kill to pod-kill
+release_name="test"-${pod}-${chaos_type/_/-}-${cur_time} # replace pod_kill to pod-kill
+release=${RELEASE_NAME:-"${release_name}"}
 
+# replace separator to default
+chaos_type=${chaos_type/-/_} # default separator of chaos_type is _
+chaos_task=${chaos_task/_/-} # default separator of chaos_task is -
+echo "chaos_type: ${chaos_type}"
 # install milvus cluster for chaos testing
 pushd ./scripts
 echo "uninstall milvus if exist"
@@ -36,13 +43,13 @@ echo "install milvus"
 if [ ${pod} != "standalone" ];
 then
     echo "insatll cluster"
-    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.tag=${image_tag:-"master-latest"} --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
+    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.repository=${REPOSITORY:-"milvusdb/milvus-dev"} --set image.all.tag=${IMAGE_TAG:-"master-latest"} --set ${pod_map[${pod}]}.replicas=$node_num -f ../cluster-values.yaml -n=${ns}
 fi
 
 if [ ${pod} == "standalone" ];
 then
     echo "install standalone"
-    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.tag=${image_tag:-"master-latest"} -f ../standalone-values.yaml -n=${ns}
+    helm install --wait --timeout 360s ${release} milvus/milvus --set image.all.repository=${REPOSITORY:-"milvusdb/milvus-dev"} --set image.all.tag=${IMAGE_TAG:-"master-latest"} -f ../standalone-values.yaml -n=${ns}
 fi
 
 # wait all pod ready
@@ -72,7 +79,7 @@ else
     host=$(kubectl get svc/${release}-milvus -o jsonpath="{.spec.clusterIP}")
 fi
 pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no
-python scripts/hello_milvus.py --host "$host"
+python3 scripts/hello_milvus.py --host "$host"
 
 # chaos test
 if [ "$chaos_task" == "chaos-test" ];
@@ -90,7 +97,7 @@ kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${release} 
 kubectl wait --for=condition=Ready pod -l release=${release} -n ${ns} --timeout=360s
 
 pytest -s -v ../testcases/test_e2e.py --host "$host" --log-cli-level=INFO --capture=no || echo "e2e test fail"
-python scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
+python3 scripts/hello_milvus.py --host "$host" || echo "e2e test fail"
 
 # save logs
 cur_time=$(date +%Y-%m-%d-%H-%M-%S)

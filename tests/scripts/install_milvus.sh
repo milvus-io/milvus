@@ -55,11 +55,16 @@ if [[ -n "${DISABLE_KIND:-}" ]]; then
 fi
 
 # Get Milvus Chart from git
-if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
-  TMP_DIR="$(mktemp -d)"
-  git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
-  MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
-fi
+# if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
+#   TMP_DIR="$(mktemp -d)"
+#   git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
+#   MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
+# fi
+
+# Use helm repo to install milvus charts 
+helm repo add milvus https://milvus-io.github.io/milvus-helm/
+helm repo update
+MILVUS_HELM_CHART_PATH="milvus/milvus"
 
 # Create namespace when it does not exist
 kubectl create namespace "${MILVUS_HELM_NAMESPACE}" > /dev/null 2>&1 || true
@@ -96,5 +101,17 @@ fi
 exitcode=$?
 # List pod list & pvc list before exit after helm install
 kubectl get pods -n ${MILVUS_HELM_NAMESPACE} -o wide | grep "${MILVUS_HELM_RELEASE_NAME}-"
+
+
+restart_pods=$(kubectl get pods -n ${MILVUS_HELM_NAMESPACE} | grep "${MILVUS_HELM_RELEASE_NAME}-" | grep 'ago)' | awk '{print $1}')
+
+for restart_pod in ${restart_pods}
+do 
+  reason=$(kubectl get pod ${restart_pod} -n milvus-ci -o json | jq .status.containerStatuses[0].lastState.terminated.reason )
+  restart_count=$(kubectl get pod ${restart_pod} -n milvus-ci -o json | jq .status.containerStatuses[0].restartCount )
+  echo "${restart_pod} restarts ${restart_count}, last terminateed reason is ${reason}"
+done
+
+
 kubectl get pvc -n ${MILVUS_HELM_NAMESPACE} |  grep "${MILVUS_HELM_RELEASE_NAME}-" | awk '{$3=null;print $0}'
 exit ${exitcode}

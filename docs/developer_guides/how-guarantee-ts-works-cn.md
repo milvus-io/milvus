@@ -59,5 +59,5 @@ syncTs1 为例，当下游消费者（比如QueryNodes）看到 syncTs1，那么
 - 客户端一致性：客户端使用上一次写入的时间戳作为 GuaranteeTs，那么每个客户端至少能看到
 自己插入的全部数据。
 
-Milvus 默认提供强一致性，如果用户不传入 GuaranteeTs，那么会将 GuaranteeTs 设为系统
+Milvus 默认提供有界一致性，如果用户不传入 GuaranteeTs，那么会将 GuaranteeTs 设为系统
 当前的最新时间戳。

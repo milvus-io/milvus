@@ -34,11 +34,11 @@ import (
 func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	defer etcdCli.Close()
 	assert.Nil(t, err)
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
-	clusterSession := sessionutil.NewSession(context.Background(), Params.BaseParams.MetaRootPath, etcdCli)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 	factory := msgstream.NewPmsFactory()
 	meta, err := newMeta(baseCtx, kv, factory, nil)
@@ -69,7 +69,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	cluster.dataKV, err = minioKV.NewMinIOKV(baseCtx, option)
 	assert.Nil(t, err)
 
-	schema := genCollectionSchema(defaultCollectionID, false)
+	schema := genDefaultCollectionSchema(false)
 	firstReq := &querypb.LoadSegmentsRequest{
 		CollectionID: defaultCollectionID,
 		Schema:       schema,

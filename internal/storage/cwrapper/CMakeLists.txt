@@ -115,8 +115,11 @@ macro( build_arrow )
     target_link_libraries(parquet INTERFACE arrow )
 endmacro()
 
-
-build_arrow()
+if (MSYS)
+    message("Using system arrow in msys")
+else ()
+    build_arrow()
+endif ()
 
 add_library(wrapper STATIC)
 target_sources(wrapper PUBLIC ParquetWrapper.cpp PayloadStream.cpp)

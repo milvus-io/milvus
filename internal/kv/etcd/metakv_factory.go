@@ -27,12 +27,12 @@ import (
 
 // NewMetaKvFactory returns an object that implements the kv.MetaKv interface using etcd.
 // The UseEmbedEtcd in the param is used to determine whether the etcd service is external or embedded.
-func NewMetaKvFactory(rootPath string, param *paramtable.BaseParamTable) (kv.MetaKv, error) {
+func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.MetaKv, error) {
 	log.Info("start etcd with rootPath",
 		zap.String("rootpath", rootPath),
-		zap.Bool("isEmbed", param.UseEmbedEtcd))
-	if param.UseEmbedEtcd {
-		path := param.EtcdConfigPath
+		zap.Bool("isEmbed", etcdCfg.UseEmbedEtcd))
+	if etcdCfg.UseEmbedEtcd {
+		path := etcdCfg.ConfigPath
 		var cfg *embed.Config
 		if len(path) > 0 {
 			cfgFromFile, err := embed.ConfigFromFile(path)
@@ -43,14 +43,14 @@ func NewMetaKvFactory(rootPath string, param *paramtable.BaseParamTable) (kv.Met
 		} else {
 			cfg = embed.NewConfig()
 		}
-		cfg.Dir = param.EtcdDataDir
+		cfg.Dir = etcdCfg.DataDir
 		metaKv, err := NewEmbededEtcdKV(cfg, rootPath)
 		if err != nil {
 			return nil, err
 		}
 		return metaKv, err
 	}
-	client, err := etcd.GetEtcdClient(param)
+	client, err := etcd.GetEtcdClient(etcdCfg)
 	if err != nil {
 		return nil, err
 	}

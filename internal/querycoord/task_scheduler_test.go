@@ -209,10 +209,10 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 
 func TestUnMarshalTask(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	baseCtx, cancel := context.WithCancel(context.Background())
 	taskScheduler := &TaskScheduler{
 		ctx:    baseCtx,
@@ -457,10 +457,10 @@ func TestUnMarshalTask(t *testing.T) {
 
 func TestReloadTaskFromKV(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParams)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.BaseParams.MetaRootPath)
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	assert.Nil(t, err)
 	baseCtx, cancel := context.WithCancel(context.Background())
 	taskScheduler := &TaskScheduler{

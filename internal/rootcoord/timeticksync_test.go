@@ -26,15 +26,11 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 func TestTimetickSync(t *testing.T) {
 	ctx := context.Background()
-
-	session := &sessionutil.Session{
-		ServerID: 100,
-	}
+	sourceID := int64(100)
 
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
@@ -49,9 +45,9 @@ func TestTimetickSync(t *testing.T) {
 	//}
 
 	Params.RootCoordCfg.DmlChannelNum = 2
-	Params.RootCoordCfg.DmlChannelName = "rootcoord-dml"
-	Params.RootCoordCfg.DeltaChannelName = "rootcoord-delta"
-	ttSync := newTimeTickSync(ctx, session, factory, nil)
+	Params.MsgChannelCfg.RootCoordDml = "rootcoord-dml"
+	Params.MsgChannelCfg.RootCoordDelta = "rootcoord-delta"
+	ttSync := newTimeTickSync(ctx, sourceID, factory, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -59,7 +55,7 @@ func TestTimetickSync(t *testing.T) {
 		defer wg.Done()
 		ttSync.sendToChannel()
 
-		ttSync.proxyTimeTick[1] = nil
+		ttSync.sess2ChanTsMap[1] = nil
 		ttSync.sendToChannel()
 
 		msg := &internalpb.ChannelTimeTickMsg{
@@ -67,7 +63,7 @@ func TestTimetickSync(t *testing.T) {
 				MsgType: commonpb.MsgType_TimeTick,
 			},
 		}
-		ttSync.proxyTimeTick[1] = newChanTsMsg(msg, 1)
+		ttSync.sess2ChanTsMap[1] = newChanTsMsg(msg, 1)
 		ttSync.sendToChannel()
 	})
 
@@ -101,14 +97,14 @@ func TestTimetickSync(t *testing.T) {
 		msg.Timestamps = append(msg.Timestamps, uint64(2))
 		msg.DefaultTimestamp = uint64(200)
 		cttMsg := newChanTsMsg(msg, 1)
-		ttSync.proxyTimeTick[msg.Base.SourceID] = cttMsg
+		ttSync.sess2ChanTsMap[msg.Base.SourceID] = cttMsg
 
 		ttSync.ddlMinTs = uint64(100)
 		err = ttSync.updateTimeTick(msg, "1")
 		assert.Nil(t, err)
 
 		ttSync.ddlMinTs = uint64(300)
-		ttSync.session.ServerID = int64(1)
+		ttSync.sourceID = int64(1)
 		err = ttSync.updateTimeTick(msg, "1")
 		assert.Nil(t, err)
 	})

@@ -645,6 +645,7 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 15416")
     def test_insert_multi_threading(self):
         """
         target: test concurrent insert

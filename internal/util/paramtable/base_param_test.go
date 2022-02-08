@@ -20,23 +20,62 @@ import (
 )
 
 func TestBaseParamTable(t *testing.T) {
-	var Params BaseParamTable
-	Params.Init()
+	var BaseParams BaseParamTable
+	BaseParams.Init()
 
-	assert.NotZero(t, len(Params.EtcdEndpoints))
-	t.Logf("etcd endpoints = %s", Params.EtcdEndpoints)
+	t.Run("test etcdConfig", func(t *testing.T) {
+		Params := BaseParams.EtcdCfg
 
-	assert.NotEqual(t, Params.MetaRootPath, "")
-	t.Logf("meta root path = %s", Params.MetaRootPath)
+		assert.NotZero(t, len(Params.Endpoints))
+		t.Logf("etcd endpoints = %s", Params.Endpoints)
 
-	assert.NotEqual(t, Params.KvRootPath, "")
-	t.Logf("kv root path = %s", Params.KvRootPath)
+		assert.NotEqual(t, Params.MetaRootPath, "")
+		t.Logf("meta root path = %s", Params.MetaRootPath)
 
-	// test UseEmbedEtcd
-	Params.Save("etcd.use.embed", "true")
-	assert.Nil(t, os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode))
-	assert.Panics(t, func() { Params.initUseEmbedEtcd() })
+		assert.NotEqual(t, Params.KvRootPath, "")
+		t.Logf("kv root path = %s", Params.KvRootPath)
 
-	assert.Nil(t, os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode))
-	Params.LoadCfgToMemory()
+		// test UseEmbedEtcd
+		Params.Base.Save("etcd.use.embed", "true")
+		assert.Nil(t, os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode))
+		assert.Panics(t, func() { Params.initUseEmbedEtcd() })
+
+		assert.Nil(t, os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode))
+		Params.LoadCfgToMemory()
+	})
+
+	t.Run("test pulsarConfig", func(t *testing.T) {
+		Params := BaseParams.PulsarCfg
+
+		assert.NotEqual(t, Params.Address, "")
+		t.Logf("pulsar address = %s", Params.Address)
+
+		assert.Equal(t, Params.MaxMessageSize, SuggestPulsarMaxMessageSize)
+	})
+
+	t.Run("test rocksmqConfig", func(t *testing.T) {
+		Params := BaseParams.RocksmqCfg
+
+		assert.NotEqual(t, Params.Path, "")
+		t.Logf("rocksmq path = %s", Params.Path)
+	})
+
+	t.Run("test minioConfig", func(t *testing.T) {
+		Params := BaseParams.MinioCfg
+
+		addr := Params.Address
+		equal := addr == "localhost:9000" || addr == "minio:9000"
+		assert.Equal(t, equal, true)
+		t.Logf("minio address = %s", Params.Address)
+
+		assert.Equal(t, Params.AccessKeyID, "minioadmin")
+
+		assert.Equal(t, Params.SecretAccessKey, "minioadmin")
+
+		assert.Equal(t, Params.UseSSL, false)
+
+		t.Logf("Minio BucketName = %s", Params.BucketName)
+
+		t.Logf("Minio rootpath = %s", Params.RootPath)
+	})
 }

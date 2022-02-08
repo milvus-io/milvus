@@ -102,7 +102,7 @@ func (s *Server) init() error {
 
 	log.Debug("QueryNode", zap.Int("port", Params.Port))
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.BaseParamTable)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		log.Debug("QueryNode connect to etcd failed", zap.Error(err))
 		return err
@@ -120,7 +120,7 @@ func (s *Server) init() error {
 
 	// --- RootCoord Client ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.BaseParams.MetaRootPath, s.etcdCli)
+		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -150,7 +150,7 @@ func (s *Server) init() error {
 
 	// --- IndexCoord ---
 	if s.indexCoord == nil {
-		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.BaseParams.MetaRootPath, s.etcdCli)
+		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("QueryNode new IndexCoordClient failed", zap.Error(err))
 			panic(err)
