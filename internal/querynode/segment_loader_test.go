@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func TestSegmentLoader_loadSegment(t *testing.T) {
@@ -155,13 +155,14 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 
 		col := newCollection(defaultCollectionID, schema)
 		assert.NotNil(t, col)
-		segment := newSegment(col,
+		segment, err := newSegment(col,
 			defaultSegmentID,
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
 			segmentTypeSealed,
 			true)
+		assert.Nil(t, err)
 
 		schema.Fields = append(schema.Fields, fieldUID)
 		schema.Fields = append(schema.Fields, fieldTimestamp)
@@ -169,7 +170,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		binlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadSegmentFieldsData(segment, binlog, segmentTypeSealed)
+		err = loader.loadFiledBinlogData(segment, binlog)
 		assert.NoError(t, err)
 	}
 
@@ -301,59 +302,13 @@ func TestSegmentLoader_checkSegmentSize(t *testing.T) {
 	loader := node.loader
 	assert.NotNil(t, loader)
 
-	err = loader.checkSegmentSize(defaultSegmentID, map[UniqueID]int64{defaultSegmentID: 1024})
+	err = loader.checkSegmentSize(defaultSegmentID, []*querypb.SegmentLoadInfo{{SegmentID: defaultSegmentID, SegmentSize: 1024}})
 	assert.NoError(t, err)
 
 	//totalMem, err := getTotalMemory()
 	//assert.NoError(t, err)
 	//err = historical.loader.checkSegmentSize(defaultSegmentID, map[UniqueID]int64{defaultSegmentID: int64(totalMem * 2)})
 	//assert.Error(t, err)
-}
-
-func TestSegmentLoader_estimateSegmentSize(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
-	loader := node.loader
-	assert.NotNil(t, loader)
-
-	seg, err := node.historical.replica.getSegmentByID(defaultSegmentID)
-	assert.NoError(t, err)
-
-	binlog := []*datapb.FieldBinlog{
-		{
-			FieldID: simpleConstField.id,
-			Binlogs: []*datapb.Binlog{{LogPath: "^&^%*&%&&(*^*&"}},
-		},
-	}
-
-	_, err = loader.estimateSegmentSize(seg, binlog, nil)
-	assert.Error(t, err)
-
-	binlog, err = saveSimpleBinLog(ctx)
-	assert.NoError(t, err)
-
-	_, err = loader.estimateSegmentSize(seg, binlog, nil)
-	assert.NoError(t, err)
-
-	indexPath, err := generateIndex(defaultSegmentID)
-	assert.NoError(t, err)
-
-	seg.setIndexInfo(simpleVecField.id, &indexInfo{})
-
-	err = seg.setIndexPaths(simpleVecField.id, indexPath)
-	assert.NoError(t, err)
-
-	_, err = loader.estimateSegmentSize(seg, binlog, []FieldID{simpleVecField.id})
-	assert.NoError(t, err)
-
-	err = seg.setIndexPaths(simpleVecField.id, []string{"&*^*(^*(&*%^&*^(&"})
-	assert.NoError(t, err)
-
-	_, err = loader.estimateSegmentSize(seg, binlog, []FieldID{simpleVecField.id})
-	assert.Error(t, err)
 }
 
 func TestSegmentLoader_testLoadGrowing(t *testing.T) {
@@ -369,7 +324,8 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
+		assert.Nil(t, err)
 
 		insertMsg, err := genSimpleInsertMsg()
 		assert.NoError(t, err)
@@ -387,7 +343,8 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
+		assert.Nil(t, err)
 
 		insertMsg, err := genSimpleInsertMsg()
 		assert.NoError(t, err)
@@ -420,8 +377,6 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 
 		loader := node.loader
 		assert.NotNil(t, loader)
-		loader.indexLoader.indexCoord = nil
-		loader.indexLoader.rootCoord = nil
 
 		segmentID1 := UniqueID(100)
 		req1 := &querypb.LoadSegmentsRequest{
@@ -473,4 +428,77 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 
 		assert.Equal(t, segment1.getRowCount(), segment2.getRowCount())
 	})
+}
+
+func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	//generate schema
+	fieldUID := genConstantField(uidField)
+	fieldTimestamp := genConstantField(timestampField)
+	fieldVec := genFloatVectorField(simpleVecField)
+	fieldInt := genConstantField(simpleConstField)
+
+	schema := &schemapb.CollectionSchema{ // schema for insertData
+		Name:   defaultCollectionName,
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			fieldUID,
+			fieldTimestamp,
+			fieldVec,
+			fieldInt,
+		},
+	}
+
+	// generate insert binlog
+	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+	assert.NoError(t, err)
+
+	segmentID := UniqueID(100)
+	// generate index file for segment
+	indexPaths, err := generateIndex(segmentID)
+	assert.NoError(t, err)
+	indexInfo := &querypb.VecFieldIndexInfo{
+		FieldID:        simpleVecField.id,
+		EnableIndex:    true,
+		IndexName:      indexName,
+		IndexID:        indexID,
+		BuildID:        buildID,
+		IndexParams:    funcutil.Map2KeyValuePair(genSimpleIndexParams()),
+		IndexFilePaths: indexPaths,
+	}
+
+	// generate segmentLoader
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+	loader := node.loader
+	assert.NotNil(t, loader)
+
+	req := &querypb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_WatchQueryChannels,
+			MsgID:   rand.Int63(),
+		},
+		DstNodeID: 0,
+		Schema:    schema,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:    segmentID,
+				PartitionID:  defaultPartitionID,
+				CollectionID: defaultCollectionID,
+				BinlogPaths:  fieldBinlog,
+				IndexInfos:   []*querypb.VecFieldIndexInfo{indexInfo},
+			},
+		},
+	}
+
+	err = loader.loadSegment(req, segmentTypeSealed)
+	assert.NoError(t, err)
+
+	segment, err := node.historical.replica.getSegmentByID(segmentID)
+	assert.NoError(t, err)
+	vecFieldInfo, err := segment.getVectorFieldInfo(simpleVecField.id)
+	assert.NoError(t, err)
+	assert.NotNil(t, vecFieldInfo)
+	assert.Equal(t, true, vecFieldInfo.indexInfo.EnableIndex)
 }

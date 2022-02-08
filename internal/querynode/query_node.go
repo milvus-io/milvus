@@ -105,10 +105,6 @@ type QueryNode struct {
 	// etcd client
 	etcdCli *clientv3.Client
 
-	// clients
-	rootCoord  types.RootCoord
-	indexCoord types.IndexCoord
-
 	msFactory msgstream.Factory
 	scheduler *taskScheduler
 
@@ -283,27 +279,15 @@ func (node *QueryNode) Init() error {
 		)
 
 		node.loader = newSegmentLoader(node.queryNodeLoopCtx,
-			node.rootCoord,
-			node.indexCoord,
 			node.historical.replica,
 			node.streaming.replica,
 			node.etcdKV,
 			node.msFactory)
 
-		//node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.loader.indexLoader.fieldStatsChan, node.msFactory)
+		//node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.msFactory)
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
 
 		node.InitSegcore()
-
-		if node.rootCoord == nil {
-			initError = errors.New("null root coordinator detected when queryNode init")
-			return
-		}
-
-		if node.indexCoord == nil {
-			initError = errors.New("null index coordinator detected when queryNode init")
-			return
-		}
 
 		// TODO: add session creator to node
 		node.sessionManager = NewSessionManager(withSessionCreator(defaultSessionCreator()))
@@ -399,24 +383,6 @@ func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
-}
-
-// SetRootCoord assigns parameter rc to its member rootCoord.
-func (node *QueryNode) SetRootCoord(rc types.RootCoord) error {
-	if rc == nil {
-		return errors.New("null root coordinator interface")
-	}
-	node.rootCoord = rc
-	return nil
-}
-
-// SetIndexCoord assigns parameter index to its member indexCoord.
-func (node *QueryNode) SetIndexCoord(index types.IndexCoord) error {
-	if index == nil {
-		return errors.New("null index coordinator interface")
-	}
-	node.indexCoord = index
-	return nil
 }
 
 func (node *QueryNode) watchChangeInfo() {

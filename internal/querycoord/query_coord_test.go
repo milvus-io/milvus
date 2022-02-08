@@ -78,16 +78,15 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 		return nil, err
 	}
 
-	rootCoord := newRootCoordMock()
+	rootCoord := newRootCoordMock(ctx)
 	rootCoord.createCollection(defaultCollectionID)
 	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
 
-	dataCoord, err := newDataCoordMock(ctx)
+	dataCoord := newDataCoordMock(ctx)
+	indexCoord, err := newIndexCoordMock(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	indexCoord := newIndexCoordMock()
 
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
@@ -101,7 +100,6 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	if err != nil {
 		return nil, err
 	}
-	coord.cluster.(*queryNodeCluster).segSizeEstimator = segSizeEstimateForTest
 	err = coord.Start()
 	if err != nil {
 		return nil, err
@@ -126,14 +124,10 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 		return nil, err
 	}
 
-	rootCoord := newRootCoordMock()
+	rootCoord := newRootCoordMock(ctx)
 	rootCoord.createCollection(defaultCollectionID)
 	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
-
-	dataCoord, err := newDataCoordMock(ctx)
-	if err != nil {
-		return nil, err
-	}
+	dataCoord := newDataCoordMock(ctx)
 
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
@@ -255,9 +249,8 @@ func TestHandoffSegmentLoop(t *testing.T) {
 
 	queryCoord, err := startQueryCoord(baseCtx)
 	assert.Nil(t, err)
-	indexCoord := newIndexCoordMock()
-	indexCoord.returnIndexFile = true
-	queryCoord.indexCoordClient = indexCoord
+	rootCoord := queryCoord.rootCoordClient.(*rootCoordMock)
+	rootCoord.enableIndex = true
 
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
@@ -306,7 +299,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: handoffReq,
-			dataCoord:              queryCoord.dataCoordClient,
+			broker:                 queryCoord.broker,
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
@@ -343,7 +336,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: handoffReq,
-			dataCoord:              queryCoord.dataCoordClient,
+			broker:                 queryCoord.broker,
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
@@ -370,7 +363,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: handoffReq,
-			dataCoord:              queryCoord.dataCoordClient,
+			broker:                 queryCoord.broker,
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
@@ -397,7 +390,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: handoffReq,
-			dataCoord:              queryCoord.dataCoordClient,
+			broker:                 queryCoord.broker,
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
@@ -429,7 +422,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: handoffReq,
-			dataCoord:              queryCoord.dataCoordClient,
+			broker:                 queryCoord.broker,
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
@@ -468,7 +461,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: handoffReq,
-			dataCoord:              queryCoord.dataCoordClient,
+			broker:                 queryCoord.broker,
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
@@ -507,7 +500,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: handoffReq,
-			dataCoord:              queryCoord.dataCoordClient,
+			broker:                 queryCoord.broker,
 			cluster:                queryCoord.cluster,
 			meta:                   queryCoord.meta,
 		}
@@ -554,9 +547,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		loadPartitionTask := &loadPartitionTask{
 			baseTask:              baseTask,
 			LoadPartitionsRequest: req,
-			rootCoord:             queryCoord.rootCoordClient,
-			dataCoord:             queryCoord.dataCoordClient,
-			indexCoord:            queryCoord.indexCoordClient,
+			broker:                queryCoord.broker,
 			cluster:               queryCoord.cluster,
 			meta:                  queryCoord.meta,
 		}

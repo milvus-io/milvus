@@ -125,7 +125,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 		return
 	}
 
-	if targetSegment.segmentType != segmentTypeSealed && targetSegment.segmentType != segmentTypeIndexing {
+	if targetSegment.segmentType != segmentTypeSealed {
 		return
 	}
 

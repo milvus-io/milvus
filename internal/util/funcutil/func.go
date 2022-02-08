@@ -27,13 +27,15 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/go-basic/ipv4"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"go.uber.org/zap"
 )
 
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
@@ -173,6 +175,39 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 // CheckCtxValid check if the context is valid
 func CheckCtxValid(ctx context.Context) bool {
 	return ctx.Err() != context.DeadlineExceeded && ctx.Err() != context.Canceled
+}
+
+func GetVecFieldIDs(schema *schemapb.CollectionSchema) []int64 {
+	var vecFieldIDs []int64
+	for _, field := range schema.Fields {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+			vecFieldIDs = append(vecFieldIDs, field.FieldID)
+		}
+	}
+
+	return vecFieldIDs
+}
+
+func Map2KeyValuePair(datas map[string]string) []*commonpb.KeyValuePair {
+	results := make([]*commonpb.KeyValuePair, len(datas))
+	offset := 0
+	for key, value := range datas {
+		results[offset] = &commonpb.KeyValuePair{
+			Key:   key,
+			Value: value,
+		}
+		offset++
+	}
+	return results
+}
+
+func KeyValuePair2Map(datas []*commonpb.KeyValuePair) map[string]string {
+	results := make(map[string]string)
+	for _, pair := range datas {
+		results[pair.Key] = pair.Value
+	}
+
+	return results
 }
 
 // GenChannelSubName generate subName to watch channel

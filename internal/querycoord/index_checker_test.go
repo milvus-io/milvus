@@ -55,7 +55,7 @@ func TestReloadFromKV(t *testing.T) {
 	assert.Nil(t, err)
 
 	t.Run("Test_CollectionNotExist", func(t *testing.T) {
-		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil, nil, nil)
+		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, 0, len(indexChecker.handoffReqChan))
 	})
@@ -66,7 +66,7 @@ func TestReloadFromKV(t *testing.T) {
 	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadPartition, genDefaultCollectionSchema(false))
 
 	t.Run("Test_PartitionNotExist", func(t *testing.T) {
-		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil, nil, nil)
+		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, 0, len(indexChecker.handoffReqChan))
 	})
@@ -76,7 +76,7 @@ func TestReloadFromKV(t *testing.T) {
 	meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
 
 	t.Run("Test_CollectionExist", func(t *testing.T) {
-		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil, nil, nil)
+		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil)
 		assert.Nil(t, err)
 		for {
 			if len(indexChecker.handoffReqChan) > 0 {
@@ -98,10 +98,12 @@ func TestCheckIndexLoop(t *testing.T) {
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 
-	rootCoord := newRootCoordMock()
+	rootCoord := newRootCoordMock(ctx)
+	indexCoord, err := newIndexCoordMock(ctx)
 	assert.Nil(t, err)
-	indexCoord := newIndexCoordMock()
-	indexCoord.returnIndexFile = true
+	rootCoord.enableIndex = true
+	broker, err := newGlobalMetaBroker(ctx, rootCoord, nil, indexCoord)
+	assert.Nil(t, err)
 
 	segmentInfo := &querypb.SegmentInfo{
 		SegmentID:    defaultSegmentID,
@@ -115,7 +117,7 @@ func TestCheckIndexLoop(t *testing.T) {
 
 	t.Run("Test_ReqInValid", func(t *testing.T) {
 		childCtx, childCancel := context.WithCancel(context.Background())
-		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, rootCoord, indexCoord, nil)
+		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, broker)
 		assert.Nil(t, err)
 
 		err = kv.Save(key, string(value))
@@ -136,7 +138,7 @@ func TestCheckIndexLoop(t *testing.T) {
 	meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
 	t.Run("Test_GetIndexInfo", func(t *testing.T) {
 		childCtx, childCancel := context.WithCancel(context.Background())
-		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, rootCoord, indexCoord, nil)
+		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, broker)
 		assert.Nil(t, err)
 
 		indexChecker.enqueueHandoffReq(segmentInfo)
@@ -164,13 +166,15 @@ func TestHandoffNotExistSegment(t *testing.T) {
 	meta, err := newMeta(ctx, kv, nil, nil)
 	assert.Nil(t, err)
 
-	rootCoord := newRootCoordMock()
+	rootCoord := newRootCoordMock(ctx)
+	rootCoord.enableIndex = true
+	indexCoord, err := newIndexCoordMock(ctx)
 	assert.Nil(t, err)
-	indexCoord := newIndexCoordMock()
 	indexCoord.returnError = true
-	dataCoord, err := newDataCoordMock(ctx)
+	dataCoord := newDataCoordMock(ctx)
+	dataCoord.segmentState = commonpb.SegmentState_NotExist
+	broker, err := newGlobalMetaBroker(ctx, rootCoord, dataCoord, indexCoord)
 	assert.Nil(t, err)
-	dataCoord.segmentNotExist = true
 
 	meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
 
@@ -184,7 +188,7 @@ func TestHandoffNotExistSegment(t *testing.T) {
 	value, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
 
-	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, nil, rootCoord, indexCoord, dataCoord)
+	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, nil, broker)
 	assert.Nil(t, err)
 
 	err = kv.Save(key, string(value))
@@ -217,7 +221,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		ctx:              ctx,
 		cancel:           cancel,
 		client:           kv,
-		triggerTaskQueue: NewTaskQueue(),
+		triggerTaskQueue: newTaskQueue(),
 	}
 	idAllocatorKV := tsoutil.NewTSOKVBase(etcdCli, Params.EtcdCfg.KvRootPath, "queryCoordTaskID")
 	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
@@ -226,7 +230,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	taskScheduler.taskIDAllocator = func() (UniqueID, error) {
 		return idAllocator.AllocOne()
 	}
-	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, taskScheduler, nil, nil, nil)
+	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, taskScheduler, nil)
 	assert.Nil(t, err)
 	indexChecker.wg.Add(1)
 	go indexChecker.processHandoffAfterIndexDone()

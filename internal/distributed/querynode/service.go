@@ -26,8 +26,6 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
-	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -63,9 +61,7 @@ type Server struct {
 
 	grpcServer *grpc.Server
 
-	etcdCli    *clientv3.Client
-	rootCoord  types.RootCoord
-	indexCoord types.IndexCoord
+	etcdCli *clientv3.Client
 
 	closer io.Closer
 }
@@ -116,67 +112,6 @@ func (s *Server) init() error {
 	err = <-s.grpcErrChan
 	if err != nil {
 		return err
-	}
-
-	// --- RootCoord Client ---
-	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.ctx, qn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
-		if err != nil {
-			log.Debug("QueryNode new RootCoordClient failed", zap.Error(err))
-			panic(err)
-		}
-	}
-
-	if err = s.rootCoord.Init(); err != nil {
-		log.Debug("QueryNode RootCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err = s.rootCoord.Start(); err != nil {
-		log.Debug("QueryNode RootCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode start to wait for RootCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryNode wait for RootCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode report RootCoord is ready")
-
-	if err := s.SetRootCoord(s.rootCoord); err != nil {
-		panic(err)
-	}
-
-	// --- IndexCoord ---
-	if s.indexCoord == nil {
-		s.indexCoord, err = icc.NewClient(s.ctx, qn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
-		if err != nil {
-			log.Debug("QueryNode new IndexCoordClient failed", zap.Error(err))
-			panic(err)
-		}
-	}
-
-	if err := s.indexCoord.Init(); err != nil {
-		log.Debug("QueryNode IndexCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err := s.indexCoord.Start(); err != nil {
-		log.Debug("QueryNode IndexCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	// wait IndexCoord healthy
-	log.Debug("QueryNode start to wait for IndexCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.ctx, s.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryNode wait for IndexCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryNode report IndexCoord is ready")
-
-	if err := s.SetIndexCoord(s.indexCoord); err != nil {
-		panic(err)
 	}
 
 	s.querynode.UpdateStateCode(internalpb.StateCode_Initializing)
@@ -298,16 +233,6 @@ func (s *Server) Stop() error {
 // SetEtcdClient sets the etcd client for QueryNode component.
 func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
 	s.querynode.SetEtcdClient(etcdCli)
-}
-
-// SetRootCoord sets the RootCoord's client for QueryNode component.
-func (s *Server) SetRootCoord(rootCoord types.RootCoord) error {
-	return s.querynode.SetRootCoord(rootCoord)
-}
-
-// SetIndexCoord sets the IndexCoord's client for QueryNode component.
-func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
-	return s.querynode.SetIndexCoord(indexCoord)
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.
