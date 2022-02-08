@@ -42,9 +42,7 @@ raw_search(MetricType metric_type,
            float* D,
            idx_t* labels,
            const BitsetView bitset) {
-#ifdef __APPLE__
-    // TODO
-#elif __linux__
+#ifdef __linux__
     using namespace faiss;  // NOLINT
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float_maxheap_array_t res = {size_t(n), size_t(k), labels, D};
@@ -73,7 +71,7 @@ raw_search(MetricType metric_type,
         PanicInfo(msg);
     }
 #else
-#error "Unsupported OS environment.";
+#error "Unsupported OS environment!";
 #endif
 }
 
@@ -132,7 +130,7 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
         faiss::knn_inner_product(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
     }
 #else
-#error "Unsupported OS environment.";
+#error "Unsupported OS environment!";
 #endif
     sub_qr.round_values();
     return sub_qr;
