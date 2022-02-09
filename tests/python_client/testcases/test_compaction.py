@@ -172,6 +172,46 @@ class TestCompactionParams(TestcaseBase):
         collection_w.query(f'{ct.default_int64_field_name} in {insert_res.primary_keys[-1:]}',
                            check_items={'exp_res': res})
 
+    @pytest.mark.xfail("Issue #15499")
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_compact_after_delete_index(self):
+        """
+        target: test compact after delete and create index
+        method: 1.create with 1 shard and insert nb entities (ensure can be index)
+                2.delete some entities and flush (ensure generate delta log)
+                3.create index
+                4.compact outside retentionDuration
+                5.load and search with travel time
+        expected: Empty search result
+        """
+        # create, insert without flush
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+
+        # delete and flush
+        expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
+        collection_w.delete(expr)
+        assert collection_w.num_entities == ct.default_nb
+
+        # build index
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        log.debug(collection_w.index())
+
+        # compact, get plan
+        sleep(50)
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed()
+        c_plans = collection_w.get_compaction_plans()[0]
+        assert len(c_plans.plans[0].sources) == 1
+
+        collection_w.load()
+        res, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
+                                     ct.default_float_vec_field_name,
+                                     ct.default_search_params, ct.default_limit)
+        # Travel time currently does not support travel back to retention ago, so just verify search is available.
+        assert len(res[0]) == ct.default_limit
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_delete_ratio(self):
         """
@@ -597,6 +637,7 @@ class TestCompactionOperation(TestcaseBase):
                 4.compact after compact_retention_duration
                 5.load and search with travel time tt
         expected: Empty search result
+                  But no way to verify, because travel time does not support travel back to retentionDuration ago so far
         """
         from pymilvus import utility
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
