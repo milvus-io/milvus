@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -303,8 +302,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 			CompactRevision: 1,
 		}
 		err := w.handleWatchResponse(wresp)
-		assert.Error(t, err)
-		assert.Equal(t, v3rpc.ErrCompacted, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("err compacted resp, valid Rewatch", func(t *testing.T) {
@@ -327,6 +325,19 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("err handled but rewatch failed", func(t *testing.T) {
+		w := getWatcher(s, func(sessions map[string]*Session) error {
+			return errors.New("mocked")
+		})
+		wresp := clientv3.WatchResponse{
+			CompactRevision: 1,
+		}
+		err := w.handleWatchResponse(wresp)
+		t.Log(err.Error())
+
+		assert.Error(t, err)
+	})
+
 	t.Run("err handled but list failed", func(t *testing.T) {
 		s := NewSession(ctx, "/by-dev/session-ut", etcdCli)
 		s.etcdCli.Close()
@@ -341,17 +352,6 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("err handled but rewatch failed", func(t *testing.T) {
-		w := getWatcher(s, func(sessions map[string]*Session) error {
-			return errors.New("mocked")
-		})
-		wresp := clientv3.WatchResponse{
-			CompactRevision: 1,
-		}
-		err := w.handleWatchResponse(wresp)
-
-		assert.Error(t, err)
-	})
 }
 
 func TestSessionRevoke(t *testing.T) {

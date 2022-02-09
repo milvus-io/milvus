@@ -216,7 +216,13 @@ func (node *QueryNode) watchService(ctx context.Context) {
 			return
 		case event, ok := <-node.eventCh:
 			if !ok {
-				//TODO add retry logic
+				// ErrCompacted is handled inside SessionWatcher
+				log.Error("Session Watcher channel closed", zap.Int64("server id", node.session.ServerID))
+				// need to call stop in separate goroutine
+				go node.Stop()
+				if node.session.TriggerKill {
+					syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+				}
 				return
 			}
 			if err := node.handleSessionEvent(ctx, event); err != nil {

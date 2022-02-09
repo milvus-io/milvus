@@ -406,6 +406,7 @@ func (s *Server) initServiceDiscovery() error {
 
 	s.cluster.Startup(datanodes)
 
+	// TODO implement rewatch logic
 	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)
 	return nil
 }
@@ -607,7 +608,13 @@ func (s *Server) watchService(ctx context.Context) {
 			return
 		case event, ok := <-s.eventCh:
 			if !ok {
-				//TODO add retry logic
+				// ErrCompacted in handled inside SessionWatcher
+				// So there is some other error occurred, closing DataCoord server
+				logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
+				go s.Stop()
+				if s.session.TriggerKill {
+					syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+				}
 				return
 			}
 			if err := s.handleSessionEvent(ctx, event); err != nil {
@@ -620,7 +627,6 @@ func (s *Server) watchService(ctx context.Context) {
 			}
 		}
 	}
-
 }
 
 // handles session events - DataNodes Add/Del

@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -241,6 +243,44 @@ func TestWatchNodeLoop(t *testing.T) {
 		err = removeAllSession()
 		assert.Nil(t, err)
 	})
+}
+
+func TestHandleNodeEventClosed(t *testing.T) {
+	ech := make(chan *sessionutil.SessionEvent)
+	qc := &QueryCoord{
+		eventChan: ech,
+		session: &sessionutil.Session{
+			TriggerKill: true,
+			ServerID:    0,
+		},
+	}
+	flag := false
+	closed := false
+
+	sigDone := make(chan struct{}, 1)
+	sigQuit := make(chan struct{}, 1)
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT)
+
+	defer signal.Reset(syscall.SIGINT)
+
+	go func() {
+		qc.handleNodeEvent(context.Background())
+		flag = true
+		sigDone <- struct{}{}
+	}()
+
+	go func() {
+		<-sc
+		closed = true
+		sigQuit <- struct{}{}
+	}()
+
+	close(ech)
+	<-sigDone
+	<-sigQuit
+	assert.True(t, flag)
+	assert.True(t, closed)
 }
 
 func TestHandoffSegmentLoop(t *testing.T) {
