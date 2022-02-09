@@ -50,3 +50,17 @@ function docker_login_ci_registry(){
     fi
 }
 
+# Check if requirement file changed or not in PR
+function check_requirement_file(){
+     URL="https://api.github.com/repos/milvus-io/milvus/pulls/$CHANGE_ID/files"
+
+     CHANGED_FILES=( $(curl -s --max-time 10 --retry 5 --retry-delay 0 --retry-max-time 40 -X GET -G ${URL} \
+     | jq -r  '.[] | select (.filename | endswith("requirements.txt") ) | .filename') )
+
+      for file in ${CHANGED_FILES[@]}
+      do
+          if [[ "${file}" == "tests/python_client/requirements.txt" ]]; then 
+            REQUIREMENT_CHANGED=true 
+          fi 
+      done 
+}

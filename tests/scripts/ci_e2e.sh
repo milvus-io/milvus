@@ -40,7 +40,7 @@ PARALLEL_NUM="${PARALLEL_NUM:-6}"
 # Use service name instead of IP to test
 MILVUS_SERVICE_NAME=$(echo "${MILVUS_HELM_RELEASE_NAME}-milvus.${MILVUS_HELM_NAMESPACE}" | tr -d '\n')
 MILVUS_SERVICE_PORT="19530"
-
+REQUIREMENT_CHANGED=false
 
 
 # Shellcheck source=ci-util.sh
@@ -61,8 +61,12 @@ if [ ! -d "${CI_LOG_PATH}" ]; then
 fi
 
 echo "prepare e2e test"  
-install_pytest_requirements  
 
+check_requirement_file 
+#Install pytest requirements only when requirement files changed 
+if [[ ${REQUIREMENT_CHANGED} == "true" ]]; then 
+  install_pytest_requirements  
+fi 
 
 # Pytest is not able to have both --timeout & --workers, so do not add --timeout or --workers in the shell script
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
