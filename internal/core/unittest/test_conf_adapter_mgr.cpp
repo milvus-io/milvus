@@ -11,10 +11,8 @@
 
 #include <vector>
 #include <thread>
-
 #include <gtest/gtest.h>
-
-#include "index/knowhere/knowhere/index/vector_index/ConfAdapterMgr.h"
+#include <knowhere/index/vector_index/ConfAdapterMgr.h>
 
 TEST(AdapterMgr, MultiThread) {
     auto run_case = [&]() {

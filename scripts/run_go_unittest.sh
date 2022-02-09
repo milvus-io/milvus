@@ -27,6 +27,11 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
+unameOut="$(uname -s)"
+if [[ "$unameOut" == "Darwin" ]]; then
+  export MallocNanoZone=0
+fi
+
 # ignore MinIO,S3 unittes
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo "Running go unittest under $MILVUS_DIR"
@@ -49,11 +54,16 @@ go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
 #go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
 go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
 go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
-go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast
 
-go test -race -cover -v "${MILVUS_DIR}/distributed/rootcoord" -failfast
-go test -race -cover -v "${MILVUS_DIR}/rootcoord" -failfast
-go test -race -cover -v "${MILVUS_DIR}/datacoord/..." -failfast
-go test -race -cover -v "${MILVUS_DIR}/indexcoord/..." -failfast
+# TODO: enable ut on mac os
+case "${unameOut}" in
+    Linux*)     go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast;;
+    *)          echo "Skip querynode unit tests, unsupported os:${unameOut}";
+esac
+
+go test -race -cover "${MILVUS_DIR}/distributed/rootcoord" -failfast
+go test -race -cover "${MILVUS_DIR}/rootcoord" -failfast
+go test -race -cover "${MILVUS_DIR}/datacoord/..." -failfast
+go test -race -cover "${MILVUS_DIR}/indexcoord/..." -failfast
 
 echo " Go unittest finished"

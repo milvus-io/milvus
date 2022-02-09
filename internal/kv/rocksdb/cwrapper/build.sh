@@ -63,6 +63,24 @@ while getopts "t:h:" arg; do
 done
 echo "BUILD_TYPE: " $BUILD_TYPE
 
+unameOut="$(uname -s)"
+if [[ ! ${jobs+1} ]]; then
+  case "${unameOut}" in
+      Linux*)     jobs=$(nproc);;
+      Darwin*)
+        llvm_prefix="$(brew --prefix llvm)"
+        export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
+        export CC="${llvm_prefix}/bin/clang"
+        export CXX="${llvm_prefix}/bin/clang++"
+        export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
+        export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
+        jobs=$(sysctl -n hw.physicalcpu);;
+       *)
+          echo "Exit 0, System:${unameOut}";
+          exit 0;
+  esac
+fi
+
 pushd ${OUTPUT_LIB}
 CMAKE_CMD="cmake \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} .."
@@ -70,7 +88,4 @@ CMAKE_CMD="cmake \
 ${CMAKE_CMD}
 echo ${CMAKE_CMD}
 
-if [[ ! ${jobs+1} ]]; then
-    jobs=$(nproc)
-fi
 make -j ${jobs} VERBOSE=0

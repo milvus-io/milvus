@@ -28,7 +28,7 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     visit(BinaryVectorANNS& node) override;
 
     void
-    visit(RetrievePlanNode& node);
+    visit(RetrievePlanNode& node) override;
 
  public:
     using RetType = SearchResult;

@@ -11,8 +11,6 @@
 
 #pragma once
 
-#include <faiss/utils/BinaryDistance.h>
-
 #include "common/Schema.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
