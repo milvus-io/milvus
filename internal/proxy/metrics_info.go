@@ -224,7 +224,7 @@ func getSystemInfoMetrics(
 			TargetType:          typeutil.DataCoordRole,
 		})
 
-		// data coord in system topology graph
+		// DataCoord in system topology graph
 		dataCoordTopologyNode := metricsinfo.SystemTopologyNode{
 			Identifier: identifierMap[dataCoordRoleName],
 			Connected:  make([]metricsinfo.ConnectionEdge, 0),
@@ -285,7 +285,7 @@ func getSystemInfoMetrics(
 			})
 		}
 
-		// add data coord to system topology graph
+		// add DataCoord to system topology graph
 		systemTopology.NodesInfo = append(systemTopology.NodesInfo, dataCoordTopologyNode)
 	}
 

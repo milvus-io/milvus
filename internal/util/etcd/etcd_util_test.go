@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var Params paramtable.BaseParamTable
+var Params paramtable.ServiceParam
 
 func TestEtcd(t *testing.T) {
 	Params.Init()

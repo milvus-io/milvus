@@ -31,12 +31,12 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -91,19 +91,6 @@ var uidField = constFieldParam{
 }
 
 type indexParam = map[string]string
-
-func segSizeEstimateForTest(segments *querypb.LoadSegmentsRequest, dataKV kv.DataKV) (int64, error) {
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(segments.Schema)
-	if err != nil {
-		return 0, err
-	}
-	sizeOfReq := int64(0)
-	for _, loadInfo := range segments.Infos {
-		sizeOfReq += int64(sizePerRecord) * loadInfo.NumOfRows
-	}
-
-	return sizeOfReq, nil
-}
 
 func genCollectionMeta(collectionID UniqueID, schema *schemapb.CollectionSchema) *etcdpb.CollectionMeta {
 	colInfo := &etcdpb.CollectionMeta{
@@ -304,7 +291,7 @@ func genSimpleIndexParams() indexParam {
 	return indexParams
 }
 
-func generateIndex(segmentID UniqueID) ([]string, error) {
+func generateIndex(indexBuildID UniqueID, dataKv kv.DataKV) ([]string, error) {
 	indexParams := genSimpleIndexParams()
 
 	var indexParamsKV []*commonpb.KeyValuePair
@@ -334,20 +321,6 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 		return nil, err
 	}
 
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
-	if err != nil {
-		return nil, err
-	}
-
 	// save index to minio
 	binarySet, err := index.Serialize()
 	if err != nil {
@@ -356,33 +329,40 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 
 	// serialize index params
 	indexCodec := storage.NewIndexFileBinlogCodec()
-	serializedIndexBlobs, err := indexCodec.Serialize(
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		indexParams,
-		indexName,
-		indexID,
-		binarySet,
-	)
+	serializedIndexBlobs, err := indexCodec.Serialize(0, 0, 0, 0, 0, 0, indexParams, indexName, indexID, binarySet)
 	if err != nil {
 		return nil, err
 	}
 
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
-		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
+		p := strconv.Itoa(int(indexBuildID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := kv.Save(p, string(index.Value))
+		err := dataKv.Save(p, string(index.Value))
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return indexPaths, nil
+}
+
+func generateIndexFileInfo(indexBuildIDs []int64, dataKV kv.DataKV) ([]*indexpb.IndexFilePathInfo, error) {
+	schema := genDefaultCollectionSchema(false)
+	sizePerRecord, _ := typeutil.EstimateSizePerRecord(schema)
+
+	var indexInfos []*indexpb.IndexFilePathInfo
+	for _, buildID := range indexBuildIDs {
+		indexPaths, err := generateIndex(buildID, dataKV)
+		if err != nil {
+			return nil, err
+		}
+		indexInfos = append(indexInfos, &indexpb.IndexFilePathInfo{
+			IndexFilePaths: indexPaths,
+			SerializedSize: uint64(sizePerRecord * defaultNumRowPerSegment),
+		})
+	}
+	return indexInfos, nil
 }
 
 func TestQueryNodeCluster_getMetrics(t *testing.T) {
@@ -401,12 +381,11 @@ func TestReloadClusterFromKV(t *testing.T) {
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
 		cluster := &queryNodeCluster{
-			ctx:              baseCtx,
-			client:           kv,
-			nodes:            make(map[int64]Node),
-			newNodeFn:        newQueryNodeTest,
-			session:          clusterSession,
-			segSizeEstimator: segSizeEstimateForTest,
+			ctx:       baseCtx,
+			client:    kv,
+			nodes:     make(map[int64]Node),
+			newNodeFn: newQueryNodeTest,
+			session:   clusterSession,
 		}
 
 		queryNode, err := startQueryNodeServer(baseCtx)
@@ -436,13 +415,12 @@ func TestReloadClusterFromKV(t *testing.T) {
 		assert.Nil(t, err)
 
 		cluster := &queryNodeCluster{
-			client:           kv,
-			handler:          handler,
-			clusterMeta:      meta,
-			nodes:            make(map[int64]Node),
-			newNodeFn:        newQueryNodeTest,
-			session:          clusterSession,
-			segSizeEstimator: segSizeEstimateForTest,
+			client:      kv,
+			handler:     handler,
+			clusterMeta: meta,
+			nodes:       make(map[int64]Node),
+			newNodeFn:   newQueryNodeTest,
+			session:     clusterSession,
 		}
 
 		kvs := make(map[string]string)
@@ -494,15 +472,14 @@ func TestGrpcRequest(t *testing.T) {
 	assert.Nil(t, err)
 
 	cluster := &queryNodeCluster{
-		ctx:              baseCtx,
-		cancel:           cancel,
-		client:           kv,
-		clusterMeta:      meta,
-		handler:          handler,
-		nodes:            make(map[int64]Node),
-		newNodeFn:        newQueryNodeTest,
-		session:          clusterSession,
-		segSizeEstimator: segSizeEstimateForTest,
+		ctx:         baseCtx,
+		cancel:      cancel,
+		client:      kv,
+		clusterMeta: meta,
+		handler:     handler,
+		nodes:       make(map[int64]Node),
+		newNodeFn:   newQueryNodeTest,
+		session:     clusterSession,
 	}
 
 	t.Run("Test GetNodeInfoByIDWithNodeNotExist", func(t *testing.T) {
@@ -663,44 +640,6 @@ func TestGrpcRequest(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestEstimateSegmentSize(t *testing.T) {
-	refreshParams()
-	binlog := []*datapb.FieldBinlog{
-		{
-			FieldID: defaultVecFieldID,
-			Binlogs: []*datapb.Binlog{{LogPath: "by-dev/rand/path", LogSize: 1024}},
-		},
-	}
-
-	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    defaultSegmentID,
-		PartitionID:  defaultPartitionID,
-		CollectionID: defaultCollectionID,
-		BinlogPaths:  binlog,
-		NumOfRows:    defaultNumRowPerSegment,
-	}
-
-	loadReq := &querypb.LoadSegmentsRequest{
-		Infos:        []*querypb.SegmentLoadInfo{loadInfo},
-		CollectionID: defaultCollectionID,
-	}
-
-	size, err := estimateSegmentsSize(loadReq, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(1024), size)
-
-	indexInfo := &querypb.VecFieldIndexInfo{
-		FieldID:     defaultVecFieldID,
-		EnableIndex: true,
-		IndexSize:   2048,
-	}
-
-	loadInfo.IndexInfos = []*querypb.VecFieldIndexInfo{indexInfo}
-	size, err = estimateSegmentsSize(loadReq, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2048), size)
-}
-
 func TestSetNodeState(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
@@ -728,15 +667,14 @@ func TestSetNodeState(t *testing.T) {
 	assert.Nil(t, err)
 
 	cluster := &queryNodeCluster{
-		ctx:              baseCtx,
-		cancel:           cancel,
-		client:           kv,
-		clusterMeta:      meta,
-		handler:          handler,
-		nodes:            make(map[int64]Node),
-		newNodeFn:        newQueryNodeTest,
-		session:          clusterSession,
-		segSizeEstimator: segSizeEstimateForTest,
+		ctx:         baseCtx,
+		cancel:      cancel,
+		client:      kv,
+		clusterMeta: meta,
+		handler:     handler,
+		nodes:       make(map[int64]Node),
+		newNodeFn:   newQueryNodeTest,
+		session:     clusterSession,
 	}
 
 	node, err := startQueryNodeServer(baseCtx)

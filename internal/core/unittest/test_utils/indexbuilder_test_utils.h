@@ -16,15 +16,15 @@
 #include <limits>
 #include <cmath>
 #include <google/protobuf/text_format.h>
+#include <knowhere/common/MetricType.h>
+#include <knowhere/index/vector_index/helpers/IndexParameter.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
 
 #include "pb/index_cgo_msg.pb.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
 #include "DataGen.h"
-#include "faiss/MetricType.h"
-#include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
 #include "indexbuilder/utils.h"
 
 constexpr int64_t DIM = 128;

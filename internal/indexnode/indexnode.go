@@ -20,7 +20,8 @@ package indexnode
 
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
 
-#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include <stdlib.h>
 #include "indexbuilder/init_c.h"
@@ -68,7 +69,7 @@ var _ types.IndexNode = (*IndexNode)(nil)
 var _ types.IndexNodeComponent = (*IndexNode)(nil)
 
 // Params is a GlobalParamTable singleton of indexnode
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {

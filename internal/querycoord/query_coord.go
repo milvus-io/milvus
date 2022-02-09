@@ -64,7 +64,7 @@ type queryChannelInfo struct {
 }
 
 // Params is param table of query coordinator
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // QueryCoord is the coordinator of queryNodes
 type QueryCoord struct {
@@ -90,12 +90,12 @@ type QueryCoord struct {
 	dataCoordClient  types.DataCoord
 	rootCoordClient  types.RootCoord
 	indexCoordClient types.IndexCoord
+	broker           *globalMetaBroker
 
 	session   *sessionutil.Session
 	eventChan <-chan *sessionutil.SessionEvent
 
-	stateCode  atomic.Value
-	enableGrpc bool
+	stateCode atomic.Value
 
 	msFactory msgstream.Factory
 }
@@ -176,15 +176,22 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 
+		//init globalMetaBroker
+		qc.broker, initError = newGlobalMetaBroker(qc.loopCtx, qc.rootCoordClient, qc.dataCoordClient, qc.indexCoordClient)
+		if initError != nil {
+			log.Error("query coordinator init globalMetaBroker failed", zap.Error(initError))
+			return
+		}
+
 		// init task scheduler
-		qc.scheduler, initError = NewTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.rootCoordClient, qc.dataCoordClient, qc.indexCoordClient, qc.idAllocator)
+		qc.scheduler, initError = newTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.broker, qc.idAllocator)
 		if initError != nil {
 			log.Error("query coordinator init task scheduler failed", zap.Error(initError))
 			return
 		}
 
 		// init index checker
-		qc.indexChecker, initError = newIndexChecker(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.rootCoordClient, qc.indexCoordClient, qc.dataCoordClient)
+		qc.indexChecker, initError = newIndexChecker(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.broker)
 		if initError != nil {
 			log.Error("query coordinator init index checker failed", zap.Error(initError))
 			return
@@ -351,9 +358,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 		loadBalanceTask := &loadBalanceTask{
 			baseTask:           baseTask,
 			LoadBalanceRequest: loadBalanceSegment,
-			rootCoord:          qc.rootCoordClient,
-			dataCoord:          qc.dataCoordClient,
-			indexCoord:         qc.indexCoordClient,
+			broker:             qc.broker,
 			cluster:            qc.cluster,
 			meta:               qc.meta,
 		}
@@ -403,9 +408,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 				loadBalanceTask := &loadBalanceTask{
 					baseTask:           baseTask,
 					LoadBalanceRequest: loadBalanceSegment,
-					rootCoord:          qc.rootCoordClient,
-					dataCoord:          qc.dataCoordClient,
-					indexCoord:         qc.indexCoordClient,
+					broker:             qc.broker,
 					cluster:            qc.cluster,
 					meta:               qc.meta,
 				}
@@ -558,9 +561,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 						balanceTask := &loadBalanceTask{
 							baseTask:           baseTask,
 							LoadBalanceRequest: req,
-							rootCoord:          qc.rootCoordClient,
-							dataCoord:          qc.dataCoordClient,
-							indexCoord:         qc.indexCoordClient,
+							broker:             qc.broker,
 							cluster:            qc.cluster,
 							meta:               qc.meta,
 						}

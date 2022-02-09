@@ -33,14 +33,13 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
-// TaskQueue is used to cache triggerTasks
-type TaskQueue struct {
+// taskQueue is used to cache triggerTasks
+type taskQueue struct {
 	tasks *list.List
 
 	maxTask  int64
@@ -50,21 +49,21 @@ type TaskQueue struct {
 }
 
 // Chan returns the taskChan of taskQueue
-func (queue *TaskQueue) Chan() <-chan int {
+func (queue *taskQueue) Chan() <-chan int {
 	return queue.taskChan
 }
 
-func (queue *TaskQueue) taskEmpty() bool {
+func (queue *taskQueue) taskEmpty() bool {
 	queue.Lock()
 	defer queue.Unlock()
 	return queue.tasks.Len() == 0
 }
 
-func (queue *TaskQueue) taskFull() bool {
+func (queue *taskQueue) taskFull() bool {
 	return int64(queue.tasks.Len()) >= queue.maxTask
 }
 
-func (queue *TaskQueue) addTask(t task) {
+func (queue *taskQueue) addTask(t task) {
 	queue.Lock()
 	defer queue.Unlock()
 
@@ -90,7 +89,7 @@ func (queue *TaskQueue) addTask(t task) {
 	}
 }
 
-func (queue *TaskQueue) addTaskToFront(t task) {
+func (queue *taskQueue) addTaskToFront(t task) {
 	queue.taskChan <- 1
 	if queue.tasks.Len() == 0 {
 		queue.tasks.PushBack(t)
@@ -100,7 +99,7 @@ func (queue *TaskQueue) addTaskToFront(t task) {
 }
 
 // PopTask pops a trigger task from task list
-func (queue *TaskQueue) popTask() task {
+func (queue *taskQueue) popTask() task {
 	queue.Lock()
 	defer queue.Unlock()
 
@@ -116,8 +115,8 @@ func (queue *TaskQueue) popTask() task {
 }
 
 // NewTaskQueue creates a new task queue for scheduler to cache trigger tasks
-func NewTaskQueue() *TaskQueue {
-	return &TaskQueue{
+func newTaskQueue() *taskQueue {
+	return &taskQueue{
 		tasks:    list.New(),
 		maxTask:  1024,
 		taskChan: make(chan int, 1024),
@@ -126,7 +125,7 @@ func NewTaskQueue() *TaskQueue {
 
 // TaskScheduler controls the scheduling of trigger tasks and internal tasks
 type TaskScheduler struct {
-	triggerTaskQueue         *TaskQueue
+	triggerTaskQueue         *taskQueue
 	activateTaskChan         chan task
 	meta                     Meta
 	cluster                  Cluster
@@ -134,9 +133,7 @@ type TaskScheduler struct {
 	client                   *etcdkv.EtcdKV
 	stopActivateTaskLoopChan chan int
 
-	rootCoord  types.RootCoord
-	dataCoord  types.DataCoord
-	indexCoord types.IndexCoord
+	broker *globalMetaBroker
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -144,13 +141,11 @@ type TaskScheduler struct {
 }
 
 // NewTaskScheduler reloads tasks from kv and returns a new taskScheduler
-func NewTaskScheduler(ctx context.Context,
+func newTaskScheduler(ctx context.Context,
 	meta Meta,
 	cluster Cluster,
 	kv *etcdkv.EtcdKV,
-	rootCoord types.RootCoord,
-	dataCoord types.DataCoord,
-	indexCoord types.IndexCoord,
+	broker *globalMetaBroker,
 	idAllocator func() (UniqueID, error)) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	taskChan := make(chan task, 1024)
@@ -164,11 +159,9 @@ func NewTaskScheduler(ctx context.Context,
 		activateTaskChan:         taskChan,
 		client:                   kv,
 		stopActivateTaskLoopChan: stopTaskLoopChan,
-		rootCoord:                rootCoord,
-		dataCoord:                dataCoord,
-		indexCoord:               indexCoord,
+		broker:                   broker,
 	}
-	s.triggerTaskQueue = NewTaskQueue()
+	s.triggerTaskQueue = newTaskQueue()
 
 	err := s.reloadFromKV()
 	if err != nil {
@@ -277,9 +270,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		loadCollectionTask := &loadCollectionTask{
 			baseTask:              baseTask,
 			LoadCollectionRequest: &loadReq,
-			rootCoord:             scheduler.rootCoord,
-			dataCoord:             scheduler.dataCoord,
-			indexCoord:            scheduler.indexCoord,
+			broker:                scheduler.broker,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -293,9 +284,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		loadPartitionTask := &loadPartitionTask{
 			baseTask:              baseTask,
 			LoadPartitionsRequest: &loadReq,
-			rootCoord:             scheduler.rootCoord,
-			dataCoord:             scheduler.dataCoord,
-			indexCoord:            scheduler.indexCoord,
+			broker:                scheduler.broker,
 			cluster:               scheduler.cluster,
 			meta:                  scheduler.meta,
 		}
@@ -311,7 +300,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			ReleaseCollectionRequest: &loadReq,
 			cluster:                  scheduler.cluster,
 			meta:                     scheduler.meta,
-			rootCoord:                scheduler.rootCoord,
+			broker:                   scheduler.broker,
 		}
 		newTask = releaseCollectionTask
 	case commonpb.MsgType_ReleasePartitions:
@@ -409,9 +398,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		loadBalanceTask := &loadBalanceTask{
 			baseTask:           baseTask,
 			LoadBalanceRequest: &loadReq,
-			rootCoord:          scheduler.rootCoord,
-			dataCoord:          scheduler.dataCoord,
-			indexCoord:         scheduler.indexCoord,
+			broker:             scheduler.broker,
 			cluster:            scheduler.cluster,
 			meta:               scheduler.meta,
 		}
@@ -425,7 +412,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		handoffTask := &handoffTask{
 			baseTask:               baseTask,
 			HandoffSegmentsRequest: &handoffReq,
-			dataCoord:              scheduler.dataCoord,
+			broker:                 scheduler.broker,
 			cluster:                scheduler.cluster,
 			meta:                   scheduler.meta,
 		}

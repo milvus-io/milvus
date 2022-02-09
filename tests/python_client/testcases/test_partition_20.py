@@ -811,3 +811,36 @@ class TestPartitionOperations(TestcaseBase):
         """
         pass
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("data", [cf.gen_default_list_data(nb=3000)])
+    @pytest.mark.parametrize("index_param", cf.gen_simple_index())
+    def test_partition_delete_indexed_data(self, data, index_param):
+        """
+        target: verify delete entities with an expression condition from an indexed partition
+        method: 1. create collection
+                2. create an index
+                3. create a partition
+                4. insert same data
+                5. delete entities with an expression condition
+        expected: delete successfully
+        issue #15456
+        """
+        # create collection
+        collection_w = self.init_collection_wrap()
+
+        # create index of collection
+        collection_w.create_index(ct.default_float_vec_field_name, index_param)
+
+        # create partition
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
+
+        # insert data to partition
+        ins_res, _ = partition_w.insert(data)
+        assert len(ins_res.primary_keys) == len(data[0])
+
+        # delete entities with an expression condition
+        expr = "int64 in [0,1]"
+        res = partition_w.delete(expr)
+        assert len(res) == 2

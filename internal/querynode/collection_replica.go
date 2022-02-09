@@ -20,7 +20,8 @@ package querynode
 
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
 
-#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -38,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -291,11 +291,7 @@ func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]U
 	return collection.partitionIDs, nil
 }
 
-// getVecFieldIDsByCollectionID returns vector field ids of collection
-func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-
+func (colReplica *collectionReplica) getVecFieldIDsByCollectionIDPrivate(collectionID UniqueID) ([]FieldID, error) {
 	fields, err := colReplica.getFieldsByCollectionIDPrivate(collectionID)
 	if err != nil {
 		return nil, err
@@ -308,6 +304,14 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID U
 		}
 	}
 	return vecFields, nil
+}
+
+// getVecFieldIDsByCollectionID returns vector field ids of collection
+func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error) {
+	colReplica.mu.RLock()
+	defer colReplica.mu.RUnlock()
+
+	return colReplica.getVecFieldIDsByCollectionIDPrivate(collectionID)
 }
 
 // getPKFieldIDsByCollectionID returns vector field ids of collection
@@ -364,7 +368,7 @@ func (colReplica *collectionReplica) getSegmentInfosByColID(collectionID UniqueI
 			if !ok {
 				return nil, fmt.Errorf("the meta of partition %d and segment %d are inconsistent in QueryNode", partitionID, segmentID)
 			}
-			segmentInfo := getSegmentInfo(segment)
+			segmentInfo := colReplica.getSegmentInfo(segment)
 			segmentInfos = append(segmentInfos, segmentInfo)
 		}
 	}
@@ -512,7 +516,10 @@ func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID 
 	if err != nil {
 		return err
 	}
-	seg := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, onService)
+	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, onService)
+	if err != nil {
+		return err
+	}
 	return colReplica.addSegmentPrivate(segmentID, partitionID, seg)
 }
 
@@ -699,14 +706,20 @@ func newCollectionReplica(etcdKv *etcdkv.EtcdKV) ReplicaInterface {
 }
 
 // trans segment to queryPb.segmentInfo
-func getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
+func (colReplica *collectionReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
 	var indexName string
 	var indexID int64
 	// TODO:: segment has multi vec column
-	for fieldID := range segment.indexInfos {
-		indexName = segment.getIndexName(fieldID)
-		indexID = segment.getIndexID(fieldID)
-		break
+	vecFieldIDs, _ := colReplica.getVecFieldIDsByCollectionIDPrivate(segment.collectionID)
+	for _, fieldID := range vecFieldIDs {
+		if segment.hasLoadIndexForVecField(fieldID) {
+			fieldInfo, err := segment.getVectorFieldInfo(fieldID)
+			if err == nil {
+				indexName = fieldInfo.indexInfo.IndexName
+				indexID = fieldInfo.indexInfo.IndexID
+				break
+			}
+		}
 	}
 	info := &querypb.SegmentInfo{
 		SegmentID:    segment.ID(),
@@ -718,22 +731,7 @@ func getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
 		IndexName:    indexName,
 		IndexID:      indexID,
 		DmChannel:    segment.vChannelID,
-		SegmentState: getSegmentStateBySegmentType(segment.segmentType),
+		SegmentState: segment.segmentType,
 	}
 	return info
-}
-
-// TODO: remove segmentType and use queryPb.SegmentState instead
-func getSegmentStateBySegmentType(segType segmentType) commonpb.SegmentState {
-	switch segType {
-	case segmentTypeGrowing:
-		return commonpb.SegmentState_Growing
-	case segmentTypeSealed:
-		return commonpb.SegmentState_Sealed
-	// TODO: remove segmentTypeIndexing
-	case segmentTypeIndexing:
-		return commonpb.SegmentState_Sealed
-	default:
-		return commonpb.SegmentState_NotExist
-	}
 }

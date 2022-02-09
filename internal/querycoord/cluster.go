@@ -27,9 +27,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -79,7 +77,6 @@ type Cluster interface {
 	getSessionVersion() int64
 
 	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse
-	estimateSegmentsSize(segments *querypb.LoadSegmentsRequest) (int64, error)
 }
 
 type newQueryNodeFn func(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error)
@@ -96,7 +93,6 @@ type queryNodeCluster struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	client *etcdkv.EtcdKV
-	dataKV kv.DataKV
 
 	session        *sessionutil.Session
 	sessionVersion int64
@@ -108,7 +104,6 @@ type queryNodeCluster struct {
 	newNodeFn        newQueryNodeFn
 	segmentAllocator SegmentAllocatePolicy
 	channelAllocator ChannelAllocatePolicy
-	segSizeEstimator func(request *querypb.LoadSegmentsRequest, dataKV kv.DataKV) (int64, error)
 }
 
 func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdKV, newNodeFn newQueryNodeFn, session *sessionutil.Session, handler *channelUnsubscribeHandler) (Cluster, error) {
@@ -125,23 +120,8 @@ func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdK
 		newNodeFn:        newNodeFn,
 		segmentAllocator: defaultSegAllocatePolicy(),
 		channelAllocator: defaultChannelAllocatePolicy(),
-		segSizeEstimator: defaultSegEstimatePolicy(),
 	}
 	err := c.reloadFromKV()
-	if err != nil {
-		return nil, err
-	}
-
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	c.dataKV, err = minioKV.NewMinIOKV(ctx, option)
 	if err != nil {
 		return nil, err
 	}
@@ -716,45 +696,4 @@ func (c *queryNodeCluster) allocateSegmentsToQueryNode(ctx context.Context, reqs
 
 func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error {
 	return c.channelAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs)
-}
-
-func (c *queryNodeCluster) estimateSegmentsSize(segments *querypb.LoadSegmentsRequest) (int64, error) {
-	return c.segSizeEstimator(segments, c.dataKV)
-}
-
-func defaultSegEstimatePolicy() segEstimatePolicy {
-	return estimateSegmentsSize
-}
-
-type segEstimatePolicy func(request *querypb.LoadSegmentsRequest, dataKv kv.DataKV) (int64, error)
-
-func estimateSegmentsSize(segments *querypb.LoadSegmentsRequest, kvClient kv.DataKV) (int64, error) {
-	requestSize := int64(0)
-	for _, loadInfo := range segments.Infos {
-		segmentSize := int64(0)
-		// get which field has index file
-		vecFieldIndexInfo := make(map[int64]*querypb.VecFieldIndexInfo)
-		for _, indexInfo := range loadInfo.IndexInfos {
-			if indexInfo.EnableIndex {
-				fieldID := indexInfo.FieldID
-				vecFieldIndexInfo[fieldID] = indexInfo
-			}
-		}
-
-		for _, binlogPath := range loadInfo.BinlogPaths {
-			fieldID := binlogPath.FieldID
-			// if index node has built index, cal segment size by index file size, or use raw data's binlog size
-			if indexInfo, ok := vecFieldIndexInfo[fieldID]; ok {
-				segmentSize += indexInfo.IndexSize
-			} else {
-				for _, binlog := range binlogPath.Binlogs {
-					segmentSize += binlog.GetLogSize()
-				}
-			}
-		}
-		loadInfo.SegmentSize = segmentSize
-		requestSize += segmentSize
-	}
-
-	return requestSize, nil
 }

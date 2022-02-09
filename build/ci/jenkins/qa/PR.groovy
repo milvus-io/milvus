@@ -4,22 +4,21 @@ int total_timeout_minutes = 120
 int e2e_timeout_seconds = 70 * 60
 def imageTag=''
 int case_timeout_seconds = 10 * 60
-def chart_version='2.4.25'
+def chart_version='3.0.1'
+
 pipeline {
     options {
-        timestamps()
         timeout(time: total_timeout_minutes, unit: 'MINUTES')
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         parallelsAlwaysFailFast()
         preserveStashes(buildCount: 5)
-
     }
     agent {
             kubernetes {
                 label 'milvus-qa-e2e-test-pipeline'
                 inheritFrom 'default'
                 defaultContainer 'main'
-                yamlFile 'build/ci/jenkins/pod/qa/rte.yaml'
+                yamlFile 'build/ci/jenkins/qa/pod/rte.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
             }
     }
@@ -28,17 +27,12 @@ pipeline {
         SEMVER = "${BRANCH_NAME.contains('/') ? BRANCH_NAME.substring(BRANCH_NAME.lastIndexOf('/') + 1) : BRANCH_NAME}"
         DOCKER_BUILDKIT = 1
         ARTIFACTS = "${env.WORKSPACE}/_artifacts"
-        DOCKER_CREDENTIALS_ID = "f0aacc8e-33f2-458a-ba9e-2c44f431b4d2"
-        TARGET_REPO = "milvusdb"
-        // CI_DOCKER_CREDENTIAL_ID = "ci-docker-registry"
         CI_DOCKER_CREDENTIAL_ID = "qa-ci-docker-registry"
         MILVUS_HELM_NAMESPACE = "milvus-ci"
         DISABLE_KIND = true
-        // HUB = 'registry.milvus.io/milvus'
         HUB = 'harbor.zilliz.cc/milvus-ci'
         JENKINS_BUILD_ID = "${env.BUILD_ID}"
         CI_MODE="pr"
-        MIRROR_URL="http://10.201.20.246:5000"
     }
 
     stages {
@@ -108,7 +102,7 @@ pipeline {
                                                     try{
                                                         unstash 'imageTag'
                                                         imageTag=sh(returnStdout: true, script: 'cat imageTag.txt | tr -d \'\n\r\'')
-                                                    }catch(e){
+                                                    }catch (e){
                                                         print "No Image Tag info remained ,please rerun build to build new image."
                                                         exit 1
                                                     }
@@ -142,13 +136,13 @@ pipeline {
                             }
                         }
                     }
-                    stage('E2E Test'){
+                     stage('E2E Test'){
                         agent {
                                 kubernetes {
                                     label 'milvus-qa-e2e-test-pr'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
-                                    yamlFile 'build/ci/jenkins/pod/qa/rte.yaml'
+                                    yamlFile 'build/ci/jenkins/qa/pod/rte.yaml'
                                     customWorkspace '/home/jenkins/agent/workspace'
                                 }
                         }
@@ -177,23 +171,26 @@ pipeline {
                                 }
                             }
                         }
-
+                        post{
+                            always {
+                                container('pytest'){
+                                    dir("${env.ARTIFACTS}") {
+                                            sh "tar -zcvf ${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
+                                            archiveArtifacts artifacts: "${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ", allowEmptyArchive: true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 post{
                     always {
-                        container('pytest'){
-                            dir("${env.ARTIFACTS}") {
-                                    sh "tar -zcvf artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz /tmp/ci_logs/test --remove-files || true"
-                                    archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${MILVUS_CLIENT}-pytest-logs.tar.gz ", allowEmptyArchive: true
-                            }
-                        }
                         container('main') {
                             dir ('tests/scripts') {  
                                 script {
                                     def release_name=sh(returnStdout: true, script: './get_release_name.sh')
-                                    sh "./qa/uninstall_milvus.sh --release-name ${release_name}"
-                                    sh "./qa/ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
+                                    sh "./uninstall_milvus.sh --release-name ${release_name}"
+                                    sh "./ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
                                     --release-name ${release_name}"
                                     dir("${env.ARTIFACTS}") {
                                         archiveArtifacts artifacts: "artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs.tar.gz", allowEmptyArchive: true

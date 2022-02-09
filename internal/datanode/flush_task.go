@@ -153,6 +153,7 @@ func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBu
 					LogPath:       deltaLogs.GetLogPath(),
 					TimestampFrom: deltaLogs.GetTimestampFrom(),
 					TimestampTo:   deltaLogs.GetTimestampTo(),
+					EntriesNum:    deltaLogs.GetEntriesNum(),
 				},
 			}
 		}

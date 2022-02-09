@@ -78,7 +78,7 @@ const illegalRequestErrStr = "Illegal request"
 var _ types.DataNode = (*DataNode)(nil)
 
 // Params from config.yaml
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // DataNode communicates with outside services and unioun all
 // services in datanode package.

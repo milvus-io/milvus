@@ -217,9 +217,6 @@ func Test_NewServer(t *testing.T) {
 	server.querynode = mqn
 
 	t.Run("Run", func(t *testing.T) {
-		server.rootCoord = &MockRootCoord{}
-		server.indexCoord = &MockIndexCoord{}
-
 		err = server.Run()
 		assert.Nil(t, err)
 	})
@@ -319,28 +316,6 @@ func Test_Run(t *testing.T) {
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
-
-	server.querynode = &MockQueryNode{}
-	server.indexCoord = &MockIndexCoord{}
-	server.rootCoord = &MockRootCoord{initErr: errors.New("failed")}
-	assert.Panics(t, func() { err = server.Run() })
-
-	server.rootCoord = &MockRootCoord{startErr: errors.New("Failed")}
-	assert.Panics(t, func() { err = server.Run() })
-
-	server.querynode = &MockQueryNode{}
-	server.rootCoord = &MockRootCoord{}
-	server.indexCoord = &MockIndexCoord{initErr: errors.New("Failed")}
-	assert.Panics(t, func() { err = server.Run() })
-
-	server.indexCoord = &MockIndexCoord{startErr: errors.New("Failed")}
-	assert.Panics(t, func() { err = server.Run() })
-
-	server.indexCoord = &MockIndexCoord{}
-	server.rootCoord = &MockRootCoord{}
-	server.querynode = &MockQueryNode{initErr: errors.New("Failed")}
-	err = server.Run()
-	assert.Error(t, err)
 
 	server.querynode = &MockQueryNode{startErr: errors.New("Failed")}
 	err = server.Run()

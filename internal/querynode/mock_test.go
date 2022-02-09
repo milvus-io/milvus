@@ -172,7 +172,7 @@ func genFloatVectorField(param vecFieldParam) *schemapb.FieldSchema {
 	return fieldVec
 }
 
-func genSimpleIndexParams() indexParam {
+func genSimpleIndexParams() map[string]string {
 	indexParams := make(map[string]string)
 	indexParams["index_type"] = "IVF_PQ"
 	indexParams["index_mode"] = "cpu"
@@ -790,13 +790,16 @@ func genSealedSegment(schemaForCreate *schemapb.CollectionSchema,
 	vChannel Channel,
 	msgLength int) (*Segment, error) {
 	col := newCollection(collectionID, schemaForCreate)
-	seg := newSegment(col,
+	seg, err := newSegment(col,
 		segmentID,
 		partitionID,
 		collectionID,
 		vChannel,
 		segmentTypeSealed,
 		true)
+	if err != nil {
+		return nil, err
+	}
 	insertData, err := genInsertData(msgLength, schemaForLoad)
 	if err != nil {
 		return nil, err
@@ -879,7 +882,7 @@ func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterf
 	if err != nil {
 		return nil, err
 	}
-	return newSegmentLoader(ctx, newMockRootCoord(), newMockIndexCoord(), historicalReplica, streamingReplica, kv, msgstream.NewPmsFactory()), nil
+	return newSegmentLoader(ctx, historicalReplica, streamingReplica, kv, msgstream.NewPmsFactory()), nil
 }
 
 func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {

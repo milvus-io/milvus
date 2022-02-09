@@ -60,7 +60,7 @@ const (
 	indexSizeFactor = 6
 )
 
-var Params paramtable.GlobalParamTable
+var Params paramtable.ComponentParam
 
 // IndexCoord is a component responsible for scheduling index construction tasks and maintaining index status.
 // IndexCoord accepts requests from rootcoord to build indexes, delete indexes, and query index information.

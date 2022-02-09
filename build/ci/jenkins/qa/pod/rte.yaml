@@ -8,7 +8,7 @@ spec:
   enableServiceLinks: false
   containers:
   - name: main
-    image: harbor.zilliz.cc/dockerhub/milvusdb/krte:20211213-dcc15e9
+    image: harbor.zilliz.cc/ci/krte:20211213-dcc15e9
     env:
     - name: DOCKER_IN_DOCKER_ENABLED
       value: "true"
@@ -38,8 +38,10 @@ spec:
     - mountPath: /mnt/disk/.docker
       name: build-cache
       subPath: docker-volume
+    - mountPath: /ci-logs
+      name: ci-logs  
   - name: pytest
-    image: harbor.zilliz.cc/dockerhub/milvusdb/pytest:20220118-3eb5cc4
+    image: harbor.zilliz.cc/ci/pytest:20220128-6d9612d
     resources:
       limits:
         cpu: "6"
@@ -47,6 +49,9 @@ spec:
       requests:
         cpu: "0.5"
         memory: 5Gi
+    volumeMounts:
+    - mountPath: /ci-logs
+      name: ci-logs
   volumes:
   - emptyDir: {}
     name: docker-graph
@@ -64,3 +69,7 @@ spec:
       path: /sys/fs/cgroup
       type: Directory
     name: cgroup
+  - name: ci-logs
+    nfs:
+      path: /volume1/ci-logs
+      server: 172.16.70.249

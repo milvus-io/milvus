@@ -31,8 +31,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor
@@ -44,22 +46,18 @@ func TestSegment_newSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	assert.Nil(t, err)
 	assert.Equal(t, segmentID, segment.segmentID)
 	deleteSegment(segment)
 	deleteCollection(collection)
 
 	t.Run("test invalid type", func(t *testing.T) {
-		s := newSegment(collection,
-			defaultSegmentID,
-			defaultPartitionID,
-			collectionID, "", segmentTypeInvalid, true)
-		assert.Nil(t, s)
-		s = newSegment(collection,
+		_, err = newSegment(collection,
 			defaultSegmentID,
 			defaultPartitionID,
 			collectionID, "", 100, true)
-		assert.Nil(t, s)
+		assert.Error(t, err)
 	})
 }
 
@@ -71,8 +69,9 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	deleteSegment(segment)
 	deleteCollection(collection)
@@ -94,8 +93,9 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
 	timestamps := []Timestamp{0, 0, 0}
@@ -150,8 +150,9 @@ func TestSegment_retrieve(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{}
 	timestamps := []Timestamp{}
@@ -244,8 +245,9 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
 	timestamps := []uint64{0, 0, 0}
@@ -306,8 +308,9 @@ func TestSegment_getMemSize(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
 	timestamps := []uint64{0, 0, 0}
@@ -354,8 +357,9 @@ func TestSegment_segmentInsert(t *testing.T) {
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
 	timestamps := []uint64{0, 0, 0}
@@ -414,8 +418,9 @@ func TestSegment_segmentDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
 	timestamps := []uint64{0, 0, 0}
@@ -464,8 +469,9 @@ func TestSegment_segmentSearch(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
 	timestamps := []uint64{0, 0, 0}
@@ -570,8 +576,9 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	const DIM = 16
 	const N = 3
@@ -609,8 +616,9 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
 	timestamps := []uint64{0, 0, 0}
@@ -663,13 +671,14 @@ func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
 		},
 	}
 
-	seg := newSegment(newCollection(defaultCollectionID, schema),
+	seg, err := newSegment(newCollection(defaultCollectionID, schema),
 		defaultSegmentID,
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
 		segmentTypeSealed,
 		true)
+	assert.Nil(t, err)
 	pks := []IntPrimaryKey{1, 2, 3}
 	timestamps := []Timestamp{10, 10, 10}
 	var rowCount int64 = 3
@@ -867,9 +876,10 @@ func TestSegment_ConcurrentOperation(t *testing.T) {
 	wg := sync.WaitGroup{}
 	for i := 0; i < 100; i++ {
 		segmentID := UniqueID(i)
-		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
+		segment, err := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
 		assert.Equal(t, segmentID, segment.segmentID)
 		assert.Equal(t, partitionID, segment.partitionID)
+		assert.Nil(t, err)
 
 		wg.Add(2)
 		go func() {
@@ -886,134 +896,62 @@ func TestSegment_ConcurrentOperation(t *testing.T) {
 	deleteCollection(collection)
 }
 
-func TestSegment_indexInfoTest(t *testing.T) {
-	t.Run("Test_valid", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+func TestSegment_indexInfo(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		tSafe := newTSafeReplica()
-		h, err := genSimpleHistorical(ctx, tSafe)
-		assert.NoError(t, err)
+	tSafe := newTSafeReplica()
+	h, err := genSimpleHistorical(ctx, tSafe)
+	assert.NoError(t, err)
 
-		seg, err := h.replica.getSegmentByID(defaultSegmentID)
-		assert.NoError(t, err)
+	seg, err := h.replica.getSegmentByID(defaultSegmentID)
+	assert.NoError(t, err)
 
-		fieldID := simpleVecField.id
+	fieldID := simpleVecField.id
 
-		seg.setIndexInfo(fieldID, &indexInfo{})
+	indexName := "query-node-test-index"
+	indexParam := make(map[string]string)
+	indexParam["index_type"] = "IVF_PQ"
+	indexParam["index_mode"] = "cpu"
+	indexPaths := []string{"query-node-test-index-path"}
+	indexID := UniqueID(0)
+	buildID := UniqueID(0)
 
-		indexName := "query-node-test-index"
-		err = seg.setIndexName(fieldID, indexName)
-		assert.NoError(t, err)
-		name := seg.getIndexName(fieldID)
-		assert.Equal(t, indexName, name)
+	indexInfo := &querypb.VecFieldIndexInfo{
+		IndexName:      indexName,
+		IndexParams:    funcutil.Map2KeyValuePair(indexParam),
+		IndexFilePaths: indexPaths,
+		IndexID:        indexID,
+		BuildID:        buildID,
+	}
 
-		indexParam := make(map[string]string)
-		indexParam["index_type"] = "IVF_PQ"
-		indexParam["index_mode"] = "cpu"
-		err = seg.setIndexParam(fieldID, indexParam)
-		assert.NoError(t, err)
-		param := seg.getIndexParams(fieldID)
-		assert.Equal(t, len(indexParam), len(param))
-		assert.Equal(t, indexParam["index_type"], param["index_type"])
-		assert.Equal(t, indexParam["index_mode"], param["index_mode"])
+	seg.setVectorFieldInfo(fieldID, &VectorFieldInfo{indexInfo: indexInfo})
 
-		indexPaths := []string{"query-node-test-index-path"}
-		err = seg.setIndexPaths(fieldID, indexPaths)
-		assert.NoError(t, err)
-		paths := seg.getIndexPaths(fieldID)
-		assert.Equal(t, len(indexPaths), len(paths))
-		assert.Equal(t, indexPaths[0], paths[0])
-
-		indexID := UniqueID(0)
-		err = seg.setIndexID(fieldID, indexID)
-		assert.NoError(t, err)
-		id := seg.getIndexID(fieldID)
-		assert.Equal(t, indexID, id)
-
-		buildID := UniqueID(0)
-		err = seg.setBuildID(fieldID, buildID)
-		assert.NoError(t, err)
-		id = seg.getBuildID(fieldID)
-		assert.Equal(t, buildID, id)
-
-		// TODO: add match index test
-	})
-
-	t.Run("Test_invalid", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		tSafe := newTSafeReplica()
-		h, err := genSimpleHistorical(ctx, tSafe)
-		assert.NoError(t, err)
-
-		seg, err := h.replica.getSegmentByID(defaultSegmentID)
-		assert.NoError(t, err)
-
-		fieldID := simpleVecField.id
-
-		indexName := "query-node-test-index"
-		err = seg.setIndexName(fieldID, indexName)
-		assert.Error(t, err)
-		name := seg.getIndexName(fieldID)
-		assert.Equal(t, "", name)
-
-		indexParam := make(map[string]string)
-		indexParam["index_type"] = "IVF_PQ"
-		indexParam["index_mode"] = "cpu"
-		err = seg.setIndexParam(fieldID, indexParam)
-		assert.Error(t, err)
-		err = seg.setIndexParam(fieldID, nil)
-		assert.Error(t, err)
-		param := seg.getIndexParams(fieldID)
-		assert.Nil(t, param)
-
-		indexPaths := []string{"query-node-test-index-path"}
-		err = seg.setIndexPaths(fieldID, indexPaths)
-		assert.Error(t, err)
-		paths := seg.getIndexPaths(fieldID)
-		assert.Nil(t, paths)
-
-		indexID := UniqueID(0)
-		err = seg.setIndexID(fieldID, indexID)
-		assert.Error(t, err)
-		id := seg.getIndexID(fieldID)
-		assert.Equal(t, int64(-1), id)
-
-		buildID := UniqueID(0)
-		err = seg.setBuildID(fieldID, buildID)
-		assert.Error(t, err)
-		id = seg.getBuildID(fieldID)
-		assert.Equal(t, int64(-1), id)
-
-		seg.setIndexInfo(fieldID, &indexInfo{
-			readyLoad: true,
-		})
-
-		ready := seg.checkIndexReady(fieldID)
-		assert.True(t, ready)
-		ready = seg.checkIndexReady(FieldID(1000))
-		assert.False(t, ready)
-	})
+	fieldInfo, err := seg.getVectorFieldInfo(fieldID)
+	assert.Nil(t, err)
+	info := fieldInfo.indexInfo
+	assert.Equal(t, indexName, info.IndexName)
+	params := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+	assert.Equal(t, len(indexParam), len(params))
+	assert.Equal(t, indexParam["index_type"], params["index_type"])
+	assert.Equal(t, indexParam["index_mode"], params["index_mode"])
+	assert.Equal(t, len(indexPaths), len(info.IndexFilePaths))
+	assert.Equal(t, indexPaths[0], info.IndexFilePaths[0])
+	assert.Equal(t, indexID, info.IndexID)
+	assert.Equal(t, buildID, info.BuildID)
 }
 
 func TestSegment_BasicMetrics(t *testing.T) {
 	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
-	segment := newSegment(collection,
+	segment, err := newSegment(collection,
 		defaultSegmentID,
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
 		segmentTypeSealed,
 		true)
-
-	t.Run("test enable index", func(t *testing.T) {
-		segment.setEnableIndex(true)
-		enable := segment.getEnableIndex()
-		assert.True(t, enable)
-	})
+	assert.Nil(t, err)
 
 	t.Run("test id binlog row size", func(t *testing.T) {
 		size := int64(1024)
@@ -1060,13 +998,14 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 
 	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
-	segment := newSegment(collection,
+	segment, err := newSegment(collection,
 		defaultSegmentID,
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
 		segmentTypeSealed,
 		true)
+	assert.Nil(t, err)
 
 	vecCM, err := genVectorChunkManager(ctx)
 	assert.NoError(t, err)
@@ -1074,12 +1013,12 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 	t.Run("test fillVectorFieldsData float-vector invalid vectorChunkManager", func(t *testing.T) {
 		fieldID := FieldID(100)
 		fieldName := "float-vector-field-0"
-		segment.setIndexInfo(fieldID, &indexInfo{})
 		info := &VectorFieldInfo{
 			fieldBinlog: &datapb.FieldBinlog{
 				FieldID: fieldID,
 				Binlogs: []*datapb.Binlog{},
 			},
+			indexInfo: &querypb.VecFieldIndexInfo{EnableIndex: true},
 		}
 		segment.setVectorFieldInfo(fieldID, info)
 		fieldData := []*schemapb.FieldData{
@@ -1105,155 +1044,6 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 			FieldsData: fieldData,
 		}
 		err = segment.fillVectorFieldsData(defaultCollectionID, vecCM, result)
-		assert.Error(t, err)
-	})
-}
-
-func TestSegment_indexParam(t *testing.T) {
-	schema := genSimpleSegCoreSchema()
-	collection := newCollection(defaultCollectionID, schema)
-	segment := newSegment(collection,
-		defaultSegmentID,
-		defaultPartitionID,
-		defaultCollectionID,
-		defaultDMLChannel,
-		segmentTypeSealed,
-		true)
-
-	t.Run("test indexParam", func(t *testing.T) {
-		fieldID := rowIDFieldID
-		iParam := genSimpleIndexParams()
-		segment.indexInfos[fieldID] = &indexInfo{}
-		err := segment.setIndexParam(fieldID, iParam)
-		assert.NoError(t, err)
-		_ = segment.getIndexParams(fieldID)
-		match := segment.matchIndexParam(fieldID, iParam)
-		assert.True(t, match)
-		match = segment.matchIndexParam(FieldID(1000), nil)
-		assert.False(t, match)
-	})
-}
-
-func TestSegment_dropFieldData(t *testing.T) {
-	t.Run("test dropFieldData", func(t *testing.T) {
-		segment, err := genSimpleSealedSegment()
-		assert.NoError(t, err)
-		segment.setType(segmentTypeIndexing)
-		err = segment.dropFieldData(simpleVecField.id)
-		assert.NoError(t, err)
-	})
-
-	t.Run("test nil segment", func(t *testing.T) {
-		segment, err := genSimpleSealedSegment()
-		assert.NoError(t, err)
-		segment.segmentPtr = nil
-		err = segment.dropFieldData(simpleVecField.id)
-		assert.Error(t, err)
-	})
-
-	t.Run("test invalid segment type", func(t *testing.T) {
-		segment, err := genSimpleSealedSegment()
-		assert.NoError(t, err)
-		err = segment.dropFieldData(simpleVecField.id)
-		assert.Error(t, err)
-	})
-
-	t.Run("test invalid field", func(t *testing.T) {
-		segment, err := genSimpleSealedSegment()
-		assert.NoError(t, err)
-		segment.setType(segmentTypeIndexing)
-		err = segment.dropFieldData(FieldID(1000))
-		assert.Error(t, err)
-	})
-}
-
-func TestSegment_updateSegmentIndex(t *testing.T) {
-	t.Run("test updateSegmentIndex invalid", func(t *testing.T) {
-		schema := genSimpleSegCoreSchema()
-		collection := newCollection(defaultCollectionID, schema)
-		segment := newSegment(collection,
-			defaultSegmentID,
-			defaultPartitionID,
-			defaultCollectionID,
-			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
-
-		fieldID := rowIDFieldID
-		iParam := genSimpleIndexParams()
-		segment.indexInfos[fieldID] = &indexInfo{}
-		err := segment.setIndexParam(fieldID, iParam)
-		assert.NoError(t, err)
-
-		indexPaths := make([]string, 0)
-		indexPaths = append(indexPaths, "IVF")
-		err = segment.setIndexPaths(fieldID, indexPaths)
-		assert.NoError(t, err)
-
-		indexBytes, err := genIndexBinarySet()
-		assert.NoError(t, err)
-		err = segment.updateSegmentIndex(indexBytes, fieldID)
-		assert.Error(t, err)
-
-		segment.setType(segmentTypeGrowing)
-		err = segment.updateSegmentIndex(indexBytes, fieldID)
-		assert.Error(t, err)
-
-		segment.setType(segmentTypeSealed)
-		segment.segmentPtr = nil
-		err = segment.updateSegmentIndex(indexBytes, fieldID)
-		assert.Error(t, err)
-	})
-}
-
-func TestSegment_dropSegmentIndex(t *testing.T) {
-	t.Run("test dropSegmentIndex invalid segment type", func(t *testing.T) {
-		schema := genSimpleSegCoreSchema()
-		collection := newCollection(defaultCollectionID, schema)
-		segment := newSegment(collection,
-			defaultSegmentID,
-			defaultPartitionID,
-			defaultCollectionID,
-			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
-
-		fieldID := rowIDFieldID
-		err := segment.dropSegmentIndex(fieldID)
-		assert.Error(t, err)
-	})
-
-	t.Run("test dropSegmentIndex nil segment ptr", func(t *testing.T) {
-		schema := genSimpleSegCoreSchema()
-		collection := newCollection(defaultCollectionID, schema)
-		segment := newSegment(collection,
-			defaultSegmentID,
-			defaultPartitionID,
-			defaultCollectionID,
-			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
-
-		segment.segmentPtr = nil
-		fieldID := rowIDFieldID
-		err := segment.dropSegmentIndex(fieldID)
-		assert.Error(t, err)
-	})
-
-	t.Run("test dropSegmentIndex nil index", func(t *testing.T) {
-		schema := genSimpleSegCoreSchema()
-		collection := newCollection(defaultCollectionID, schema)
-		segment := newSegment(collection,
-			defaultSegmentID,
-			defaultPartitionID,
-			defaultCollectionID,
-			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
-		segment.setType(segmentTypeIndexing)
-
-		fieldID := rowIDFieldID
-		err := segment.dropSegmentIndex(fieldID)
 		assert.Error(t, err)
 	})
 }
