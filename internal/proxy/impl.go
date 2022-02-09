@@ -24,9 +24,8 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/logutil"
-
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/logutil"
 
 	"github.com/milvus-io/milvus/internal/util/trace"
 
