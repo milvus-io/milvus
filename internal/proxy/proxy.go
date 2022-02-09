@@ -154,10 +154,6 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("init session for Proxy done")
 
-	log.Debug("refresh configuration of Proxy")
-	Params.ProxyCfg.Refresh()
-	log.Debug("refresh configuration of Proxy done")
-
 	if node.queryCoord != nil {
 		log.Debug("create query channel for Proxy")
 		resp, err := node.queryCoord.CreateQueryChannel(node.ctx, &querypb.CreateQueryChannelRequest{})

@@ -817,9 +817,10 @@ func (sched *taskScheduler) collectResultLoop() {
 
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
 	// proxy didn't need to walk through all the search results in channel, because it no longer has client connections.
-	queryResultMsgStream.AsConsumerWithPosition(Params.ProxyCfg.SearchResultChannelNames, Params.ProxyCfg.ProxySubName, mqclient.SubscriptionPositionLatest)
+	consumeSubName := fmt.Sprintf("%s-%d", Params.MsgChannelCfg.ProxySubName, Params.ProxyCfg.ProxyID)
+	queryResultMsgStream.AsConsumerWithPosition(Params.ProxyCfg.SearchResultChannelNames, consumeSubName, mqclient.SubscriptionPositionLatest)
 	log.Debug("Proxy", zap.Strings("SearchResultChannelNames", Params.ProxyCfg.SearchResultChannelNames),
-		zap.Any("ProxySubName", Params.ProxyCfg.ProxySubName))
+		zap.Any("consumeSubName", consumeSubName))
 
 	queryResultMsgStream.Start()
 	defer queryResultMsgStream.Close()
