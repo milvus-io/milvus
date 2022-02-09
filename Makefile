@@ -195,6 +195,9 @@ clean:
 	@rm -rf bin/
 	@rm -rf lib/
 	@rm -rf $(GOPATH)/bin/milvus
+	@rm -rf cmake_build
+	@rm -rf cwrapper_rocksdb_build
+	@rm -rf cwrapper_build
 
 milvus-tools: print-build-info
 	@echo "Building tools ..."
