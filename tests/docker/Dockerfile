@@ -11,6 +11,8 @@
 
 FROM python:3.6.8-jessie
 
+RUN apt-get update && apt-get install -y jq
+
 COPY ./tests/python_client/requirements.txt /requirements.txt
 
 RUN python3 -m pip install --no-cache-dir -r /requirements.txt
