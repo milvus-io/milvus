@@ -259,7 +259,6 @@ func (node *QueryNode) Init() error {
 			initError = err
 			return
 		}
-		Params.QueryNodeCfg.Refresh()
 
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
 		log.Debug("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))

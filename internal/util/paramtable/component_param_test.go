@@ -12,7 +12,6 @@
 package paramtable
 
 import (
-	"log"
 	"os"
 	"path"
 	"testing"
@@ -50,8 +49,12 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("knowhere simd type = %s", Params.SimdType)
 	})
 
-	t.Run("test knowhereConfig", func(t *testing.T) {
+	t.Run("test msgChannelConfig", func(t *testing.T) {
 		Params := CParams.MsgChannelCfg
+
+		// -- proxy --
+		assert.Equal(t, Params.ProxySubName, "by-dev-proxy")
+		t.Logf("ProxySubName: %s", Params.ProxySubName)
 
 		// -- rootcoord --
 		assert.Equal(t, Params.RootCoordTimeTick, "by-dev-rootcoord-timetick")
@@ -83,6 +86,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.QueryNodeStats, "by-dev-query-node-stats")
 		t.Logf("querynode stats channel = %s", Params.QueryNodeStats)
 
+		assert.Equal(t, Params.QueryNodeSubName, "by-dev-queryNode")
+		t.Logf("querynode subname = %s", Params.QueryNodeSubName)
+
 		// -- datacoord --
 		assert.Equal(t, Params.DataCoordTimeTick, "by-dev-datacoord-timetick-channel")
 		t.Logf("datacoord timetick channel = %s", Params.DataCoordTimeTick)
@@ -92,6 +98,9 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.DataCoordSubName, "by-dev-dataCoord")
 		t.Logf("datacoord subname = %s", Params.DataCoordSubName)
+
+		assert.Equal(t, Params.DataNodeSubName, "by-dev-dataNode")
+		t.Logf("datanode subname = %s", Params.DataNodeSubName)
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -113,9 +122,6 @@ func TestComponentParam(t *testing.T) {
 		Params := CParams.ProxyCfg
 
 		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
-
-		assert.Equal(t, Params.ProxySubName, "by-dev-proxy-0")
-		t.Logf("ProxySubName: %s", Params.ProxySubName)
 
 		t.Logf("MsgStreamTimeTickBufSize: %d", Params.MsgStreamTimeTickBufSize)
 
@@ -204,11 +210,6 @@ func TestComponentParam(t *testing.T) {
 
 		maxParallelism := Params.FlowGraphMaxParallelism
 		assert.Equal(t, int32(1024), maxParallelism)
-
-		Params.QueryNodeID = 3
-		Params.initQueryNodeSubName()
-		name := Params.QueryNodeSubName
-		assert.Equal(t, name, "by-dev-queryNode")
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
@@ -219,35 +220,30 @@ func TestComponentParam(t *testing.T) {
 		Params := CParams.DataNodeCfg
 
 		Params.NodeID = 2
-		Params.Refresh()
 
 		id := Params.NodeID
-		log.Println("NodeID:", id)
+		t.Logf("NodeID: %d", id)
 
 		alias := Params.Alias
-		log.Println("Alias:", alias)
+		t.Logf("Alias: %s", alias)
 
 		length := Params.FlowGraphMaxQueueLength
-		log.Println("flowGraphMaxQueueLength:", length)
+		t.Logf("flowGraphMaxQueueLength: %d", length)
 
 		maxParallelism := Params.FlowGraphMaxParallelism
-		log.Println("flowGraphMaxParallelism:", maxParallelism)
+		t.Logf("flowGraphMaxParallelism: %d", maxParallelism)
 
 		size := Params.FlushInsertBufferSize
-		log.Println("FlushInsertBufferSize:", size)
+		t.Logf("FlushInsertBufferSize: %d", size)
 
 		path1 := Params.InsertBinlogRootPath
-		log.Println("InsertBinlogRootPath:", path1)
-
-		name := Params.DataNodeSubName
-		assert.Equal(t, name, "by-dev-dataNode-2")
-		log.Println("DataNodeSubName:", name)
+		t.Logf("InsertBinlogRootPath: %s", path1)
 
 		Params.CreatedTime = time.Now()
-		log.Println("CreatedTime: ", Params.CreatedTime)
+		t.Logf("CreatedTime: %v", Params.CreatedTime)
 
 		Params.UpdatedTime = time.Now()
-		log.Println("UpdatedTime: ", Params.UpdatedTime)
+		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
 
 		assert.Equal(t, path.Join("files", "insert_log"), Params.InsertBinlogRootPath)
 

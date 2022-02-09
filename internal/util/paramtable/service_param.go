@@ -30,8 +30,7 @@ const (
 	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
 )
 
-// BaseParamTable is a derived struct of BaseTable. It achieves Composition by
-// embedding BaseTable. It is used to quickly and easily access the system configuration.
+// ServiceParam is used to quickly and easily access all basic service configurations.
 type ServiceParam struct {
 	BaseTable
 
@@ -41,8 +40,6 @@ type ServiceParam struct {
 	MinioCfg   MinioConfig
 }
 
-// Init is an override method of BaseTable's Init. It mainly calls the
-// Init of BaseTable and do some other initialization.
 func (p *ServiceParam) Init() {
 	p.BaseTable.Init()
 

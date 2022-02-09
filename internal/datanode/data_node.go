@@ -213,7 +213,6 @@ func (node *DataNode) Init() error {
 		log.Error("DataNode init session failed", zap.Error(err))
 		return err
 	}
-	Params.DataNodeCfg.Refresh()
 
 	m := map[string]interface{}{
 		"PulsarAddress":  Params.PulsarCfg.Address,
@@ -227,7 +226,7 @@ func (node *DataNode) Init() error {
 		return err
 	}
 	log.Debug("DataNode Init",
-		zap.String("MsgChannelSubName", Params.DataNodeCfg.DataNodeSubName))
+		zap.String("MsgChannelSubName", Params.MsgChannelCfg.DataNodeSubName))
 
 	return nil
 }

@@ -362,7 +362,6 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup) {
 	p.InitOnce(typeutil.ProxyRole)
 	Params.InitOnce()
 	Params.ProxyCfg.NetworkAddress = p.GetAddress()
-	Params.ProxyCfg.Refresh()
 
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection

@@ -29,7 +29,7 @@ const (
 	DefaultRetentionDuration = 3600 * 24 * 5
 )
 
-// ComponentParam is used to quickly and easily access all system configuration.
+// ComponentParam is used to quickly and easily access all components' configurations.
 type ComponentParam struct {
 	ServiceParam
 	once sync.Once
@@ -134,6 +134,8 @@ type msgChannelConfig struct {
 
 	ClusterPrefix string
 
+	ProxySubName string
+
 	RootCoordTimeTick   string
 	RootCoordStatistics string
 	RootCoordDml        string
@@ -144,11 +146,13 @@ type msgChannelConfig struct {
 	QueryCoordSearchResult string
 	QueryCoordTimeTick     string
 	QueryNodeStats         string
+	QueryNodeSubName       string
 
 	DataCoordStatistic   string
 	DataCoordTimeTick    string
 	DataCoordSegmentInfo string
 	DataCoordSubName     string
+	DataNodeSubName      string
 }
 
 func (p *msgChannelConfig) init(base *BaseTable) {
@@ -156,6 +160,8 @@ func (p *msgChannelConfig) init(base *BaseTable) {
 
 	// must init cluster prefix first
 	p.initClusterPrefix()
+
+	p.initProxySubName()
 
 	p.initRootCoordTimeTick()
 	p.initRootCoordStatistics()
@@ -167,11 +173,13 @@ func (p *msgChannelConfig) init(base *BaseTable) {
 	p.initQueryCoordSearchResult()
 	p.initQueryCoordTimeTick()
 	p.initQueryNodeStats()
+	p.initQueryNodeSubName()
 
 	p.initDataCoordStatistic()
 	p.initDataCoordTimeTick()
 	p.initDataCoordSegmentInfo()
 	p.initDataCoordSubName()
+	p.initDataNodeSubName()
 }
 
 func (p *msgChannelConfig) initClusterPrefix() {
@@ -189,6 +197,11 @@ func (p *msgChannelConfig) initChanNamePrefix(cfg string) string {
 	}
 	s := []string{p.ClusterPrefix, value}
 	return strings.Join(s, "-")
+}
+
+// --- proxy ---
+func (p *msgChannelConfig) initProxySubName() {
+	p.ProxySubName = p.initChanNamePrefix("msgChannel.subNamePrefix.proxySubNamePrefix")
 }
 
 // --- rootcoord ---
@@ -230,6 +243,10 @@ func (p *msgChannelConfig) initQueryNodeStats() {
 	p.QueryNodeStats = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryNodeStats")
 }
 
+func (p *msgChannelConfig) initQueryNodeSubName() {
+	p.QueryNodeSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
+}
+
 // --- datacoord ---
 func (p *msgChannelConfig) initDataCoordStatistic() {
 	p.DataCoordStatistic = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordStatistic")
@@ -245,6 +262,10 @@ func (p *msgChannelConfig) initDataCoordSegmentInfo() {
 
 func (p *msgChannelConfig) initDataCoordSubName() {
 	p.DataCoordSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
+}
+
+func (p *msgChannelConfig) initDataNodeSubName() {
+	p.DataNodeSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -305,9 +326,6 @@ type proxyConfig struct {
 	BufFlagExpireTime        time.Duration
 	BufFlagCleanupInterval   time.Duration
 
-	// --- Channels ---
-	ProxySubName string
-
 	// required from QueryCoord
 	SearchResultChannelNames   []string
 	RetrieveResultChannelNames []string
@@ -323,8 +341,6 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.initTimeTickInterval()
 
-	p.initProxySubName()
-
 	p.initMsgStreamTimeTickBufSize()
 	p.initMaxNameLength()
 	p.initMaxFieldNum()
@@ -336,11 +352,6 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initBufFlagCleanupInterval()
 }
 
-// Refresh is called after session init
-func (p *proxyConfig) Refresh() {
-	p.initProxySubName()
-}
-
 // InitAlias initialize Alias member.
 func (p *proxyConfig) InitAlias(alias string) {
 	p.Alias = alias
@@ -349,19 +360,6 @@ func (p *proxyConfig) InitAlias(alias string) {
 func (p *proxyConfig) initTimeTickInterval() {
 	interval := p.Base.ParseIntWithDefault("proxy.timeTickInterval", 200)
 	p.TimeTickInterval = time.Duration(interval) * time.Millisecond
-}
-
-func (p *proxyConfig) initProxySubName() {
-	cluster, err := p.Base.Load("msgChannel.chanNamePrefix.cluster")
-	if err != nil {
-		panic(err)
-	}
-	subname, err := p.Base.Load("msgChannel.subNamePrefix.proxySubNamePrefix")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{cluster, subname, strconv.FormatInt(p.ProxyID, 10)}
-	p.ProxySubName = strings.Join(s, "-")
 }
 
 func (p *proxyConfig) initMsgStreamTimeTickBufSize() {
@@ -514,9 +512,6 @@ type queryNodeConfig struct {
 	// TODO: remove cacheSize
 	CacheSize int64 // deprecated
 
-	// channel prefix
-	QueryNodeSubName string
-
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 
@@ -563,8 +558,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initSearchPulsarBufSize()
 	p.initSearchResultReceiveBufSize()
 
-	p.initQueryNodeSubName()
-
 	p.initStatsPublishInterval()
 
 	p.initSegcoreChunkRows()
@@ -575,11 +568,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 // InitAlias initializes an alias for the QueryNode role.
 func (p *queryNodeConfig) InitAlias(alias string) {
 	p.Alias = alias
-}
-
-// Refresh is called after session init
-func (p *queryNodeConfig) Refresh() {
-	p.initQueryNodeSubName()
 }
 
 func (p *queryNodeConfig) initCacheSize() {
@@ -629,21 +617,6 @@ func (p *queryNodeConfig) initSearchPulsarBufSize() {
 
 func (p *queryNodeConfig) initSearchResultReceiveBufSize() {
 	p.SearchResultReceiveBufSize = p.Base.ParseInt64WithDefault("queryNode.msgStream.searchResult.recvBufSize", 64)
-}
-
-// ------------------------  channel names
-func (p *queryNodeConfig) initQueryNodeSubName() {
-	cluster, err := p.Base.Load("msgChannel.chanNamePrefix.cluster")
-	if err != nil {
-		panic(err)
-	}
-	subname, err := p.Base.Load("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
-	if err != nil {
-		log.Warn(err.Error())
-	}
-
-	s := []string{cluster, subname}
-	p.QueryNodeSubName = strings.Join(s, "-")
 }
 
 func (p *queryNodeConfig) initGracefulTime() {
@@ -792,9 +765,6 @@ type dataNodeConfig struct {
 	DeleteBinlogRootPath    string
 	Alias                   string // Different datanode in one machine
 
-	// Channel subscribition name -
-	DataNodeSubName string
-
 	// etcd
 	ChannelWatchSubPath string
 
@@ -812,13 +782,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initStatsBinlogRootPath()
 	p.initDeleteBinlogRootPath()
 
-	p.initDataNodeSubName()
 	p.initChannelWatchPath()
-}
-
-// Refresh is called after session init
-func (p *dataNodeConfig) Refresh() {
-	p.initDataNodeSubName()
 }
 
 // InitAlias init this DataNode alias
@@ -861,19 +825,6 @@ func (p *dataNodeConfig) initDeleteBinlogRootPath() {
 		panic(err)
 	}
 	p.DeleteBinlogRootPath = path.Join(rootPath, "delta_log")
-}
-
-func (p *dataNodeConfig) initDataNodeSubName() {
-	cluster, err := p.Base.Load("msgChannel.chanNamePrefix.cluster")
-	if err != nil {
-		panic(err)
-	}
-	subname, err := p.Base.Load("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
-	if err != nil {
-		panic(err)
-	}
-	s := []string{cluster, subname, strconv.FormatInt(p.NodeID, 10)}
-	p.DataNodeSubName = strings.Join(s, "-")
 }
 
 func (p *dataNodeConfig) initChannelWatchPath() {
