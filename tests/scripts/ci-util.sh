@@ -36,7 +36,7 @@ ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 function install_pytest_requirements(){
  echo "Install pytest requirements"
  cd ${ROOT}/tests/python_client
- python3 -m pip install --no-cache-dir -r requirements.txt
+ python3 -m pip install --no-cache-dir -r requirements.txt --timeout 30 --retries 6 
 }
 
 # Login in ci docker registry
