@@ -30,7 +30,6 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/shirou/gopsutil v3.21.8+incompatible
-	github.com/soothing-rain/gorocksdb v0.0.0-20220113075731-e68e68ed4c62 // indirect
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
 	github.com/spf13/viper v1.8.1
