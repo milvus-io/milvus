@@ -36,7 +36,7 @@ minio:
 pulsar:
   address: localhost # Address of pulsar
   port: 6650 # Port of pulsar
-  maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
+  maxMessageSize: 1048576 # 1024 * 1024 = 1 Mega Bytes, Maximum size of each message in pulsar.
 
 rocksmq:
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq

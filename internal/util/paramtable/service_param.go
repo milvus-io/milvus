@@ -27,7 +27,7 @@ import (
 
 const (
 	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
-	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
+	SuggestPulsarMaxMessageSize = 1 * 1024 * 1024
 )
 
 // ServiceParam is used to quickly and easily access all basic service configurations.

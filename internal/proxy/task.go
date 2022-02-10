@@ -773,7 +773,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstream.MsgPack) (*msgstream.MsgPack, error) {
+func (it *insertTask) assignSegmentID(stream msgstream.MsgStream, pack *msgstream.MsgPack) (*msgstream.MsgPack, error) {
 	newPack := &msgstream.MsgPack{
 		BeginTs:        pack.BeginTs,
 		EndTs:          pack.EndTs,
@@ -1040,7 +1040,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// Assign SegmentID
 	var pack *msgstream.MsgPack
-	pack, err = it._assignSegmentID(stream, &msgPack)
+	pack, err = it.assignSegmentID(stream, &msgPack)
 	if err != nil {
 		return err
 	}
