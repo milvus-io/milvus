@@ -940,7 +940,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	for _, sid := range req.GetSegmentIDs() {
 		segment := s.meta.GetSegment(sid)
 		// segment is nil if it was compacted
-		if segment == nil || segment.GetState() == commonpb.SegmentState_Flushed ||
+		if segment == nil || segment.GetState() == commonpb.SegmentState_Flushing ||
 			segment.GetState() == commonpb.SegmentState_Flushed {
 			continue
 		}
