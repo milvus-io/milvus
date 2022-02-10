@@ -102,8 +102,6 @@ type MetaReplica struct {
 	//sync.RWMutex
 	collectionInfos   map[UniqueID]*querypb.CollectionInfo
 	collectionMu      sync.RWMutex
-	segmentInfos      map[UniqueID]*querypb.SegmentInfo
-	segmentMu         sync.RWMutex
 	queryChannelInfos map[UniqueID]*querypb.QueryChannelInfo
 	channelMu         sync.RWMutex
 	deltaChannelInfos map[UniqueID][]*datapb.VchannelInfo
@@ -113,13 +111,13 @@ type MetaReplica struct {
 	queryStreams      map[UniqueID]msgstream.MsgStream
 	streamMu          sync.RWMutex
 
+	segmentsInfo *segmentsInfo
 	//partitionStates map[UniqueID]*querypb.PartitionStates
 }
 
 func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
-	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
 	deltaChannelInfos := make(map[UniqueID][]*datapb.VchannelInfo)
 	dmChannelInfos := make(map[string]*querypb.DmChannelWatchInfo)
@@ -133,11 +131,12 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAll
 		idAllocator: idAllocator,
 
 		collectionInfos:   collectionInfos,
-		segmentInfos:      segmentInfos,
 		queryChannelInfos: queryChannelInfos,
 		deltaChannelInfos: deltaChannelInfos,
 		dmChannelInfos:    dmChannelInfos,
 		queryStreams:      queryMsgStream,
+
+		segmentsInfo: newSegmentsInfo(kv),
 	}
 
 	err := m.reloadFromKV()
@@ -167,21 +166,8 @@ func (m *MetaReplica) reloadFromKV() error {
 		m.collectionInfos[collectionID] = collectionInfo
 	}
 
-	segmentKeys, segmentValues, err := m.client.LoadWithPrefix(util.SegmentMetaPrefix)
-	if err != nil {
+	if err := m.segmentsInfo.loadSegments(); err != nil {
 		return err
-	}
-	for index := range segmentKeys {
-		segmentID, err := strconv.ParseInt(filepath.Base(segmentKeys[index]), 10, 64)
-		if err != nil {
-			return err
-		}
-		segmentInfo := &querypb.SegmentInfo{}
-		err = proto.Unmarshal([]byte(segmentValues[index]), segmentInfo)
-		if err != nil {
-			return err
-		}
-		m.segmentInfos[segmentID] = segmentInfo
 	}
 
 	deltaChannelKeys, deltaChannelValues, err := m.client.LoadWithPrefix(deltaChannelMetaPrefix)
@@ -522,29 +508,17 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 	}
 
 	// save segmentInfo to etcd
-	segmentInfoKvs := make(map[string]string)
 	for _, infos := range saves {
 		for _, info := range infos {
-			segmentInfoBytes, err := proto.Marshal(info)
-			if err != nil {
-				return col2SegmentChangeInfos, err
+			if err := m.segmentsInfo.saveSegment(info); err != nil {
+				panic(err)
 			}
-			segmentKey := fmt.Sprintf("%s/%d/%d/%d", util.SegmentMetaPrefix, info.CollectionID, info.PartitionID, info.SegmentID)
-			segmentInfoKvs[segmentKey] = string(segmentInfoBytes)
-		}
-	}
-	for key, value := range segmentInfoKvs {
-		err := m.client.Save(key, value)
-		if err != nil {
-			panic(err)
 		}
 	}
 
 	// remove compacted segment info from etcd
 	for _, segmentInfo := range segmentsCompactionFrom {
-		segmentKey := fmt.Sprintf("%s/%d/%d/%d", util.SegmentMetaPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
-		err := m.client.Remove(segmentKey)
-		if err != nil {
+		if err := m.segmentsInfo.removeSegment(segmentInfo); err != nil {
 			panic(err)
 		}
 	}
@@ -568,18 +542,6 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 	if err != nil {
 		panic(err)
 	}
-
-	m.segmentMu.Lock()
-	for _, segmentInfos := range saves {
-		for _, info := range segmentInfos {
-			segmentID := info.SegmentID
-			m.segmentInfos[segmentID] = info
-		}
-	}
-	for _, segmentInfo := range segmentsCompactionFrom {
-		delete(m.segmentInfos, segmentInfo.SegmentID)
-	}
-	m.segmentMu.Unlock()
 
 	m.channelMu.Lock()
 	for collectionID, channelInfo := range queryChannelInfosMap {
@@ -640,9 +602,7 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 
 	// remove meta from etcd
 	for _, info := range removes {
-		segmentKey := fmt.Sprintf("%s/%d/%d/%d", util.SegmentMetaPrefix, info.CollectionID, info.PartitionID, info.SegmentID)
-		err = m.client.Remove(segmentKey)
-		if err != nil {
+		if err = m.segmentsInfo.removeSegment(info); err != nil {
 			panic(err)
 		}
 	}
@@ -663,12 +623,6 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 	if err != nil {
 		panic(err)
 	}
-
-	m.segmentMu.Lock()
-	for _, info := range removes {
-		delete(m.segmentInfos, info.SegmentID)
-	}
-	m.segmentMu.Unlock()
 
 	m.channelMu.Lock()
 	m.queryChannelInfos[collectionID] = queryChannelInfo
@@ -727,52 +681,41 @@ func (m *MetaReplica) sendSealedSegmentChangeInfos(collectionID UniqueID, queryC
 }
 
 func (m *MetaReplica) showSegmentInfos(collectionID UniqueID, partitionIDs []UniqueID) []*querypb.SegmentInfo {
-	m.segmentMu.RLock()
-	defer m.segmentMu.RUnlock()
-
-	results := make([]*querypb.SegmentInfo, 0)
-	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _, info := range m.segmentInfos {
-		if info.CollectionID == collectionID {
-			segmentInfos = append(segmentInfos, proto.Clone(info).(*querypb.SegmentInfo))
-		}
-	}
-	if len(partitionIDs) == 0 {
-		return segmentInfos
+	ignorePartitionCmp := len(partitionIDs) == 0
+	partitionFilter := make(map[int64]struct{})
+	for _, pid := range partitionIDs {
+		partitionFilter[pid] = struct{}{}
 	}
 
-	partitionIDMap := getCompareMapFromSlice(partitionIDs)
-	for _, info := range segmentInfos {
-		partitionID := info.PartitionID
-		if _, ok := partitionIDMap[partitionID]; ok {
-			results = append(results, info)
+	segments := m.segmentsInfo.getSegments()
+	var res []*querypb.SegmentInfo
+	for _, segment := range segments {
+		_, ok := partitionFilter[segment.GetPartitionID()]
+		if (ignorePartitionCmp || ok) && segment.GetCollectionID() == collectionID {
+			res = append(res, segment)
 		}
 	}
-	return results
+	return res
 }
 
 func (m *MetaReplica) getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error) {
-	m.segmentMu.RLock()
-	defer m.segmentMu.RUnlock()
-
-	if info, ok := m.segmentInfos[segmentID]; ok {
-		return proto.Clone(info).(*querypb.SegmentInfo), nil
+	segment := m.segmentsInfo.getSegment(segmentID)
+	if segment != nil {
+		return segment, nil
 	}
 
 	return nil, errors.New("getSegmentInfoByID: can't find segmentID in segmentInfos")
 }
-func (m *MetaReplica) getSegmentInfosByNode(nodeID int64) []*querypb.SegmentInfo {
-	m.segmentMu.RLock()
-	defer m.segmentMu.RUnlock()
 
-	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _, info := range m.segmentInfos {
-		if info.NodeID == nodeID {
-			segmentInfos = append(segmentInfos, proto.Clone(info).(*querypb.SegmentInfo))
+func (m *MetaReplica) getSegmentInfosByNode(nodeID int64) []*querypb.SegmentInfo {
+	var res []*querypb.SegmentInfo
+	segments := m.segmentsInfo.getSegments()
+	for _, segment := range segments {
+		if segment.GetNodeID() == nodeID {
+			res = append(res, segment)
 		}
 	}
-
-	return segmentInfos
+	return res
 }
 
 func (m *MetaReplica) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {
