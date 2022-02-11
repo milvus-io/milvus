@@ -99,6 +99,8 @@ pulsar:
         # memory: "8Gi"
   bookkeeper:
     volumes:
+      journal:
+        existingStorageClassName: local-path
       ledgers:
         existingStorageClassName: local-path
     resources:
@@ -152,6 +154,9 @@ minio:
       # cpu: "0.6"
       # memory: "512Mi"
 standalone:
+  persistence:
+    persistentVolumeClaim:
+      storageClass: local-path
   resources:
     requests:
       cpu: "1"
