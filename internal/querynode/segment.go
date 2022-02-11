@@ -320,8 +320,16 @@ func HandleCProto(cRes *C.CProto, msg proto.Message) error {
 	// Standalone CProto is protobuf created by C side,
 	// Passed from c side
 	// memory is managed manually
-	blob := C.GoBytes(unsafe.Pointer(cRes.proto_blob), C.int32_t(cRes.proto_size))
 	defer C.free(cRes.proto_blob)
+
+	const maxLen = 0x7fffffff
+	var blob []byte
+	if cRes.proto_size > maxLen {
+		blob = C.GoBytes(cRes.proto_blob, C.int32_t(cRes.proto_size))
+	} else {
+		blob = (*[maxLen]byte)(cRes.proto_blob)[:cRes.proto_size:cRes.proto_size]
+	}
+
 	return proto.Unmarshal(blob, msg)
 }
 
