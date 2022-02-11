@@ -36,6 +36,12 @@ ROOT="$( cd -P "$( dirname "$SOURCE" )/../.." && pwd )"
 function install_pytest_requirements(){
  echo "Install pytest requirements"
  cd ${ROOT}/tests/python_client
+ 
+export PIP_TRUSTED_HOST="nexus-nexus-repository-manager.nexus"
+export PIP_INDEX_URL="http://nexus-nexus-repository-manager.nexus:8081/repository/pypi-all/simple"
+export PIP_INDEX="http://nexus-nexus-repository-manager.nexus:8081/repository/pypi-all/pypi"
+export PIP_FIND_LINKS="http://nexus-nexus-repository-manager.nexus:8081/repository/pypi-all/pypi"
+
  python3 -m pip install --no-cache-dir -r requirements.txt --timeout 30 --retries 6 
 }
 
