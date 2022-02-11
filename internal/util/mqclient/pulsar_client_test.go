@@ -27,12 +27,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.uber.org/zap"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -659,6 +659,6 @@ func TestPulsarClient_SubscribeExclusiveFail(t *testing.T) {
 
 		_, err := pc.Subscribe(ConsumerOptions{})
 		assert.Error(t, err)
-		assert.True(t, retry.IsUncoverable(err))
+		assert.True(t, retry.IsUnRecoverable(err))
 	})
 }

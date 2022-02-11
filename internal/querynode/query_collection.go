@@ -84,7 +84,7 @@ type queryCollection struct {
 
 	localChunkManager  storage.ChunkManager
 	remoteChunkManager storage.ChunkManager
-	vectorChunkManager storage.ChunkManager
+	vectorChunkManager *storage.VectorChunkManager
 	localCacheEnabled  bool
 
 	globalSegmentManager *globalSealedSegmentManager
@@ -166,6 +166,12 @@ func (q *queryCollection) close() {
 	// 	q.queryResultMsgStream.Close()
 	// }
 	q.globalSegmentManager.close()
+	if q.vectorChunkManager != nil {
+		err := q.vectorChunkManager.Close()
+		if err != nil {
+			log.Warn("close vector chunk manager error occurs", zap.Error(err))
+		}
+	}
 }
 
 // registerCollectionTSafe registers tSafe watcher if vChannels exists

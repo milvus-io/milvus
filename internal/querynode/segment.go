@@ -386,8 +386,8 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 			case schemapb.DataType_BinaryVector:
 				rowBytes := dim / 8
 				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
-				content := make([]byte, rowBytes)
-				if _, err = vcm.ReadAt(vecPath, content, offset*rowBytes); err != nil {
+				content, err := vcm.ReadAt(vecPath, offset*rowBytes, rowBytes)
+				if err != nil {
 					return err
 				}
 				resultLen := dim / 8
@@ -395,8 +395,8 @@ func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
 			case schemapb.DataType_FloatVector:
 				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
 				rowBytes := dim * 4
-				content := make([]byte, rowBytes)
-				if _, err = vcm.ReadAt(vecPath, content, offset*rowBytes); err != nil {
+				content, err := vcm.ReadAt(vecPath, offset*rowBytes, rowBytes)
+				if err != nil {
 					return err
 				}
 				floatResult := make([]float32, dim)

@@ -410,33 +410,41 @@ func genLocalChunkManager() (storage.ChunkManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	lcm := storage.NewLocalChunkManager(p)
+	lcm := storage.NewLocalChunkManager(storage.RootPath(p))
 
 	return lcm, nil
 }
 
 func genRemoteChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	client, err := genMinioKV(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rcm := storage.NewMinioChunkManager(client)
-
-	return rcm, nil
+	return storage.NewMinioChunkManager(
+		ctx,
+		storage.Address(Params.MinioCfg.Address),
+		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+		storage.UseSSL(Params.MinioCfg.UseSSL),
+		storage.BucketName(Params.MinioCfg.BucketName),
+		storage.CreateBucket(true))
 }
 
-func genVectorChunkManager(ctx context.Context) (storage.ChunkManager, error) {
+func genVectorChunkManager(ctx context.Context) (*storage.VectorChunkManager, error) {
 	p, err := Params.Load("storage.path")
 	if err != nil {
 		return nil, err
 	}
-	lcm := storage.NewLocalChunkManager(p)
+	lcm := storage.NewLocalChunkManager(storage.RootPath(p))
 
-	client, err := genMinioKV(ctx)
+	rcm, err := storage.NewMinioChunkManager(
+		ctx,
+		storage.Address(Params.MinioCfg.Address),
+		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+		storage.UseSSL(Params.MinioCfg.UseSSL),
+		storage.BucketName(Params.MinioCfg.BucketName),
+		storage.CreateBucket(true))
+
 	if err != nil {
 		return nil, err
 	}
-	rcm := storage.NewMinioChunkManager(client)
 
 	schema := genSimpleInsertDataSchema()
 	vcm := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
