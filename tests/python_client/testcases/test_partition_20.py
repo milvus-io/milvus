@@ -844,3 +844,218 @@ class TestPartitionOperations(TestcaseBase):
         expr = "int64 in [0,1]"
         res = partition_w.delete(expr)
         assert len(res) == 2
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_create_partition_repeat(self):
+        """
+        target: test create partition, check status returned
+        method: call function: create_partition
+        expected: status is ok
+        """
+
+        # create partition
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+
+        partition_w = self.init_partition_wrap(collection_w,partition_name)
+        partition_e = self.init_partition_wrap(collection_w,partition_w.name)
+
+    
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_create_partition_name_name_none(self):
+        """
+        target: test create partition,partition name set None, check status returned
+        method: call function: create_partition
+        expected: status ok
+        """
+        
+        collection_w = self.init_collection_wrap()
+        partition_name = None
+        partition_w = self.init_partition_wrap(collection_w,partition_name)
+
+
+class TestShowBase(TestcaseBase):
+
+    """
+    ******************************************************************
+      The following cases are used to test list partition
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_list_partitions(self):
+        """
+        target: test show partitions, check status and partitions returned
+        method: create partition first, then call : collection.partitions
+        expected: status ok, partition correct
+        """
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+
+        partition_w = self.init_partition_wrap(collection_w,partition_name)
+        assert collection_w.partitions
+
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_show_multi_partitions(self):
+        """
+        target: test show partitions, check status and partitions returned
+        method: create partitions first, then call : collection.partitions
+        expected: status ok, partitions correct
+        """
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+
+        partition_w = self.init_partition_wrap(collection_w,partition_name)
+        partition_e = self.init_partition_wrap(collection_w,partition_name)
+
+        assert collection_w.partitions
+
+        
+
+class TestHasBase(TestcaseBase):
+
+    """
+    ******************************************************************
+      The following cases are used to test `has_partition` function
+    ******************************************************************
+    """
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_has_partition_a(self):
+        """
+        target: test has_partition, check status and result
+        method: create partition first, then call function: has_partition
+        expected: status ok, result true
+        """
+        collection_w = self.init_collection_wrap()
+
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_w.name)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_has_partition_multi_partitions(self):
+        """
+        target: test has_partition, check status and result
+        method: create partition first, then call function: has_partition
+        expected: status ok, result true
+        """
+        collection_w = self.init_collection_wrap()
+
+        partition_name = cf.gen_unique_str(prefix)
+
+        partition_w1 = self.init_partition_wrap(collection_w, partition_name)
+        partition_w2 = self.init_partition_wrap(collection_w, partition_name)
+       
+        assert collection_w.has_partition(partition_w1.name)
+        assert collection_w.has_partition(partition_w2.name)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_has_partition_name_not_existed(self):
+        """
+        target: test has_partition, check status and result
+        method: then call function: has_partition, with partition name not existed
+        expected: status ok, result empty
+        """
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        assert not collection_w.has_partition(partition_name)[0]
+
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_has_partition_collection_not_existed(self):
+        """
+        target: test has_partition, check status and result
+        method: then call function: has_partition, with collection not existed
+        expected: status not ok
+        """
+
+        collection_w = self.init_collection_wrap()
+        collection_e = self.init_collection_wrap()
+
+        partition_name = cf.gen_unique_str(prefix)
+        
+        partition_w1 = self.init_partition_wrap(collection_w, partition_name)
+
+        assert not collection_e.has_partition(partition_name)[0]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_has_partition_with_invalid_partition_name(self):
+        """
+        target: test has partition, with invalid partition name, check status returned
+        method: call function: has_partition
+        expected: status ok
+        """
+        collection_w = self.init_collection_wrap()
+        partition_name = ct.get_invalid_strs
+        collection_w.has_partition(partition_name, check_task=CheckTasks.err_res,
+                                           check_items={ct.err_code: 1, 'err_msg': "is illegal"})
+
+
+class TestDropBase(TestcaseBase):
+
+    """
+    ******************************************************************
+      The following cases are used to test `drop_partition` function
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_partition_repeatedly(self):
+        """
+        target: test drop partition twice, check status and partition if existed
+        method: create partitions first, then call function: drop_partition
+        expected: status not ok, no partitions in db
+        """    
+        collection_w = self.init_collection_wrap()
+
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w,partition_name)
+
+        # drop partition
+        collection_w.drop_partition(partition_w.name)
+
+        # check that the partition not exists
+        assert not collection_w.has_partition(partition_name)[0]
+
+        collection_w.drop_partition(partition_w.name, check_task=CheckTasks.err_res,
+                                               check_items={ct.err_code: 1, 'err_msg': "Partition not exist"})
+        
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_drop_partition_create(self):
+        """
+        target: test drop partition, and create again, check status
+        method: create partitions first, then call function: drop_partition, create_partition
+        expected: status is ok, partition in db
+        """
+        collection_w = self.init_collection_wrap()
+
+        partition_name = cf.gen_unique_str(prefix)
+
+        partition_w = self.init_partition_wrap(collection_w,partition_name)
+
+        collection_w.drop_partition(partition_w.name)
+
+        partition_w = self.init_partition_wrap(collection_w,partition_name)
+
+        assert collection_w.has_partition(partition_w.name)
+
+
+
+class TestNameInvalid(TestcaseBase):
+
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_partition_with_invalid_name(self):
+        """
+        target: test drop partition, with invalid partition name, check status returned
+        method: call function: drop_partition
+        expected: status not ok
+        """
+        collection_w = self.init_collection_wrap()
+        partition_name = ct.get_invalid_strs
+        collection_w.drop_partition(partition_name, check_task=CheckTasks.err_res,
+                                               check_items={ct.err_code: 1, 'err_msg': "is illegal"})
+        
+
+   
+        
