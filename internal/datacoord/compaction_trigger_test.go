@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -194,7 +195,7 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 					},
 					StartTime:        3,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
-					Type:             datapb.CompactionType_MergeCompaction,
+					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,
 					Channel:          "ch1",
 				},
@@ -262,7 +263,7 @@ func Test_compactionTrigger_forceTriggerCompaction(t *testing.T) {
 					},
 					StartTime:        3,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
-					Type:             datapb.CompactionType_InnerCompaction,
+					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,
 					Channel:          "ch1",
 				},
@@ -373,7 +374,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      300,
+									NumOfRows:      301,
 									MaxRowNum:      1000,
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushed,
@@ -424,7 +425,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 					},
 					StartTime:        3,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
-					Type:             datapb.CompactionType_InnerCompaction,
+					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,
 					Channel:          "ch1",
 				},
@@ -460,7 +461,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 					},
 					StartTime:        5,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
-					Type:             datapb.CompactionType_MergeCompaction,
+					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,
 					Channel:          "ch2",
 				},
@@ -522,7 +523,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      300,
+									NumOfRows:      301,
 									MaxRowNum:      1000,
 									InsertChannel:  "ch2",
 									State:          commonpb.SegmentState_Flushed,
@@ -653,7 +654,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 					},
 					StartTime:        3,
 					TimeoutInSeconds: maxCompactionTimeoutInSeconds,
-					Type:             datapb.CompactionType_MergeCompaction,
+					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,
 					Channel:          "ch2",
 				},
@@ -686,9 +687,35 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 			for _, plan := range gotPlans {
 				sortPlanCompactionBinlogs(plan)
 			}
-			assert.EqualValues(t, tt.wantPlans, gotPlans)
+			for _, wantPlan := range tt.wantPlans {
+				foundMatch := false
+				for _, gotPlan := range gotPlans {
+					if sameSegmentInfos(gotPlan.SegmentBinlogs, wantPlan.SegmentBinlogs) {
+						assert.Equal(t, wantPlan.Channel, gotPlan.Channel)
+						assert.Equal(t, wantPlan.Timetravel, gotPlan.Timetravel)
+						assert.Equal(t, wantPlan.TimeoutInSeconds, gotPlan.TimeoutInSeconds)
+						assert.Equal(t, wantPlan.Type, gotPlan.Type)
+						foundMatch = true
+					}
+				}
+				assert.True(t, foundMatch)
+			}
 		})
 	}
+}
+
+func sameSegmentInfos(s1, s2 []*datapb.CompactionSegmentBinlogs) bool {
+	if len(s1) != len(s2) {
+		return false
+	}
+
+	for idx, seg := range s1 {
+		if !proto.Equal(seg, s2[idx]) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
@@ -1079,10 +1106,12 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 				if tt.wantPlan {
 					assert.EqualValues(t, tt.wantBinlogs, plan.GetSegmentBinlogs())
 				} else {
+					t.Error("case not want plan but got one")
 					t.Fail()
 				}
 			case <-ctx.Done():
 				if tt.wantPlan {
+					t.Error("case want plan but got none")
 					t.Fail()
 				}
 			}

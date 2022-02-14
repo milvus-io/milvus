@@ -199,7 +199,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 		if err := c.handleInnerCompactionResult(plan, result); err != nil {
 			return err
 		}
-	case datapb.CompactionType_MergeCompaction:
+	case datapb.CompactionType_MergeCompaction, datapb.CompactionType_MixCompaction:
 		if err := c.handleMergeCompactionResult(plan, result); err != nil {
 			return err
 		}
@@ -208,7 +208,8 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	}
 	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
 	c.executingTaskNum--
-	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction {
+	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction ||
+		c.plans[planID].plan.GetType() == datapb.CompactionType_MixCompaction {
 		c.flushCh <- result.GetSegmentID()
 	}
 	// TODO: when to clean task list

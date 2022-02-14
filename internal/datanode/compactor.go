@@ -319,7 +319,7 @@ func (t *compactionTask) compact() error {
 		log.Error("compact wrong, there's no segments in segment binlogs")
 		return errIllegalCompactionPlan
 
-	case t.plan.GetType() == datapb.CompactionType_MergeCompaction:
+	case t.plan.GetType() == datapb.CompactionType_MergeCompaction || t.plan.GetType() == datapb.CompactionType_MixCompaction:
 		targetSegID, err = t.allocID()
 		if err != nil {
 			log.Error("compact wrong", zap.Error(err))
