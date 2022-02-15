@@ -296,6 +296,7 @@ if [[ -z "${SKIP_BUILD:-}" ]]; then
     trace "setup kind registry" setup_kind_registry
   fi 
     pushd "${ROOT}"
+      trace "docker pull builder " docker-compose pull --ignore-pull-failures builder
       trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "${BUILD_COMMAND}"
     popd
   
