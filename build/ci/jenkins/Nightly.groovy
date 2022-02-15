@@ -3,9 +3,10 @@
 // When scheduling a job that gets automatically triggered by changes,
 // you need to include a [cronjob] tag within the commit message.
 String cron_timezone = 'TZ=Asia/Shanghai'
-String cron_string = BRANCH_NAME == "master" ? "50 22 * * * " : ""
+String cron_string = BRANCH_NAME == "master" ? "50 22,2 * * * " : ""
 
-int total_timeout_minutes = 660
+// Make timeout 4 hours so that we can run two nightly during the ci
+int total_timeout_minutes = 4 * 60
 def imageTag=''
 def chart_version='3.0.1'
 pipeline {
@@ -178,7 +179,7 @@ pipeline {
                                                     MILVUS_HELM_NAMESPACE="milvus-ci" \
                                                     MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                                     TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                                    ./ci_e2e.sh  "--workers 4 --tags L0 L1 L2 --repeat-scope=session --random-order-bucket=global"
+                                                    ./ci_e2e.sh  "-n 6 --tags L0 L1 L2 "
                                                     """
                                                 } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
