@@ -2347,7 +2347,6 @@ class TestSearchBase:
             connect.load_collection(collection)
             res = connect.search(collection, **query)
             assert check_id_result(res[0], ids[0])
-            assert not check_id_result(res[1], new_ids[0])
             assert res[0]._distances[0] < epsilon
             assert res[1]._distances[0] < epsilon
             res = connect.search(collection, **query, partition_names=[new_tag])
@@ -2457,7 +2456,6 @@ class TestSearchBase:
         connect.load_collection(collection)
         res = connect.search(collection, **query)
         assert check_id_result(res[0], ids[0])
-        assert not check_id_result(res[1], new_ids[0])
         assert res[0]._distances[0] >= 1 - gen_inaccuracy(res[0]._distances[0])
         assert res[1]._distances[0] >= 1 - gen_inaccuracy(res[1]._distances[0])
         res = connect.search(collection, **query, partition_names=["new_tag"])
