@@ -103,30 +103,30 @@ $ make milvus
 <table>
   <tr>
     <td width="30%">
-      <a href="https://zilliz.com/milvus-demos">
+      <a href="https://milvus.io/milvus-demos">
         <img src="https://assets.zilliz.com/image_search_59a64e4f22.gif" />
       </a>
     </td>
     <td width="30%">
-<a href="https://zilliz.com/milvus-demos">
+<a href="https://milvus.io/milvus-demos">
 <img src="https://assets.zilliz.com/qa_df5ee7bd83.gif" />
 </a>
     </td>
     <td width="30%">
-<a href="https://zilliz.com/milvus-demos">
+<a href="https://milvus.io/milvus-demos">
 <img src="https://assets.zilliz.com/mole_search_76f8340572.gif" />
 </a>
     </td>
   </tr>
   <tr>
     <th>
-      <a href="https://zilliz.com/milvus-demos">以图搜图系统</a>
+      <a href="https://milvus.io/milvus-demos">以图搜图系统</a>
     </th>
     <th>
-      <a href="https://zilliz.com/milvus-demos">智能问答机器人</a>
+      <a href="https://milvus.io/milvus-demos">智能问答机器人</a>
     </th>
     <th>
-      <a href="https://zilliz.com/milvus-demos">分子式检索系统</a>
+      <a href="https://milvus.io/milvus-demos">分子式检索系统</a>
     </th>
   </tr>
 </table>
