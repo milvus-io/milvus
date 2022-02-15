@@ -200,6 +200,7 @@ func (i *IndexCoord) Init() error {
 
 		}
 		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
+		// TODO silverxia add Rewatch logic
 		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
 		nodeTasks := i.metaTable.GetNodeTaskStats()
 		for nodeID, taskNum := range nodeTasks {
@@ -758,7 +759,12 @@ func (i *IndexCoord) watchNodeLoop() {
 			return
 		case event, ok := <-i.eventChan:
 			if !ok {
-				//TODO silverxia add retry
+				// ErrCompacted is handled inside SessionWatcher
+				log.Error("Session Watcher channel closed", zap.Int64("server id", i.session.ServerID))
+				go i.Stop()
+				if i.session.TriggerKill {
+					syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+				}
 				return
 			}
 			log.Debug("IndexCoord watchNodeLoop event updated")

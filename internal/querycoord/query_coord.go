@@ -367,13 +367,24 @@ func (qc *QueryCoord) watchNodeLoop() {
 		log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
 	}
 
+	// TODO silverxia add Rewatch logic
 	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, qc.cluster.getSessionVersion()+1, nil)
+	qc.handleNodeEvent(ctx)
+}
+
+func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case event, ok := <-qc.eventChan:
 			if !ok {
+				// ErrCompacted is handled inside SessionWatcher
+				log.Error("Session Watcher channel closed", zap.Int64("server id", qc.session.ServerID))
+				go qc.Stop()
+				if qc.session.TriggerKill {
+					syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+				}
 				return
 			}
 			switch event.EventType {

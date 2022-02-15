@@ -403,21 +403,18 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 		return err
 	}
 
-	// rewatch is nil, no logic to handle
-	if w.rewatch == nil {
-		log.Warn("Watch service with ErrCompacted but no rewatch logic provided")
-		close(w.eventCh)
-		return err
-	}
-
 	sessions, revision, err := w.s.GetSessions(w.prefix)
 	if err != nil {
 		log.Warn("GetSession before rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
 		close(w.eventCh)
 		return err
 	}
-
-	err = w.rewatch(sessions)
+	// rewatch is nil, no logic to handle
+	if w.rewatch == nil {
+		log.Warn("Watch service with ErrCompacted but no rewatch logic provided")
+	} else {
+		err = w.rewatch(sessions)
+	}
 	if err != nil {
 		log.Warn("WatchServices rewatch failed", zap.String("prefix", w.prefix), zap.Error(err))
 		close(w.eventCh)

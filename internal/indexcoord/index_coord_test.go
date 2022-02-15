@@ -19,7 +19,10 @@ package indexcoord
 import (
 	"context"
 	"math/rand"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -227,21 +230,37 @@ func TestIndexCoord_watchNodeLoop(t *testing.T) {
 		loopWg:    sync.WaitGroup{},
 		loopCtx:   context.Background(),
 		eventChan: ech,
+		session: &sessionutil.Session{
+			TriggerKill: true,
+			ServerID:    0,
+		},
 	}
 	in.loopWg.Add(1)
 
 	flag := false
-	signal := make(chan struct{}, 1)
+	closed := false
+	sigDone := make(chan struct{}, 1)
+	sigQuit := make(chan struct{}, 1)
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT)
+	defer signal.Reset(syscall.SIGINT)
+
 	go func() {
 		in.watchNodeLoop()
 		flag = true
-		signal <- struct{}{}
+		sigDone <- struct{}{}
+	}()
+	go func() {
+		<-sc
+		closed = true
+		sigQuit <- struct{}{}
 	}()
 
 	close(ech)
-	<-signal
+	<-sigDone
+	<-sigQuit
 	assert.True(t, flag)
-
+	assert.True(t, closed)
 }
 
 func TestIndexCoord_GetComponentStates(t *testing.T) {

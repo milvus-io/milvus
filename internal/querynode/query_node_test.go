@@ -20,8 +20,10 @@ import (
 	"context"
 	"math/rand"
 	"os"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // mock of query coordinator client
@@ -424,4 +427,81 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	})
 	wg.Wait()
+}
+
+func TestQueryNode_watchService(t *testing.T) {
+	t.Run("watch channel closed", func(t *testing.T) {
+		ech := make(chan *sessionutil.SessionEvent)
+		qn := &QueryNode{
+			session: &sessionutil.Session{
+				TriggerKill: true,
+				ServerID:    0,
+			},
+			wg:                  sync.WaitGroup{},
+			eventCh:             ech,
+			queryNodeLoopCancel: func() {},
+		}
+		flag := false
+		closed := false
+
+		sigDone := make(chan struct{}, 1)
+		sigQuit := make(chan struct{}, 1)
+		sc := make(chan os.Signal, 1)
+		signal.Notify(sc, syscall.SIGINT)
+
+		defer signal.Reset(syscall.SIGINT)
+
+		qn.wg.Add(1)
+
+		go func() {
+			qn.watchService(context.Background())
+			flag = true
+			sigDone <- struct{}{}
+		}()
+		go func() {
+			<-sc
+			closed = true
+			sigQuit <- struct{}{}
+		}()
+
+		close(ech)
+		<-sigDone
+		<-sigQuit
+		assert.True(t, flag)
+		assert.True(t, closed)
+	})
+
+	t.Run("context done", func(t *testing.T) {
+		ech := make(chan *sessionutil.SessionEvent)
+		qn := &QueryNode{
+			session: &sessionutil.Session{
+				TriggerKill: true,
+				ServerID:    0,
+			},
+			wg:      sync.WaitGroup{},
+			eventCh: ech,
+		}
+		flag := false
+
+		sigDone := make(chan struct{}, 1)
+		sc := make(chan os.Signal, 1)
+		signal.Notify(sc, syscall.SIGINT)
+
+		defer signal.Reset(syscall.SIGINT)
+
+		qn.wg.Add(1)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			qn.watchService(ctx)
+			flag = true
+			sigDone <- struct{}{}
+		}()
+
+		assert.False(t, flag)
+		cancel()
+		<-sigDone
+		assert.True(t, flag)
+	})
 }

@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/signal"
 	"path"
 	"strconv"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -611,25 +613,40 @@ func TestGetFlushedSegments(t *testing.T) {
 }
 
 func TestService_WatchServices(t *testing.T) {
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT)
+	defer signal.Reset(syscall.SIGINT)
 	factory := msgstream.NewPmsFactory()
 	svr := CreateServer(context.TODO(), factory)
+	svr.session = &sessionutil.Session{
+		TriggerKill: true,
+	}
 	svr.serverLoopWg.Add(1)
 
 	ech := make(chan *sessionutil.SessionEvent)
 	svr.eventCh = ech
 
 	flag := false
-	signal := make(chan struct{}, 1)
+	closed := false
+	sigDone := make(chan struct{}, 1)
+	sigQuit := make(chan struct{}, 1)
 
 	go func() {
 		svr.watchService(context.Background())
 		flag = true
-		signal <- struct{}{}
+		sigDone <- struct{}{}
+	}()
+	go func() {
+		<-sc
+		closed = true
+		sigQuit <- struct{}{}
 	}()
 
 	close(ech)
-	<-signal
+	<-sigDone
+	<-sigQuit
 	assert.True(t, flag)
+	assert.True(t, closed)
 
 	ech = make(chan *sessionutil.SessionEvent)
 
@@ -641,12 +658,12 @@ func TestService_WatchServices(t *testing.T) {
 	go func() {
 		svr.watchService(ctx)
 		flag = true
-		signal <- struct{}{}
+		sigDone <- struct{}{}
 	}()
 
 	ech <- nil
 	cancel()
-	<-signal
+	<-sigDone
 	assert.True(t, flag)
 }
 
