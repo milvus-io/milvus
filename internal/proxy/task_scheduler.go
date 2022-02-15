@@ -48,7 +48,7 @@ type taskQueue interface {
 	FrontUnissuedTask() task
 	PopUnissuedTask() task
 	AddActiveTask(t task)
-	PopActiveTask(tID UniqueID) task
+	PopActiveTask(taskID UniqueID) task
 	getTaskByReqID(reqID UniqueID) task
 	Enqueue(t task) error
 	setMaxTaskNum(num int64)
@@ -138,16 +138,16 @@ func (queue *baseTaskQueue) AddActiveTask(t task) {
 	queue.activeTasks[tID] = t
 }
 
-func (queue *baseTaskQueue) PopActiveTask(tID UniqueID) task {
+func (queue *baseTaskQueue) PopActiveTask(taskID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
-	t, ok := queue.activeTasks[tID]
+	t, ok := queue.activeTasks[taskID]
 	if ok {
-		delete(queue.activeTasks, tID)
+		delete(queue.activeTasks, taskID)
 		return t
 	}
 
-	log.Debug("Proxy task not in active task list! ts", zap.Any("tID", tID))
+	log.Debug("Proxy task not in active task list! ts", zap.Any("taskID", taskID))
 	return t
 }
 
@@ -253,19 +253,19 @@ func (queue *dmTaskQueue) Enqueue(t task) error {
 	return nil
 }
 
-func (queue *dmTaskQueue) PopActiveTask(tID UniqueID) task {
+func (queue *dmTaskQueue) PopActiveTask(taskID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
-	t, ok := queue.activeTasks[tID]
+	t, ok := queue.activeTasks[taskID]
 	if ok {
 		queue.statsLock.Lock()
 		defer queue.statsLock.Unlock()
 
-		delete(queue.activeTasks, tID)
-		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Any("tID", t.ID()))
+		delete(queue.activeTasks, taskID)
+		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Any("taskID", t.ID()))
 		queue.popPChanStats(t)
 	} else {
-		log.Debug("Proxy task not in active task list!", zap.Any("tID", tID))
+		log.Debug("Proxy task not in active task list!", zap.Any("taskID", taskID))
 	}
 	return t
 }
@@ -441,14 +441,14 @@ func (sched *taskScheduler) scheduleDqTask() task {
 	return sched.dqQueue.PopUnissuedTask()
 }
 
-func (sched *taskScheduler) getTaskByReqID(collMeta UniqueID) task {
-	if t := sched.ddQueue.getTaskByReqID(collMeta); t != nil {
+func (sched *taskScheduler) getTaskByReqID(reqID UniqueID) task {
+	if t := sched.ddQueue.getTaskByReqID(reqID); t != nil {
 		return t
 	}
-	if t := sched.dmQueue.getTaskByReqID(collMeta); t != nil {
+	if t := sched.dmQueue.getTaskByReqID(reqID); t != nil {
 		return t
 	}
-	if t := sched.dqQueue.getTaskByReqID(collMeta); t != nil {
+	if t := sched.dqQueue.getTaskByReqID(reqID); t != nil {
 		return t
 	}
 	return nil
