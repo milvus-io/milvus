@@ -435,17 +435,17 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		cpaths, err := mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
 		require.NoError(t, err)
 		require.Equal(t, 11, len(cpaths.inPaths))
+		segBinlogs := []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:           segID,
+				FieldBinlogs:        cpaths.inPaths,
+				Field2StatslogPaths: cpaths.statsPaths,
+				Deltalogs:           cpaths.deltaInfo,
+			}}
 
 		plan := &datapb.CompactionPlan{
-			PlanID: 10080,
-			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-				{
-					SegmentID:           segID,
-					FieldBinlogs:        cpaths.inPaths,
-					Field2StatslogPaths: cpaths.statsPaths,
-					Deltalogs:           cpaths.deltaInfo,
-				},
-			},
+			PlanID:           10080,
+			SegmentBinlogs:   segBinlogs,
 			StartTime:        0,
 			TimeoutInSeconds: 1,
 			Type:             datapb.CompactionType_InnerCompaction,
@@ -473,6 +473,21 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		planID := task.getPlanID()
 		assert.Equal(t, plan.GetPlanID(), planID)
 
+		err = mockKv.RemoveWithPrefix("/")
+		require.NoError(t, err)
+		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
+		require.NoError(t, err)
+		plan.PlanID = 999876
+		segmentBinlogsWithEmptySegment := []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID: segID,
+			},
+		}
+		plan.SegmentBinlogs = segmentBinlogsWithEmptySegment
+		err = task.compact()
+		assert.Error(t, err)
+
+		plan.SegmentBinlogs = segBinlogs
 		// New test, remove all the binlogs in memkv
 		//  Deltas in timetravel range
 		err = mockKv.RemoveWithPrefix("/")
@@ -500,6 +515,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		mockfm.sleepSeconds = plan.TimeoutInSeconds + int32(1)
 		err = task.compact()
 		assert.Error(t, err)
+
 	})
 
 	t.Run("Test typeII compact valid", func(t *testing.T) {

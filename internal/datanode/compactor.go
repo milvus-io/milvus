@@ -379,11 +379,22 @@ func (t *compactionTask) compact() error {
 	g, gCtx := errgroup.WithContext(ctxTimeout)
 	for _, s := range t.plan.GetSegmentBinlogs() {
 
-		// TODO may panic
-		fieldNum := len(s.GetFieldBinlogs()[0].GetBinlogs())
+		// Get the number of field binlog files from non-empty segment
+		var binlogNum int
+		for _, b := range s.GetFieldBinlogs() {
+			if b != nil {
+				binlogNum = len(b.GetBinlogs())
+				break
+			}
+		}
+		// Unable to deal with all empty segments cases, so return error
+		if binlogNum == 0 {
+			log.Error("compact wrong, all segments' binlogs are empty", zap.Int64("planID", t.plan.GetPlanID()))
+			return errIllegalCompactionPlan
+		}
 
-		for idx := 0; idx < fieldNum; idx++ {
-			ps := make([]string, 0, fieldNum)
+		for idx := 0; idx < binlogNum; idx++ {
+			var ps []string
 			for _, f := range s.GetFieldBinlogs() {
 				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
 			}
