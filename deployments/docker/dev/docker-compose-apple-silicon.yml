@@ -12,7 +12,7 @@ services:
       - "4001:4001"
 
   pulsar:
-    image: milvusdb/pulsar:v2.7.3-m1
+    image: milvusdb/pulsar:v2.8.2-m1
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
     environment:
