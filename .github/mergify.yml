@@ -181,3 +181,27 @@ pull_request_rules:
       comment:
         message: |
           @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
+
+
+
+
+  - name: Add `needs-rebase` label when more than one commit in pr
+    conditions:
+      - base=master
+      - "#commits>1"
+    actions:
+      comment:
+        message: |
+          @{{author}}, please be sure the pr should only have one commit, check https://github.com/milvus-io/milvus/blob/master/CODE_REVIEW.md for more details.
+      label:
+        add:
+          - needs-rebase
+
+  - name: Remove `needs-rebase` label when only one commit in pr
+    conditions:
+      - base=master
+      - "#commits=1"
+    actions:
+      label:
+        remove:
+          - needs-rebase
