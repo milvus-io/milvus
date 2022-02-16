@@ -285,6 +285,10 @@ install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder${CMAKE
         DESTINATION lib
 )
 
+install(FILES ${CMAKE_BINARY_DIR}/src/common/libmilvus_common${CMAKE_SHARED_LIBRARY_SUFFIX}
+        DESTINATION lib
+)
+
 # Install common
 install(
         DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/

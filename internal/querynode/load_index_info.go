@@ -18,13 +18,15 @@ package querynode
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
-#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
-#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/load_index_c.h"
+#include "common/vector_index_c.h"
 
 */
 import "C"
+
 import (
 	"path/filepath"
 	"unsafe"
@@ -108,9 +110,9 @@ func (li *LoadIndexInfo) appendIndexData(bytesIndex [][]byte, indexKeys []string
 		binarySetKey := filepath.Base(indexKeys[i])
 		log.Debug("", zap.String("index key", binarySetKey))
 		indexKey := C.CString(binarySetKey)
-		status = C.AppendBinaryIndex(cBinarySet, indexPtr, indexLen, indexKey)
+		status = C.AppendIndexBinary(cBinarySet, indexPtr, indexLen, indexKey)
 		C.free(unsafe.Pointer(indexKey))
-		if err := HandleCStatus(&status, "AppendBinaryIndex failed"); err != nil {
+		if err := HandleCStatus(&status, "LoadIndexInfo AppendIndexBinary failed"); err != nil {
 			return err
 		}
 	}

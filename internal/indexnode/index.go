@@ -20,12 +20,13 @@ package indexnode
 
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
 
-#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath,"${SRCDIR}/../core/output/lib"
-#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_indexbuilder -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include <stdlib.h>	// free
 #include "segcore/collection_c.h"
 #include "indexbuilder/index_c.h"
+#include "common/vector_index_c.h"
 
 */
 import "C"
@@ -33,6 +34,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"unsafe"
 
@@ -63,7 +65,75 @@ type CIndex struct {
 	close    bool
 }
 
+func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
+	size := int(C.GetBinarySetSize(cBinarySet))
+	if size == 0 {
+		return nil, fmt.Errorf("BinarySet size is zero!")
+	}
+	datas := make([]unsafe.Pointer, size)
+
+	C.GetBinarySetKeys(cBinarySet, unsafe.Pointer(&datas[0]))
+	ret := make([]string, size)
+	for i := 0; i < size; i++ {
+		ret[i] = C.GoString((*C.char)(datas[i]))
+	}
+
+	return ret, nil
+}
+
+func GetBinarySetValue(cBinarySet C.CBinarySet, key string) ([]byte, error) {
+	cIndexKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cIndexKey))
+	ret := C.GetBinarySetValueSize(cBinarySet, cIndexKey)
+	size := int(ret)
+	if size == 0 {
+		return nil, fmt.Errorf("GetBinarySetValueSize size is zero!")
+	}
+	value := make([]byte, size)
+	status := C.CopyBinarySetValue(unsafe.Pointer(&value[0]), cIndexKey, cBinarySet)
+
+	if err := HandleCStatus(&status, "CopyBinarySetValue failed"); err != nil {
+		return nil, err
+	}
+
+	return value, nil
+}
+
+func (index *CIndex) Serialize() ([]*Blob, error) {
+	var cBinarySet C.CBinarySet
+
+	status := C.SerializeToBinarySet(index.indexPtr, &cBinarySet)
+	defer func() {
+		if cBinarySet != nil {
+			C.DeleteBinarySet(cBinarySet)
+		}
+	}()
+	if err := HandleCStatus(&status, "SerializeToBinarySet failed"); err != nil {
+		return nil, err
+	}
+
+	keys, err := GetBinarySetKeys(cBinarySet)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*Blob, 0)
+	for _, key := range keys {
+		value, err := GetBinarySetValue(cBinarySet, key)
+		if err != nil {
+			return nil, err
+		}
+		blob := &Blob{
+			Key:   key,
+			Value: value,
+		}
+		ret = append(ret, blob)
+	}
+
+	return ret, nil
+}
+
 // Serialize serializes vector data into bytes data so that it can be accessed in 'C'.
+/*
 func (index *CIndex) Serialize() ([]*Blob, error) {
 	var cBinary C.CBinary
 
@@ -94,8 +164,36 @@ func (index *CIndex) Serialize() ([]*Blob, error) {
 
 	return ret, nil
 }
+*/
+
+func (index *CIndex) Load(blobs []*Blob) error {
+	var cBinarySet C.CBinarySet
+	status := C.NewBinarySet(&cBinarySet)
+	defer C.DeleteBinarySet(cBinarySet)
+
+	if err := HandleCStatus(&status, "CIndex Load2 NewBinarySet failed"); err != nil {
+		return err
+	}
+	for _, blob := range blobs {
+		key := blob.Key
+		byteIndex := blob.Value
+		indexPtr := unsafe.Pointer(&byteIndex[0])
+		indexLen := C.int64_t(len(byteIndex))
+		binarySetKey := filepath.Base(key)
+		log.Debug("", zap.String("index key", binarySetKey))
+		indexKey := C.CString(binarySetKey)
+		status = C.AppendIndexBinary(cBinarySet, indexPtr, indexLen, indexKey)
+		C.free(unsafe.Pointer(indexKey))
+		if err := HandleCStatus(&status, "CIndex Load AppendIndexBinary failed"); err != nil {
+			return err
+		}
+	}
+	status = C.LoadFromBinarySet(index.indexPtr, cBinarySet)
+	return HandleCStatus(&status, "AppendIndex failed")
+}
 
 // Load loads data from 'C'.
+/*
 func (index *CIndex) Load(blobs []*Blob) error {
 	binarySet := &indexcgopb.BinarySet{Datas: make([]*indexcgopb.Binary, 0)}
 	for _, blob := range blobs {
@@ -107,13 +205,10 @@ func (index *CIndex) Load(blobs []*Blob) error {
 		return err2
 	}
 
-	/*
-		CStatus
-		LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
-	*/
 	status := C.LoadFromSlicedBuffer(index.indexPtr, (*C.char)(unsafe.Pointer(&datas[0])), (C.int32_t)(len(datas)))
 	return HandleCStatus(&status, "LoadFromSlicedBuffer failed")
 }
+*/
 
 // BuildFloatVecIndexWithoutIds builds indexes for float vector.
 func (index *CIndex) BuildFloatVecIndexWithoutIds(vectors []float32) error {

@@ -40,16 +40,12 @@ endif ()
 
 target_link_libraries(milvus_segcore
         ${PLATFORM_LIBS}
-        log
         pthread
         ${TBB}
         ${OpenMP_CXX_FLAGS}
-        knowhere
         milvus_common
-        milvus_config
-        milvus_proto
+        knowhere
         milvus_query
-        milvus_utils
 #        gperftools
         )
 
