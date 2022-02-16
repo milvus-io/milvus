@@ -274,10 +274,10 @@ def gen_binary_default_fields(auto_id=True):
     return default_fields
 
 
-def gen_entities(nb, is_normal=False):
+def gen_entities(nb, start=0, is_normal=False):
     vectors = gen_vectors(nb, default_dim, is_normal)
     entities = [
-        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(nb)]},
+        {"name": "int64", "type": DataType.INT64, "values": [i for i in range(start, nb+start)]},
         {"name": "float", "type": DataType.FLOAT, "values": [float(i) for i in range(nb)]},
         {"name": default_float_vec_field_name, "type": DataType.FLOAT_VECTOR, "values": vectors}
     ]
