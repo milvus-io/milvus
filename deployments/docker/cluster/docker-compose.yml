@@ -14,7 +14,7 @@ services:
 
   pulsar:
     container_name: milvus-pulsar
-    image: apachepulsar/pulsar:2.7.3
+    image: apachepulsar/pulsar:2.8.2
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
     environment:
