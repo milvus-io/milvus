@@ -78,6 +78,39 @@ func (tr *TimeRecorder) printTimeRecord(msg string, span time.Duration) {
 	log.Debug(str)
 }
 
+// TimeRecorders involves multiple TimeRecorder, which is a mapping of TimeRecorder's header to TimeRecorder,
+// note: TimeRecorders is not thread safe, please don't use it concurrently.
+type TimeRecorders struct {
+	trs map[string]*TimeRecorder
+}
+
+// NewTimeRecorders returns a new TimeRecorders
+func NewTimeRecorders() *TimeRecorders {
+	return &TimeRecorders{
+		trs: make(map[string]*TimeRecorder),
+	}
+}
+
+// AddTimeRecord adds a new TimeRecorder to TimeRecorders
+func (trs *TimeRecorders) AddTimeRecord(header string) error {
+	if _, ok := trs.trs[header]; ok {
+		return fmt.Errorf("TimeRecorder has been existed with header = %s", header)
+	}
+	if header == "" {
+		return fmt.Errorf("empty TimeRecorder's header")
+	}
+	trs.trs[header] = NewTimeRecorder(header)
+	return nil
+}
+
+// ElapseSpan returns the duration from the beginning
+func (trs *TimeRecorders) ElapseSpan(header string) time.Duration {
+	if _, ok := trs.trs[header]; !ok {
+		return 0
+	}
+	return trs.trs[header].ElapseSpan()
+}
+
 // LongTermChecker checks we receive at least one msg in d duration. If not, checker
 // will print a warn message.
 type LongTermChecker struct {

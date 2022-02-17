@@ -30,10 +30,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	milvusNamespace = "milvus"
-)
-
 var (
 	// RootCoordProxyLister counts the num of registered proxy nodes
 	RootCoordProxyLister = prometheus.NewGaugeVec(
