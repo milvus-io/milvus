@@ -25,7 +25,7 @@ pre-proc:
 	@echo "Running pre-processing"
 ifeq ($(OS),Darwin) # MacOS X
 	@echo "MacOS system identified. Switching to customized gorocksdb fork..."
-	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@latest
+	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@v0.0.1
 endif
 
 get-build-deps:
