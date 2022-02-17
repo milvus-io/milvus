@@ -28,7 +28,7 @@ echo "platform: $platform"
 
 Task="reinstall"
 Mode="standalone"
-Release="v2.0.0-pre-ga"
+Release="v2.0.0"
 while getopts "hm:t:p:" OPT;
 do
     case $OPT in
@@ -120,12 +120,12 @@ python scripts/get_tag.py
 
 latest_tag=$(jq -r ".latest_tag" tag_info.json)
 latest_rc_tag=$(jq -r ".latest_rc_tag" tag_info.json)
-release_version="v2.0.0-pre-ga"
+release_version="v2.0.0"
 echo $release_version
 
 pushd ${Deploy_Dir}
 # download docker-compose.yml
-wget https://github.com/milvus-io/milvus/releases/download/${release_version}/milvus-${Deploy_Dir}-docker-compose.yml -O docker-compose.yml
+wget https://github.com/milvus-io/milvus/releases/download/${release_version}/milvus-${Mode}-docker-compose.yml -O docker-compose.yml
 ls
 # clean env to deploy a fresh milvus
 docker-compose down
@@ -135,14 +135,15 @@ echo "$pw"| sudo -S rm -rf ./volumes
 # first deployment
 if [ "$Task" == "reinstall" ];
 then
+    printf "download latest milvus docker-compose yaml file from github\n"
+    wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
     printf "start to deploy latest rc tag milvus\n"
     replace_image_tag $latest_tag
-
 fi
 if [ "$Task" == "upgrade" ];
 then
     printf "start to deploy previous rc tag milvus\n"
-    replace_image_tag "master-20211225-6177d46" # replace previous rc tag with master-20211225-6177d46
+    replace_image_tag "master-20220125-6336e232" # replace previous rc tag
 
 fi
 cat docker-compose.yml|grep milvusdb
@@ -182,6 +183,9 @@ if [ "$Task" == "upgrade" ];
 then
     printf "start to upgrade milvus\n"
     # because the task is upgrade, so replace image tag to latest, like rc4-->rc5
+    printf "download latest milvus docker-compose yaml file from github\n"
+    wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
+    printf "start to deploy latest rc tag milvus\n"
     replace_image_tag $latest_tag
 
 fi

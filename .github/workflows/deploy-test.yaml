@@ -131,11 +131,11 @@ jobs:
           # if the task is upgrade, install milvus with latest rc image in repo milvusdb/milvus
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "cluster" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20211225-6177d46 -f cluster-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20220125-6336e232 -f cluster-values.yaml;
           fi
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "standalone" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20211225-6177d46 -f standalone-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20220125-6336e232 -f standalone-values.yaml;
           fi
 
           kubectl get pods
