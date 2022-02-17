@@ -89,7 +89,9 @@ pull_request_rules:
   - name: Blocking PR if missing a related issue or PR doesn't have kind/improvement label
     conditions:
       - base=master
-      - -body~=\#[0-9]{1,6}(\s+|$)
+      - or:
+        - -body~=\#[0-9]{1,6}(\s+|$)
+        - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
       - -label=kind/improvement
       - -title~=\[automated\]
     actions:
@@ -106,7 +108,9 @@ pull_request_rules:
       - or:
         - and:
           - base=master
-          - body~=\#[0-9]{1,6}(\s+|$)
+          - and:
+            - body~=\#[0-9]{1,6}(\s+|$)
+            - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
         - and:
           - base=master
           - label=kind/improvement
