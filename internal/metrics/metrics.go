@@ -640,11 +640,6 @@ func RegisterDataNode() {
 	prometheus.MustRegister(DataNodeWatchDmChannelsCounter)
 }
 
-//RegisterIndexCoord registers IndexCoord metrics
-func RegisterIndexCoord() {
-
-}
-
 //RegisterIndexNode registers IndexNode metrics
 func RegisterIndexNode() {
 

@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -159,6 +161,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 		},
 		revision: 0,
 	}
+	metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.UnissuedIndexTaskLabel).Inc()
 	return mt.saveIndexMeta(meta)
 }
 
@@ -185,6 +188,8 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 	}
 	meta.indexMeta.NodeID = nodeID
 	meta.indexMeta.State = commonpb.IndexState_InProgress
+	metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.UnissuedIndexTaskLabel).Dec()
+	metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.InProgressIndexTaskLabel).Inc()
 
 	err := mt.saveIndexMeta(&meta)
 	if err != nil {
