@@ -10,6 +10,8 @@
 
 ## What is Milvus?
 
+<img src="https://github.com/milvus-io/artwork/blob/master/horizontal/color/milvus-horizontal-color.png" alt="milvus-logo"/>
+
 Milvus is an open-source vector database built to power embedding similarity search and AI applications. Milvus makes unstructured data search more accessible, and provides a consistent user experience regardless of the deployment environment.
 
 Milvus 2.0 is a cloud-native vector database with storage and computation separated by design. All components in this refactored version of Milvus are stateless to enhance elasticity and flexibility. For more architecture details, see [Milvus Architecture Overview](https://milvus.io/docs/architecture_overview.md).
