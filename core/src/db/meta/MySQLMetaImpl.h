@@ -111,11 +111,12 @@ class MySQLMetaImpl : public Meta {
     GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) override;
 
     Status
-    FilesToSearch(const std::string& collection_id, FilesHolder& files_holder) override;
+    FilesToSearch(const std::string& collection_id, FilesHolder& files_holder, 
+                  bool is_all_search_file = true) override;
 
     Status
     FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,
-                    FilesHolder& files_holder) override;
+                    FilesHolder& files_holder, bool is_all_search_file = true) override;
 
     Status
     FilesToMerge(const std::string& collection_id, FilesHolder& files_holder) override;

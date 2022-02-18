@@ -32,6 +32,7 @@ static const char* VALID_CONFIG_STR =
     "general:\n"
     "  timezone: UTC+8\n"
     "  meta_uri: sqlite://:@:/\n"
+    "  search_raw_enable: false\n"
     "\n"
     "network:\n"
     "  bind.address: 0.0.0.0\n"

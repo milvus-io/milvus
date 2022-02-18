@@ -420,9 +420,13 @@ DBImpl::PreloadCollection(const std::shared_ptr<server::Context>& context, const
         return SHUTDOWN_ERROR;
     }
 
+    bool  is_all_search_file = true;
+    server::Config::GetInstance().GetGeneralConfigSearchRawEnable(is_all_search_file);
+
     // step 1: get all collection files from collection
     meta::FilesHolder files_holder;
-    Status status = CollectFilesToSearch(collection_id, partition_tags, files_holder);
+    Status status = CollectFilesToSearch(collection_id, partition_tags, 
+                                         is_all_search_file, files_holder);
     if (!status.ok()) {
         return status;
     }
@@ -503,7 +507,7 @@ DBImpl::ReleaseCollection(const std::shared_ptr<server::Context>& context, const
 
     // step 1: get all collection files from collection
     meta::FilesHolder files_holder;
-    Status status = CollectFilesToSearch(collection_id, partition_tags, files_holder);
+    Status status = CollectFilesToSearch(collection_id, partition_tags, true, files_holder);
     if (!status.ok()) {
         return status;
     }
@@ -1757,9 +1761,12 @@ DBImpl::Query(const std::shared_ptr<server::Context>& context, const std::string
         return SHUTDOWN_ERROR;
     }
 
+    bool  is_all_search_file = true;
+    server::Config::GetInstance().GetGeneralConfigSearchRawEnable(is_all_search_file);
     // step 1: get all collection files from collection
     meta::FilesHolder files_holder;
-    Status status = CollectFilesToSearch(collection_id, partition_tags, files_holder);
+    Status status = CollectFilesToSearch(collection_id, partition_tags, 
+                                         is_all_search_file, files_holder);
     if (!status.ok()) {
         return status;
     }
@@ -2628,13 +2635,14 @@ DBImpl::ResumeIfLast() {
 
 Status
 DBImpl::CollectFilesToSearch(const std::string& collection_id, const std::vector<std::string>& partition_tags,
+                             bool is_all_search_file,
                              meta::FilesHolder& files_holder) {
     Status status;
     std::set<std::string> partition_ids;
     if (partition_tags.empty()) {
         // no partition tag specified, means search in whole collection
         // get files from root collection
-        status = meta_ptr_->FilesToSearch(collection_id, files_holder);
+        status = meta_ptr_->FilesToSearch(collection_id, files_holder, is_all_search_file);
         if (!status.ok()) {
             return status;
         }
@@ -2660,7 +2668,7 @@ DBImpl::CollectFilesToSearch(const std::string& collection_id, const std::vector
     }
 
     // get files from partitions
-    status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder);
+    status = meta_ptr_->FilesToSearchEx(collection_id, partition_ids, files_holder, is_all_search_file);
     if (!status.ok()) {
         return status;
     }

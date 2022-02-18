@@ -612,6 +612,21 @@ TEST_F(MySqlMetaTest, COLLECTION_FILES_TEST) {
     status = impl_->FilesToMerge("notexist", files_holder);
     ASSERT_EQ(status.code(), milvus::DB_NOT_FOUND);
 
+    files_holder.ReleaseFiles();
+    status = impl_->FilesToSearch(collection_id, files_holder, false);
+    ASSERT_EQ(files_holder.HoldFiles().size(), index_files_cnt);
+
+    std::set<std::string> coll_arr;
+    coll_arr.insert(collection_id);
+
+    files_holder.ReleaseFiles();
+    status = impl_->FilesToSearchEx(collection_id, coll_arr, files_holder, false);
+    ASSERT_EQ(files_holder.HoldFiles().size(), index_files_cnt);
+
+    files_holder.ReleaseFiles();
+    status = impl_->FilesToSearchEx(collection_id, coll_arr, files_holder);
+    ASSERT_EQ(files_holder.HoldFiles().size(), to_index_files_cnt + raw_files_cnt + index_files_cnt);
+
     table_file.file_type_ = milvus::engine::meta::SegmentSchema::RAW;
     table_file.file_size_ = milvus::engine::GB + 1;
     status = impl_->UpdateCollectionFile(table_file);
