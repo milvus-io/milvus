@@ -1,8 +1,11 @@
 # Configuration File for CodeCov
 codecov:
+  require_ci_to_pass: no
   notify:
-    require_ci_to_pass: yes
-
+    require_ci_to_pass: no
+    wait_for_ci: false
+  ci:
+    - jenkins.milvus.io:18080
 coverage:
   precision: 2
   round: down
@@ -38,3 +41,6 @@ ignore:
   - "docs/.*"
   - "**/*.pb.go"
   - "**/*.proto"
+
+
+
