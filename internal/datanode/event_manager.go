@@ -60,7 +60,7 @@ func (e *channelEventManager) Run() {
 								zap.String("retry interval", retryWatchInterval.String()),
 								zap.Error(err))
 
-							<-time.NewTimer(time.Second).C
+							<-time.NewTimer(retryWatchInterval).C
 
 							select {
 							case e, ok := <-e.eventChan:
