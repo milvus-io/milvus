@@ -28,12 +28,8 @@ endif ()
 # link order matters
 target_link_libraries(milvus_indexbuilder
         knowhere
-        milvus_config
         milvus_common
-        milvus_utils
-        milvus_proto
         ${TBB}
-        log
         ${PLATFORM_LIBS}
         pthread
         )

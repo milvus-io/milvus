@@ -18,6 +18,7 @@ extern "C" {
 #include <stdint.h>
 #include "segcore/collection_c.h"
 #include "common/type_c.h"
+#include "common/vector_index_c.h"
 
 typedef void* CIndex;
 typedef void* CIndexQueryResult;
@@ -41,6 +42,9 @@ BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* ve
 CStatus
 SerializeToSlicedBuffer(CIndex index, CBinary* c_binary);
 
+CStatus
+SerializeToBinarySet(CIndex index, CBinarySet* c_binary_set);
+
 int64_t
 GetCBinarySize(CBinary c_binary);
 
@@ -53,6 +57,9 @@ DeleteCBinary(CBinary c_binary);
 
 CStatus
 LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size);
+
+CStatus
+LoadFromBinarySet(CIndex index, CBinarySet c_binary_set);
 
 CStatus
 QueryOnFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors, CIndexQueryResult* res);

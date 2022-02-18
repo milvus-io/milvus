@@ -315,16 +315,16 @@ TEST(IVFFLATNMWrapper, Codec) {
     auto dataset = GenDataset(flat_nb, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
     auto xb_dataset = milvus::knowhere::GenDataset(flat_nb, DIM, xb_data.data());
-    auto index =
+    auto index_wrapper =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
+    ASSERT_NO_THROW(index_wrapper->BuildWithoutIds(xb_dataset));
 
-    auto binary = index->Serialize();
-    auto copy_index =
+    auto binary = index_wrapper->Serialize();
+    auto copy_index_wrapper =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_NO_THROW(copy_index->Load(binary->data.data(), binary->data.size()));
-    ASSERT_EQ(copy_index->dim(), copy_index->dim());
-    auto copy_binary = copy_index->Serialize();
+    ASSERT_NO_THROW(copy_index_wrapper->Load(binary->data.data(), binary->data.size()));
+    ASSERT_EQ(copy_index_wrapper->dim(), copy_index_wrapper->dim());
+    auto copy_binary = copy_index_wrapper->Serialize();
 }
 
 TEST(BinFlatWrapper, Build) {
@@ -416,17 +416,17 @@ TEST_P(IndexWrapperTest, BuildWithoutIds) {
 }
 
 TEST_P(IndexWrapperTest, Codec) {
-    auto index =
+    auto index_wrapper =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
 
-    ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
+    ASSERT_NO_THROW(index_wrapper->BuildWithoutIds(xb_dataset));
 
-    auto binary = index->Serialize();
-    auto copy_index =
+    auto binary = index_wrapper->Serialize();
+    auto copy_index_wrapper =
         std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_NO_THROW(copy_index->Load(binary->data.data(), binary->data.size()));
-    ASSERT_EQ(copy_index->dim(), copy_index->dim());
-    auto copy_binary = copy_index->Serialize();
+    ASSERT_NO_THROW(copy_index_wrapper->Load(binary->data.data(), binary->data.size()));
+    ASSERT_EQ(copy_index_wrapper->dim(), copy_index_wrapper->dim());
+    auto copy_binary = copy_index_wrapper->Serialize();
     if (!milvus::indexbuilder::is_in_nm_list(index_type)) {
         // binary may be not same due to uncertain internal map order
         ASSERT_EQ(binary->data.size(), copy_binary->data.size());

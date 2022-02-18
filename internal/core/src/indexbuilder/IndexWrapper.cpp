@@ -40,7 +40,8 @@ IndexWrapper::IndexWrapper(const char* serialized_type_params, const char* seria
     AssertInfo(index_ != nullptr, "[IndexWrapper]Index is null after create index");
 }
 
-template <typename ParamsT>  // ugly here, ParamsT will just be MapParams later
+template <typename ParamsT>
+// ugly here, ParamsT will just be MapParams later
 void
 IndexWrapper::parse_impl(const std::string& serialized_params_str, knowhere::Config& conf) {
     bool deserialized_success;
@@ -164,7 +165,7 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
         }
     }
     auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-    std::cout << "config_ when build index: " << config_ << std::endl;
+    std::cout << "Konwhere BuildWithoutIds config_ is " << config_ << std::endl;
     AssertInfo(conf_adapter->CheckTrain(config_, index_mode), "something wrong in index parameters!");
 
     if (is_in_need_id_list(index_type)) {
@@ -228,6 +229,23 @@ IndexWrapper::StoreRawData(const knowhere::DatasetPtr& dataset) {
     }
 }
 
+std::unique_ptr<milvus::knowhere::BinarySet>
+IndexWrapper::SerializeBinarySet() {
+    auto ret = std::make_unique<milvus::knowhere::BinarySet>(index_->Serialize(config_));
+    auto index_type = get_index_type();
+
+    if (is_in_nm_list(index_type)) {
+        std::shared_ptr<uint8_t[]> raw_data(new uint8_t[raw_data_.size()], std::default_delete<uint8_t[]>());
+        memcpy(raw_data.get(), raw_data_.data(), raw_data_.size());
+        ret->Append(RAW_DATA, raw_data, raw_data_.size());
+        auto slice_size = get_index_file_slice_size();
+        // https://github.com/milvus-io/milvus/issues/6421
+        // Disassemble will only divide the raw vectors, other keys were already divided
+        knowhere::Disassemble(slice_size * 1024 * 1024, *ret);
+    }
+    return std::move(ret);
+}
+
 /*
  * brief Return serialized binary set
  * TODO: use a more efficient method to manage memory, consider std::vector later
@@ -236,6 +254,7 @@ std::unique_ptr<IndexWrapper::Binary>
 IndexWrapper::Serialize() {
     auto binarySet = index_->Serialize(config_);
     auto index_type = get_index_type();
+
     if (is_in_nm_list(index_type)) {
         std::shared_ptr<uint8_t[]> raw_data(new uint8_t[raw_data_.size()], std::default_delete<uint8_t[]>());
         memcpy(raw_data.get(), raw_data_.data(), raw_data_.size());
@@ -264,6 +283,21 @@ IndexWrapper::Serialize() {
     memcpy(binary->data.data(), serialized_data.c_str(), serialized_data.length());
 
     return binary;
+}
+
+void
+IndexWrapper::LoadFromBinarySet(milvus::knowhere::BinarySet& binary_set) {
+    auto& map_ = binary_set.binary_map_;
+    for (auto it = map_.begin(); it != map_.end(); ++it) {
+        if (it->first == RAW_DATA) {
+            raw_data_.clear();
+            auto data_size = it->second->size;
+            raw_data_.resize(data_size);
+            memcpy(raw_data_.data(), it->second->data.get(), data_size);
+            break;
+        }
+    }
+    index_->Load(binary_set);
 }
 
 void

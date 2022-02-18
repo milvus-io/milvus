@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/common/BinarySet.h"
 
 namespace milvus::indexbuilder {
 
@@ -36,6 +37,12 @@ class IndexWrapper {
 
     std::unique_ptr<Binary>
     Serialize();
+
+    std::unique_ptr<milvus::knowhere::BinarySet>
+    SerializeBinarySet();
+
+    void
+    LoadFromBinarySet(milvus::knowhere::BinarySet&);
 
     void
     Load(const char* serialized_sliced_blob_buffer, int32_t size);

@@ -10,9 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string>
+
 #ifndef __APPLE__
+
 #include <malloc.h>
+
 #endif
+
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
@@ -91,6 +95,22 @@ BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* ve
 }
 
 CStatus
+SerializeToBinarySet(CIndex index, CBinarySet* c_binary_set) {
+    auto status = CStatus();
+    try {
+        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        auto binary = cIndex->SerializeBinarySet();
+        *c_binary_set = binary.release();
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
 SerializeToSlicedBuffer(CIndex index, CBinary* c_binary) {
     auto status = CStatus();
     try {
@@ -131,6 +151,22 @@ LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, in
     try {
         auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
         cIndex->Load(serialized_sliced_blob_buffer, size);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+CStatus
+LoadFromBinarySet(CIndex index, CBinarySet c_binary_set) {
+    auto status = CStatus();
+    try {
+        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        auto binary_set = (milvus::knowhere::BinarySet*)c_binary_set;
+        cIndex->LoadFromBinarySet(*binary_set);
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
