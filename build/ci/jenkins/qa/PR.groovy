@@ -12,6 +12,7 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         parallelsAlwaysFailFast()
         preserveStashes(buildCount: 5)
+
     }
     agent {
             kubernetes {
@@ -87,7 +88,9 @@ pipeline {
                 stages {
                     stage('Install') {
                         steps {
+                            
                             container('main') {
+                                stash includes: 'tests/**', name: 'testCode', useDefaultExcludes: false
                                 dir ('tests/scripts') {
                                     script {
                                         sh 'printenv'
@@ -137,6 +140,10 @@ pipeline {
                         }
                     }
                      stage('E2E Test'){
+                        options { 
+                            skipDefaultCheckout() 
+                        }
+                       
                         agent {
                                 kubernetes {
                                     label 'milvus-qa-e2e-test-pr'
@@ -148,6 +155,10 @@ pipeline {
                         }
                         steps {
                             container('pytest') {
+                                unstash('testCode')
+                                script {
+                                        sh 'ls -lah'
+                                }
                                 dir ('tests/scripts') {
                                     script {
                                         def release_name=sh(returnStdout: true, script: './get_release_name.sh')
