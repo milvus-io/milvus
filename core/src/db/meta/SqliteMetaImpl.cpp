@@ -1427,13 +1427,13 @@ SqliteMetaImpl::FilesToSearch(const std::string& collection_id, FilesHolder& fil
         std::string statement = "SELECT id, table_id, segment_id, file_id, file_type, file_size, row_count, date,"
                                 " engine_type, created_on, updated_time FROM " + std::string(META_TABLEFILES)
                                 + " WHERE table_id = " + Quote(collection_id);
-		if (is_all_search_file) {						
+        if (is_all_search_file) {
             statement = statement + " AND (file_type = " + std::to_string(SegmentSchema::RAW)
-                                  + " OR file_type = " + std::to_string(SegmentSchema::TO_INDEX)
-                                  + " OR file_type = " + std::to_string(SegmentSchema::INDEX) + ");";
-		} else {
-		    statement += (" AND file_type = " + std::to_string(SegmentSchema::INDEX) + ";");
-		}
+                                    + " OR file_type = " + std::to_string(SegmentSchema::TO_INDEX)
+                                    + " OR file_type = " + std::to_string(SegmentSchema::INDEX) + ");";
+        } else {
+            statement += (" AND file_type = " + std::to_string(SegmentSchema::INDEX) + ";");
+        }
         LOG_ENGINE_DEBUG_ << "FilesToSearch: " << statement;
 
         // to ensure UpdateCollectionFiles to be a atomic operation
@@ -1539,13 +1539,13 @@ SqliteMetaImpl::FilesToSearchEx(const std::string& root_collection, const std::s
                 }
             }
             statement += ")";
-			if (is_all_search_file) {
+            if (is_all_search_file) {
                 statement += (" AND (file_type = " + std::to_string(SegmentSchema::RAW));
                 statement += (" OR file_type = " + std::to_string(SegmentSchema::TO_INDEX));
                 statement += (" OR file_type = " + std::to_string(SegmentSchema::INDEX) + ");");
-			} else {
-			    statement += (" AND file_type = " + std::to_string(SegmentSchema::INDEX) + ";");
-			}
+            } else {
+                statement += (" AND file_type = " + std::to_string(SegmentSchema::INDEX) + ";");
+            }
             LOG_ENGINE_DEBUG_ << "FilesToSearchEx: " << statement;
 
             // to ensure UpdateCollectionFiles to be a atomic operation
