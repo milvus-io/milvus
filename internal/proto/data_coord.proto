@@ -338,6 +338,7 @@ enum CompactionType {
   UndefinedCompaction = 0;
   InnerCompaction = 1;
   MergeCompaction = 2;
+  MixCompaction = 3;
 }
 
 message CompactionSegmentBinlogs {
