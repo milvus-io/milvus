@@ -110,7 +110,7 @@ func (gc *garbageCollector) close() {
 // scan load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) scan() {
-	var v, m, e int
+	var v, m int
 	valid := gc.meta.ListSegmentFiles()
 	vm := make(map[string]struct{})
 	for _, k := range valid {
@@ -122,6 +122,7 @@ func (gc *garbageCollector) scan() {
 	prefixes = append(prefixes, path.Join(gc.option.rootPath, insertLogPrefix))
 	prefixes = append(prefixes, path.Join(gc.option.rootPath, statsLogPrefix))
 	prefixes = append(prefixes, path.Join(gc.option.rootPath, deltaLogPrefix))
+	var removedKeys []string
 
 	for _, prefix := range prefixes {
 		for info := range gc.option.cli.ListObjects(context.TODO(), gc.option.bucketName, minio.ListObjectsOptions{
@@ -136,13 +137,13 @@ func (gc *garbageCollector) scan() {
 			m++
 			// not found in meta, check last modified time exceeds tolerance duration
 			if time.Since(info.LastModified) > gc.option.missingTolerance {
-				e++
 				// ignore error since it could be cleaned up next time
+				removedKeys = append(removedKeys, info.Key)
 				_ = gc.option.cli.RemoveObject(context.TODO(), gc.option.bucketName, info.Key, minio.RemoveObjectOptions{})
 			}
 		}
 	}
-	log.Warn("scan result", zap.Int("valid", v), zap.Int("missing", m), zap.Int("removed", e))
+	log.Warn("scan result", zap.Int("valid", v), zap.Int("missing", m), zap.Strings("removed keys", removedKeys))
 }
 
 func (gc *garbageCollector) clearEtcd() {
