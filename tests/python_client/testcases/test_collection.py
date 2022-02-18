@@ -1,15 +1,12 @@
 import numpy
 import pandas as pd
 import pytest
-from pymilvus import DataType
 
 from base.client_base import TestcaseBase
-from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
-from common import constants as cons
 
 prefix = "collection"
 exp_name = "name"
@@ -36,6 +33,15 @@ default_single_query = {
     "param": {"metric_type": "L2", "params": {"nprobe": 10}},
     "limit": default_top_k,
 }
+
+default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
+default_nq = ct.default_nq
+default_search_exp = "int64 >= 0"
+default_limit = ct.default_limit
+vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+default_search_field = ct.default_float_vec_field_name
+default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
 
 
 class TestCollectionParams(TestcaseBase):
@@ -90,7 +96,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = ""
-        error = {ct.err_code: 1, ct.err_msg: f'`collection_name` value is illegal'}
+        error = {ct.err_code: -1, ct.err_msg: f'`collection_name` value is illegal'}
         self.collection_wrap.init_collection(c_name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
 
@@ -104,7 +110,7 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        error = {ct.err_code: 1, ct.err_msg: "`collection_name` value {} is illegal".format(name)}
+        error = {ct.err_code: -1, ct.err_msg: "`collection_name` value {} is illegal".format(name)}
         self.collection_wrap.init_collection(name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
 
@@ -438,7 +444,7 @@ class TestCollectionParams(TestcaseBase):
         err_msg = "multiple vector fields is not supported"
         self.collection_wrap.init_collection(c_name, schema=schema,
                                              check_task=CheckTasks.err_res,
-                                             check_items={"err_code": 1, "err_msg": err_msg})[0]
+                                             check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
@@ -1145,7 +1151,6 @@ class TestCollectionDataframe(TestcaseBase):
                                                       check_task=CheckTasks.check_collection_property,
                                                       check_items={exp_name: c_name, exp_schema: default_schema})
         # flush
-        self.collection_wrap.num_entities
         assert self.collection_wrap.num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -1417,61 +1422,25 @@ class TestCollectionDataframe(TestcaseBase):
                                                       check_task=CheckTasks.check_collection_property,
                                                       check_items={exp_name: c_name, exp_schema: default_schema})
         # flush
-        self.collection_wrap.num_entities
         assert collection_w.num_entities == ct.default_nb
         assert collection_w.num_entities == self.collection_wrap.num_entities
 
 
-class TestCollectionCount:
-    """
-    params means different nb, the nb value may trigger merge, or not
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=[
-            1,
-            1000,
-            2001
-        ],
-    )
-    def insert_count(self, request):
-        yield request.param
-
-    """
-    generate valid create_index params
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        return request.param
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_count_without_connection(self, collection, dis_connect):
-        """
-        target: test count_entities, without connection
-        method: calling count_entities with correct params, with a disconnected instance
-        expected: count_entities raise exception
-        """
-        with pytest.raises(Exception) as e:
-            dis_connect.count_entities(collection)
-
+class TestCollectionCount(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_collection_count_no_vectors(self, connect, collection):
         """
         target: test collection rows_count is correct or not, if collection is empty
         method: create collection and no vectors in it,
-            assert the value returned by count_entities method is equal to 0
+                assert the value returned by num_entities attribute is equal to 0
         expected: the count is equal to 0
         """
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == 0
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        assert collection_w.num_entities == 0
 
 
-class TestCollectionCountIP:
+class TestCollectionCountIP(TestcaseBase):
     """
     params means different nb, the nb value may trigger merge, or not
     """
@@ -1486,35 +1455,26 @@ class TestCollectionCountIP:
     )
     def insert_count(self, request):
         yield request.param
-
-    """
-    generate valid create_index params
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        request.param.update({"metric_type": "IP"})
-        return request.param
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_count_after_index_created(self, connect, collection, get_simple_index, insert_count):
+    def test_collection_count_after_index_created(self, insert_count):
         """
         target: test count_entities, after index have been created
-        method: add vectors in db, and create index, then calling count_entities with correct params
+        method: add vectors in db, and create index, then calling num_entities with correct params
         expected: count_entities raise exception
         """
-        entities = gen_entities(insert_count)
-        connect.insert(collection, entities)
-        connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == insert_count
+        self._connect()
+        collection_w = self.init_collection_wrap()
+
+        data = cf.gen_default_list_data(insert_count, ct.default_dim)
+        collection_w.insert(data)
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name=ct.default_index_name)
+        assert collection_w.num_entities == insert_count
 
 
-class TestCollectionCountBinary:
+class TestCollectionCountBinary(TestcaseBase):
     """
     params means different nb, the nb value may trigger merge, or not
     """
@@ -1529,68 +1489,38 @@ class TestCollectionCountBinary:
     )
     def insert_count(self, request):
         yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_binary_index()
-    )
-    def get_jaccard_index(self, request, connect):
-        request.param["metric_type"] = "JACCARD"
-        return request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_binary_index()
-    )
-    def get_hamming_index(self, request, connect):
-        request.param["metric_type"] = "HAMMING"
-        return request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_substructure_index(self, request, connect):
-        request.param["metric_type"] = "SUBSTRUCTURE"
-        return request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_superstructure_index(self, request, connect):
-        request.param["metric_type"] = "SUPERSTRUCTURE"
-        return request.param
 
     # TODO: need to update and enable
     @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_count_after_index_created_A(self, connect, binary_collection, get_hamming_index, insert_count):
+    def test_collection_count_after_index_created_binary(self, insert_count):
         """
-        target: test count_entities, after index have been created
-        method: add vectors in db, and create index, then calling count_entities with correct params
-        expected: count_entities equals entities count just inserted
+        target: test num_entities, after index have been created
+        method: add vectors in db, and create binary index, then calling num_entities with correct params
+        expected: num_entities equals entities count just inserted
         """
-        raw_vectors, entities = gen_binary_entities(insert_count)
-        connect.insert(binary_collection, entities)
-        connect.flush([binary_collection])
-        # connect.load_collection(binary_collection)
-        connect.create_index(binary_collection, default_binary_vec_field_name, get_hamming_index)
-        stats = connect.get_collection_stats(binary_collection)
-        assert stats[row_count] == insert_count
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        df, _ = cf.gen_default_binary_dataframe_data(insert_count)
+        mutation_res, _ = collection_w.insert(data=df)
+        collection_w.create_index(ct.default_binary_vec_field_name, default_binary_index_params)
+        assert collection_w.num_entities == insert_count
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_count_no_entities(self, connect, binary_collection):
+    def test_collection_count_no_entities(self):
         """
-        target: test collection rows_count is correct or not, if collection is empty
+        target: test collection num_entities is correct or not, if collection is empty
         method: create collection and no vectors in it,
-            assert the value returned by count_entities method is equal to 0
+                assert the value returned by num_entities method is equal to 0
         expected: the count is equal to 0
         """
-        stats = connect.get_collection_stats(binary_collection)
-        assert stats[row_count] == 0
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        assert collection_w.num_entities == 0
 
 
-class TestCollectionMultiCollections:
+class TestCollectionMultiCollections(TestcaseBase):
     """
     params means different nb, the nb value may trigger merge, or not
     """
@@ -1607,545 +1537,84 @@ class TestCollectionMultiCollections:
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_count_multi_collections_l2(self, connect, insert_count):
+    def test_collection_count_multi_collections_l2(self, insert_count):
         """
         target: test collection rows_count is correct or not with multiple collections of L2
         method: create collection and add entities in it,
-            assert the value returned by count_entities method is equal to length of entities
+                assert the value returned by num_entities is equal to length of entities
         expected: the count is equal to the length of entities
         """
-        entities = gen_entities(insert_count)
+        self._connect()
+        data = cf.gen_default_list_data(insert_count)
         collection_list = []
         collection_num = 20
         for i in range(collection_num):
             collection_name = gen_unique_str(uid_count)
+            collection_w = self.init_collection_wrap(name=collection_name)
+            collection_w.insert(data)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, cons.default_fields)
-            connect.insert(collection_name, entities)
-        connect.flush(collection_list)
         for i in range(collection_num):
-            stats = connect.get_collection_stats(collection_list[i])
-            assert stats[row_count] == insert_count
-            connect.drop_collection(collection_list[i])
+            res, _ = self.collection_wrap.init_collection(collection_list[i])
+            assert self.collection_wrap.num_entities == insert_count
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_count_multi_collections_binary(self, connect, binary_collection, insert_count):
-        """
-        target: test collection rows_count is correct or not with multiple collections of JACCARD
-        method: create collection and add entities in it,
-            assert the value returned by count_entities method is equal to length of entities
-        expected: the count is equal to the length of entities
-        """
-        raw_vectors, entities = gen_binary_entities(insert_count)
-        connect.insert(binary_collection, entities)
-        collection_list = []
-        collection_num = 20
-        for i in range(collection_num):
-            collection_name = gen_unique_str(uid_count)
-            collection_list.append(collection_name)
-            connect.create_collection(collection_name, cons.default_binary_fields)
-            connect.insert(collection_name, entities)
-        connect.flush(collection_list)
-        for i in range(collection_num):
-            stats = connect.get_collection_stats(collection_list[i])
-            assert stats[row_count] == insert_count
-            connect.drop_collection(collection_list[i])
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_count_multi_collections_mix(self, connect):
+    def test_collection_count_multi_collections_binary(self, insert_count):
         """
         target: test collection rows_count is correct or not with multiple collections of JACCARD
         method: create collection and add entities in it,
                 assert the value returned by count_entities method is equal to length of entities
         expected: the count is equal to the length of entities
         """
+        self._connect()
+        df, _ = cf.gen_default_binary_dataframe_data(insert_count)
         collection_list = []
         collection_num = 20
+        for i in range(collection_num):
+            c_name = cf.gen_unique_str(prefix)
+            collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+            mutation_res, _ = collection_w.insert(data=df)
+            collection_list.append(c_name)
+        for i in range(collection_num):
+            res, _ = self.collection_wrap.init_collection(collection_list[i])
+            assert self.collection_wrap.num_entities == insert_count
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_count_multi_collections_mix(self):
+        """
+        target: test collection rows_count is correct or not with multiple collections of
+        method: create collection and add entities in it,
+                assert the value returned by count_entities method is equal to length of entities
+        expected: the count is equal to the length of entities
+        """
+        self._connect()
+        collection_list = []
+        collection_num = 20
+        data = cf.gen_default_list_data()
+        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         for i in range(0, int(collection_num / 2)):
             collection_name = gen_unique_str(uid_count)
+            collection_w = self.init_collection_wrap(name=collection_name)
+            collection_w.insert(data)
             collection_list.append(collection_name)
-            connect.create_collection(collection_name, cons.default_fields)
-            connect.insert(collection_name, cons.default_entities)
         for i in range(int(collection_num / 2), collection_num):
-            collection_name = gen_unique_str(uid_count)
-            collection_list.append(collection_name)
-            connect.create_collection(collection_name, cons.default_binary_fields)
-            res = connect.insert(collection_name, cons.default_binary_entities)
-        connect.flush(collection_list)
+            c_name = cf.gen_unique_str(prefix)
+            collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+            mutation_res, _ = collection_w.insert(data=df)
+            collection_list.append(c_name)
         for i in range(collection_num):
-            stats = connect.get_collection_stats(collection_list[i])
-            assert stats[row_count] == default_nb
-            connect.drop_collection(collection_list[i])
+            res, _ = self.collection_wrap.init_collection(collection_list[i])
+            assert self.collection_wrap.num_entities == ct.default_nb
 
 
-class TestGetCollectionStats:
-    """
-    ******************************************************************
-      The following cases are used to test `collection_stats` function
-    ******************************************************************
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
-    def get_invalid_collection_name(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("CPU not support index_type: ivf_sq8h")
-        return request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_binary_index()
-    )
-    def get_jaccard_index(self, request, connect):
-        log.info(request.param)
-        if request.param["index_type"] in binary_support():
-            request.param["metric_type"] = "JACCARD"
-            return request.param
-        else:
-            pytest.skip("Skip index Temporary")
-
-    @pytest.fixture(
-        scope="function",
-        params=[
-            1,
-            1000,
-            2001
-        ],
-    )
-    def insert_count(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_name_not_existed(self, connect, collection):
-        """
-        target: get collection stats where collection name does not exist
-        method: call collection_stats with a random collection_name, which is not in db
-        expected: status not ok
-        """
-        collection_name = gen_unique_str(uid_stats)
-        with pytest.raises(Exception) as e:
-            connect.get_collection_stats(collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_name_invalid(self, connect, get_invalid_collection_name):
-        """
-        target: get collection stats where collection name is invalid
-        method: call collection_stats with invalid collection_name
-        expected: status not ok
-        """
-        collection_name = get_invalid_collection_name
-        with pytest.raises(Exception) as e:
-            connect.get_collection_stats(collection_name)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_get_collection_stats_empty(self, connect, collection):
-        """
-        target: get collection stats where no entity in collection
-        method: call collection_stats in empty collection
-        expected: segment = []
-        """
-        stats = connect.get_collection_stats(collection)
-        connect.flush([collection])
-        assert stats[row_count] == 0
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_without_connection(self, collection, dis_connect):
-        """
-        target: test count_entities, without connection
-        method: calling count_entities with correct params, with a disconnected instance
-        expected: count_entities raise exception
-        """
-        with pytest.raises(Exception) as e:
-            dis_connect.get_collection_stats(collection)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_get_collection_stats_batch(self, connect, collection):
-        """
-        target: get row count with collection_stats
-        method: add entities, check count in collection info
-        expected: count as expected
-        """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert int(stats[row_count]) == default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_get_collection_stats_single(self, connect, collection):
-        """
-        target: get row count with collection_stats
-        method: add entity one by one, check count in collection info
-        expected: count as expected
-        """
-        nb = 10
-        for i in range(nb):
-            connect.insert(collection, cons.default_entity)
-            connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == nb
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def _test_get_collection_stats_after_delete(self, connect, collection):
-        """
-        target: get row count with collection_stats
-        method: add and delete entities, check count in collection info
-        expected: status ok, count as expected
-        """
-        ids = connect.insert(collection, cons.default_entities)
-        status = connect.flush([collection])
-        delete_ids = [ids[0], ids[-1]]
-        connect.delete_entity_by_id(collection, delete_ids)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats["row_count"] == default_nb - 2
-        assert stats["partitions"][0]["row_count"] == default_nb - 2
-        assert stats["partitions"][0]["segments"][0]["data_size"] > 0
-
-    # TODO: enable
-    @pytest.mark.tags(CaseLabel.L2)
-    def _test_get_collection_stats_after_compact_parts(self, connect, collection):
-        """
-        target: get row count with collection_stats
-        method: add and delete entities, and compact collection, check count in collection info
-        expected: status ok, count as expected
-        """
-        delete_length = 1000
-        ids = connect.insert(collection, cons.default_entities)
-        status = connect.flush([collection])
-        delete_ids = ids[:delete_length]
-        connect.delete_entity_by_id(collection, delete_ids)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        log.info(stats)
-        assert stats["row_count"] == default_nb - delete_length
-        compact_before = stats["partitions"][0]["segments"][0]["data_size"]
-        connect.compact(collection)
-        stats = connect.get_collection_stats(collection)
-        log.info(stats)
-        compact_after = stats["partitions"][0]["segments"][0]["data_size"]
-        assert compact_before == compact_after
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def _test_get_collection_stats_after_compact_delete_one(self, connect, collection):
-        """
-        target: get row count with collection_stats
-        method: add and delete one entity, and compact collection, check count in collection info
-        expected: status ok, count as expected
-        """
-        ids = connect.insert(collection, cons.default_entities)
-        status = connect.flush([collection])
-        delete_ids = ids[:1]
-        connect.delete_entity_by_id(collection, delete_ids)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        log.info(stats)
-        compact_before = stats["partitions"][0]["row_count"]
-        connect.compact(collection)
-        stats = connect.get_collection_stats(collection)
-        log.info(stats)
-        compact_after = stats["partitions"][0]["row_count"]
-        # pdb.set_trace()
-        assert compact_before == compact_after
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_partition(self, connect, collection):
-        """
-        target: get partition info in a collection
-        method: call collection_stats after partition created and check partition_stats
-        expected: status ok, vectors added to partition
-        """
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_get_collection_stats_partitions(self, connect, collection):
-        """
-        target: get partition info in a collection
-        method: create two partitions, add vectors in one of the partitions, call collection_stats and check
-        expected: status ok, vectors added to one partition but not the other
-        """
-        new_tag = "new_tag"
-        connect.create_partition(collection, default_tag)
-        connect.create_partition(collection, new_tag)
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == default_nb
-        connect.insert(collection, cons.default_entities, partition_name=new_tag)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == default_nb * 2
-        connect.insert(collection, cons.default_entities)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == default_nb * 3
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_partitions_A(self, connect, collection, insert_count):
-        """
-        target: test collection rows_count is correct or not
-        method: create collection, create partitions and add entities in it,
-            assert the value returned by count_entities method is equal to length of entities
-        expected: the count is equal to the length of entities
-        """
-        new_tag = "new_tag"
-        entities = gen_entities(insert_count)
-        connect.create_partition(collection, default_tag)
-        connect.create_partition(collection, new_tag)
-        connect.insert(collection, entities)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == insert_count
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_partitions_B(self, connect, collection, insert_count):
-        """
-        target: test collection rows_count is correct or not
-        method: create collection, create partitions and add entities in one of the partitions,
-            assert the value returned by count_entities method is equal to length of entities
-        expected: the count is equal to the length of entities
-        """
-        new_tag = "new_tag"
-        entities = gen_entities(insert_count)
-        connect.create_partition(collection, default_tag)
-        connect.create_partition(collection, new_tag)
-        connect.insert(collection, entities, partition_name=default_tag)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == insert_count
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_get_collection_stats_partitions_C(self, connect, collection, insert_count):
-        """
-        target: test collection rows_count is correct or not
-        method: create collection, create partitions and add entities in one of the partitions,
-                assert the value returned by count_entities method is equal to length of entities
-        expected: the count is equal to the length of vectors
-        """
-        new_tag = "new_tag"
-        entities = gen_entities(insert_count)
-        connect.create_partition(collection, default_tag)
-        connect.create_partition(collection, new_tag)
-        connect.insert(collection, entities)
-        connect.insert(collection, entities, partition_name=default_tag)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == insert_count * 2
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_partitions_D(self, connect, collection, insert_count):
-        """
-        target: test collection rows_count is correct or not
-        method: create collection, create partitions and add entities in one of the partitions,
-                assert the value returned by count_entities method is equal to length of entities
-        expected: the collection count is equal to the length of entities
-        """
-        new_tag = "new_tag"
-        entities = gen_entities(insert_count)
-        connect.create_partition(collection, default_tag)
-        connect.create_partition(collection, new_tag)
-        connect.insert(collection, entities, partition_name=default_tag)
-        connect.insert(collection, entities, partition_name=new_tag)
-        connect.flush([collection])
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == insert_count * 2
-
-    # TODO: assert metric type in stats response
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_get_collection_stats_after_index_created(self, connect, collection, get_simple_index):
-        """
-        target: test collection info after index created
-        method: create collection, add vectors, create index and call collection_stats
-        expected: status ok, index created and shown in segments
-        """
-        connect.insert(collection, cons.default_entities)
-        connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == default_nb
-
-    # TODO: assert metric type in stats response
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_after_index_created_ip(self, connect, collection, get_simple_index):
-        """
-        target: test collection info after index created
-        method: create collection, add vectors, create index and call collection_stats
-        expected: status ok, index created and shown in segments
-        """
-        get_simple_index["metric_type"] = "IP"
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        get_simple_index.update({"metric_type": "IP"})
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        stats = connect.get_collection_stats(collection)
-        assert stats[row_count] == default_nb
-
-    # TODO: assert metric type in stats response
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_get_collection_stats_after_index_created_jac(self, connect, binary_collection, get_jaccard_index):
-        """
-        target: test collection info after index created
-        method: create collection, add binary entities, create index and call collection_stats
-        expected: status ok, index created and shown in segments
-        """
-        ids = connect.insert(binary_collection, cons.default_binary_entities)
-        connect.flush([binary_collection])
-        connect.create_index(binary_collection, default_binary_vec_field_name, get_jaccard_index)
-        stats = connect.get_collection_stats(binary_collection)
-        assert stats[row_count] == default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_get_collection_stats_after_create_different_index(self, connect, collection):
-        """
-        target: test collection info after index created repeatedly
-        method: create collection, add vectors, create index and call collection_stats multiple times
-        expected: status ok, index info shown in segments
-        """
-        result = connect.insert(collection, cons.default_entities)
-        connect.flush([collection])
-        for index_type in ["IVF_FLAT", "IVF_SQ8"]:
-            connect.create_index(collection, default_float_vec_field_name,
-                                 {"index_type": index_type, "params": {"nlist": 1024}, "metric_type": "L2"})
-            stats = connect.get_collection_stats(collection)
-            assert stats[row_count] == default_nb
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_count_multi_collections_indexed(self, connect):
-        """
-        target: test collection rows_count is correct or not with multiple collections of L2
-        method: create collection and add entities in it,
-                assert the value returned by count_entities method is equal to length of entities
-        expected: row count in segments
-        """
-        collection_list = []
-        collection_num = 10
-        for i in range(collection_num):
-            collection_name = gen_unique_str(uid_stats)
-            collection_list.append(collection_name)
-            connect.create_collection(collection_name, cons.default_fields)
-            res = connect.insert(collection_name, cons.default_entities)
-            connect.flush(collection_list)
-            index_1 = {"index_type": "IVF_SQ8", "params": {"nlist": 1024}, "metric_type": "L2"}
-            index_2 = {"index_type": "IVF_FLAT", "params": {"nlist": 1024}, "metric_type": "L2"}
-            if i % 2:
-                connect.create_index(collection_name, default_float_vec_field_name, index_1)
-            else:
-                connect.create_index(collection_name, default_float_vec_field_name, index_2)
-        for i in range(collection_num):
-            stats = connect.get_collection_stats(collection_list[i])
-            assert stats[row_count] == default_nb
-            index = connect.describe_index(collection_list[i], "")
-            if i % 2:
-                create_target_index(index_1, default_float_vec_field_name)
-                assert index == index_1
-            else:
-                create_target_index(index_2, default_float_vec_field_name)
-                assert index == index_2
-                # break
-            connect.drop_collection(collection_list[i])
-
-
-class TestCreateCollection:
-    """
-    ******************************************************************
-      The following cases are used to test `create_collection` function
-    ******************************************************************
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_filter_fields()
-    )
-    def get_filter_field(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_vector_fields()
-    )
-    def get_vector_field(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_segment_row_limits()
-    )
-    def get_segment_row_limit(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def _test_create_collection_segment_row_limit(self, connect, get_segment_row_limit):
-        """
-        target: test create normal collection with different fields
-        method: create collection with diff segment_row_limit
-        expected: no exception raised
-        """
-        collection_name = gen_unique_str(uid_create)
-        fields = copy.deepcopy(cons.default_fields)
-        # fields["segment_row_limit"] = get_segment_row_limit
-        connect.create_collection(collection_name, fields)
-        assert connect.has_collection(collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_create_collection_after_insert(self, connect, collection):
-        """
-        target: test insert vector, then create collection again
-        method: insert vector and create collection
-        expected: error raised
-        """
-        # pdb.set_trace()
-        connect.insert(collection, cons.default_entity)
-
-        try:
-            connect.create_collection(collection, cons.default_fields)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "CreateCollection failed: meta table add collection failed," \
-                              "error = collection %s exist" % collection
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_create_collection_after_insert_flush(self, connect, collection):
-        """
-        target: test insert vector, then create collection again
-        method: insert vector and create collection
-        expected: error raised
-        """
-        connect.insert(collection, cons.default_entity)
-        connect.flush([collection])
-        try:
-            connect.create_collection(collection, cons.default_fields)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "CreateCollection failed: meta table add collection failed," \
-                              "error = collection %s exist" % collection
-
+class TestCreateCollection(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
-    def test_create_collection_multithread(self, connect):
+    def test_create_collection_multithread(self):
         """
         target: test create collection with multi-thread
         method: create collection using multi-thread,
         expected: collections are created
         """
+        self._connect()
         threads_num = 8
         threads = []
         collection_names = []
@@ -2153,7 +1622,7 @@ class TestCreateCollection:
         def create():
             collection_name = gen_unique_str(uid_create)
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, cons.default_fields)
+            self.init_collection_wrap(name=collection_name)
 
         for i in range(threads_num):
             t = MyThread(target=create, args=())
@@ -2164,289 +1633,40 @@ class TestCreateCollection:
             t.join()
 
         for item in collection_names:
-            assert item in connect.list_collections()
-            connect.drop_collection(item)
+            assert item in self.utility_wrap.list_collections()[0]
 
 
-class TestCreateCollectionInvalid(object):
+class TestCreateCollectionInvalid(TestcaseBase):
     """
     Test creating collections with invalid params
     """
 
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_metric_types()
-    )
-    def get_metric_type(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_ints()
-    )
-    def get_segment_row_limit(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_ints()
-    )
-    def get_dim(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
-    def get_invalid_string(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_field_types()
-    )
-    def get_field_type(self, request):
-        yield request.param
-
     @pytest.mark.tags(CaseLabel.L2)
-    def _test_create_collection_with_invalid_segment_row_limit(self, connect, get_segment_row_limit):
-        collection_name = gen_unique_str()
-        fields = copy.deepcopy(cons.default_fields)
-        fields["segment_row_limit"] = get_segment_row_limit
-        with pytest.raises(Exception) as e:
-            connect.create_collection(collection_name, fields)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def _test_create_collection_no_segment_row_limit(self, connect):
-        """
-        target: test create collection with no segment_row_limit params
-        method: create collection with correct params
-        expected: use default default_segment_row_limit
-        """
-        collection_name = gen_unique_str(uid_create)
-        fields = copy.deepcopy(cons.default_fields)
-        fields.pop("segment_row_limit")
-        connect.create_collection(collection_name, fields)
-        res = connect.get_collection_info(collection_name)
-        log.info(res)
-        assert res["segment_row_limit"] == default_server_segment_row_limit
-
-    # TODO: assert exception
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_create_collection_limit_fields(self, connect):
+    def test_create_collection_limit_fields(self):
         """
         target: test create collection with maximum fields
         method: create collection with maximum field number
         expected: raise exception
         """
-        collection_name = gen_unique_str(uid_create)
-        limit_num = 64
-        fields = copy.deepcopy(cons.default_fields)
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        limit_num = ct.max_field_num
+        field_schema_list = []
+        field_pr = cf.gen_int64_field(ct.default_int64_field_name, is_primary=True)
+        field_v = cf.gen_float_vec_field(ct.default_float_vec_field_name)
+        field_schema_list.append(field_pr)
+        field_schema_list.append(field_v)
+
         for i in range(limit_num):
-            field_name = gen_unique_str("field_name")
-            field = {"name": field_name, "type": DataType.INT64}
-            fields["fields"].append(field)
-
-        try:
-            connect.create_collection(collection_name, fields)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "maximum field's number should be limited to 64"
+            field_name_tmp = gen_unique_str("field_name")
+            field_schema_temp = cf.gen_int64_field(field_name_tmp)
+            field_schema_list.append(field_schema_temp)
+        error = {ct.err_code: 1, ct.err_msg: "'maximum field\'s number should be limited to 256'"}
+        schema, _ = self.collection_schema_wrap.init_collection_schema(fields=field_schema_list)
+        self.init_collection_wrap(name=c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
 
-class TestDescribeCollection:
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_filter_fields()
-    )
-    def get_filter_field(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_single_vector_fields()
-    )
-    def get_vector_field(self, request):
-        yield request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        log.info(request.param)
-        # if str(connect._cmd("mode")) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in CPU mode")
-        return request.param
-
-    """
-    ******************************************************************
-      The following cases are used to test `describe_collection` function, no data in collection
-    ******************************************************************
-    """
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_collection_fields(self, connect, get_filter_field, get_vector_field):
-        """
-        target: test create normal collection with different fields, check info returned
-        method: create collection with diff fields: metric/field_type/..., calling `describe_collection`
-        expected: no exception raised, and value returned correct
-        """
-        filter_field = get_filter_field
-        vector_field = get_vector_field
-        collection_name = gen_unique_str(uid_describe)
-        fields = {
-            "fields": [gen_primary_field(), filter_field, vector_field],
-            # "segment_row_limit": default_segment_row_limit
-        }
-        connect.create_collection(collection_name, fields)
-        res = connect.describe_collection(collection_name)
-        # assert res['segment_row_limit'] == default_segment_row_limit
-        assert len(res["fields"]) == len(fields.get("fields"))
-        for field in res["fields"]:
-            if field["type"] == filter_field:
-                assert field["name"] == filter_field["name"]
-            elif field["type"] == vector_field:
-                assert field["name"] == vector_field["name"]
-                assert field["params"] == vector_field["params"]
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_describe_collection_after_index_created(self, connect, collection, get_simple_index):
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        if get_simple_index["index_type"] != "FLAT":
-            index = connect.describe_index(collection, "")
-            assert index["index_type"] == get_simple_index["index_type"]
-            assert index["metric_type"] == get_simple_index["metric_type"]
-            assert index["params"] == get_simple_index["params"]
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_describe_collection_without_connection(self, collection, dis_connect):
-        """
-        target: test get collection info, without connection
-        method: calling get collection info with correct params, with a disconnected instance
-        expected: get collection info raise exception
-        """
-        with pytest.raises(Exception) as e:
-            dis_connect.describe_collection(collection)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_describe_collection_not_existed(self, connect):
-        """
-        target: test if collection not created
-        method: random a collection name, create this collection then drop it,
-            assert the value returned by describe_collection method
-        expected: False
-        """
-        collection_name = gen_unique_str(uid_describe)
-        connect.create_collection(collection_name, cons.default_fields)
-        connect.describe_collection(collection_name)
-        connect.drop_collection(collection_name)
-        try:
-            connect.describe_collection(collection_name)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_describe_collection_multithread(self, connect):
-        """
-        target: test create collection with multi-thread
-        method: create collection using multi-thread,
-        expected: collections are created
-        """
-        threads_num = 4
-        threads = []
-        collection_name = gen_unique_str(uid_describe)
-        connect.create_collection(collection_name, cons.default_fields)
-
-        def get_info():
-            connect.describe_collection(collection_name)
-
-        for i in range(threads_num):
-            t = MyThread(target=get_info)
-            threads.append(t)
-            t.start()
-            time.sleep(0.2)
-        for t in threads:
-            t.join()
-
-    """
-    ******************************************************************
-      The following cases are used to test `describe_collection` function, and insert data in collection
-    ******************************************************************
-    """
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_describe_collection_fields_after_insert(self, connect, get_filter_field, get_vector_field):
-        """
-        target: test create normal collection with different fields, check info returned
-        method: create collection with diff fields: metric/field_type/..., calling `describe_collection`
-        expected: no exception raised, and value returned correct
-        """
-        filter_field = get_filter_field
-        vector_field = get_vector_field
-        collection_name = gen_unique_str(uid_describe)
-        fields = {
-            "fields": [gen_primary_field(), filter_field, vector_field],
-            # "segment_row_limit": default_segment_row_limit
-        }
-        connect.create_collection(collection_name, fields)
-        entities = gen_entities_by_fields(fields["fields"], default_nb, vector_field["params"]["dim"])
-        res_ids = connect.insert(collection_name, entities)
-        connect.flush([collection_name])
-        res = connect.describe_collection(collection_name)
-        # assert res['segment_row_limit'] == default_segment_row_limit
-        assert len(res["fields"]) == len(fields.get("fields"))
-        for field in res["fields"]:
-            if field["type"] == filter_field:
-                assert field["name"] == filter_field["name"]
-            elif field["type"] == vector_field:
-                assert field["name"] == vector_field["name"]
-                assert field["params"] == vector_field["params"]
-
-
-class TestDescribeCollectionInvalid(object):
-    """
-    Test describe collection with invalid params
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
-    def get_collection_name(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_describe_collection_with_invalid_collection_name(self, connect, get_collection_name):
-        """
-        target: test describe collection which name invalid
-        method: call describe_collection with invalid names
-        expected: raise exception
-        """
-        collection_name = get_collection_name
-        with pytest.raises(Exception) as e:
-            connect.describe_collection(collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("collection_name", ('', None))
-    def test_describe_collection_with_empty_or_None_collection_name(self, connect, collection_name):
-        """
-        target: test describe collection which name is empty or None
-        method: call describe_collection with '' or None name
-        expected: raise exception
-        """
-        with pytest.raises(Exception) as e:
-            connect.describe_collection(collection_name)
-
-
-class TestDropCollection:
+class TestDropCollection(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test `drop_collection` function
@@ -2454,60 +1674,67 @@ class TestDropCollection:
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_collection_A(self, connect, collection):
+    def test_drop_collection_A(self):
         """
         target: test delete collection created with correct params
         method: create collection and then delete,
                 assert the value returned by delete method
         expected: status ok, and no collection in collections
         """
-        connect.drop_collection(collection)
-        time.sleep(2)
-        assert not connect.has_collection(collection)
+        self._connect()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.drop()
+        assert not self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_collection_without_connection(self, collection, dis_connect):
+    def test_drop_collection_without_connection(self):
         """
         target: test describe collection, without connection
         method: drop collection with correct params, with a disconnected instance
         expected: drop raise exception
         """
-        with pytest.raises(Exception) as e:
-            dis_connect.drop_collection(collection)
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_wr = self.init_collection_wrap(c_name)
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        collection_wr.drop(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_drop_collection_not_existed(self, connect):
+    def test_drop_collection_not_existed(self):
         """
         target: test if collection not created
         method: random a collection name, which not existed in db,
                 assert the exception raised returned by drp_collection method
         expected: False
         """
-        collection_name = gen_unique_str(uid_drop)
-        try:
-            connect.drop_collection(collection_name)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
+        self._connect()
+        c_name = cf.gen_unique_str()
+        self.init_collection_wrap(name=c_name)
+        c_name_2 = cf.gen_unique_str()
+        error = {ct.err_code: 0, ct.err_msg: 'DescribeCollection failed: can\'t find collection: %s' % c_name_2}
+        self.utility_wrap.drop_collection(c_name_2, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_create_drop_collection_multithread(self, connect):
+    def test_create_drop_collection_multithread(self):
         """
         target: test create and drop collection with multi-thread
         method: create and drop collection using multi-thread,
         expected: collections are created, and dropped
         """
+        self._connect()
         threads_num = 8
         threads = []
         collection_names = []
 
         def create():
-            collection_name = gen_unique_str(uid_drop)
-            collection_names.append(collection_name)
-            connect.create_collection(collection_name, cons.default_fields)
-            connect.drop_collection(collection_name)
+            c_name = cf.gen_unique_str()
+            collection_names.append(c_name)
+            collection_wr = self.init_collection_wrap(name=c_name)
+            collection_wr.drop()
 
         for i in range(threads_num):
             t = MyThread(target=create, args=())
@@ -2518,45 +1745,41 @@ class TestDropCollection:
             t.join()
 
         for item in collection_names:
-            assert not connect.has_collection(item)
+            assert not self.utility_wrap.has_collection(item)[0]
 
 
-class TestDropCollectionInvalid(object):
+class TestDropCollectionInvalid(TestcaseBase):
     """
-    Test has collection with invalid params
+    Test drop collection with invalid params
     """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
-    def get_collection_name(self, request):
-        yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_collection_with_invalid_collection_name(self, connect, get_collection_name):
+    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
+    def test_drop_collection_with_invalid_collection_name(self, name):
         """
         target: test drop invalid collection
         method: drop collection with invalid collection name
         expected: raise exception
         """
-        collection_name = get_collection_name
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+        self._connect()
+        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(name)}
+        self.utility_wrap.drop_collection(name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("collection_name", ('', None))
-    def test_drop_collection_with_empty_or_None_collection_name(self, connect, collection_name):
+    def test_drop_collection_with_empty_or_None_collection_name(self):
         """
         target: test drop invalid collection
         method: drop collection with empty or None collection name
         expected: raise exception
         """
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+        self._connect()
+        error = {ct.err_code: -1, ct.err_msg: '`collection_name` value  is illegal'}
+        self.utility_wrap.drop_collection('', check_task=CheckTasks.err_res, check_items=error)
+        error_none = {ct.err_code: -1, ct.err_msg: '`collection_name` value None is illegal'}
+        self.utility_wrap.drop_collection(None, check_task=CheckTasks.err_res, check_items=error_none)
 
 
-class TestHasCollection:
+class TestHasCollection(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test `has_collection` function
@@ -2564,43 +1787,50 @@ class TestHasCollection:
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_without_connection(self, collection, dis_connect):
+    def test_has_collection_without_connection(self):
         """
         target: test has collection, without connection
         method: calling has collection with correct params, with a disconnected instance
         expected: has collection raise exception
         """
-        with pytest.raises(Exception) as e:
-            assert dis_connect.has_collection(collection)
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        self.init_collection_wrap(c_name)
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_not_existed(self, connect):
+    def test_has_collection_not_existed(self):
         """
         target: test if collection not created
         method: random a collection name, create this collection then drop it,
                 assert the value returned by has_collection method
         expected: False
         """
-        collection_name = gen_unique_str(uid_has)
-        connect.create_collection(collection_name, cons.default_fields)
-        assert connect.has_collection(collection_name)
-        connect.drop_collection(collection_name)
-        assert not connect.has_collection(collection_name)
+        self._connect()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.drop()
+        assert not self.utility_wrap.has_collection(c_name)[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_multithread(self, connect):
+    def test_has_collection_multithread(self):
         """
         target: test create collection with multi-thread
         method: create collection using multi-thread,
         expected: collections are created
         """
+        self._connect()
         threads_num = 4
         threads = []
-        collection_name = gen_unique_str(uid_has)
-        connect.create_collection(collection_name, cons.default_fields)
+        c_name = cf.gen_unique_str()
+        self.init_collection_wrap(name=c_name)
 
         def has():
-            assert connect.has_collection(collection_name)
+            assert self.utility_wrap.has_collection(c_name)
             # assert not assert_collection(connect, collection_name)
 
         for i in range(threads_num):
@@ -2612,115 +1842,96 @@ class TestHasCollection:
             t.join()
 
 
-class TestHasCollectionInvalid(object):
-    """
-    Test has collection with invalid params
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
-    def get_collection_name(self, request):
-        yield request.param
-
+class TestHasCollectionInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_with_invalid_collection_name(self, connect, get_collection_name):
+    @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
+    def test_has_collection_with_invalid_collection_name(self, name):
         """
         target: test list collections with invalid scenario
         method: show collection with invalid collection name
         expected: raise exception
         """
-        collection_name = get_collection_name
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+        self._connect()
+        error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(name)}
+        self.utility_wrap.has_collection(name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_with_empty_collection_name(self, connect):
+    def test_has_collection_with_empty_collection_name(self):
         """
         target: test list collections with invalid scenario
         method: show collection with empty collection name
         expected: raise exception
         """
-        collection_name = ''
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+        self._connect()
+        error = {ct.err_code: -1, ct.err_msg: '`collection_name` value  is illegal'}
+        self.utility_wrap.has_collection('', check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_with_none_collection_name(self, connect):
+    def test_has_collection_with_none_collection_name(self):
         """
         target: test list collections with invalid scenario
         method: show collection with no collection name
         expected: raise exception
         """
-        collection_name = None
-        with pytest.raises(Exception) as e:
-            connect.has_collection(collection_name)
+        self._connect()
+        error = {ct.err_code: -1, ct.err_msg: '`collection_name` value None is illegal'}
+        self.utility_wrap.has_collection(None, check_task=CheckTasks.err_res, check_items=error)
 
 
-class TestListCollections:
+class TestListCollections(TestcaseBase):
     """
     ******************************************************************
-      The following cases are used to test `list_collections` function
+      The following cases are used to test `utility.list_collections()` function
     ******************************************************************
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_list_collections_multi_collections(self, connect):
+    def test_list_collections_multi_collections(self):
         """
         target: test list collections
         method: create collection, assert the value returned by list_collections method
         expected: True
         """
+        self._connect()
         collection_num = 50
         collection_names = []
         for i in range(collection_num):
-            collection_name = gen_unique_str(uid_list)
+            collection_name = cf.gen_unique_str()
             collection_names.append(collection_name)
-            connect.create_collection(collection_name, cons.default_fields)
-            assert collection_name in connect.list_collections()
+            self.init_collection_wrap(name=collection_name)
         for i in range(collection_num):
-            connect.drop_collection(collection_names[i])
+            assert collection_names[i] in self.utility_wrap.list_collections()[0]
+            self.utility_wrap.drop_collection(collection_names[i])
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_list_collections_without_connection(self, dis_connect):
+    def test_list_collections_without_connection(self):
         """
         target: test list collections, without connection
         method: calling list collections with correct params, with a disconnected instance
         expected: list collections raise exception
         """
-        with pytest.raises(Exception) as e:
-            dis_connect.list_collections()
-
-    # TODO: make sure to run this case in the end
-    @pytest.mark.skip("r0.3-test")
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_list_collections_no_collection(self, connect):
-        """
-        target: test show collections is correct or not, if no collection in db
-        method: delete all collections,
-            assert the value returned by list_collections method is equal to []
-        expected: the status is ok, and the result is equal to []
-        """
-        result = connect.list_collections()
-        if result:
-            for collection_name in result:
-                assert connect.has_collection(collection_name)
+        self._connect()
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        self.utility_wrap.list_collections(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_list_collections_multithread(self, connect):
+    def test_list_collections_multithread(self):
         """
         target: test list collection with multi-threads
         method: list collection using multi-threads
         expected: list collections correctly
         """
+        self._connect()
         threads_num = 10
         threads = []
-        collection_name = gen_unique_str(uid_list)
-        connect.create_collection(collection_name, cons.default_fields)
+        collection_name = cf.gen_unique_str()
+        self.init_collection_wrap(name=collection_name)
 
         def _list():
-            assert collection_name in connect.list_collections()
+            assert collection_name in self.utility_wrap.list_collections()[0]
 
         for i in range(threads_num):
             t = MyThread(target=_list)
@@ -2731,425 +1942,289 @@ class TestListCollections:
             t.join()
 
 
-class TestLoadCollection:
+class TestLoadCollection(TestcaseBase):
     """
     ******************************************************************
-      The following cases are used to test `load_collection` function
+      The following cases are used to test `collection.load()` function
     ******************************************************************
     """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        return request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_binary_index()
-    )
-    def get_binary_index(self, request, connect):
-        return request.param
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_load_collection_after_index(self, connect, collection, get_simple_index):
+    def test_load_collection_after_index(self):
         """
         target: test load collection, after index created
         method: insert and create index, load collection with correct params
         expected: no error raised
         """
-        connect.insert(collection, cons.default_entities)
-        connect.flush([collection])
-        connect.create_index(collection, default_float_vec_field_name, get_simple_index)
-        connect.load_collection(collection)
-        connect.release_collection(collection)
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        data = cf.gen_default_list_data()
+        collection_w.insert(data)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name=ct.default_index_name)
+        collection_w.load()
+        collection_w.release()
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_load_collection_after_index_binary(self, connect, binary_collection, get_binary_index):
+    def test_load_collection_after_index_binary(self):
         """
         target: test load binary_collection, after index created
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
         """
-        result = connect.insert(binary_collection, cons.default_binary_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([binary_collection])
-        for metric_type in binary_metrics():
-            get_binary_index["metric_type"] = metric_type
-            connect.drop_index(binary_collection, default_binary_vec_field_name)
-            if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in structure_metrics():
-                with pytest.raises(Exception) as e:
-                    connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
-            else:
-                connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
-                index = connect.describe_index(binary_collection, "")
-                create_target_index(get_binary_index, default_binary_vec_field_name)
-                assert index == get_binary_index
-            connect.load_collection(binary_collection)
-            connect.release_collection(binary_collection)
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
+        mutation_res, _ = collection_w.insert(data=df)
+        collection_w.create_index(ct.default_binary_vec_field_name, default_binary_index_params)
+        collection_w.load()
+        collection_w.release()
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_empty_collection(self, connect, collection):
+    def test_load_empty_collection(self):
         """
         target: test load an empty collection with no data inserted
         method: no entities in collection, load and release the collection
         expected: load and release successfully
         """
-        connect.load_collection(collection)
-        connect.release_collection(collection)
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        collection_w.load()
+        collection_w.release()
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_collection_dis_connect(self, dis_connect, collection):
+    def test_load_collection_dis_connect(self):
         """
         target: test load collection, without connection
         method: load collection with correct params, with a disconnected instance
         expected: load raise exception
         """
-        with pytest.raises(Exception) as e:
-            dis_connect.load_collection(collection)
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_wr = self.init_collection_wrap(c_name)
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_release_collection_dis_connect(self, dis_connect, collection):
+    def test_release_collection_dis_connect(self):
         """
         target: test release collection, without connection
         method: release collection with correct params, with a disconnected instance
         expected: release raise exception
         """
-        with pytest.raises(Exception) as e:
-            dis_connect.release_collection(collection)
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_wr = self.init_collection_wrap(c_name)
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_collection_not_existed(self, connect, collection):
+    def test_load_collection_not_existed(self):
         """
         target: test load invalid collection
         method: load not existed collection
         expected: raise exception
         """
-        collection_name = gen_unique_str(uid_load)
-        try:
-            connect.load_collection(collection_name)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
+        self._connect()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.drop()
+        error = {ct.err_code: 0,
+                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+        collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_release_collection_not_existed(self, connect, collection):
+    def test_release_collection_not_existed(self):
         """
         target: test release a not existed collection
         method: release with a not existed collection name
         expected: raise exception
         """
-        collection_name = gen_unique_str(uid_load)
-        try:
-            connect.release_collection(collection_name)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
+        self._connect()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.drop()
+        error = {ct.err_code: 0,
+                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+        collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_release_collection_not_load(self, connect, collection):
+    def test_release_collection_not_load(self):
         """
         target: test release collection without load
         method: release collection without load
         expected: release successfully
         """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.release_collection(collection)
+        self._connect()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.release()
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_load_collection_after_load_release(self, connect, collection):
+    def test_load_collection_after_load_release(self):
         """
         target: test load collection after load and release
         method: 1.load and release collection after entities flushed
                 2.re-load collection
         expected: No exception
         """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_collection(collection)
-        connect.release_collection(collection)
-        connect.load_collection(collection)
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        insert_data = cf.gen_default_list_data()
+        collection_w.insert(data=insert_data)
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.load()
+        collection_w.release()
+        collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_collection_repeatedly(self, connect, collection):
+    def test_load_collection_repeatedly(self):
         """
         target: test load collection repeatedly
         method: load collection twice
         expected: No exception
         """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_collection(collection)
-        connect.load_collection(collection)
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        insert_data = cf.gen_default_list_data()
+        collection_w.insert(data=insert_data)
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.load()
+        collection_w.load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_release_collection(self, connect, collection):
+    def test_load_release_collection(self):
         """
         target: test load, release non-exist collection
         method: 1. load, release and drop collection
                 2. load and release dropped collection
         expected: raise exception
         """
-        collection_name = gen_unique_str(uid_load)
-        connect.create_collection(collection_name, cons.default_fields)
-        connect.insert(collection_name, cons.default_entities)
-        connect.flush([collection_name])
-        connect.load_collection(collection_name)
-        connect.release_collection(collection_name)
-        connect.drop_collection(collection_name)
-        try:
-            connect.load_collection(collection_name)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
-
-        try:
-            connect.release_collection(collection_name)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection_name
+        self._connect()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.load()
+        collection_wr.release()
+        collection_wr.drop()
+        error = {ct.err_code: 0,
+                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+        collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
+        collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_release_collection_after_drop(self, connect, collection):
+    def test_release_collection_after_drop(self):
         """
         target: test release collection after drop
         method: insert and flush, then release collection after load and drop
         expected: raise exception
         """
-        result = connect.insert(collection, cons.default_entities)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_collection(collection)
-        connect.drop_collection(collection)
-        try:
-            connect.release_collection(collection)
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection
+        self._connect()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.load()
+        collection_wr.drop()
+        error = {ct.err_code: 0,
+                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+        collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_load_collection_without_flush(self, connect, collection):
-        """
-        target: test load collection without flush
-        method: insert entities without flush, then load collection
-        expected: No exception and data can be queried
-        """
-        result = connect.insert(collection, gen_entities(100))
-        assert len(result.primary_keys) == 100
-        connect.load_collection(collection)
-        int_field_name = "int64"
-        term_expr = f'{int_field_name} in {result.primary_keys[:1]}'
-        res = connect.query(collection, term_expr)
-        assert res == [{int_field_name: result.primary_keys[0]}]
-
-    # TODO
-    @pytest.mark.tags(CaseLabel.L2)
-    def _test_load_collection_larger_than_memory(self):
-        """
-        target: test load collection when memory less than collection size
-        method: i don't know
-        expected: raise exception
-        """
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_load_partitions_release_collection(self, connect, collection):
+    def test_load_partitions_release_collection(self):
         """
         target: test release collection after load partitions
-        method: insert entities into partitions, search empty after load partitions and release collection
+        method: insert entities into partitions, load partitions and release collection
         expected: search result empty
         """
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_partitions(collection, [default_tag])
-        connect.release_collection(collection)
-        with pytest.raises(Exception):
-            connect.search(collection, **default_single_query)
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        patition_w = self.init_partition_wrap(collection_wrap=collection_w, name=ct.default_tag)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data, partition_name=ct.default_tag)
+        assert collection_w.num_entities == ct.default_nb
+        patition_w.load()
+        collection_w.release()
 
 
-class TestReleaseAdvanced:
-
+class TestReleaseAdvanced(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
-    def test_release_collection_during_searching(self, connect, collection):
+    def test_release_collection_during_searching(self):
         """
         target: test release collection during searching
         method: insert entities into collection, flush and load collection, release collection during searching
         expected: raise exception
         """
-        nq = 1000
-        top_k = 1
-        connect.insert(collection, cons.default_entities)
-        connect.flush([collection])
-        connect.load_collection(collection)
-        params, _ = gen_search_vectors_params(field_name, cons.default_entities, top_k, nq)
-        future = connect.search(collection, **params, _async=True)
-        connect.release_collection(collection)
-        with pytest.raises(Exception):
-            connect.search(collection, **default_single_query)
+        self._connect()
+        data = cf.gen_default_list_data()
+        c_name = cf.gen_unique_str()
+        collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.insert(data=data)
+        assert collection_wr.num_entities == ct.default_nb
+        collection_wr.load()
+        search_res, _ = collection_wr.search(vectors, default_search_field, default_search_params,
+                                             default_limit, _async=True)
+        collection_wr.release()
+        error = {ct.err_code: 1, ct.err_msg: 'collection %s was not loaded into memory' % c_name}
+        collection_wr.search(vectors, default_search_field, default_search_params, default_limit,
+                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_release_partition_during_searching(self, connect, collection):
+    def test_release_partition_during_searching(self):
         """
         target: test release partition during searching
         method: insert entities into partition, flush and load partition, release partition during searching
         expected: raise exception
         """
-        nq = 1000
-        top_k = 1
-        connect.create_partition(collection, default_tag)
-        query, _ = gen_search_vectors_params(field_name, cons.default_entities, top_k, nq)
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        connect.flush([collection])
-        connect.load_partitions(collection, [default_tag])
-        res = connect.search(collection, **query, _async=True)
-        connect.release_partitions(collection, [default_tag])
-        with pytest.raises(Exception):
-            res = connect.search(collection, **default_single_query)
+        self._connect()
+        partition_num = 1
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        par = collection_w.partitions
+        par_name = par[partition_num].name
+        par[partition_num].load()
+        limit = 10
+        collection_w.search(vectors, default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            [par_name])
+        par[partition_num].release()
+        collection_w.search(vectors, default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            [par_name],
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "partition has been released"})
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_release_collection_during_searching_A(self, connect, collection):
+    def test_release_indexed_collection_during_searching(self):
         """
-        target: test release collection during searching
+        target: test release indexed collection during searching
         method: insert entities into partition, flush and load partition, release collection during searching
         expected: raise exception
         """
-        nq = 1000
-        top_k = 1
-        connect.create_partition(collection, default_tag)
-        query, _ = gen_search_vectors_params(field_name, cons.default_entities, top_k, nq)
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        connect.flush([collection])
-        connect.load_partitions(collection, [default_tag])
-        connect.search(collection, **query, _async=True)
-        connect.release_collection(collection)
-        with pytest.raises(Exception):
-            connect.search(collection, **default_single_query)
-
-    def _test_release_collection_during_loading(self, connect, collection):
-        """
-        target: test release collection during loading
-        method: insert entities into collection, flush, release collection during loading
-        expected: raise exception
-        """
-        connect.insert(collection, cons.default_entities)
-        connect.flush([collection])
-
-        def load():
-            connect.load_collection(collection)
-
-        t = threading.Thread(target=load, args=())
-        t.start()
-        connect.release_collection(collection)
-        with pytest.raises(Exception):
-            connect.search(collection, **default_single_query)
-
-    def _test_release_partition_during_loading(self, connect, collection):
-        """
-        target: test release partition during loading
-        method: insert entities into partition, flush, release partition during loading
-        expected:
-        """
-        connect.create_partition(collection, default_tag)
-        connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        connect.flush([collection])
-
-        def load():
-            connect.load_collection(collection)
-
-        t = threading.Thread(target=load, args=())
-        t.start()
-        connect.release_partitions(collection, [default_tag])
-        res = connect.search(collection, **default_single_query)
-        assert len(res[0]) == 0
-
-    def _test_release_collection_during_inserting(self, connect, collection):
-        """
-        target: test release collection during inserting
-        method: load collection, do release collection during inserting
-        expected: raise exception
-        """
-        connect.insert(collection, cons.default_entities)
-        connect.flush([collection])
-        connect.load_collection(collection)
-
-        def insert():
-            connect.insert(collection, cons.default_entities)
-
-        t = threading.Thread(target=insert, args=())
-        t.start()
-        connect.release_collection(collection)
-        with pytest.raises(Exception):
-            res = connect.search(collection, **default_single_query)
-
-    def _test_release_collection_during_indexing(self, connect, collection):
-        """
-        target: test release collection during building index
-        method: insert and flush, load collection, do release collection during creating index
-        expected:
-        """
-        pass
-
-    def _test_release_collection_during_droping_index(self, connect, collection):
-        """
-        target: test release collection during droping index
-        method: insert, create index and flush, load collection, do release collection during droping index
-        expected:
-        """
-        pass
+        self._connect()
+        partition_num = 1
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        par = collection_w.partitions
+        par_name = par[partition_num].name
+        par[partition_num].load()
+        limit = 10
+        collection_w.search(vectors, default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            [par_name],  _async=True)
+        collection_w.release()
+        error = {ct.err_code: 1, ct.err_msg: 'collection %s was not loaded into memory' % collection_w.name}
+        collection_w.search(vectors, default_search_field,
+                            default_search_params, limit, default_search_exp,
+                            [par_name],
+                            check_task=CheckTasks.err_res,
+                            check_items=error)
 
 
-class TestLoadCollectionInvalid(object):
-    """
-    Test load collection with invalid params
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
-    def get_collection_name(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_load_collection_with_invalid_collection_name(self, connect, get_collection_name):
-        """
-        target: test load invalid collection
-        method: load collection with invalid name
-        expected: raise exception
-        """
-        collection_name = get_collection_name
-        with pytest.raises(Exception) as e:
-            connect.load_collection(collection_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_release_collection_with_invalid_collection_name(self, connect, get_collection_name):
-        """
-        target: test release invalid collection
-        method: release collection with invalid name
-        expected: raise exception
-        """
-        collection_name = get_collection_name
-        with pytest.raises(Exception) as e:
-            connect.release_collection(collection_name)
-
-
-class TestLoadPartition:
+class TestLoadPartition(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test `load_collection` function
@@ -3170,44 +2245,61 @@ class TestLoadPartition:
         scope="function",
         params=gen_binary_index()
     )
-    def get_binary_index(self, request, connect):
+    def get_binary_index(self, request):
         log.info(request.param)
-        if request.param["index_type"] in binary_support():
+        if request.param["index_type"] in ct.binary_support:
             return request.param
         else:
             pytest.skip("Skip index Temporary")
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_load_partition_after_index_binary(self, connect, binary_collection, get_binary_index):
+    def test_load_partition_after_index_binary(self, get_binary_index):
         """
         target: test load binary_collection, after index created
         method: insert and create index, load binary_collection with correct params
         expected: no error raised
         """
-        connect.create_partition(binary_collection, default_tag)
-        result = connect.insert(binary_collection, cons.default_binary_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([binary_collection])
-        for metric_type in binary_metrics():
+        self._connect()
+        partition_num = 1
+        collection_w = self.init_collection_general(prefix, True, ct.default_nb, partition_num,
+                                                    is_binary=True, is_index=True)[0]
+
+        for metric_type in ct.binary_metrics:
             log.info(metric_type)
             get_binary_index["metric_type"] = metric_type
-            if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in structure_metrics():
-                with pytest.raises(Exception) as e:
-                    connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
+            if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
+                error = {ct.err_code: -1, ct.err_msg: 'Invalid metric_type: SUBSTRUCTURE, '
+                                                      'which does not match the index type: %s' % metric_type}
+                collection_w.create_index(ct.default_binary_vec_field_name, get_binary_index,
+                                          check_task=CheckTasks.err_res, check_items=error)
             else:
-                connect.create_index(binary_collection, default_binary_vec_field_name, get_binary_index)
-            connect.load_partitions(binary_collection, [default_tag])
+                collection_w.create_index(ct.default_binary_vec_field_name, get_binary_index)
+            par = collection_w.partitions
+            par[partition_num].load()
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_collection_dis_connect(self, connect, dis_connect, collection):
+    def test_load_partition_dis_connect(self):
         """
-        target: test load collection, without connection
-        method: load collection with correct params, with a disconnected instance
+        target: test load partition, without connection
+        method: load partition with correct params, with a disconnected instance
         expected: load raise exception
         """
-        connect.create_partition(collection, default_tag)
-        with pytest.raises(Exception) as e:
-            dis_connect.load_partitions(collection, [default_tag])
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        description = cf.gen_unique_str("desc_")
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               description=description,
+                                               check_task=CheckTasks.check_partition_property,
+                                               check_items={"name": partition_name, "description": description,
+                                                            "is_empty": True, "num_entities": 0}
+                                               )
+        partition_w.load()
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first.'}
+        partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_release_partition_dis_connect(self, connect, dis_connect, collection):
@@ -3216,10 +2308,22 @@ class TestLoadPartition:
         method: release collection with correct params, with a disconnected instance
         expected: release raise exception
         """
-        connect.create_partition(collection, default_tag)
-        connect.load_partitions(collection, [default_tag])
-        with pytest.raises(Exception) as e:
-            dis_connect.release_partitions(collection, [default_tag])
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        description = cf.gen_unique_str("desc_")
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               description=description,
+                                               check_task=CheckTasks.check_partition_property,
+                                               check_items={"name": partition_name, "description": description,
+                                                            "is_empty": True, "num_entities": 0}
+                                               )
+        partition_w.load()
+        self.connection_wrap.remove_connection(ct.default_alias)
+        res_list, _ = self.connection_wrap.list_connections()
+        assert ct.default_alias not in res_list
+        error = {ct.err_code: 0, ct.err_msg: 'should create connect first.'}
+        partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_not_existed(self, connect, collection):
@@ -3228,27 +2332,38 @@ class TestLoadPartition:
         method: load not existed partition
         expected: raise exception and report the error
         """
-        partition_name = gen_unique_str(uid_load)
-        try:
-            connect.load_partitions(collection, [partition_name])
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "partitionID of partitionName:%s can not be find" % partition_name
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        description = cf.gen_unique_str("desc_")
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               description=description,
+                                               check_task=CheckTasks.check_partition_property,
+                                               check_items={"name": partition_name, "description": description,
+                                                            "is_empty": True, "num_entities": 0}
+                                               )
+        partition_w.drop()
+        error = {ct.err_code: 0, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_release_partition_not_load(self, connect, collection):
+    def test_release_partition_not_load(self):
         """
         target: test release partition without load
         method: release partition without load
-        expected: raise exception
+        expected: release success
         """
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.release_partitions(collection, [default_tag])
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        description = cf.gen_unique_str("desc_")
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               description=description,
+                                               check_task=CheckTasks.check_partition_property,
+                                               check_items={"name": partition_name, "description": description,
+                                                            "is_empty": True, "num_entities": 0}
+                                               )
+        partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_release_after_drop(self, connect, collection):
@@ -3257,28 +2372,20 @@ class TestLoadPartition:
         method: drop partition and then load and release it
         expected: raise exception
         """
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_partitions(collection, [default_tag])
-        connect.release_partitions(collection, [default_tag])
-        connect.drop_partition(collection, default_tag)
-        try:
-            connect.load_partitions(collection, [default_tag])
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "partitionID of partitionName:%s can not be find" % default_tag
-
-        try:
-            connect.release_partitions(collection, [default_tag])
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "partitionID of partitionName:%s can not be find" % default_tag
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        description = cf.gen_unique_str("desc_")
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               description=description,
+                                               check_task=CheckTasks.check_partition_property,
+                                               check_items={"name": partition_name, "description": description,
+                                                            "is_empty": True, "num_entities": 0}
+                                               )
+        partition_w.drop()
+        error = {ct.err_code: 0, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        partition_w.load(check_task=CheckTasks.err_res, check_items=error)
+        partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_partition_after_drop(self, connect, collection):
@@ -3287,19 +2394,19 @@ class TestLoadPartition:
         method: insert and flush, then release collection after load and drop
         expected: raise exception
         """
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_partitions(collection, [default_tag])
-        connect.drop_partition(collection, default_tag)
-        try:
-            connect.load_partitions(collection, [default_tag])
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "partitionID of partitionName:%s can not be find" % default_tag
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        description = cf.gen_unique_str("desc_")
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               description=description,
+                                               check_task=CheckTasks.check_partition_property,
+                                               check_items={"name": partition_name, "description": description,
+                                                            "is_empty": True, "num_entities": 0}
+                                               )
+        partition_w.drop()
+        error = {ct.err_code: 0, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_release_after_collection_drop(self, connect, collection):
@@ -3308,60 +2415,19 @@ class TestLoadPartition:
         method: insert and flush, then release collection after load and drop
         expected: raise exception
         """
-        connect.create_partition(collection, default_tag)
-        result = connect.insert(collection, cons.default_entities, partition_name=default_tag)
-        assert len(result.primary_keys) == default_nb
-        connect.flush([collection])
-        connect.load_partitions(collection, [default_tag])
-        connect.release_partitions(collection, [default_tag])
-        connect.drop_collection(collection)
-        try:
-            connect.load_partitions(collection, [default_tag])
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        name = collection_w.name
+        partition_name = cf.gen_unique_str(prefix)
+        description = cf.gen_unique_str("desc_")
+        partition_w = self.init_partition_wrap(collection_w, partition_name,
+                                               description=description,
+                                               check_task=CheckTasks.check_partition_property,
+                                               check_items={"name": partition_name, "description": description,
+                                                            "is_empty": True, "num_entities": 0}
+                                               )
+        collection_w.drop()
+        error = {ct.err_code: 0, ct.err_msg: "HasPartition failed: can\'t find collection: %s" % name}
+        partition_w.load(check_task=CheckTasks.err_res, check_items=error)
+        partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
-        try:
-            connect.release_partitions(collection, [default_tag])
-        except Exception as e:
-            code = getattr(e, 'code', "The exception does not contain the field of code.")
-            assert code == 1
-            message = getattr(e, 'message', "The exception does not contain the field of message.")
-            assert message == "DescribeCollection failed: can't find collection: %s" % collection
-
-
-class TestLoadPartitionInvalid(object):
-    """
-    Test load collection with invalid params
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_invalid_strs()
-    )
-    def get_partition_name(self, request):
-        yield request.param
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_load_partition_with_invalid_partition_name(self, connect, collection, get_partition_name):
-        """
-        target: test load invalid partition
-        method: load partition with invalid partition name
-        expected: raise exception
-        """
-        partition_name = get_partition_name
-        with pytest.raises(Exception) as e:
-            connect.load_partitions(collection, [partition_name])
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_release_partition_with_invalid_partition_name(self, connect, collection, get_partition_name):
-        """
-        target: test release invalid partition
-        method: release partition with invalid partition name
-        expected: raise exception
-        """
-        partition_name = get_partition_name
-        with pytest.raises(Exception) as e:
-            connect.load_partitions(collection, [partition_name])
