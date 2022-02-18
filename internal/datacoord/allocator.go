@@ -74,6 +74,7 @@ func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) 
 		},
 		Count: 1,
 	})
+
 	if err = VerifyResponse(resp, err); err != nil {
 		return 0, err
 	}
