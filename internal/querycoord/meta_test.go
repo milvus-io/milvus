@@ -102,8 +102,8 @@ func TestMetaFunc(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 	nodeID := defaultQueryNodeID
-	segmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
-	segmentInfos[defaultSegmentID] = &querypb.SegmentInfo{
+	segmentsInfo := newSegmentsInfo(kv)
+	segmentsInfo.segmentIDMap[defaultSegmentID] = &querypb.SegmentInfo{
 		CollectionID: defaultCollectionID,
 		PartitionID:  defaultPartitionID,
 		SegmentID:    defaultSegmentID,
@@ -112,9 +112,9 @@ func TestMetaFunc(t *testing.T) {
 	meta := &MetaReplica{
 		client:            kv,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		segmentInfos:      segmentInfos,
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
+		segmentsInfo:      segmentsInfo,
 	}
 
 	dmChannels := []string{"testDm1", "testDm2"}
@@ -297,10 +297,10 @@ func TestReloadMetaFromKV(t *testing.T) {
 	meta := &MetaReplica{
 		client:            kv,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		segmentInfos:      map[UniqueID]*querypb.SegmentInfo{},
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		deltaChannelInfos: map[UniqueID][]*datapb.VchannelInfo{},
+		segmentsInfo:      newSegmentsInfo(kv),
 	}
 
 	kvs := make(map[string]string)
@@ -348,9 +348,9 @@ func TestReloadMetaFromKV(t *testing.T) {
 	assert.Nil(t, err)
 
 	assert.Equal(t, 1, len(meta.collectionInfos))
-	assert.Equal(t, 1, len(meta.segmentInfos))
+	assert.Equal(t, 1, len(meta.segmentsInfo.getSegments()))
 	_, ok := meta.collectionInfos[defaultCollectionID]
 	assert.Equal(t, true, ok)
-	_, ok = meta.segmentInfos[defaultSegmentID]
-	assert.Equal(t, true, ok)
+	segment := meta.segmentsInfo.getSegment(defaultSegmentID)
+	assert.NotNil(t, segment)
 }
