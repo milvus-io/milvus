@@ -63,6 +63,12 @@ rootCoord:
 proxy:
   port: 19530
 
+  http:
+    enabled: true # Whether to enable the http server
+    port: 8080 # Whether to enable the http server
+    readTimeout: 30000 # 30000 ms http read timeout
+    writeTimeout: 30000 # 30000 ms http write timeout
+
   grpc:
     serverMaxRecvSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
     serverMaxSendSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
