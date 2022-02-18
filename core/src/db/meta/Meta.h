@@ -126,8 +126,7 @@ class Meta {
     GetPartitionName(const std::string& collection_id, const std::string& tag, std::string& partition_name) = 0;
 
     virtual Status
-    FilesToSearch(const std::string& collection_id, FilesHolder& files_holder, 
-                  bool is_all_search_file = true) = 0;
+    FilesToSearch(const std::string& collection_id, FilesHolder& files_holder, bool is_all_search_file = true) = 0;
 
     virtual Status
     FilesToSearchEx(const std::string& root_collection, const std::set<std::string>& partition_id_array,

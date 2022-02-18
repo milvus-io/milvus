@@ -9,14 +9,14 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-#include <cmath>
-#include <limits>
-#include <thread>
-
 #include <fiu-control.h>
 #include <fiu-local.h>
 #include <gtest/gtest-death-test.h>
 #include <gtest/gtest.h>
+
+#include <cmath>
+#include <limits>
+#include <thread>
 
 #include "config/Config.h"
 #include "config/YamlConfigMgr.h"
@@ -1321,7 +1321,7 @@ TEST_F(ConfigTest, SEARCH_ROW_CONFIG_TEST) {
     config.GetConfigJsonStr(config_json_str);
     std::cout << config_json_str << std::endl;
 
-    bool  is_search_row;
+    bool is_search_row;
     config.GetGeneralConfigSearchRawEnable(is_search_row);
     ASSERT_FALSE(is_search_row);
 
@@ -1332,7 +1332,7 @@ TEST_F(ConfigTest, SEARCH_ROW_CONFIG_TEST) {
     status = config.ResetDefaultConfig();
     ASSERT_TRUE(status.ok()) << status.message();
     config.GetGeneralConfigSearchRawEnable(is_search_row);
-    ASSERT_TRUE(is_search_row); 
+    ASSERT_TRUE(is_search_row);
 }
 
 TEST_F(ConfigTest, SERVER_CONFIG_UPDATE_TEST) {

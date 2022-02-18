@@ -2232,7 +2232,8 @@ Config::GetGeneralConfigMetaSslCert(std::string& value) {
 
 Status
 Config::GetGeneralConfigSearchRawEnable(bool& value) {
-    std::string str = GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_SEARCH_RAW_ENABLE, CONFIG_GENERAL_SEARCH_RAW_ENABLE_DEFAULT);
+    std::string str =
+        GetConfigStr(CONFIG_GENERAL, CONFIG_GENERAL_SEARCH_RAW_ENABLE, CONFIG_GENERAL_SEARCH_RAW_ENABLE_DEFAULT);
     Status s = ValidationUtil::ValidateStringIsBool(str);
     if (!s.ok()) {
         return s;
