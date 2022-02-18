@@ -1,5 +1,6 @@
 # Milvus 2.0 vs. 1.x: Cloud-native, distributed architecture, highly scalable, and more
 
+
 <table class="comparison">
 <thead>
 	<tr>
