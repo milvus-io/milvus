@@ -20,8 +20,7 @@
 
 namespace milvus::query {
 
-using BitsetChunk = boost::dynamic_bitset<>;
-using BitsetSimple = std::deque<BitsetChunk>;
+using BitsetSimple = std::deque<BitsetType>;
 
 aligned_vector<uint8_t>
 AssembleNegBitset(const BitsetSimple& bitmap_simple);

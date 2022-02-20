@@ -26,21 +26,19 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class ExecPlanNodeVisitor : PlanNodeVisitor {
  public:
-    using RetType = SearchResult;
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
         : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
     }
-    // using RetType = nlohmann::json;
 
-    RetType
+    SearchResult
     get_moved_result(PlanNode& node) {
-        assert(!ret_.has_value());
+        assert(!search_result_opt_.has_value());
         node.accept(*this);
-        assert(ret_.has_value());
-        auto ret = std::move(ret_).value();
-        ret_ = std::nullopt;
+        assert(search_result_opt_.has_value());
+        auto ret = std::move(search_result_opt_).value();
+        search_result_opt_ = std::nullopt;
         return ret;
     }
 
@@ -50,12 +48,11 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
     VectorVisitorImpl(VectorPlanNode& node);
 
  private:
-    // std::optional<RetType> ret_;
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     const PlaceholderGroup& placeholder_group_;
 
-    std::optional<RetType> ret_;
+    SearchResultOpt search_result_opt_;
 };
 }  // namespace impl
 
@@ -74,15 +71,15 @@ template <typename VectorType>
 void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     // TODO: optimize here, remove the dynamic cast
-    assert(!ret_.has_value());
+    assert(!search_result_opt_.has_value());
     auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
-    RetType ret;
+    SearchResult search_result;
     auto& ph = placeholder_group_.at(0);
     auto src_data = ph.get_blob<EmbeddedType<VectorType>>();
     auto num_queries = ph.num_of_queries_;
 
-    boost::dynamic_bitset<> bitset_holder;
+    BitsetType bitset_holder;
     BitsetView view;
     // TODO: add API to unify row_count
     // auto row_count = segment->get_row_count();
@@ -90,14 +87,13 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     // skip all calculation
     if (active_count == 0) {
-        ret_ = empty_search_result(num_queries, node.search_info_.topk_, node.search_info_.round_decimal_,
-                                   node.search_info_.metric_type_);
+        search_result_opt_ = empty_search_result(num_queries, node.search_info_.topk_, node.search_info_.round_decimal_,
+                                                 node.search_info_.metric_type_);
         return;
     }
 
     if (node.predicate_.has_value()) {
-        ExecExprVisitor::RetType expr_ret =
-            ExecExprVisitor(*segment, active_count, timestamp_).call_child(*node.predicate_.value());
+        BitsetType expr_ret = ExecExprVisitor(*segment, active_count, timestamp_).call_child(*node.predicate_.value());
         bitset_holder = std::move(expr_ret);
     } else {
         bitset_holder.resize(active_count, true);
@@ -111,29 +107,29 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     auto final_bitset = segment->get_filtered_bitmap(view, active_count, timestamp_);
 
-    segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, final_bitset, ret);
+    segment->vector_search(active_count, node.search_info_, src_data, num_queries, MAX_TIMESTAMP, final_bitset,
+                           search_result);
 
-    ret_ = ret;
+    search_result_opt_ = std::move(search_result);
 }
 
 void
 ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
-    assert(!retrieve_ret_.has_value());
+    assert(!retrieve_result_opt_.has_value());
     auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "Support SegmentSmallIndex Only");
-    RetrieveRetType ret;
+    RetrieveResult retrieve_result;
 
-    boost::dynamic_bitset<> bitset_holder;
+    BitsetType bitset_holder;
     auto active_count = segment->get_active_count(timestamp_);
 
     if (active_count == 0) {
-        retrieve_ret_ = ret;
+        retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }
 
     if (node.predicate_ != nullptr) {
-        ExecExprVisitor::RetType expr_ret =
-            ExecExprVisitor(*segment, active_count, timestamp_).call_child(*(node.predicate_));
+        BitsetType expr_ret = ExecExprVisitor(*segment, active_count, timestamp_).call_child(*(node.predicate_));
         bitset_holder = std::move(expr_ret);
     }
 
@@ -148,8 +144,9 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     auto final_bitset = segment->get_filtered_bitmap(view, active_count, timestamp_);
 
     auto seg_offsets = std::move(segment->search_ids(final_bitset, MAX_TIMESTAMP));
-    ret.result_offsets_.assign((int64_t*)seg_offsets.data(), (int64_t*)seg_offsets.data() + seg_offsets.size());
-    retrieve_ret_ = ret;
+    retrieve_result.result_offsets_.assign((int64_t*)seg_offsets.data(),
+                                           (int64_t*)seg_offsets.data() + seg_offsets.size());
+    retrieve_result_opt_ = std::move(retrieve_result);
 }
 
 void

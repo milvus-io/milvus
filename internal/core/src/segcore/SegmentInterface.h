@@ -119,7 +119,7 @@ class SegmentInternalInterface : public SegmentInterface {
     num_chunk_index(FieldOffset field_offset) const = 0;
 
     virtual void
-    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const = 0;
+    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const = 0;
 
     // count of chunks
     virtual int64_t
@@ -133,7 +133,7 @@ class SegmentInternalInterface : public SegmentInterface {
     get_active_count(Timestamp ts) const = 0;
 
     virtual std::vector<SegOffset>
-    search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const = 0;
+    search_ids(const BitsetType& view, Timestamp timestamp) const = 0;
 
     virtual std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const = 0;

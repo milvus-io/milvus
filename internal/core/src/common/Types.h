@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 #include <boost/align/aligned_allocator.hpp>
+#include <boost/dynamic_bitset.hpp>
 #include <NamedType/named_type.hpp>
 
 #include "knowhere/utils/BitsetView.h"
@@ -89,6 +90,7 @@ struct SearchResult {
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;
+using SearchResultOpt = std::optional<SearchResult>;
 
 struct RetrieveResult {
     RetrieveResult() = default;
@@ -100,6 +102,7 @@ struct RetrieveResult {
 };
 
 using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
+using RetrieveResultOpt = std::optional<RetrieveResult>;
 
 namespace impl {
 // hide identifier name to make auto-completion happy
@@ -123,5 +126,8 @@ BitsetSubView(const BitsetView& view, int64_t offset, int64_t size) {
     assert(offset % 8 == 0);
     return BitsetView(view.data() + offset / 8, size);
 }
+
+using BitsetType = boost::dynamic_bitset<>;
+using BitsetTypeOpt = std::optional<BitsetType>;
 
 }  // namespace milvus

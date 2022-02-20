@@ -16,7 +16,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include <boost/dynamic_bitset.hpp>
 
 #include "Plan.h"
 #include "PlanNode.h"
@@ -39,7 +38,7 @@ struct ExtractedPlanInfo {
     }
 
  public:
-    boost::dynamic_bitset<> involved_fields_;
+    BitsetType involved_fields_;
 };
 
 struct Plan {

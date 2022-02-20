@@ -26,8 +26,8 @@ class ProtoParser {
     explicit ProtoParser(const Schema& schema) : schema(schema) {
     }
 
-    //    ExprPtr
-    //    ExprFromProto(const proto::plan::Expr& expr_proto);
+    // ExprPtr
+    // ExprFromProto(const proto::plan::Expr& expr_proto);
 
     ExprPtr
     ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb);
@@ -64,7 +64,6 @@ class ProtoParser {
 
  private:
     const Schema& schema;
-    // boost::dynamic_bitset<> involved_fields;
 };
 
 }  // namespace milvus::query

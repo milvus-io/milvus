@@ -34,7 +34,7 @@ class TimestampIndex {
     std::pair<int64_t, int64_t>
     get_active_range(Timestamp query_timestamp) const;
 
-    static boost::dynamic_bitset<>
+    static BitsetType
     GenerateBitset(Timestamp query_timestamp,
                    std::pair<int64_t, int64_t> active_range,
                    const Timestamp* timestamps,
