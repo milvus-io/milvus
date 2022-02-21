@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -165,6 +166,7 @@ func (m *MetaReplica) reloadFromKV() error {
 		}
 		m.collectionInfos[collectionID] = collectionInfo
 	}
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(m.collectionInfos)))
 
 	if err := m.segmentsInfo.loadSegments(); err != nil {
 		return err
@@ -299,6 +301,7 @@ func (m *MetaReplica) addCollection(collectionID UniqueID, loadType querypb.Load
 		}
 		m.collectionMu.Lock()
 		m.collectionInfos[collectionID] = newCollection
+		metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(m.collectionInfos)))
 		m.collectionMu.Unlock()
 	}
 
@@ -362,6 +365,7 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 
 	m.collectionMu.Lock()
 	delete(m.collectionInfos, collectionID)
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(m.collectionInfos)))
 	m.collectionMu.Unlock()
 
 	m.deltaChannelMu.Lock()

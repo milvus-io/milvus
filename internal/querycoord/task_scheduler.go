@@ -31,6 +31,7 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -70,6 +71,7 @@ func (queue *taskQueue) addTask(t task) {
 	if queue.tasks.Len() == 0 {
 		queue.taskChan <- 1
 		queue.tasks.PushBack(t)
+		metrics.QueryCoordNumParentTasks.WithLabelValues().Inc()
 		return
 	}
 
@@ -87,6 +89,8 @@ func (queue *taskQueue) addTask(t task) {
 		queue.tasks.InsertAfter(t, e)
 		break
 	}
+
+	metrics.QueryCoordNumParentTasks.WithLabelValues().Inc()
 }
 
 func (queue *taskQueue) addTaskToFront(t task) {
@@ -96,6 +100,8 @@ func (queue *taskQueue) addTaskToFront(t task) {
 	} else {
 		queue.tasks.PushFront(t)
 	}
+
+	metrics.QueryCoordNumParentTasks.WithLabelValues().Inc()
 }
 
 // PopTask pops a trigger task from task list
@@ -110,6 +116,8 @@ func (queue *taskQueue) popTask() task {
 
 	ft := queue.tasks.Front()
 	queue.tasks.Remove(ft)
+
+	metrics.QueryCoordNumParentTasks.WithLabelValues().Dec()
 
 	return ft.Value.(task)
 }
@@ -823,6 +831,7 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 		log.Debug("waitActivateTaskDone: one activate task done",
 			zap.Int64("taskID", t.getTaskID()),
 			zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+		metrics.QueryCoordChildTaskLatency.WithLabelValues().Observe(float64(t.elapseSpan().Milliseconds()))
 	}
 }
 

@@ -27,10 +27,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 const timeoutForRPC = 10 * time.Second
@@ -91,6 +93,7 @@ type task interface {
 	setResultInfo(err error)
 	getResultInfo() *commonpb.Status
 	updateTaskProcess()
+	elapseSpan() time.Duration
 }
 
 type baseTask struct {
@@ -111,6 +114,8 @@ type baseTask struct {
 	parentTask       task
 	childTasks       []task
 	childTasksMu     sync.RWMutex
+
+	timeRecorder *timerecord.TimeRecorder
 }
 
 func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *baseTask {
@@ -125,6 +130,7 @@ func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *bas
 		retryCount:       MaxRetryNum,
 		triggerCondition: triggerType,
 		childTasks:       []task{},
+		timeRecorder:     timerecord.NewTimeRecorder("QueryCoordBaseTask"),
 	}
 
 	return baseTask
@@ -197,6 +203,7 @@ func (bt *baseTask) removeChildTaskByID(taskID UniqueID) {
 		}
 	}
 	bt.childTasks = result
+	metrics.QueryCoordNumChildTasks.WithLabelValues().Dec()
 }
 
 func (bt *baseTask) clearChildTasks() {
@@ -272,12 +279,17 @@ func (bt *baseTask) rollBack(ctx context.Context) []task {
 	return nil
 }
 
+func (bt *baseTask) elapseSpan() time.Duration {
+	return bt.timeRecorder.ElapseSpan()
+}
+
 type loadCollectionTask struct {
 	*baseTask
 	*querypb.LoadCollectionRequest
 	broker  *globalMetaBroker
 	cluster Cluster
 	meta    Meta
+	once    sync.Once
 }
 
 func (lct *loadCollectionTask) msgBase() *commonpb.MsgBase {
@@ -331,6 +343,11 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 			log.Error("loadCollectionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID))
 			lct.setResultInfo(err)
 		}
+		lct.once.Do(func() {
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
+			metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lct.elapseSpan().Milliseconds()))
+			metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lct.getChildTask())))
+		})
 	}
 }
 
@@ -430,6 +447,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		lct.addChildTask(internalTask)
 		log.Debug("loadCollectionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())), zap.Int64("msgID", lct.Base.MsgID))
 	}
+	metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 	log.Debug("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
 
 	err = lct.meta.addCollection(collectionID, querypb.LoadType_loadCollection, lct.Schema)
@@ -624,6 +642,7 @@ type loadPartitionTask struct {
 	cluster Cluster
 	meta    Meta
 	addCol  bool
+	once    sync.Once
 }
 
 func (lpt *loadPartitionTask) msgBase() *commonpb.MsgBase {
@@ -678,6 +697,11 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 				lpt.setResultInfo(err)
 			}
 		}
+		lpt.once.Do(func() {
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
+			metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lpt.elapseSpan().Milliseconds()))
+			metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lpt.getChildTask())))
+		})
 	}
 }
 
@@ -765,6 +789,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		lpt.addChildTask(internalTask)
 		log.Debug("loadPartitionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())))
 	}
+	metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 	log.Debug("loadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID))
 
 	err = lpt.meta.addCollection(collectionID, querypb.LoadType_LoadPartition, lpt.Schema)
