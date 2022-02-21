@@ -26,18 +26,37 @@ namespace milvus::query {
 
 template <typename T>
 struct TermExprImpl : TermExpr {
-    boost::container::vector<T> terms_;
+    const std::vector<T> terms_;
+
+    TermExprImpl(const FieldOffset field_offset, const DataType data_type, const std::vector<T>& terms)
+        : TermExpr(field_offset, data_type), terms_(terms) {
+    }
 };
 
 template <typename T>
 struct UnaryRangeExprImpl : UnaryRangeExpr {
-    T value_;
+    const T value_;
+
+    UnaryRangeExprImpl(const FieldOffset field_offset, const DataType data_type, const OpType op_type, const T value)
+        : UnaryRangeExpr(field_offset, data_type, op_type), value_(value) {
+    }
 };
 
 template <typename T>
 struct BinaryRangeExprImpl : BinaryRangeExpr {
-    T lower_value_;
-    T upper_value_;
+    const T lower_value_;
+    const T upper_value_;
+
+    BinaryRangeExprImpl(const FieldOffset field_offset,
+                        const DataType data_type,
+                        const bool lower_inclusive,
+                        const bool upper_inclusive,
+                        const T lower_value,
+                        const T upper_value)
+        : BinaryRangeExpr(field_offset, data_type, lower_inclusive, upper_inclusive),
+          lower_value_(lower_value),
+          upper_value_(upper_value) {
+    }
 };
 
 }  // namespace milvus::query

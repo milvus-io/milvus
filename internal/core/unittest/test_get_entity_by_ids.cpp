@@ -118,13 +118,11 @@ TEST(Retrieve, AUTOID) {
     auto i64_col = dataset.get_col<int64_t>(0);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>();
-    term_expr->field_offset_ = FieldOffset(0);
-    term_expr->data_type_ = DataType::INT64;
+    std::vector<int64_t> values;
     for (int i = 0; i < req_size; ++i) {
-        term_expr->terms_.emplace_back(i64_col[choose(i)]);
+        values.emplace_back(i64_col[choose(i)]);
     }
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
@@ -172,13 +170,11 @@ TEST(Retrieve2, LargeTimestamp) {
     auto i64_col = dataset.get_col<int64_t>(0);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>();
-    term_expr->field_offset_ = FieldOffset(0);
-    term_expr->data_type_ = DataType::INT64;
+    std::vector<int64_t> values;
     for (int i = 0; i < req_size; ++i) {
-        term_expr->terms_.emplace_back(i64_col[choose(i)]);
+        values.emplace_back(i64_col[choose(i)]);
     }
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
@@ -275,13 +271,11 @@ TEST(GetEntityByIds, delete_retrieve) {
     auto i64_col = dataset.get_col<int64_t>(0);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>();
-    term_expr->field_offset_ = FieldOffset(0);
-    term_expr->data_type_ = DataType::INT64;
+    std::vector<int64_t> values;
     for (int i = 0; i < req_size; ++i) {
-        term_expr->terms_.emplace_back(i64_col[choose(i)]);
+        values.emplace_back(i64_col[choose(i)]);
     }
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};

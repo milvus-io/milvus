@@ -370,10 +370,8 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
 
     // create retrieve plan "age in [0]"
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>();
-    term_expr->field_offset_ = FieldOffset(1);
-    term_expr->data_type_ = DataType::INT32;
-    term_expr->terms_.emplace_back(0);
+    std::vector<int64_t> values(1, 0);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(1), DataType::INT32, values);
 
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
