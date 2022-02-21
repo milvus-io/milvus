@@ -436,14 +436,14 @@ func (it *IndexBuildTask) buildIndex(ctx context.Context) ([]*storage.Blob, erro
 		}
 		it.tr.Record("build index done")
 	}
-
+	it.releaseMemory()
 	indexBlobs, err := it.index.Serialize()
 	if err != nil {
 		log.Error("IndexNode index Serialize failed", zap.Error(err))
 		return nil, err
 	}
 	it.tr.Record("index serialize done")
-
+	it.releaseMemory()
 	// early release index for gc, and we can ensure that Delete is idempotent.
 	if err := it.index.Delete(); err != nil {
 		log.Error("IndexNode IndexBuildTask Execute CIndexDelete failed",
@@ -564,7 +564,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 				zap.Error(err))
 		}
 	}()
-
+	it.releaseMemory()
 	var blobs []*storage.Blob
 	blobs, err = it.buildIndex(ctx)
 	if err != nil {
