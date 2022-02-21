@@ -45,6 +45,13 @@ jobs:
           path: .docker/amd64-ubuntu18.04-ccache
           key: ubuntu18.04-ccache-${{ hashFiles('internal/core/**') }}
           restore-keys: ubuntu18.04-ccache-
+      - name: Mac Cache CCache Volumes
+        if: ${{  matrix.os == 'macos-11' }}
+        uses: actions/cache@v1
+        with:
+          path: /var/tmp/ccache
+          key: macos-11-ccache-${{ hashFiles('internal/core/**') }}
+          restore-keys: macos-11-ccache-
       - name: Cache Go Mod Volumes
         if: ${{  matrix.os == 'ubuntu-18.04' }}
         uses: actions/cache@v1
@@ -60,10 +67,19 @@ jobs:
            ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
       - name: Code Check
         if: ${{  matrix.os == 'macos-11' }}
+        env:
+          CCACHE_DIR: /var/tmp/ccache
+          CCACHE_COMPILERCHECK: content
+          CCACHE_COMPRESS: 1
+          CCACHE_COMPRESSLEVEL: 5
+          CCACHE_MAXSIZE: 2G
         run: |
+          if [[ ! -d "/var/tmp/ccache" ]];then
+            mkdir -p /var/tmp/ccache
+          fi
           bash < <(curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer)
           source ~/.gvm/scripts/gvm
           gvm install go1.17.2
           gvm use go1.17.2
-          brew install boost libomp ninja tbb
+          brew install boost libomp ninja tbb ccache
           make check-proto-product && make verifiers
