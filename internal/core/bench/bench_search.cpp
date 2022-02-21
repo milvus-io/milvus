@@ -57,6 +57,7 @@ auto ph_group = [] {
     return ph_group;
 }();
 
+
 static void
 Search_SmallIndex(benchmark::State& state) {
     // schema->AddDebugField("age", DataType::FLOAT);
