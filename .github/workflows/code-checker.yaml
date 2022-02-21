@@ -52,6 +52,21 @@ jobs:
           path: /var/tmp/ccache
           key: macos-11-ccache-${{ hashFiles('internal/core/**') }}
           restore-keys: macos-11-ccache-
+      - name: Setup Go environment
+        uses: actions/setup-go@v2.2.0
+        if: ${{  matrix.os == 'macos-11' }}
+        with:
+          go-version: '^1.17.1' # The Go version to download (if necessary) and use.
+      - run: go version
+
+      - name: Mac Cache Go Mod Volumes
+        if: ${{  matrix.os == 'macos-11' }}
+        uses: actions/cache@v1
+        with:
+          path: /var/tmp/ccache
+          key: macos-11-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: macos-11-go-mod-
+      - run: go env
       - name: Cache Go Mod Volumes
         if: ${{  matrix.os == 'ubuntu-18.04' }}
         uses: actions/cache@v1
