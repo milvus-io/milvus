@@ -3,6 +3,9 @@ name: Code Checker
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
+  push:
+    branches:
+      - master
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
