@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
@@ -392,6 +394,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 			},
 		}, err
 	}
+	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 	log.Debug("IndexCoord building index ...",
 		zap.Int64("IndexBuildID", req.IndexBuildID),
 		zap.String("IndexName = ", req.IndexName),
@@ -445,6 +448,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 	if err != nil {
 		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
+		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return ret, nil
 	}
 	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Int64("IndexBuildID", t.indexBuildID))
@@ -454,11 +458,13 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		log.Error("IndexCoord scheduler index task failed", zap.Int64("IndexBuildID", t.indexBuildID))
 		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
+		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return ret, nil
 	}
 	sp.SetTag("IndexCoord-IndexBuildID", strconv.FormatInt(t.indexBuildID, 10))
 	ret.Status.ErrorCode = commonpb.ErrorCode_Success
 	ret.IndexBuildID = t.indexBuildID
+	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return ret, nil
 }
 
@@ -736,6 +742,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
 						zap.Int64("Recycle the low version index files successfully of the index with indexBuildID", meta.indexMeta.IndexBuildID))
 				}
+				metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.RecycledIndexTaskLabel).Inc()
 			}
 		}
 	}
@@ -823,6 +830,13 @@ func (i *IndexCoord) watchMetaLoop() {
 							zap.Int64("Finish by IndexNode", indexMeta.NodeID),
 							zap.Int64("The version of the task", indexMeta.Version))
 						i.nodeManager.pq.IncPriority(indexMeta.NodeID, -1)
+						metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.InProgressIndexTaskLabel).Dec()
+						if indexMeta.State == commonpb.IndexState_Finished {
+							metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.FinishedIndexTaskLabel).Inc()
+						}
+						if indexMeta.State == commonpb.IndexState_Failed {
+							metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.FailedIndexTaskLabel).Inc()
+						}
 					}
 				case mvccpb.DELETE:
 					log.Debug("IndexCoord watchMetaLoop DELETE", zap.Int64("The meta has been deleted of indexBuildID", indexBuildID))
