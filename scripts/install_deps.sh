@@ -56,7 +56,7 @@ function install_linux_deps() {
 
 function install_mac_deps() {
   sudo xcode-select --install  > /dev/null 2>&1
-  brew install boost libomp ninja tbb cmake llvm
+  brew install boost libomp ninja tbb cmake llvm ccache
   brew uninstall grep
   brew install grep
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
