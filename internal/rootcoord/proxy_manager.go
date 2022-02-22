@@ -139,7 +139,7 @@ func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
 	for _, f := range p.addSessionsFunc {
 		f(session)
 	}
-	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Set(1)
+	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Inc()
 	return nil
 }
 
@@ -152,7 +152,7 @@ func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
 	for _, f := range p.delSessionsFunc {
 		f(session)
 	}
-	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Set(0)
+	metrics.RootCoordProxyLister.WithLabelValues(metricProxy(session.ServerID)).Dec()
 	return nil
 }
 

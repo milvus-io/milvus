@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -67,6 +69,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 		})
 	}
 	log.Debug("init dml channels", zap.Int64("num", chanNum))
+	metrics.RootCoordNumOfDMLChannel.Add(float64(chanNum))
 	return d
 }
 
@@ -162,6 +165,7 @@ func (d *dmlChannels) addChannels(names ...string) {
 		dms.refcnt++
 		dms.mutex.Unlock()
 	}
+	metrics.RootCoordNumOfDMLChannel.Inc()
 }
 
 func (d *dmlChannels) removeChannels(names ...string) {
@@ -182,6 +186,7 @@ func (d *dmlChannels) removeChannels(names ...string) {
 		}
 		dms.mutex.Unlock()
 	}
+	metrics.RootCoordNumOfDMLChannel.Dec()
 }
 
 func genChannelName(prefix string, idx int64) string {

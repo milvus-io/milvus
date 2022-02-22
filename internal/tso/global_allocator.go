@@ -58,6 +58,8 @@ type Allocator interface {
 	GenerateTSO(count uint32) (uint64, error)
 	// Reset is used to reset the TSO allocator.
 	Reset()
+
+	GetLastSavedTime() time.Time
 }
 
 // GlobalTSOAllocator is the global single point TSO allocator.
@@ -155,4 +157,10 @@ func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.tso.ResetTimestamp()
+}
+
+// GetLastSavedTime get the last saved time for tso.
+func (gta *GlobalTSOAllocator) GetLastSavedTime() time.Time {
+	ts := gta.tso.lastSavedTime.Load()
+	return ts.(time.Time)
 }

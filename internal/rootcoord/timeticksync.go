@@ -332,6 +332,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			}
 			wg.Wait()
 			span := tr.ElapseSpan()
+			metrics.RootCoordSyncTimeTickLatency.Observe(float64(span.Milliseconds()))
 			// rootcoord send tt msg to all channels every 200ms by default
 			if span > Params.ProxyCfg.TimeTickInterval {
 				log.Warn("rootcoord send tt to all channels too slowly",
