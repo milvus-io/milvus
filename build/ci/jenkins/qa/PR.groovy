@@ -12,6 +12,8 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         parallelsAlwaysFailFast()
         preserveStashes(buildCount: 5)
+        //Only keep the last build for one pr
+        disableConcurrentBuilds(abortPrevious: true)
 
     }
     agent {
