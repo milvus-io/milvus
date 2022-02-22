@@ -12,6 +12,7 @@ pipeline {
         buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         parallelsAlwaysFailFast()
         preserveStashes(buildCount: 5)
+        disableConcurrentBuilds()
 
     }
     agent {
