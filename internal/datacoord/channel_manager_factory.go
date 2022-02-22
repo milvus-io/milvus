@@ -21,17 +21,17 @@ import (
 	"stathat.com/c/consistent"
 )
 
-// ChannelPolicyFactory is the abstract factory to create policies for channel manager
+// ChannelPolicyFactory is the abstract factory that creates policies for channel manager.
 type ChannelPolicyFactory interface {
-	// NewRegisterPolicy create a new register policy
+	// NewRegisterPolicy creates a new register policy.
 	NewRegisterPolicy() RegisterPolicy
-	// NewDeregisterPolicy create a new dereigster policy
+	// NewDeregisterPolicy creates a new deregister policy.
 	NewDeregisterPolicy() DeregisterPolicy
-	// NewAssignPolicy create a new channel assign policy
+	// NewAssignPolicy creates a new channel assign policy.
 	NewAssignPolicy() ChannelAssignPolicy
-	// NewReassignPolicy create a new channel reassign policy
+	// NewReassignPolicy creates a new channel reassign policy.
 	NewReassignPolicy() ChannelReassignPolicy
-	// NewBgChecker create a new bakcground checker
+	// NewBgChecker creates a new background checker.
 	NewBgChecker() ChannelBGChecker
 }
 
@@ -40,27 +40,27 @@ type ChannelPolicyFactoryV1 struct {
 	kv kv.TxnKV
 }
 
-// NewChannelPolicyFactoryV1 helper function creates a Channel policy factory v1 from kv
+// NewChannelPolicyFactoryV1 helper function creates a Channel policy factory v1 from kv.
 func NewChannelPolicyFactoryV1(kv kv.TxnKV) *ChannelPolicyFactoryV1 {
 	return &ChannelPolicyFactoryV1{kv: kv}
 }
 
-// NewRegisterPolicy implementing ChannelPolicyFactory returns BufferChannelAssignPolicy
+// NewRegisterPolicy implementing ChannelPolicyFactory returns BufferChannelAssignPolicy.
 func (f *ChannelPolicyFactoryV1) NewRegisterPolicy() RegisterPolicy {
 	return AvgAssignRegisterPolicy
 }
 
-// NewDeregisterPolicy implementing ChannelPolicyFactory returns AvgAssignUnregisteredChannels
+// NewDeregisterPolicy implementing ChannelPolicyFactory returns AvgAssignUnregisteredChannels.
 func (f *ChannelPolicyFactoryV1) NewDeregisterPolicy() DeregisterPolicy {
 	return AvgAssignUnregisteredChannels
 }
 
-// NewAssignPolicy implementing ChannelPolicyFactory returns AverageAssignPolicy
+// NewAssignPolicy implementing ChannelPolicyFactory returns AverageAssignPolicy.
 func (f *ChannelPolicyFactoryV1) NewAssignPolicy() ChannelAssignPolicy {
 	return AverageAssignPolicy
 }
 
-// NewReassignPolicy implementing ChannelPolicyFactory returns AvarageReassginPolicy
+// NewReassignPolicy implementing ChannelPolicyFactory returns AverageReassignPolicy.
 func (f *ChannelPolicyFactoryV1) NewReassignPolicy() ChannelReassignPolicy {
 	return AverageReassignPolicy
 }

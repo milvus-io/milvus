@@ -35,7 +35,7 @@ const (
 	maxWatchDuration = 20 * time.Second
 )
 
-// ChannelManager manages the allocation and the balance of channels between datanodes
+// ChannelManager manages the allocation and the balance between channels and data nodes.
 type ChannelManager struct {
 	mu               sync.RWMutex
 	h                Handler
@@ -54,7 +54,7 @@ type channel struct {
 	CollectionID UniqueID
 }
 
-// ChannelManagerOpt is to set optional parameters in channel manager
+// ChannelManagerOpt is to set optional parameters in channel manager.
 type ChannelManagerOpt func(c *ChannelManager)
 
 func withFactory(f ChannelPolicyFactory) ChannelManagerOpt {
@@ -69,7 +69,7 @@ func withMsgstreamFactory(f msgstream.Factory) ChannelManagerOpt {
 	return func(c *ChannelManager) { c.msgstreamFactory = f }
 }
 
-// NewChannelManager returns a new ChannelManager
+// NewChannelManager creates and returns a new ChannelManager instance.
 func NewChannelManager(
 	kv kv.TxnKV,
 	h Handler,
@@ -97,38 +97,43 @@ func NewChannelManager(
 	return c, nil
 }
 
-// Startup adjusts the channel store according to current cluster states
+// Startup adjusts the channel store according to current cluster states.
 func (c *ChannelManager) Startup(nodes []int64) error {
 	channels := c.store.GetNodesChannels()
-	olds := make([]int64, 0, len(channels))
+	// Retrieve the current old nodes.
+	oNodes := make([]int64, 0, len(channels))
 	for _, c := range channels {
-		olds = append(olds, c.NodeID)
+		oNodes = append(oNodes, c.NodeID)
 	}
 
-	newOnLines := c.getNewOnLines(nodes, olds)
+	// Add new online nodes to the cluster.
+	newOnLines := c.getNewOnLines(nodes, oNodes)
 	for _, n := range newOnLines {
 		if err := c.AddNode(n); err != nil {
 			return err
 		}
 	}
 
-	offlines := c.getOffLines(nodes, olds)
-	for _, n := range offlines {
+	// Remove new offline nodes from the cluster.
+	offLines := c.getOffLines(nodes, oNodes)
+	for _, n := range offLines {
 		if err := c.DeleteNode(n); err != nil {
 			return err
 		}
 	}
 
+	// Unwatch and drop channel with drop flag.
 	c.unwatchDroppedChannels()
 
 	log.Debug("cluster start up",
 		zap.Any("nodes", nodes),
-		zap.Any("olds", olds),
+		zap.Any("oNodes", oNodes),
 		zap.Int64s("new onlines", newOnLines),
-		zap.Int64s("offLines", offlines))
+		zap.Int64s("offLines", offLines))
 	return nil
 }
 
+// unwatchDroppedChannels removes drops channel that are marked to drop.
 func (c *ChannelManager) unwatchDroppedChannels() {
 	nodeChannels := c.store.GetNodesChannels()
 	for _, nodeChannel := range nodeChannels {
@@ -146,6 +151,7 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 	}
 }
 
+// NOT USED.
 func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 	timer := time.NewTicker(bgCheckInterval)
 	for {
@@ -168,7 +174,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 			log.Debug("channel manager bg check reassign", zap.Array("updates", updates))
 			for _, update := range updates {
 				if update.Type == Add {
-					c.fillChannelPosition(update)
+					c.fillChannelWatchInfo(update)
 				}
 			}
 
@@ -181,6 +187,7 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 	}
 }
 
+// getNewOnLines returns a list of new online node ids in `curr` but not in `old`.
 func (c *ChannelManager) getNewOnLines(curr []int64, old []int64) []int64 {
 	mold := make(map[int64]struct{})
 	ret := make([]int64, 0, len(curr))
@@ -195,6 +202,7 @@ func (c *ChannelManager) getNewOnLines(curr []int64, old []int64) []int64 {
 	return ret
 }
 
+// getOffLines returns a list of new offline node ids in `old` but not in `curr`.
 func (c *ChannelManager) getOffLines(curr []int64, old []int64) []int64 {
 	mcurr := make(map[int64]struct{})
 	ret := make([]int64, 0, len(old))
@@ -209,7 +217,7 @@ func (c *ChannelManager) getOffLines(curr []int64, old []int64) []int64 {
 	return ret
 }
 
-// AddNode adds a new node in cluster
+// AddNode adds a new node to cluster and reassigns the node - channel mapping.
 func (c *ChannelManager) AddNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -221,15 +229,15 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 		zap.Int64("registered node", nodeID),
 		zap.Array("updates", updates))
 
-	for _, v := range updates {
-		if v.Type == Add {
-			c.fillChannelPosition(v)
+	for _, op := range updates {
+		if op.Type == Add {
+			c.fillChannelWatchInfo(op)
 		}
 	}
 	return c.store.Update(updates)
 }
 
-// DeleteNode deletes the node from the cluster
+// DeleteNode deletes the node from the cluster.
 func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -239,7 +247,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 		return nil
 	}
 
-	c.tryToUnsubscribe(nodeChannelInfo)
+	c.unsubAttempt(nodeChannelInfo)
 
 	updates := c.deregisterPolicy(c.store, nodeID)
 	log.Debug("deregister node",
@@ -248,7 +256,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 
 	for _, v := range updates {
 		if v.Type == Add {
-			c.fillChannelPosition(v)
+			c.fillChannelWatchInfo(v)
 		}
 	}
 	if err := c.store.Update(updates); err != nil {
@@ -258,8 +266,9 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	return err
 }
 
-func (c *ChannelManager) tryToUnsubscribe(nodeChannelInfo *NodeChannelInfo) {
-	if nodeChannelInfo == nil {
+// unsubAttempt attempts to unsubscribe node-channel info from the channel.
+func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
+	if ncInfo == nil {
 		return
 	}
 
@@ -268,32 +277,33 @@ func (c *ChannelManager) tryToUnsubscribe(nodeChannelInfo *NodeChannelInfo) {
 		return
 	}
 
-	nodeID := nodeChannelInfo.NodeID
-	for _, ch := range nodeChannelInfo.Channels {
-		subscriptionName := subscriptionGenerator(ch.CollectionID, nodeID)
-		err := c.unsubscribe(subscriptionName, ch.Name)
+	nodeID := ncInfo.NodeID
+	for _, ch := range ncInfo.Channels {
+		subName := buildSubName(ch.CollectionID, nodeID)
+		err := c.unsubscribe(subName, ch.Name)
 		if err != nil {
-			log.Warn("failed to unsubcribe topic", zap.String("subscription name", subscriptionName), zap.String("channel name", ch.Name))
+			log.Warn("failed to unsubscribe topic", zap.String("subscription name", subName), zap.String("channel name", ch.Name))
 		}
 	}
 }
 
-func subscriptionGenerator(collectionID int64, nodeID int64) string {
+// buildSubName generates a subscription name by concatenating DataNodeSubName, node ID and collection ID.
+func buildSubName(collectionID int64, nodeID int64) string {
 	return fmt.Sprintf("%s-%d-%d", Params.MsgChannelCfg.DataNodeSubName, nodeID, collectionID)
 }
 
-func (c *ChannelManager) unsubscribe(subscriptionName string, channel string) error {
+func (c *ChannelManager) unsubscribe(subName string, channel string) error {
 	msgStream, err := c.msgstreamFactory.NewMsgStream(context.TODO())
 	if err != nil {
 		return err
 	}
 
-	msgStream.AsConsumer([]string{channel}, subscriptionName)
+	msgStream.AsConsumer([]string{channel}, subName)
 	msgStream.Close()
 	return nil
 }
 
-// Watch try to add the channel to cluster. If the channel already exists, do nothing
+// Watch tries to add the channel to cluster. Watch is a no op if the channel already exists.
 func (c *ChannelManager) Watch(ch *channel) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -308,7 +318,7 @@ func (c *ChannelManager) Watch(ch *channel) error {
 
 	for _, v := range updates {
 		if v.Type == Add {
-			c.fillChannelPosition(v)
+			c.fillChannelWatchInfo(v)
 		}
 	}
 	err := c.store.Update(updates)
@@ -322,19 +332,20 @@ func (c *ChannelManager) Watch(ch *channel) error {
 	return nil
 }
 
-func (c *ChannelManager) fillChannelPosition(update *ChannelOp) {
-	for _, ch := range update.Channels {
-		vchan := c.h.GetVChanPositions(ch.Name, ch.CollectionID, allPartitionID)
+// fillChannelWatchInfo updates the channel op by filling in channel watch info.
+func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
+	for _, ch := range op.Channels {
+		vcInfo := c.h.GetVChanPositions(ch.Name, ch.CollectionID, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
-			Vchan:   vchan,
+			Vchan:   vcInfo,
 			StartTs: time.Now().Unix(),
 			State:   datapb.ChannelWatchState_Uncomplete,
 		}
-		update.ChannelWatchInfos = append(update.ChannelWatchInfos, info)
+		op.ChannelWatchInfos = append(op.ChannelWatchInfos, info)
 	}
 }
 
-// GetChannels gets channels info of registered nodes
+// GetChannels gets channels info of registered nodes.
 func (c *ChannelManager) GetChannels() []*NodeChannelInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -342,15 +353,15 @@ func (c *ChannelManager) GetChannels() []*NodeChannelInfo {
 	return c.store.GetNodesChannels()
 }
 
-// GetBuffer gets buffer channels
-func (c *ChannelManager) GetBuffer() *NodeChannelInfo {
+// GetBufferChannels gets buffer channels.
+func (c *ChannelManager) GetBufferChannels() *NodeChannelInfo {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	return c.store.GetBufferChannelInfo()
 }
 
-// Match checks whether nodeID and channel match
+// Match checks and returns whether the node ID and channel match.
 func (c *ChannelManager) Match(nodeID int64, channel string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -368,7 +379,7 @@ func (c *ChannelManager) Match(nodeID int64, channel string) bool {
 	return false
 }
 
-// FindWatcher finds the datanode watching the provided channel
+// FindWatcher finds the datanode watching the provided channel.
 func (c *ChannelManager) FindWatcher(channel string) (int64, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -392,7 +403,7 @@ func (c *ChannelManager) FindWatcher(channel string) (int64, error) {
 	return 0, errChannelNotWatched
 }
 
-// RemoveChannel removes the channel from channel manager
+// RemoveChannel removes the channel from channel manager.
 func (c *ChannelManager) RemoveChannel(channelName string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -405,6 +416,7 @@ func (c *ChannelManager) RemoveChannel(channelName string) error {
 	return c.remove(nodeID, ch)
 }
 
+// remove deletes the nodeID-channel pair from data store.
 func (c *ChannelManager) remove(nodeID int64, ch *channel) error {
 	var op ChannelOpSet
 	op.Delete(nodeID, []*channel{ch})

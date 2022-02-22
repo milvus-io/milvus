@@ -186,7 +186,7 @@ func TestRegister(t *testing.T) {
 		}
 		err = cluster.Register(info)
 		assert.Nil(t, err)
-		bufferChannels := channelManager.GetBuffer()
+		bufferChannels := channelManager.GetBufferChannels()
 		assert.Empty(t, bufferChannels.Channels)
 		nodeChannels := channelManager.GetChannels()
 		assert.EqualValues(t, 1, len(nodeChannels))
@@ -297,7 +297,7 @@ func TestUnregister(t *testing.T) {
 		assert.Nil(t, err)
 		channels := channelManager.GetChannels()
 		assert.Empty(t, channels)
-		channel := channelManager.GetBuffer()
+		channel := channelManager.GetBufferChannels()
 		assert.NotNil(t, channel)
 		assert.EqualValues(t, 1, len(channel.Channels))
 		assert.EqualValues(t, "ch_1", channel.Channels[0].Name)
@@ -344,7 +344,7 @@ func TestWatchIfNeeded(t *testing.T) {
 
 		channels := channelManager.GetChannels()
 		assert.Empty(t, channels)
-		channel := channelManager.GetBuffer()
+		channel := channelManager.GetBufferChannels()
 		assert.NotNil(t, channel)
 		assert.EqualValues(t, "ch1", channel.Channels[0].Name)
 	})
@@ -423,7 +423,7 @@ func TestConsistentHashPolicy(t *testing.T) {
 	hash.Remove("3")
 	err = cluster.UnRegister(nodeInfo3)
 	assert.Nil(t, err)
-	bufferChannels := channelManager.GetBuffer()
+	bufferChannels := channelManager.GetBufferChannels()
 	assert.EqualValues(t, 3, len(bufferChannels.Channels))
 }
 

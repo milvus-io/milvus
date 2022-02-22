@@ -374,7 +374,7 @@ func EmptyReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) Cha
 	return nil
 }
 
-// AverageReassignPolicy is a reassign policy that evenly assign channels
+// AverageReassignPolicy is a reassigning policy that evenly assign channels
 func AverageReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) ChannelOpSet {
 	channels := store.GetNodesChannels()
 	filterMap := make(map[int64]struct{})
@@ -444,7 +444,7 @@ func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 				Channels: make([]*channel, 0),
 			}
 			for _, c := range ch.Channels {
-				k := buildChannelKey(ch.NodeID, c.Name)
+				k := buildNodeChannelKey(ch.NodeID, c.Name)
 				v, err := kv.Load(k)
 				if err != nil {
 					return nil, err

@@ -41,7 +41,7 @@ func NewCluster(sessionManager *SessionManager, channelManager *ChannelManager) 
 	return c
 }
 
-// Startup inits the cluster
+// Startup inits the cluster with the given data nodes.
 func (c *Cluster) Startup(nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)

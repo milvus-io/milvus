@@ -59,7 +59,7 @@ type ValueKV interface {
 	Load(key string) (Value, error)
 }
 
-// BaseKV contains base operations of kv. Include save, load and remove.
+// BaseKV contains basic kv operations, including save, load and remove.
 type BaseKV interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
@@ -88,7 +88,7 @@ type TxnKV interface {
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 
-// MetaKv is TxnKV for meta data. It should save data with lease.
+// MetaKv is TxnKV for metadata. It should save data with lease.
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
