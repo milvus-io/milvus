@@ -2063,7 +2063,6 @@ class TestCollectionSearch(TestcaseBase):
             # abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
             assert math.isclose(dis_actual, dis_expect, rel_tol=0, abs_tol=abs_tol)
 
-
 """
 ******************************************************************
 #  The following cases are copied from test_search.py
