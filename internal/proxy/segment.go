@@ -329,22 +329,22 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 	var errMsg string
 	now := time.Now()
 	success := true
-	for _, info := range resp.SegIDAssignments {
-		if info.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Debug("proxy", zap.String("SyncSegment Error", info.Status.Reason))
-			errMsg += info.Status.Reason
+	for _, segAssign := range resp.SegIDAssignments {
+		if segAssign.Status.GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Debug("proxy", zap.String("SyncSegment Error", segAssign.Status.Reason))
+			errMsg += segAssign.Status.Reason
 			errMsg += "\n"
 			success = false
 			continue
 		}
-		assign, err := sa.getAssign(info.CollectionID, info.PartitionID, info.ChannelName)
+		assign, err := sa.getAssign(segAssign.CollectionID, segAssign.PartitionID, segAssign.ChannelName)
 		segInfo2 := &segInfo{
-			segID:      info.SegID,
-			count:      info.Count,
-			expireTime: info.ExpireTime,
+			segID:      segAssign.SegID,
+			count:      segAssign.Count,
+			expireTime: segAssign.ExpireTime,
 		}
 		if err != nil {
-			colInfos, ok := sa.assignInfos[info.CollectionID]
+			colInfos, ok := sa.assignInfos[segAssign.CollectionID]
 			if !ok {
 				colInfos = list.New()
 			}
@@ -352,13 +352,13 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 
 			segInfos.PushBack(segInfo2)
 			assign = &assignInfo{
-				collID:      info.CollectionID,
-				partitionID: info.PartitionID,
-				channelName: info.ChannelName,
+				collID:      segAssign.CollectionID,
+				partitionID: segAssign.PartitionID,
+				channelName: segAssign.ChannelName,
 				segInfos:    segInfos,
 			}
 			colInfos.PushBack(assign)
-			sa.assignInfos[info.CollectionID] = colInfos
+			sa.assignInfos[segAssign.CollectionID] = colInfos
 		} else {
 			assign.segInfos.PushBack(segInfo2)
 		}

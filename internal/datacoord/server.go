@@ -597,7 +597,7 @@ func (s *Server) startWatchService(ctx context.Context) {
 	go s.watchService(ctx)
 }
 
-// watchService watchs services
+// watchService watches services.
 func (s *Server) watchService(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -793,6 +793,8 @@ func (s *Server) stopServerLoop() {
 //	return fmt.Errorf("can not find channel %s", channelName)
 //}
 
+// loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
+// collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
 	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{

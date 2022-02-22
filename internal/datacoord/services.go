@@ -97,7 +97,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	return resp, nil
 }
 
-// AssignSegmentID applies for segment ids and make allocation for records
+// AssignSegmentID applies for segment ids and make allocation for records.
 func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	if s.isClosed() {
 		return &datapb.AssignSegmentIDResponse{
@@ -117,6 +117,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()))
 
+		// Load the collection info from Root Coordinator, if it is not found in server meta.
 		if s.meta.GetCollection(r.GetCollectionID()) == nil {
 			err := s.loadCollectionFromRootCoord(ctx, r.GetCollectionID())
 			if err != nil {
@@ -125,18 +126,19 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			}
 		}
 
+		// Add the channel to cluster for watching.
 		s.cluster.Watch(r.ChannelName, r.CollectionID)
 
-		allocations, err := s.segmentManager.AllocSegment(ctx,
+		// Have segment manager allocate and return the segment allocation info.
+		segAlloc, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
 			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
 			continue
 		}
+		log.Debug("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segAlloc))
 
-		log.Debug("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", allocations))
-
-		for _, allocation := range allocations {
+		for _, allocation := range segAlloc {
 			result := &datapb.SegmentIDAssignment{
 				SegID:        allocation.SegmentID,
 				ChannelName:  r.ChannelName,
@@ -892,7 +894,7 @@ func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState
 	return
 }
 
-// WatchChannels notifies DataCoord to watch vchannels of a collection
+// WatchChannels notifies DataCoord to watch vchannels of a collection.
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	log.Debug("receive watch channels request", zap.Any("channels", req.GetChannelNames()))
 	resp := &datapb.WatchChannelsResponse{

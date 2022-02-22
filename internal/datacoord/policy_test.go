@@ -377,7 +377,7 @@ func TestBgCheckWithMaxWatchDuration(t *testing.T) {
 	getKv := func(watchInfos []*watch) kv.TxnKV {
 		kv := memkv.NewMemoryKV()
 		for _, info := range watchInfos {
-			k := buildChannelKey(info.nodeID, info.name)
+			k := buildNodeChannelKey(info.nodeID, info.name)
 			v, _ := proto.Marshal(info.info)
 			kv.Save(k, string(v))
 		}

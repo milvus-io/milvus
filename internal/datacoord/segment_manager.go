@@ -185,7 +185,7 @@ func defaultFlushPolicy() flushPolicy {
 	return flushPolicyV1
 }
 
-// newSegmentManager should be the only way to retrieve SegmentManager
+// newSegmentManager should be the only way to retrieve SegmentManager.
 func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *SegmentManager {
 	manager := &SegmentManager{
 		meta:                meta,
@@ -237,7 +237,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		segments = append(segments, segment)
 	}
 
-	// apply allocate policy
+	// Apply allocation policy.
 	maxCountPerSegment, err := s.estimateMaxNumOfRows(collectionID)
 	if err != nil {
 		return nil, err
