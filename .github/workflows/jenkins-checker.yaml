@@ -18,7 +18,7 @@ jobs:
       - name: Validate Jenkinsfile
         shell: bash
         run: |
-          JENKINS_URL=https://ci.milvus.io:18080/jenkins
+          JENKINS_URL=https://jenkins.milvus.io:18080
           # JENKINS_CRUMB is needed if your Jenkins controller has CRSF protection enabled as it should
           JENKINS_CRUMB=`curl "$JENKINS_URL/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)"`
 
