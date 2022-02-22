@@ -145,3 +145,27 @@ Collections:
           index: fail
           search: fail
           query: fail
+  -
+    testcase:
+      name: test_allstandalone_pod_kill
+      chaos: chaos_allstandalone_pod_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail
+  -
+    testcase:
+      name: test_allcluster_pod_kill
+      chaos: chaos_allcluster_pod_kill.yaml
+      expectation:
+        cluster_1_node:
+          create: fail
+          insert: fail
+          flush: fail
+          index: fail
+          search: fail
+          query: fail

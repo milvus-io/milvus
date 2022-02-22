@@ -12,6 +12,7 @@ from chaos.checker import (CreateChecker, InsertFlushChecker,
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_pod_list
+from utils.util_common import findkeys
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from chaos import constants
@@ -33,6 +34,27 @@ def assert_statistic(checkers, expectations={}):
             expect(succ_rate > 0.90 or total > 2,
                    f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
 
+
+def check_cluster_nodes(chaos_config):
+     
+    # if all pods will be effected, the expect is all fail. 
+    # Even though the replicas is greater than 1, it can not provide HA, so cluster_nodes is set as 1 for this situation.
+    if "all" in chaos_config["metadata"]["name"]:
+        return 1
+    
+    selector = findkeys(chaos_config, "selector")
+    selector = list(selector)
+    log.info(f"chaos target selector: {selector}")
+    assert len(selector) == 1
+    selector = selector[0]
+    namespace = selector["namespaces"][0]
+    labels_dict = selector["labelSelectors"]
+    labels_list = []
+    for k,v in labels_dict.items():
+        labels_list.append(k+"="+v)
+    labels_str = ",".join(labels_list)
+    pods = get_pod_list(namespace, labels_str)
+    return len(pods)
 
 def record_results(checkers):
     res = ""
@@ -57,17 +79,7 @@ class TestChaosBase:
     health_checkers = {}
 
     def parser_testcase_config(self, chaos_yaml, chaos_config):
-        # TODO: need a better way (maybe recursion) to parse chaos_config
-        # selector key is located in different depth when chaos config's kind is different
-        # for now, there are two kinds of chaos config: xxChaos and Schedule(applied in pod kill chaos).
-        if chaos_config["kind"] == "Schedule":
-            for k, v in chaos_config["spec"].items():
-                if "Chaos" in k and "selector" in v.keys():
-                    selector = v["selector"]
-                    break
-        else:
-            selector = chaos_config["spec"]["selector"]
-        log.info(f"chaos target selector: {selector}")
+        cluster_nodes = check_cluster_nodes(chaos_config)
         tests_yaml = constants.TESTS_CONFIG_LOCATION + 'testcases.yaml'
         tests_config = cc.gen_experiment_config(tests_yaml)
         test_collections = tests_config.get('Collections', None)
@@ -75,16 +87,8 @@ class TestChaosBase:
             test_chaos = t.get('testcase', {}).get('chaos', {})
             if test_chaos in chaos_yaml:
                 expects = t.get('testcase', {}).get('expectation', {}).get('cluster_1_node', {})
-                # get the nums of pods
-                namespace = selector["namespaces"][0]
-                labels_dict = selector["labelSelectors"]
-                labels_list = []
-                for k,v in labels_dict.items():
-                    labels_list.append(k+"="+v)
-                labels_str = ",".join(labels_list)
-                pods = get_pod_list(namespace, labels_str)
                 # for the cluster_n_node
-                if len(pods) > 1:
+                if cluster_nodes > 1:
                     expects = t.get('testcase', {}).get('expectation', {}).get('cluster_n_node', {})
                 log.info(f"yaml.expects: {expects}")
                 self.expect_create = expects.get(Op.create.value, constants.SUCC)
