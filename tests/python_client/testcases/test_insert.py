@@ -1054,9 +1054,9 @@ class TestInsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=collection_name)
         field_one = cf.gen_int64_field(is_primary=True)
         field_two = cf.gen_int64_field() 
-        vec_field  = ct.get_invalid_vectors
+        vec_field = ct.get_invalid_vectors
         df = cf.gen_collection_schema(fields=[field_one, field_two, vec_field])
-        error={ct.err_code: 1, 'err_msg': "is illegal"}
+        error = {ct.err_code: 0, ct.err_msg: "The field of schema type must be FieldSchema."}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
    
 class TestInsertInvalidBinary(TestcaseBase):
@@ -1075,12 +1075,12 @@ class TestInsertInvalidBinary(TestcaseBase):
         """
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
-        field_one = cf.gen_float_field(is_primary=True, auto_id=False)
+        field_one = cf.gen_float_field(is_primary=True)
         field_two = cf.gen_float_field() 
-        vec_field  = cf.gen_float_vec_field()
+        vec_field = cf.gen_float_vec_field()
         df = cf.gen_default_binary_collection_schema(fields=[field_one, field_two, vec_field])
-        error = {ct.err_code: 0, ct.err_msg: "is error."}
-        mutation_res, _ =collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 0, ct.err_msg: "Data type is not support."}
+        mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_binary_partition_name(self):
@@ -1093,39 +1093,8 @@ class TestInsertInvalidBinary(TestcaseBase):
         collection_w = self.init_collection_wrap(name=collection_name)
         partition_name = ct.get_invalid_strs
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
-        error={ct.err_code: 1, 'err_msg': "The types of schema and data do not match."}
+        error = {ct.err_code: 1, 'err_msg': "The types of schema and data do not match."}
         mutation_res, _ = collection_w.insert(data=df, partition_name=partition_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_invalid_binary_field_type(self):
-        """
-        target: test insert with invalid field
-        method: insert with invalid field type
-        expected: raise exception
-        """
-        collection_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=collection_name)
-        vec_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_int64_field_name, dtype=DataType.NONE, is_primary=True)
-        field_one = cf.gen_int64_field(is_primary=True)
-        field_two = cf.gen_int64_field()   
-        df = [field_one, field_two, vec_field]
-        error={ct.err_code: 1, 'err_msg': "Data type is not support."}
-        mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_invalid_binary_field_value(self):
-        """
-        target: test insert with invalid field
-        method: insert with invalid field value
-        expected: raise exception
-        """
-        collection_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=collection_name)
-        field_one = cf.gen_int64_field(is_primary=True)
-        field_two = cf.gen_int64_field() 
-        vec_field  = ct.get_invalid_vectors
-        df = [field_one, field_two, vec_field]
-        error={ct.err_code: 1, 'err_msg': "Data type is not support."}
-        mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
        
 
