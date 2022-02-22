@@ -455,47 +455,58 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		zap.String("subscription", Params.MsgChannelCfg.DataCoordSubName))
 	ttMsgStream.Start()
 
-	go func() {
-		var checker *timerecord.LongTermChecker
-		if enableTtChecker {
-			checker = timerecord.NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
-			checker.Start()
-			defer checker.Stop()
-		}
+	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)
+}
 
-		defer logutil.LogPanic()
-		defer s.serverLoopWg.Done()
-		defer ttMsgStream.Close()
-		for {
-			select {
-			case <-ctx.Done():
-				log.Debug("DataNode timetick loop shutdown")
-				return
-			default:
-			}
-			msgPack := ttMsgStream.Consume()
-			if msgPack == nil {
-				log.Debug("receive nil timetick msg and shutdown timetick channel")
-				return
-			}
-			for _, msg := range msgPack.Msgs {
-				ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
-				if !ok {
-					log.Warn("receive unexpected msg type from tt channel")
-					continue
-				}
-				if enableTtChecker {
-					checker.Check()
-				}
+func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStream msgstream.MsgStream) {
+	var checker *timerecord.LongTermChecker
+	if enableTtChecker {
+		checker = timerecord.NewLongTermChecker(ctx, ttCheckerName, ttMaxInterval, ttCheckerWarnMsg)
+		checker.Start()
+		defer checker.Stop()
+	}
 
-				if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
-					log.Error("failed to handle timetick message", zap.Error(err))
-					continue
-				}
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+	defer func() {
+		// https://github.com/milvus-io/milvus/issues/15659
+		// msgstream service closed before datacoord quits
+		defer func() {
+			if x := recover(); x != nil {
+				log.Error("Failed to close ttMessage", zap.Any("recovered", x))
 			}
-			s.helper.eventAfterHandleDataNodeTt()
-		}
+		}()
+		ttMsgStream.Close()
 	}()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("DataNode timetick loop shutdown")
+			return
+		default:
+		}
+		msgPack := ttMsgStream.Consume()
+		if msgPack == nil {
+			log.Debug("receive nil timetick msg and shutdown timetick channel")
+			return
+		}
+		for _, msg := range msgPack.Msgs {
+			ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
+			if !ok {
+				log.Warn("receive unexpected msg type from tt channel")
+				continue
+			}
+			if enableTtChecker {
+				checker.Check()
+			}
+
+			if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
+				log.Error("failed to handle timetick message", zap.Error(err))
+				continue
+			}
+		}
+		s.helper.eventAfterHandleDataNodeTt()
+	}
 }
 
 func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.DataNodeTtMsg) error {
