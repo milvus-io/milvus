@@ -1,3 +1,5 @@
+from pymilvus.client.types import CompactionPlans
+
 from utils.util_log import test_log as log
 from common import common_type as ct
 from common import common_func as cf
@@ -64,6 +66,12 @@ class ResponseChecker:
             # Calculate distance interface that response check
             result = self.check_distance(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_delete_compact:
+            result = self.check_delete_compact_plan(self.response, self.func_name, self.check_items)
+
+        elif self.check_task == CheckTasks.check_merge_compact:
+            result = self.check_merge_compact_plan(self.response, self.func_name, self.check_items)
+
         # Add check_items here if something new need verify
 
         return result
@@ -112,7 +120,6 @@ class ResponseChecker:
             #  assert res_obj == class_obj
 
         if func_name == "has_connection":
-
             value_content = params.get(ct.value_content, False)
             res_obj = res if res is not None else False
             assert res_obj == value_content
@@ -288,3 +295,56 @@ class ResponseChecker:
                                       metric, sqrt)
 
         return True
+
+    @staticmethod
+    def check_delete_compact_plan(compaction_plans, func_name, check_items):
+        """
+        Verify that the delete type compaction plan
+
+        :param: compaction_plans: A compaction plan
+        :type: CompactionPlans
+
+        :param func_name: get_compaction_plans API name
+        :type func_name: str
+
+        :param check_items: which items you wish to check
+                            plans_num represent the delete compact plans number
+        :type: dict
+        """
+        to_check_func = 'get_compaction_plans'
+        if func_name != to_check_func:
+            log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
+        if not isinstance(compaction_plans, CompactionPlans):
+            raise Exception("The compaction_plans result to check isn't CompactionPlans type object")
+
+        plans_num = check_items.get("plans_num", 1)
+        assert len(compaction_plans.plans) == plans_num
+        for plan in compaction_plans.plans:
+            assert len(plan.sources) == 1
+            assert plan.sources[0] != plan.target
+
+    @staticmethod
+    def check_merge_compact_plan(compaction_plans, func_name, check_items):
+        """
+        Verify that the merge type compaction plan
+
+        :param: compaction_plans: A compaction plan
+        :type: CompactionPlans
+
+        :param func_name: get_compaction_plans API name
+        :type func_name: str
+
+        :param check_items: which items you wish to check
+                            segment_num represent how many segments are expected to be merged, default is 2
+        :type: dict
+        """
+        to_check_func = 'get_compaction_plans'
+        if func_name != to_check_func:
+            log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
+        if not isinstance(compaction_plans, CompactionPlans):
+            raise Exception("The compaction_plans result to check isn't CompactionPlans type object")
+
+        segment_num = check_items.get("segment_num", 2)
+        assert len(compaction_plans.plans) == 1
+        assert len(compaction_plans.plans[0].sources) == segment_num
+        assert compaction_plans.plans[0].target not in compaction_plans.plans[0].sources
