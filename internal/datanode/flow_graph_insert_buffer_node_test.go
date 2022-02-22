@@ -94,7 +94,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		vChannelName: "string",
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
 
@@ -108,7 +108,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		cd:      0,
 	}
 
-	_, err = newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
+	_, err = newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
 	assert.Error(t, err)
 }
 
@@ -183,7 +183,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		vChannelName: "string",
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
 	require.NoError(t, err)
 
 	// trigger log ts
@@ -401,7 +401,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		allocator:    NewAllocatorFactory(),
 		vChannelName: "string",
 	}
-	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -662,7 +662,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		allocator:    NewAllocatorFactory(),
 		vChannelName: "string",
 	}
-	iBNode, err := newInsertBufferNode(ctx, flushChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
 	require.NoError(t, err)
 
 	inMsg := genFlowGraphInsertMsg(insertChannelName)

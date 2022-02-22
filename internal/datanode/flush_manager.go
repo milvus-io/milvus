@@ -25,12 +25,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -324,6 +326,8 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool,
 	dropped bool, pos *internalpb.MsgPosition) error {
 
+	tr := timerecord.NewTimeRecorder("flushDuration")
+
 	// empty flush
 	if data == nil || data.buffer == nil {
 		//m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
@@ -408,6 +412,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		BaseKV: m.BaseKV,
 		data:   kvs,
 	}, field2Insert, field2Stats, flushed, dropped, pos)
+
+	metrics.DataNodeFlushSegmentLatency.WithLabelValues(fmt.Sprint(collID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return nil
 }
 
@@ -548,7 +554,13 @@ type flushBufferInsertTask struct {
 // flushInsertData implements flushInsertTask
 func (t *flushBufferInsertTask) flushInsertData() error {
 	if t.BaseKV != nil && len(t.data) > 0 {
-		return t.MultiSave(t.data)
+		for _, d := range t.data {
+			metrics.DataNodeFlushedSize.WithLabelValues(metrics.DataNodeMsgTypeInsert, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(d)))
+		}
+		tr := timerecord.NewTimeRecorder("insertData")
+		err := t.MultiSave(t.data)
+		metrics.DataNodeSave2StorageLatency.WithLabelValues(metrics.DataNodeMsgTypeInsert, fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return err
 	}
 	return nil
 }
@@ -561,7 +573,13 @@ type flushBufferDeleteTask struct {
 // flushDeleteData implements flushDeleteTask
 func (t *flushBufferDeleteTask) flushDeleteData() error {
 	if len(t.data) > 0 && t.BaseKV != nil {
-		return t.MultiSave(t.data)
+		for _, d := range t.data {
+			metrics.DataNodeFlushedSize.WithLabelValues(metrics.DataNodeMsgTypeDelete, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(d)))
+		}
+		tr := timerecord.NewTimeRecorder("deleteData")
+		err := t.MultiSave(t.data)
+		metrics.DataNodeSave2StorageLatency.WithLabelValues(metrics.DataNodeMsgTypeDelete, fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return err
 	}
 	return nil
 }
