@@ -59,11 +59,16 @@ jobs:
         if: ${{  matrix.os == 'macos-11' }}
         uses: actions/cache@v1
         with:
-          path: |
-            /tmp/thirdparty 
-            cmake_build/3rdparty_download
+          path: /tmp/thirdparty 
           key: macos-11-thirdparty-${{ hashFiles('internal/core/**') }}
           restore-keys: macos-11-thirdparty-
+      - name: Mac Cache 3rd Party
+        if: ${{  matrix.os == 'macos-11' }}
+        uses: actions/cache@v1
+        with:
+          path: /Users/runner/work/milvus/milvus/cmake_build/3rdparty_download
+          key: macos-11-3rdparty-${{ hashFiles('internal/core/**') }}
+          restore-keys: macos-11-3rdparty-
       - name: Mac Cache CCache Volumes
         if: ${{  matrix.os == 'macos-11' }}
         uses: actions/cache@v1
