@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"net/http"
+
 	// nolint:gosec
 	_ "net/http/pprof"
 
@@ -32,9 +33,6 @@ import (
 const (
 	milvusNamespace = "milvus"
 
-	SuccessLabel = "success"
-	FailLabel    = "fail"
-	TotalLabel   = "total"
 	AbandonLabel = "abandon"
 
 	SearchLabel = "search"
@@ -42,12 +40,6 @@ const (
 
 	CacheHitLabel  = "hit"
 	CacheMissLabel = "miss"
-
-	UnissuedIndexTaskLabel   = "unissued"
-	InProgressIndexTaskLabel = "in-progress"
-	FinishedIndexTaskLabel   = "finished"
-	FailedIndexTaskLabel     = "failed"
-	RecycledIndexTaskLabel   = "recycled"
 )
 
 var (
@@ -273,11 +265,6 @@ var (
 			Help:      "Counter of watch dm channel",
 		}, []string{"type"})
 )
-
-//RegisterIndexNode registers IndexNode metrics
-func RegisterIndexNode() {
-
-}
 
 //ServeHTTP serves prometheus http service
 func ServeHTTP() {
