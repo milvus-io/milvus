@@ -253,7 +253,7 @@ class ApiCollectionWrapper:
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
-    def get_compaction_plans(self, timeout=None, check_task=None, check_items=None, **kwargs):
+    def get_compaction_plans(self, timeout=None, check_task=None, check_items={}, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.get_compaction_plans, timeout], **kwargs)
