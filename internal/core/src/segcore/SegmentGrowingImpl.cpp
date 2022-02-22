@@ -452,7 +452,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
 }
 
 std::vector<SegOffset>
-SegmentGrowingImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp timestamp) const {
+SegmentGrowingImpl::search_ids(const BitsetType& bitset, Timestamp timestamp) const {
     std::vector<SegOffset> res_offsets;
 
     for (int i = 0; i < bitset.size(); i++) {
@@ -534,7 +534,7 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const {
+SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const {
     // DO NOTHING
 }
 

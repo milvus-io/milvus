@@ -129,7 +129,7 @@ class SegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const override;
+    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const override;
 
     void
     vector_search(int64_t vec_count,
@@ -160,15 +160,15 @@ class SegmentSealedImpl : public SegmentSealed {
     search_ids(const BitsetView& view, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
-    search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
+    search_ids(const BitsetType& view, Timestamp timestamp) const override;
 
     //    virtual void
     //    build_index_if_primary_key(FieldId field_id);
 
  private:
     // segment loading state
-    boost::dynamic_bitset<> field_data_ready_bitset_;
-    boost::dynamic_bitset<> vecindex_ready_bitset_;
+    BitsetType field_data_ready_bitset_;
+    BitsetType vecindex_ready_bitset_;
     std::atomic<int> system_ready_count_ = 0;
     // segment datas
 

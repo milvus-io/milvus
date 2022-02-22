@@ -63,14 +63,14 @@ TimestampIndex::get_active_range(Timestamp query_timestamp) const {
     return {start_locs_[block_id], start_locs_[block_id + 1]};
 }
 
-boost::dynamic_bitset<>
+BitsetType
 TimestampIndex::GenerateBitset(Timestamp query_timestamp,
                                std::pair<int64_t, int64_t> active_range,
                                const Timestamp* timestamps,
                                int64_t size) {
     auto [beg, end] = active_range;
     Assert(beg < end);
-    boost::dynamic_bitset<> bitset;
+    BitsetType bitset;
     bitset.reserve(size);
     bitset.resize(beg, true);
     bitset.resize(size, false);

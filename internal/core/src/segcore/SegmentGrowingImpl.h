@@ -165,7 +165,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const override;
+    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const override;
 
     void
     vector_search(int64_t vec_count,
@@ -190,7 +190,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
-    search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
+    search_ids(const BitsetType& view, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const override;

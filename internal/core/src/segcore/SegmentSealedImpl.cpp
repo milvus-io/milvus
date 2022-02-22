@@ -18,12 +18,12 @@
 namespace milvus::segcore {
 
 static inline void
-set_bit(boost::dynamic_bitset<>& bitset, FieldOffset field_offset, bool flag = true) {
+set_bit(BitsetType& bitset, FieldOffset field_offset, bool flag = true) {
     bitset[field_offset.get()] = flag;
 }
 
 static inline bool
-get_bit(const boost::dynamic_bitset<>& bitset, FieldOffset field_offset) {
+get_bit(const BitsetType& bitset, FieldOffset field_offset) {
     return bitset[field_offset.get()];
 }
 
@@ -572,7 +572,7 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,
 }
 
 std::vector<SegOffset>
-SegmentSealedImpl::search_ids(const boost::dynamic_bitset<>& bitset, Timestamp timestamp) const {
+SegmentSealedImpl::search_ids(const BitsetType& bitset, Timestamp timestamp) const {
     std::vector<SegOffset> dst_offset;
     for (int i = 0; i < bitset.size(); i++) {
         if (bitset[i]) {
@@ -618,7 +618,7 @@ SegmentSealedImpl::get_active_count(Timestamp ts) const {
     return this->get_row_count();
 }
 void
-SegmentSealedImpl::mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const {
+SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const {
     // TODO change the
     AssertInfo(this->timestamps_.size() == get_row_count(), "Timestamp size not equal to row count");
     auto range = timestamp_index_.get_active_range(timestamp);
