@@ -422,7 +422,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		mockbIO := &binlogIO{mockKv, alloc}
 		replica, err := newReplica(context.TODO(), rc, collID)
 		require.NoError(t, err)
-		replica.addFlushedSegmentWithPKs(segID, collID, partID, "channelname", 2, []UniqueID{1})
+		replica.addFlushedSegmentWithPKs(segID, collID, partID, "channelname", 2, []UniqueID{1, 2})
 
 		iData := genInsertData()
 		meta := NewMetaFactory().GetCollectionMeta(collID, "test_compact_coll_name")
@@ -473,6 +473,28 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		planID := task.getPlanID()
 		assert.Equal(t, plan.GetPlanID(), planID)
 
+		// Compact to delete the entire segment
+		deleteAllData := &DeleteData{
+			Pks:      []UniqueID{1, 2},
+			Tss:      []Timestamp{20000, 20001},
+			RowCount: 2,
+		}
+
+		err = mockKv.RemoveWithPrefix("/")
+		require.NoError(t, err)
+		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, deleteAllData, meta)
+		require.NoError(t, err)
+		plan.PlanID++
+
+		err = task.compact()
+		assert.NoError(t, err)
+		// The segment should be removed
+		assert.False(t, replica.hasSegment(segID, true))
+
+		// re-add the segment
+		replica.addFlushedSegmentWithPKs(segID, collID, partID, "channelname", 2, []UniqueID{1, 2})
+
+		// Compact empty segment
 		err = mockKv.RemoveWithPrefix("/")
 		require.NoError(t, err)
 		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
@@ -515,7 +537,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		mockfm.sleepSeconds = plan.TimeoutInSeconds + int32(1)
 		err = task.compact()
 		assert.Error(t, err)
-
 	})
 
 	t.Run("Test typeII compact valid", func(t *testing.T) {

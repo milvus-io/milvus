@@ -350,7 +350,7 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			"test normal merge",
+			"test normal merge compaction",
 			fields{
 				memkv.NewMemoryKV(),
 				nil,
@@ -389,6 +389,52 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log5")},
 					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog5")},
 					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
+					NumOfRows:           1,
+				},
+			},
+			false,
+		},
+		{
+			"test removing all data merge compaction",
+			fields{
+				memkv.NewMemoryKV(),
+				nil,
+				&SegmentsInfo{map[int64]*SegmentInfo{
+					1: {SegmentInfo: &datapb.SegmentInfo{
+						ID:        1,
+						Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+						Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+						Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+					}},
+					2: {SegmentInfo: &datapb.SegmentInfo{
+						ID:        2,
+						Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
+						Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
+						Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
+					}},
+				}},
+			},
+			args{
+				[]*datapb.CompactionSegmentBinlogs{
+					{
+						SegmentID:           1,
+						FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+						Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+						Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+					},
+					{
+						SegmentID:           2,
+						FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
+						Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
+						Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
+					},
+				},
+				&datapb.CompactionResult{
+					SegmentID:           3,
+					InsertLogs:          nil,
+					Field2StatslogPaths: nil,
+					Deltalogs:           nil,
+					NumOfRows:           0,
 				},
 			},
 			false,
@@ -408,10 +454,12 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 					assert.Nil(t, m.GetSegment(l.GetSegmentID()))
 				}
 				segment := m.GetSegment(tt.args.result.SegmentID)
-				assert.NotNil(t, segment)
-				assert.EqualValues(t, tt.args.result.GetInsertLogs(), segment.GetBinlogs())
-				assert.EqualValues(t, tt.args.result.GetField2StatslogPaths(), segment.GetStatslogs())
-				assert.EqualValues(t, tt.args.result.GetDeltalogs(), segment.GetDeltalogs())
+				assert.Equal(t, segment != nil, tt.args.result.NumOfRows > 0)
+				if segment != nil {
+					assert.EqualValues(t, tt.args.result.GetInsertLogs(), segment.GetBinlogs())
+					assert.EqualValues(t, tt.args.result.GetField2StatslogPaths(), segment.GetStatslogs())
+					assert.EqualValues(t, tt.args.result.GetDeltalogs(), segment.GetDeltalogs())
+				}
 			}
 		})
 	}
@@ -435,7 +483,7 @@ func Test_meta_CompleteInnerCompaction(t *testing.T) {
 		want    *SegmentInfo
 	}{
 		{
-			"test normal merge",
+			"test normal inner compaction",
 			fields{
 				memkv.NewMemoryKV(),
 				nil,
@@ -462,6 +510,7 @@ func Test_meta_CompleteInnerCompaction(t *testing.T) {
 					InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")},
 					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3")},
 					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3")},
+					NumOfRows:           1,
 				},
 			},
 			false,
@@ -473,6 +522,40 @@ func Test_meta_CompleteInnerCompaction(t *testing.T) {
 					Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog2", "deltalog3")},
 				},
 			},
+		},
+		{
+			"test removing all data inner compaction",
+			fields{
+				memkv.NewMemoryKV(),
+				nil,
+				&SegmentsInfo{
+					map[int64]*SegmentInfo{
+						1: {SegmentInfo: &datapb.SegmentInfo{
+							ID:        1,
+							Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+							Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+							Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+						}},
+					},
+				},
+			},
+			args{
+				&datapb.CompactionSegmentBinlogs{
+					SegmentID:           1,
+					FieldBinlogs:        []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
+					Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
+					Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+				},
+				&datapb.CompactionResult{
+					SegmentID:           1,
+					InsertLogs:          nil,
+					Field2StatslogPaths: nil,
+					Deltalogs:           nil,
+					NumOfRows:           0,
+				},
+			},
+			false,
+			nil,
 		},
 	}
 	for _, tt := range tests {
