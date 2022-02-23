@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -2245,6 +2246,42 @@ func TestGetFlushState(t *testing.T) {
 			Flushed: true,
 		}, resp)
 	})
+}
+
+// https://github.com/milvus-io/milvus/issues/15659
+func TestIssue15659(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{
+		helper: ServerHelper{
+			eventAfterHandleDataNodeTt: func() {},
+		},
+	}
+	ms := &MockClosePanicMsgstream{}
+	ms.On("Consume").Return(&msgstream.MsgPack{})
+	ch := make(chan struct{})
+	go func() {
+		assert.NotPanics(t, func() {
+			s.serverLoopWg.Add(1)
+			s.handleDataNodeTimetickMsgstream(ctx, ms)
+			close(ch)
+		})
+	}()
+	cancel()
+	<-ch
+}
+
+type MockClosePanicMsgstream struct {
+	mock.Mock
+	msgstream.MsgStream
+}
+
+func (ms *MockClosePanicMsgstream) Close() {
+	panic("mocked close panic")
+}
+
+func (ms *MockClosePanicMsgstream) Consume() *msgstream.MsgPack {
+	args := ms.Called()
+	return args.Get(0).(*msgstream.MsgPack)
 }
 
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
