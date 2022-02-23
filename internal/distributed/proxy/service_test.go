@@ -880,3 +880,25 @@ func Test_NewServer(t *testing.T) {
 	err = server.Stop()
 	assert.Nil(t, err)
 }
+
+func Test_NewServer_HTTPServerDisabled(t *testing.T) {
+	ctx := context.Background()
+	server, err := NewServer(ctx, nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
+
+	server.proxy = &MockProxy{}
+	server.rootCoordClient = &MockRootCoord{}
+	server.indexCoordClient = &MockIndexCoord{}
+	server.queryCoordClient = &MockQueryCoord{}
+	server.dataCoordClient = &MockDataCoord{}
+
+	HTTPParams.InitOnce()
+	HTTPParams.Enabled = false
+
+	err = server.Run()
+	assert.Nil(t, err)
+	assert.Nil(t, server.httpServer)
+	err = server.Stop()
+	assert.Nil(t, err)
+}

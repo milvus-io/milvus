@@ -21,13 +21,16 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
+	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
@@ -51,6 +54,7 @@ import (
 )
 
 var Params paramtable.GrpcServerConfig
+var HTTPParams paramtable.HTTPConfig
 
 // Server is the Proxy Server
 type Server struct {
@@ -58,6 +62,9 @@ type Server struct {
 	wg         sync.WaitGroup
 	proxy      types.ProxyComponent
 	grpcServer *grpc.Server
+	httpServer *http.Server
+	// avoid race
+	httpServerMtx sync.Mutex
 
 	grpcErrChan chan error
 
@@ -85,6 +92,27 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		return nil, err
 	}
 	return server, err
+}
+
+// startHTTPServer starts the http server, panic when failed
+func (s *Server) startHTTPServer(port int) {
+	defer s.wg.Done()
+	ginHandler := gin.Default()
+	apiv1 := ginHandler.Group("/api/v1")
+	httpserver.NewHandlers(s.proxy).RegisterRoutesTo(apiv1)
+	s.httpServerMtx.Lock()
+	s.httpServer = &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      ginHandler,
+		ReadTimeout:  HTTPParams.ReadTimeout,
+		WriteTimeout: HTTPParams.WriteTimeout,
+	}
+	s.httpServerMtx.Unlock()
+	if err := s.httpServer.ListenAndServe(); err != nil {
+		if err != http.ErrServerClosed {
+			panic("failed to start http server: " + err.Error())
+		}
+	}
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
@@ -159,6 +187,8 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.ProxyRole)
 	log.Debug("Proxy init service's parameter table done")
+	HTTPParams.InitOnce()
+	log.Debug("Proxy init http server's parameter table done")
 
 	if !funcutil.CheckPortAvailable(Params.Port) {
 		Params.Port = funcutil.GetAvailablePort()
@@ -188,7 +218,12 @@ func (s *Server) init() error {
 		log.Warn("failed to start Proxy's grpc server", zap.Error(err))
 		return err
 	}
-	log.Debug("grpc server of Proxy has been started")
+	log.Debug("grpc server of proxy has been started")
+	if HTTPParams.Enabled {
+		log.Info("start http server of proxy", zap.Int("port", HTTPParams.Port))
+		s.wg.Add(1)
+		go s.startHTTPServer(HTTPParams.Port)
+	}
 
 	if s.rootCoordClient == nil {
 		var err error
@@ -347,10 +382,26 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 
-	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
-		s.grpcServer.GracefulStop()
-	}
+	gracefulWg := sync.WaitGroup{}
+	gracefulWg.Add(1)
+	go func() {
+		defer gracefulWg.Done()
+		s.httpServerMtx.Lock()
+		defer s.httpServerMtx.Unlock()
+		if s.httpServer != nil {
+			log.Debug("Graceful stop http server...")
+			s.httpServer.Shutdown(context.TODO())
+		}
+	}()
+	gracefulWg.Add(1)
+	go func() {
+		defer gracefulWg.Done()
+		if s.grpcServer != nil {
+			log.Debug("Graceful stop grpc server...")
+			s.grpcServer.GracefulStop()
+		}
+	}()
+	gracefulWg.Wait()
 
 	err = s.proxy.Stop()
 	if err != nil {
