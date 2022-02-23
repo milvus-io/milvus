@@ -70,7 +70,7 @@ func stopRocksmq() {
 	rocksmq.CloseRocksMQ()
 }
 
-// MilvusRoles determines to run which components.
+// MilvusRoles decides which components are brought up with Milvus.
 type MilvusRoles struct {
 	EnableRootCoord  bool `env:"ENABLE_ROOT_COORD"`
 	EnableProxy      bool `env:"ENABLE_PROXY"`
@@ -343,21 +343,14 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 
 // Run Milvus components.
 func (mr *MilvusRoles) Run(local bool, alias string) {
-	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
-		closer := trace.InitTracing("standalone")
-		if closer != nil {
-			defer closer.Close()
-		}
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// only standalone enable localMsg
 	if local {
-		Params.Init()
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
+		Params.Init()
 
 		if err := initRocksmq(); err != nil {
 			panic(err)
@@ -365,13 +358,20 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		defer stopRocksmq()
 
 		if Params.EtcdCfg.UseEmbedEtcd {
-			// start etcd server
+			// Start etcd server.
 			etcd.InitEtcdServer(&Params.EtcdCfg)
 			defer etcd.StopEtcdServer()
 		}
 	} else {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
+		}
+	}
+
+	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
+		closer := trace.InitTracing("standalone")
+		if closer != nil {
+			defer closer.Close()
 		}
 	}
 
