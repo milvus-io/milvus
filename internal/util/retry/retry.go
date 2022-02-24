@@ -13,9 +13,9 @@ package retry
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 )
 
 // Do will run function with retry mechanism.
@@ -28,14 +28,14 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	for _, opt := range opts {
 		opt(c)
 	}
-	var el ErrorList
+	var el errorutil.ErrorList
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
 
 			el = append(el, err)
 
-			if ok := IsUncoverable(err); ok {
+			if ok := IsUnRecoverable(err); ok {
 				return el
 			}
 
@@ -57,24 +57,6 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	return el
 }
 
-// ErrorList for print error log
-type ErrorList []error
-
-// TODO shouldn't print all retries, might be too much
-// Error method return an string representation of retry error list.
-func (el ErrorList) Error() string {
-	var builder strings.Builder
-	builder.WriteString("All attempts results:\n")
-	for index, err := range el {
-		// if early termination happens
-		if err == nil {
-			break
-		}
-		builder.WriteString(fmt.Sprintf("attempt #%d:%s\n", index+1, err.Error()))
-	}
-	return builder.String()
-}
-
 type unrecoverableError struct {
 	error
 }
@@ -85,8 +67,8 @@ func Unrecoverable(err error) error {
 	return unrecoverableError{err}
 }
 
-// IsUncoverable is used to judge whether the error is wrapped by unrecoverableError.
-func IsUncoverable(err error) bool {
+// IsUnRecoverable is used to judge whether the error is wrapped by unrecoverableError.
+func IsUnRecoverable(err error) bool {
 	_, isUnrecoverable := err.(unrecoverableError)
 	return isUnrecoverable
 }

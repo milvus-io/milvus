@@ -26,7 +26,6 @@ import (
 
 	"go.uber.org/zap"
 
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -76,22 +75,16 @@ func newQueryService(ctx context.Context,
 	enabled, _ := Params.Load("localStorage.enabled")
 	localCacheEnabled, _ := strconv.ParseBool(enabled)
 
-	localChunkManager := storage.NewLocalChunkManager(path)
+	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(path))
 
-	option := &miniokv.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	client, err := miniokv.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-	remoteChunkManager := storage.NewMinioChunkManager(client)
+	remoteChunkManager, err := storage.NewMinioChunkManager(
+		ctx,
+		storage.Address(Params.MinioCfg.Address),
+		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+		storage.UseSSL(Params.MinioCfg.UseSSL),
+		storage.BucketName(Params.MinioCfg.BucketName),
+		storage.CreateBucket(true))
 
 	qs := &queryService{
 		ctx:    queryServiceCtx,
