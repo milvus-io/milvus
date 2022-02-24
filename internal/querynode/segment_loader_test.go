@@ -99,6 +99,19 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 		err = loader.loadSegment(req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
+
+	t.Run("test load segment with nil base message", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		loader := node.loader
+		assert.NotNil(t, loader)
+
+		req := &querypb.LoadSegmentsRequest{}
+
+		err = loader.loadSegment(req, segmentTypeSealed)
+		assert.Error(t, err)
+	})
 }
 
 func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {

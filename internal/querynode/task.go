@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
@@ -279,6 +280,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}
 	req := &queryPb.LoadSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadSegments,
+			MsgID:   w.req.Base.MsgID, // use parent task's msgID
+		},
 		Infos:        unFlushedSegments,
 		CollectionID: collectionID,
 		Schema:       w.req.Schema,
