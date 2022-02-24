@@ -150,6 +150,123 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 	})
 
+	te.Run("EtcdKV SaveAndLoadBytes", func(t *testing.T) {
+		rootPath := "/etcd/test/root/saveandloadbytes"
+		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+		err = etcdKV.RemoveWithPrefix("")
+		require.NoError(t, err)
+
+		defer etcdKV.Close()
+		defer etcdKV.RemoveWithPrefix("")
+
+		saveAndLoadTests := []struct {
+			key   string
+			value string
+		}{
+			{"test1", "value1"},
+			{"test2", "value2"},
+			{"test1/a", "value_a"},
+			{"test1/b", "value_b"},
+		}
+
+		for i, test := range saveAndLoadTests {
+			if i < 4 {
+				err = etcdKV.SaveBytes(test.key, []byte(test.value))
+				assert.NoError(t, err)
+			}
+
+			val, err := etcdKV.LoadBytes(test.key)
+			assert.NoError(t, err)
+			assert.Equal(t, test.value, string(val))
+		}
+
+		invalidLoadTests := []struct {
+			invalidKey string
+		}{
+			{"t"},
+			{"a"},
+			{"test1a"},
+		}
+
+		for _, test := range invalidLoadTests {
+			val, err := etcdKV.LoadBytes(test.invalidKey)
+			assert.Error(t, err)
+			assert.Zero(t, string(val))
+		}
+
+		loadPrefixTests := []struct {
+			prefix string
+
+			expectedKeys   []string
+			expectedValues []string
+			expectedError  error
+		}{
+			{"test", []string{
+				etcdKV.GetPath("test1"),
+				etcdKV.GetPath("test2"),
+				etcdKV.GetPath("test1/a"),
+				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+			{"test1", []string{
+				etcdKV.GetPath("test1"),
+				etcdKV.GetPath("test1/a"),
+				etcdKV.GetPath("test1/b")}, []string{"value1", "value_a", "value_b"}, nil},
+			{"test2", []string{etcdKV.GetPath("test2")}, []string{"value2"}, nil},
+			{"", []string{
+				etcdKV.GetPath("test1"),
+				etcdKV.GetPath("test2"),
+				etcdKV.GetPath("test1/a"),
+				etcdKV.GetPath("test1/b")}, []string{"value1", "value2", "value_a", "value_b"}, nil},
+			{"test1/a", []string{etcdKV.GetPath("test1/a")}, []string{"value_a"}, nil},
+			{"a", []string{}, []string{}, nil},
+			{"root", []string{}, []string{}, nil},
+			{"/etcd/test/root", []string{}, []string{}, nil},
+		}
+
+		for _, test := range loadPrefixTests {
+			actualKeys, actualValues, err := etcdKV.LoadBytesWithPrefix(test.prefix)
+			actualStringValues := make([]string, len(actualValues))
+			for i := range actualValues {
+				actualStringValues[i] = string(actualValues[i])
+			}
+			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
+			assert.ElementsMatch(t, test.expectedValues, actualStringValues)
+			assert.Equal(t, test.expectedError, err)
+
+			actualKeys, actualValues, versions, err := etcdKV.LoadBytesWithPrefix2(test.prefix)
+			actualStringValues = make([]string, len(actualValues))
+			for i := range actualValues {
+				actualStringValues[i] = string(actualValues[i])
+			}
+			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
+			assert.ElementsMatch(t, test.expectedValues, actualStringValues)
+			assert.NotZero(t, versions)
+			assert.Equal(t, test.expectedError, err)
+		}
+
+		removeTests := []struct {
+			validKey   string
+			invalidKey string
+		}{
+			{"test1", "abc"},
+			{"test1/a", "test1/lskfjal"},
+			{"test1/b", "test1/b"},
+			{"test2", "-"},
+		}
+
+		for _, test := range removeTests {
+			err = etcdKV.Remove(test.validKey)
+			assert.NoError(t, err)
+
+			_, err = etcdKV.Load(test.validKey)
+			assert.Error(t, err)
+
+			err = etcdKV.Remove(test.validKey)
+			assert.NoError(t, err)
+			err = etcdKV.Remove(test.invalidKey)
+			assert.NoError(t, err)
+		}
+	})
+
 	te.Run("EtcdKV LoadWithRevision", func(t *testing.T) {
 		rootPath := "/etcd/test/root/LoadWithRevision"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -189,6 +306,54 @@ func TestEtcdKV_Load(te *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, test.expectedKeyNo, len(keys))
 			assert.ElementsMatch(t, test.expectedValues, values)
+			assert.NotZero(t, revision)
+		}
+
+	})
+
+	te.Run("EtcdKV LoadBytesWithRevision", func(t *testing.T) {
+		rootPath := "/etcd/test/root/LoadWithRevision"
+		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+
+		defer etcdKV.Close()
+		defer etcdKV.RemoveWithPrefix("")
+
+		prepareKV := []struct {
+			inKey   string
+			inValue string
+		}{
+			{"a", "a_version1"},
+			{"b", "b_version2"},
+			{"a", "a_version3"},
+			{"c", "c_version4"},
+			{"a/suba", "a_version5"},
+		}
+
+		for _, test := range prepareKV {
+			err = etcdKV.SaveBytes(test.inKey, []byte(test.inValue))
+			require.NoError(t, err)
+		}
+
+		loadWithRevisionTests := []struct {
+			inKey string
+
+			expectedKeyNo  int
+			expectedValues []string
+		}{
+			{"a", 2, []string{"a_version3", "a_version5"}},
+			{"b", 1, []string{"b_version2"}},
+			{"c", 1, []string{"c_version4"}},
+		}
+
+		for _, test := range loadWithRevisionTests {
+			keys, values, revision, err := etcdKV.LoadBytesWithRevision(test.inKey)
+			assert.NoError(t, err)
+			assert.Equal(t, test.expectedKeyNo, len(keys))
+			stringValues := make([]string, len(values))
+			for i := range values {
+				stringValues[i] = string(values[i])
+			}
+			assert.ElementsMatch(t, test.expectedValues, stringValues)
 			assert.NotZero(t, revision)
 		}
 
@@ -302,6 +467,128 @@ func TestEtcdKV_Load(te *testing.T) {
 		assert.Empty(t, vs)
 	})
 
+	te.Run("EtcdKV MultiSaveBytesAndMultiLoadBytes", func(t *testing.T) {
+		rootPath := "/etcd/test/root/multi_save_bytes_and_multi_load_bytes"
+		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+
+		defer etcdKV.Close()
+		defer etcdKV.RemoveWithPrefix("")
+
+		multiSaveTests := map[string]string{
+			"key_1":      "value_1",
+			"key_2":      "value_2",
+			"key_3/a":    "value_3a",
+			"multikey_1": "multivalue_1",
+			"multikey_2": "multivalue_2",
+			"_":          "other",
+		}
+
+		multiSaveBytesTests := make(map[string][]byte)
+		for k, v := range multiSaveTests {
+			multiSaveBytesTests[k] = []byte(v)
+		}
+
+		err = etcdKV.MultiSaveBytes(multiSaveBytesTests)
+		assert.NoError(t, err)
+		for k, v := range multiSaveTests {
+			actualV, err := etcdKV.LoadBytes(k)
+			assert.NoError(t, err)
+			assert.Equal(t, v, string(actualV))
+		}
+
+		multiLoadTests := []struct {
+			inputKeys      []string
+			expectedValues []string
+		}{
+			{[]string{"key_1"}, []string{"value_1"}},
+			{[]string{"key_1", "key_2", "key_3/a"}, []string{"value_1", "value_2", "value_3a"}},
+			{[]string{"multikey_1", "multikey_2"}, []string{"multivalue_1", "multivalue_2"}},
+			{[]string{"_"}, []string{"other"}},
+		}
+
+		for _, test := range multiLoadTests {
+			vs, err := etcdKV.MultiLoadBytes(test.inputKeys)
+			stringVs := make([]string, len(vs))
+			for i := range vs {
+				stringVs[i] = string(vs[i])
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, test.expectedValues, stringVs)
+		}
+
+		invalidMultiLoad := []struct {
+			invalidKeys    []string
+			expectedValues []string
+		}{
+			{[]string{"a", "key_1"}, []string{"", "value_1"}},
+			{[]string{".....", "key_1"}, []string{"", "value_1"}},
+			{[]string{"*********"}, []string{""}},
+			{[]string{"key_1", "1"}, []string{"value_1", ""}},
+		}
+
+		for _, test := range invalidMultiLoad {
+			vs, err := etcdKV.MultiLoadBytes(test.invalidKeys)
+			stringVs := make([]string, len(vs))
+			for i := range vs {
+				stringVs[i] = string(vs[i])
+			}
+			assert.Error(t, err)
+			assert.Equal(t, test.expectedValues, stringVs)
+		}
+
+		removeWithPrefixTests := []string{
+			"key_1",
+			"multi",
+		}
+
+		for _, k := range removeWithPrefixTests {
+			err = etcdKV.RemoveWithPrefix(k)
+			assert.NoError(t, err)
+
+			ks, vs, err := etcdKV.LoadBytesWithPrefix(k)
+			assert.Empty(t, ks)
+			assert.Empty(t, vs)
+			assert.NoError(t, err)
+		}
+
+		multiRemoveTests := []string{
+			"key_2",
+			"key_3/a",
+			"multikey_2",
+			"_",
+		}
+
+		err = etcdKV.MultiRemove(multiRemoveTests)
+		assert.NoError(t, err)
+
+		ks, vs, err := etcdKV.LoadBytesWithPrefix("")
+		assert.NoError(t, err)
+		assert.Empty(t, ks)
+		assert.Empty(t, vs)
+
+		multiSaveAndRemoveTests := []struct {
+			multiSaves   map[string][]byte
+			multiRemoves []string
+		}{
+			{map[string][]byte{"key_1": []byte("value_1")}, []string{}},
+			{map[string][]byte{"key_2": []byte("value_2")}, []string{"key_1"}},
+			{map[string][]byte{"key_3/a": []byte("value_3a")}, []string{"key_2"}},
+			{map[string][]byte{"multikey_1": []byte("multivalue_1")}, []string{}},
+			{map[string][]byte{"multikey_2": []byte("multivalue_2")}, []string{"multikey_1", "key_3/a"}},
+			{make(map[string][]byte), []string{"multikey_2"}},
+		}
+
+		for _, test := range multiSaveAndRemoveTests {
+			err = etcdKV.MultiSaveBytesAndRemove(test.multiSaves, test.multiRemoves)
+			assert.NoError(t, err)
+		}
+
+		ks, vs, err = etcdKV.LoadBytesWithPrefix("")
+		assert.NoError(t, err)
+		assert.Empty(t, ks)
+		assert.Empty(t, vs)
+	})
+
 	te.Run("EtcdKV MultiRemoveWithPrefix", func(t *testing.T) {
 		rootPath := "/etcd/test/root/multi_remove_with_prefix"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -405,7 +692,7 @@ func TestEtcdKV_Load(te *testing.T) {
 	})
 
 	te.Run("Etcd Revision", func(t *testing.T) {
-		rootPath := "/etcd/test/root/watch"
+		rootPath := "/etcd/test/root/revision"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
 		defer etcdKV.Close()
 		defer etcdKV.RemoveWithPrefix("")
@@ -453,6 +740,55 @@ func TestEtcdKV_Load(te *testing.T) {
 		assert.Error(t, err)
 	})
 
+	te.Run("Etcd Revision Bytes", func(t *testing.T) {
+		rootPath := "/etcd/test/root/revision_bytes"
+		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+		defer etcdKV.Close()
+		defer etcdKV.RemoveWithPrefix("")
+
+		revisionTests := []struct {
+			inKey       string
+			fistValue   []byte
+			secondValue []byte
+		}{
+			{"a", []byte("v1"), []byte("v11")},
+			{"y", []byte("v2"), []byte("v22")},
+			{"z", []byte("v3"), []byte("v33")},
+		}
+
+		for _, test := range revisionTests {
+			err = etcdKV.SaveBytes(test.inKey, test.fistValue)
+			require.NoError(t, err)
+
+			_, _, revision, _ := etcdKV.LoadBytesWithRevision(test.inKey)
+			ch := etcdKV.WatchWithRevision(test.inKey, revision+1)
+
+			err = etcdKV.SaveBytes(test.inKey, test.secondValue)
+			require.NoError(t, err)
+
+			resp := <-ch
+			assert.Equal(t, 1, len(resp.Events))
+			assert.Equal(t, string(test.secondValue), string(resp.Events[0].Kv.Value))
+			assert.Equal(t, revision+1, resp.Header.Revision)
+		}
+
+		err = etcdKV.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
+		assert.NoError(t, err)
+
+		value, err := etcdKV.LoadBytes("a/b/c")
+		assert.NoError(t, err)
+		assert.Equal(t, string(value), "1")
+
+		err = etcdKV.CompareVersionAndSwapBytes("a/b/c", 0, []byte("1"))
+		assert.Error(t, err)
+
+		err = etcdKV.CompareValueAndSwapBytes("a/b/c", []byte("1"), []byte("2"))
+		assert.NoError(t, err)
+
+		err = etcdKV.CompareValueAndSwapBytes("a/b/c", []byte("1"), []byte("2"))
+		assert.Error(t, err)
+	})
+
 	te.Run("Etcd Lease", func(t *testing.T) {
 		rootPath := "/etcd/test/root/lease"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -476,6 +812,34 @@ func TestEtcdKV_Load(te *testing.T) {
 			assert.NoError(t, err)
 
 			err = etcdKV.SaveWithLease(k, v, clientv3.LeaseID(999))
+			assert.Error(t, err)
+		}
+
+	})
+
+	te.Run("Etcd Lease Bytes", func(t *testing.T) {
+		rootPath := "/etcd/test/root/lease_bytes"
+		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+
+		defer etcdKV.Close()
+		defer etcdKV.RemoveWithPrefix("")
+
+		leaseID, err := etcdKV.Grant(10)
+		assert.NoError(t, err)
+
+		etcdKV.KeepAlive(leaseID)
+
+		tests := map[string][]byte{
+			"a/b":   []byte("v1"),
+			"a/b/c": []byte("v2"),
+			"x":     []byte("v3"),
+		}
+
+		for k, v := range tests {
+			err = etcdKV.SaveBytesWithLease(k, v, leaseID)
+			assert.NoError(t, err)
+
+			err = etcdKV.SaveBytesWithLease(k, v, clientv3.LeaseID(999))
 			assert.Error(t, err)
 		}
 
