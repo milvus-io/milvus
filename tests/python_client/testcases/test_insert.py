@@ -1043,7 +1043,7 @@ class TestInsertInvalid(TestcaseBase):
         error={ct.err_code: 1, 'err_msg': "partition name is illegal"}
         mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_with_invalid_field_value(self):
         """
         target: test insert with invalid field
@@ -1055,7 +1055,7 @@ class TestInsertInvalid(TestcaseBase):
         field_one = cf.gen_int64_field(is_primary=True)
         field_two = cf.gen_int64_field() 
         vec_field = ct.get_invalid_vectors
-        df = cf.gen_collection_schema(fields=[field_one, field_two, vec_field])
+        df =[field_one, field_two, vec_field]
         error = {ct.err_code: 0, ct.err_msg: "The field of schema type must be FieldSchema."}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
    
@@ -1066,7 +1066,7 @@ class TestInsertInvalidBinary(TestcaseBase):
       ******************************************************************
     """
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_ids_binary_invalid(self):
         """
         target: test insert, with using customize ids, which are not int64
@@ -1077,8 +1077,8 @@ class TestInsertInvalidBinary(TestcaseBase):
         collection_w = self.init_collection_wrap(name=collection_name)
         field_one = cf.gen_float_field(is_primary=True)
         field_two = cf.gen_float_field() 
-        vec_field = cf.gen_float_vec_field()
-        df = cf.gen_default_binary_collection_schema(fields=[field_one, field_two, vec_field])
+        vec_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_binary_vec_field_name, dtype=DataType.BINARY_VECTOR)
+        df = [field_one, field_two, vec_field]
         error = {ct.err_code: 0, ct.err_msg: "Data type is not support."}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
