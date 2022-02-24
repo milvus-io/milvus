@@ -19,7 +19,6 @@ package logutil
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/log"
 
@@ -105,17 +104,6 @@ func LogPanic() {
 }
 
 var once sync.Once
-var _globalZapWrapper atomic.Value
-
-const defaultLogLevel = "info"
-
-func init() {
-	conf := &log.Config{Level: defaultLogLevel, File: log.FileLogConfig{}}
-	lg, _, _ := log.InitLogger(conf)
-	_globalZapWrapper.Store(&zapWrapper{
-		logger: lg,
-	})
-}
 
 // SetupLogger is used to initialize the log with config.
 func SetupLogger(cfg *log.Config) {
@@ -129,22 +117,9 @@ func SetupLogger(cfg *log.Config) {
 		}
 
 		// initialize grpc and etcd logger
-		c := *cfg
-		c.Level = defaultLogLevel
-		lg, _, err := log.InitLogger(&c)
-		if err != nil {
-			log.Fatal("initialize grpc/etcd logger error", zap.Error(err))
-		}
-
-		wrapper := &zapWrapper{lg}
+		wrapper := &zapWrapper{logger}
 		grpclog.SetLoggerV2(wrapper)
-		_globalZapWrapper.Store(wrapper)
 	})
-}
-
-// GetZapWrapper returns the stored zapWrapper object.
-func GetZapWrapper() *zapWrapper {
-	return _globalZapWrapper.Load().(*zapWrapper)
 }
 
 type logKey int
