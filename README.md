@@ -117,30 +117,30 @@ See [Milvus 2.0 vs. 1.x](https://github.com/milvus-io/milvus/blob/master/milvus2
 <table>
   <tr>
     <td width="30%">
-      <a href="https://zilliz.com/milvus-demos">
+      <a href="https://milvus.io/milvus-demos">
         <img src="https://assets.zilliz.com/image_search_59a64e4f22.gif" />
       </a>
     </td>
     <td width="30%">
-<a href="https://zilliz.com/milvus-demos">
+<a href="https://milvus.io/milvus-demos">
 <img src="https://assets.zilliz.com/qa_df5ee7bd83.gif" />
 </a>
     </td>
     <td width="30%">
-<a href="https://zilliz.com/milvus-demos">
+<a href="https://milvus.io/milvus-demos">
 <img src="https://assets.zilliz.com/mole_search_76f8340572.gif" />
 </a>
     </td>
   </tr>
   <tr>
     <th>
-      <a href="https://zilliz.com/milvus-demos">Image search</a>
+      <a href="https://milvus.io/milvus-demos">Image search</a>
     </th>
     <th>
-      <a href="https://zilliz.com/milvus-demos">Chatbots</a>
+      <a href="https://milvus.io/milvus-demos">Chatbots</a>
     </th>
     <th>
-      <a href="https://zilliz.com/milvus-demos">Chemical structure search</a>
+      <a href="https://milvus.io/milvus-demos">Chemical structure search</a>
     </th>
   </tr>
 </table>
