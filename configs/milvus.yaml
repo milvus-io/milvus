@@ -21,6 +21,10 @@ etcd:
   rootPath: by-dev # The root path where data is stored in etcd
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
+  log:
+    level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  use:
+    embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
 
 # Related configuration of minio, which is responsible for data persistence for Milvus.
 minio:
@@ -203,7 +207,7 @@ localStorage:
 
 # Configures the system log output.
 log:
-  level: debug # info, warn, error, panic, fatal
+  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   file:
     rootPath: "" # default to stdout, stderr
     maxSize: 300 # MB
