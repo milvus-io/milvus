@@ -13,8 +13,8 @@ class CustomResourceOperations(object):
         self.group = group
         self.version = version
         self.namespace = namespace
-        if kind.lower() == "schedule":
-            self.plural = "schedules"
+        if kind.lower()[-1] != "s":
+            self.plural = kind.lower() + "s"
         else:
             self.plural = kind.lower()
 

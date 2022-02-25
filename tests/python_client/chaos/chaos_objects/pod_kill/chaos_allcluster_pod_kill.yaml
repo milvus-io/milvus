@@ -1,0 +1,55 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Workflow
+metadata:
+  name: test-allcluster-pod-kill
+  namespace: chaos-testing
+spec:
+  entry: entry
+  templates:
+    - name: entry
+      templateType: Serial
+      deadline: 5m
+      children:
+        - test-all-pods-kill
+    - name: test-first-part-pod-kill
+      templateType: Schedule
+      deadline: 3m
+      schedule:
+        schedule: '*/5 * * * * *'
+        startingDeadlineSeconds: 60
+        concurrencyPolicy: Forbid
+        historyLimit: 1
+        type: PodChaos
+        podChaos:
+          selector:
+            namespaces:
+              - chaos-testing
+            labelSelectors:
+              release: milvus-chaos
+          mode: all
+          action: pod-kill
+          gracePeriod: 0
+    - name: test-second-part-pod-kill
+      templateType: Schedule
+      deadline: 3m
+      schedule:
+        schedule: '*/5 * * * * *'
+        startingDeadlineSeconds: 60
+        concurrencyPolicy: Forbid
+        historyLimit: 1
+        type: PodChaos
+        podChaos:
+          selector:
+            namespaces:
+              - chaos-testing
+            labelSelectors:
+              app.kubernetes.io/instance: milvus-chaos
+          mode: all
+          action: pod-kill
+          gracePeriod: 0
+    - name: test-all-pods-kill
+      templateType: Parallel
+      deadline: 3m
+      children:
+        - test-first-part-pod-kill
+        - test-second-part-pod-kill
