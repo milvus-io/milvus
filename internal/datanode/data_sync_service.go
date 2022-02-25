@@ -60,6 +60,7 @@ func newDataSyncService(ctx context.Context,
 	flushingSegCache *Cache,
 	blobKV kv.BaseKV,
 	compactor *compactionExecutor,
+	ts Timestamp,
 ) (*dataSyncService, error) {
 
 	if replica == nil {
@@ -85,7 +86,7 @@ func newDataSyncService(ctx context.Context,
 		compactor:        compactor,
 	}
 
-	if err := service.initNodes(vchan); err != nil {
+	if err := service.initNodes(vchan, ts); err != nil {
 		return nil, err
 	}
 	return service, nil
@@ -135,7 +136,7 @@ func (dsService *dataSyncService) close() {
 }
 
 // initNodes inits a TimetickedFlowGraph
-func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
+func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, ts Timestamp) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 	// initialize flush manager for DataSync Service
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica,
@@ -166,7 +167,8 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 				pos:     *us.GetDmlPosition(),
 			}
 		}
-		if err := dsService.replica.addNormalSegment(us.GetID(), us.CollectionID, us.PartitionID, us.GetInsertChannel(), us.GetNumOfRows(), us.Statslogs, cp); err != nil {
+		if err := dsService.replica.addNormalSegment(us.GetID(), us.CollectionID,
+			us.PartitionID, us.GetInsertChannel(), us.GetNumOfRows(), us.Statslogs, cp, ts); err != nil {
 			return err
 		}
 	}
@@ -189,7 +191,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("NumOfRows", fs.GetNumOfRows()),
 		)
 		if err := dsService.replica.addFlushedSegment(fs.GetID(), fs.CollectionID,
-			fs.PartitionID, fs.GetInsertChannel(), fs.GetNumOfRows(), fs.Statslogs); err != nil {
+			fs.PartitionID, fs.GetInsertChannel(), fs.GetNumOfRows(), fs.Statslogs, ts); err != nil {
 			return err
 		}
 	}

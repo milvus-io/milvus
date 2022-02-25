@@ -34,7 +34,7 @@ func newFlowgraphManager() *flowgraphManager {
 	return &flowgraphManager{}
 }
 
-func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo) error {
+func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo, ts Timestamp) error {
 	log.Debug("received Vchannel Info",
 		zap.String("vChannelName", vchan.GetChannelName()),
 		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
@@ -54,7 +54,7 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 
 	var alloc allocatorInterface = newAllocator(dn.rootCoord)
 
-	dataSyncService, err := newDataSyncService(dn.ctx, make(chan flushMsg, 100), replica, alloc, dn.msFactory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.blobKv, dn.compactionExecutor)
+	dataSyncService, err := newDataSyncService(dn.ctx, make(chan flushMsg, 100), replica, alloc, dn.msFactory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.blobKv, dn.compactionExecutor, ts)
 	if err != nil {
 		log.Warn("new data sync service fail", zap.String("vChannelName", vchan.GetChannelName()), zap.Error(err))
 		return err

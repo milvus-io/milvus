@@ -52,9 +52,9 @@ type Replica interface {
 
 	listAllSegmentIDs() []UniqueID
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
-	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog, cp *segmentCheckPoint) error
+	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog, cp *segmentCheckPoint, ts Timestamp) error
 	filterSegments(channelName string, partitionID UniqueID) []*Segment
-	addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog) error
+	addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog, ts Timestamp) error
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
@@ -319,7 +319,7 @@ func (replica *SegmentReplica) filterSegments(channelName string, partitionID Un
 
 // addNormalSegment adds a *NotNew* and *NotFlushed* segment. Before add, please make sure there's no
 // such segment by `hasSegment`
-func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlogs []*datapb.FieldBinlog, cp *segmentCheckPoint) error {
+func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlogs []*datapb.FieldBinlog, cp *segmentCheckPoint, ts Timestamp) error {
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
@@ -349,7 +349,7 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		seg.checkPoint = *cp
 		seg.endPos = &cp.pos
 	}
-	err := replica.initPKBloomFilter(seg, statsBinlogs)
+	err := replica.initPKBloomFilter(seg, statsBinlogs, ts)
 	if err != nil {
 		return err
 	}
@@ -366,7 +366,7 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 
 // addFlushedSegment adds a *Flushed* segment. Before add, please make sure there's no
 // such segment by `hasSegment`
-func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlogs []*datapb.FieldBinlog) error {
+func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
 
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
@@ -395,7 +395,7 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
-	err := replica.initPKBloomFilter(seg, statsBinlogs)
+	err := replica.initPKBloomFilter(seg, statsBinlogs, ts)
 	if err != nil {
 		return err
 	}
@@ -410,11 +410,11 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 	return nil
 }
 
-func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*datapb.FieldBinlog) error {
+func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
 	if len(statsBinlogs) == 0 {
 		log.Info("statsBinlogs is empty")
 	}
-	schema, err := replica.getCollectionSchema(s.collectionID, 0)
+	schema, err := replica.getCollectionSchema(s.collectionID, ts)
 	if err != nil {
 		return err
 	}

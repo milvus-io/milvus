@@ -369,8 +369,9 @@ func parseDeleteEventKey(key string) string {
 
 func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo) error {
 	vChanName := watchInfo.GetVchan().GetChannelName()
+	ts := Timestamp(watchInfo.StartTs)
 
-	if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
+	if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan(), ts); err != nil {
 		return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
 	}
 	log.Debug("handle put event: new data sync service success", zap.String("vChanName", vChanName))
