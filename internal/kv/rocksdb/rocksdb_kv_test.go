@@ -40,12 +40,20 @@ func TestRocksdbKV(t *testing.T) {
 	err = rocksdbKV.Save("abc", "123")
 	assert.Nil(t, err)
 
-	err = rocksdbKV.Save("abcd", "1234")
+	err = rocksdbKV.SaveBytes("abcd", []byte("1234"))
 	assert.Nil(t, err)
 
 	val, err := rocksdbKV.Load("abc")
 	assert.Nil(t, err)
 	assert.Equal(t, val, "123")
+	value, err := rocksdbKV.LoadBytes("abc")
+	assert.NoError(t, err)
+	assert.Equal(t, value, []byte("123"))
+
+	_, err = rocksdbKV.Load("")
+	assert.Error(t, err)
+	_, err = rocksdbKV.LoadBytes("")
+	assert.Error(t, err)
 
 	keys, vals, err := rocksdbKV.LoadWithPrefix("abc")
 	assert.Nil(t, err)
@@ -56,6 +64,17 @@ func TestRocksdbKV(t *testing.T) {
 	assert.Equal(t, keys[1], "abcd")
 	assert.Equal(t, vals[0], "123")
 	assert.Equal(t, vals[1], "1234")
+
+	var values [][]byte
+	keys, values, err = rocksdbKV.LoadBytesWithPrefix("abc")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), len(vals))
+	assert.Equal(t, len(keys), 2)
+
+	assert.Equal(t, keys[0], "abc")
+	assert.Equal(t, keys[1], "abcd")
+	assert.Equal(t, values[0], []byte("123"))
+	assert.Equal(t, values[1], []byte("1234"))
 
 	err = rocksdbKV.Save("key_1", "123")
 	assert.Nil(t, err)
@@ -70,6 +89,12 @@ func TestRocksdbKV(t *testing.T) {
 	assert.Equal(t, len(vals), len(keys))
 	assert.Equal(t, vals[0], "123")
 	assert.Equal(t, vals[1], "456")
+
+	values, err = rocksdbKV.MultiLoadBytes(keys)
+	assert.Nil(t, err)
+	assert.Equal(t, len(values), len(keys))
+	assert.Equal(t, values[0], []byte("123"))
+	assert.Equal(t, values[1], []byte("456"))
 
 	err = rocksdbKV.MultiRemove(keys)
 	assert.NoError(t, err)
@@ -98,13 +123,12 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 	// Need to call RemoveWithPrefix
 	defer rocksdbKV.RemoveWithPrefix("")
 
-	err = rocksdbKV.Save("abcd", "123")
-	assert.Nil(t, err)
-
-	err = rocksdbKV.Save("abdd", "1234")
-	assert.Nil(t, err)
-
-	err = rocksdbKV.Save("abddqqq", "1234555")
+	kvs := map[string]string{
+		"abcd":    "123",
+		"abdd":    "1234",
+		"abddqqq": "1234555",
+	}
+	err = rocksdbKV.MultiSave(kvs)
 	assert.Nil(t, err)
 
 	keys, vals, err := rocksdbKV.LoadWithPrefix("abc")
@@ -112,6 +136,25 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 
 	assert.Equal(t, len(keys), 1)
 	assert.Equal(t, len(vals), 1)
+	assert.Equal(t, keys[0], "abcd")
+	assert.Equal(t, vals[0], "123")
+
+	bytesKvs := map[string][]byte{}
+	for k, v := range kvs {
+		rocksdbKV.Remove(k)
+		bytesKvs[k] = []byte(v)
+	}
+
+	err = rocksdbKV.MultiSaveBytes(bytesKvs)
+	assert.Nil(t, err)
+
+	var values [][]byte
+	keys, values, err = rocksdbKV.LoadBytesWithPrefix("abc")
+	assert.Nil(t, err)
+	assert.Equal(t, len(keys), 1)
+	assert.Equal(t, len(values), 1)
+	assert.Equal(t, keys[0], "abcd")
+	assert.Equal(t, values[0], []byte("123"))
 
 	err = rocksdbKV.RemoveWithPrefix("abc")
 	assert.Nil(t, err)
