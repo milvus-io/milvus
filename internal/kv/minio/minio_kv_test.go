@@ -118,6 +118,10 @@ func TestMinIOKV(t *testing.T) {
 					got, err := testKV.Load(path.Join(testLoadRoot, test.loadKey))
 					assert.Error(t, err)
 					assert.Empty(t, got)
+
+					value, err := testKV.LoadBytes(path.Join(testLoadRoot, test.loadKey))
+					assert.Error(t, err)
+					assert.Nil(t, value)
 				}
 			})
 		}
@@ -141,6 +145,17 @@ func TestMinIOKV(t *testing.T) {
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				assert.Equal(t, len(test.expectedValue), len(gotv))
 				assert.ElementsMatch(t, test.expectedValue, gotv)
+
+				keys, values, err := testKV.LoadBytesWithPrefix(path.Join(testLoadRoot, test.prefix))
+				assert.NoError(t, err)
+
+				assert.Equal(t, len(test.expectedValue), len(keys))
+				assert.Equal(t, len(test.expectedValue), len(values))
+				expectedValuesBytes := make([][]byte, 0)
+				for _, value := range test.expectedValue {
+					expectedValuesBytes = append(expectedValuesBytes, []byte(value))
+				}
+				assert.ElementsMatch(t, expectedValuesBytes, values)
 			})
 		}
 
@@ -151,7 +166,7 @@ func TestMinIOKV(t *testing.T) {
 			expectedValue []string
 			description   string
 		}{
-			{false, []string{"key_1", "key_not_exist"}, []string{"111", ""}, "multiload 1 exist 1 not"},
+			{false, []string{"key_1", "key_not_exist"}, nil, "multiload 1 exist 1 not"},
 			{true, []string{"abc", "key_3"}, []string{"123", "333"}, "multiload 2 exist"},
 		}
 
@@ -168,9 +183,14 @@ func TestMinIOKV(t *testing.T) {
 					got, err := testKV.MultiLoad(test.multiKeys)
 					assert.Error(t, err)
 					assert.Equal(t, test.expectedValue, got)
+
+					value, err := testKV.MultiLoadBytes(test.multiKeys)
+					assert.Error(t, err)
+					assert.Nil(t, value)
 				}
 			})
 		}
+
 	})
 
 	t.Run("test MultiSave", func(t *testing.T) {
@@ -194,9 +214,25 @@ func TestMinIOKV(t *testing.T) {
 		err = testKV.MultiSave(kvs)
 		assert.Nil(t, err)
 
-		val, err := testKV.Load(path.Join(testMultiSaveRoot, "key_1"))
-		assert.Nil(t, err)
-		assert.Equal(t, "123", val)
+		for k, v := range kvs {
+			val, err := testKV.Load(k)
+			assert.Nil(t, err)
+			assert.Equal(t, v, val)
+		}
+
+		bytesKvs := map[string][]byte{
+			path.Join(testMultiSaveRoot, "key_1"): {0x12, 0x34},
+			path.Join(testMultiSaveRoot, "key_2"): {0x56, 0x78},
+		}
+
+		err = testKV.MultiSaveBytes(bytesKvs)
+		assert.NoError(t, err)
+
+		for k, v := range bytesKvs {
+			val, err := testKV.LoadBytes(k)
+			assert.Nil(t, err)
+			assert.Equal(t, v, val)
+		}
 	})
 
 	t.Run("test Remove", func(t *testing.T) {
@@ -244,6 +280,9 @@ func TestMinIOKV(t *testing.T) {
 
 				err = testKV.Remove(k)
 				assert.NoError(t, err)
+
+				exist := testKV.Exist(k)
+				assert.False(t, exist)
 
 				v, err = testKV.Load(k)
 				require.Error(t, err)
