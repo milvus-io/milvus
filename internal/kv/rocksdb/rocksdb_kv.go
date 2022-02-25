@@ -20,9 +20,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 )
+
+var _ kv.BaseKV = (*RocksdbKV)(nil)
 
 // RocksdbKV is KV implemented by rocksdb
 type RocksdbKV struct {
@@ -108,6 +111,29 @@ func (kv *RocksdbKV) Load(key string) (string, error) {
 	return string(value.Data()), nil
 }
 
+func (kv *RocksdbKV) LoadBytes(key string) ([]byte, error) {
+	if kv.DB == nil {
+		return nil, fmt.Errorf("rocksdb instance is nil when load %s", key)
+	}
+	if key == "" {
+		return nil, errors.New("rocksdb kv does not support load empty key")
+	}
+
+	option := gorocksdb.NewDefaultReadOptions()
+	defer option.Destroy()
+
+	value, err := kv.DB.Get(option, []byte(key))
+	if err != nil {
+		return nil, err
+	}
+	defer value.Free()
+
+	data := value.Data()
+	v := make([]byte, len(data))
+	copy(v, data)
+	return v, nil
+}
+
 // LoadWithPrefix returns a batch values of keys with a prefix
 // if prefix is "", then load every thing from the database
 func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
@@ -135,6 +161,41 @@ func (kv *RocksdbKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+func (kv *RocksdbKV) LoadBytesWithPrefix(prefix string) ([]string, [][]byte, error) {
+	if kv.DB == nil {
+		return nil, nil, fmt.Errorf("rocksdb instance is nil when load %s", prefix)
+	}
+
+	option := gorocksdb.NewDefaultReadOptions()
+	defer option.Destroy()
+
+	NewRocksIterator(kv.DB, option)
+	iter := NewRocksIteratorWithUpperBound(kv.DB, typeutil.AddOne(prefix), option)
+	defer iter.Close()
+
+	var (
+		keys   []string
+		values [][]byte
+	)
+	iter.Seek([]byte(prefix))
+	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		value := iter.Value()
+		keys = append(keys, string(key.Data()))
+
+		data := value.Data()
+		v := make([]byte, len(data))
+		copy(v, data)
+		values = append(values, v)
+		key.Free()
+		value.Free()
+	}
+	if err := iter.Err(); err != nil {
+		return nil, nil, err
+	}
+	return keys, values, nil
+}
+
 // MultiLoad load a batch of values by keys
 func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	if kv.DB == nil {
@@ -146,9 +207,32 @@ func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
 	for _, key := range keys {
 		value, err := kv.DB.Get(option, []byte(key))
 		if err != nil {
-			return []string{}, err
+			return nil, err
 		}
 		values = append(values, string(value.Data()))
+		value.Free()
+	}
+	return values, nil
+}
+
+func (kv *RocksdbKV) MultiLoadBytes(keys []string) ([][]byte, error) {
+	if kv.DB == nil {
+		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
+	}
+	values := make([][]byte, 0, len(keys))
+	option := gorocksdb.NewDefaultReadOptions()
+	defer option.Destroy()
+
+	for _, key := range keys {
+		value, err := kv.DB.Get(option, []byte(key))
+		if err != nil {
+			return nil, err
+		}
+
+		data := value.Data()
+		v := make([]byte, len(data))
+		copy(v, data)
+		values = append(values, v)
 		value.Free()
 	}
 	return values, nil
@@ -165,8 +249,22 @@ func (kv *RocksdbKV) Save(key, value string) error {
 	if value == "" {
 		return errors.New("rocksdb kv does not support empty value")
 	}
-	err := kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
-	return err
+
+	return kv.DB.Put(kv.WriteOptions, []byte(key), []byte(value))
+}
+
+func (kv *RocksdbKV) SaveBytes(key string, value []byte) error {
+	if kv.DB == nil {
+		return errors.New("rocksdb instance is nil when do save")
+	}
+	if key == "" {
+		return errors.New("rocksdb kv does not support empty key")
+	}
+	if len(value) == 0 {
+		return errors.New("rocksdb kv does not support empty value")
+	}
+
+	return kv.DB.Put(kv.WriteOptions, []byte(key), value)
 }
 
 // MultiSave a batch of key-values
@@ -174,13 +272,30 @@ func (kv *RocksdbKV) MultiSave(kvs map[string]string) error {
 	if kv.DB == nil {
 		return errors.New("rocksdb instance is nil when do MultiSave")
 	}
+
 	writeBatch := gorocksdb.NewWriteBatch()
 	defer writeBatch.Destroy()
+
 	for k, v := range kvs {
 		writeBatch.Put([]byte(k), []byte(v))
 	}
-	err := kv.DB.Write(kv.WriteOptions, writeBatch)
-	return err
+
+	return kv.DB.Write(kv.WriteOptions, writeBatch)
+}
+
+func (kv *RocksdbKV) MultiSaveBytes(kvs map[string][]byte) error {
+	if kv.DB == nil {
+		return errors.New("rocksdb instance is nil when do MultiSave")
+	}
+
+	writeBatch := gorocksdb.NewWriteBatch()
+	defer writeBatch.Destroy()
+
+	for k, v := range kvs {
+		writeBatch.Put([]byte(k), v)
+	}
+
+	return kv.DB.Write(kv.WriteOptions, writeBatch)
 }
 
 // RemoveWithPrefix removes a batch of key-values with specified prefix
