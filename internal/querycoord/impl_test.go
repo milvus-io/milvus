@@ -413,7 +413,7 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
 
-	_, err = startQueryNodeServer(ctx)
+	queryNode, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 
 	taskIDAllocator := queryCoord.scheduler.taskIDAllocator
@@ -422,6 +422,9 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 	}
 
 	queryCoord.scheduler.taskIDAllocator = failedAllocator
+
+	waitQueryNodeOnline(queryCoord.cluster, queryNode.queryNodeID)
+	assert.NotEmpty(t, queryCoord.cluster.onlineNodeIDs())
 
 	t.Run("Test LoadPartition", func(t *testing.T) {
 		status, err := queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
