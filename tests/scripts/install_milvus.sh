@@ -112,6 +112,14 @@ do
   echo "${restart_pod} restarts ${restart_count}, last terminateed reason is ${reason}"
 done
 
+# Show related events when helm install failed
+if [[ ${exitcode} -ne 0 ]];then 
+  failed_pods=$(kubectl get pods --field-selector status.phase!=Running,status.phase!=Completed -n ${MILVUS_HELM_NAMESPACE} | grep "${MILVUS_HELM_RELEASE_NAME}-" | awk '{print $1}' )
+  for failed_pod in ${failed_pods}
+  do 
+    kubectl get events -n ${MILVUS_HELM_NAMESPACE} --field-selector involvedObject.name="${failed_pod}"
+  done
+fi
 
 kubectl get pvc -n ${MILVUS_HELM_NAMESPACE} |  grep "${MILVUS_HELM_RELEASE_NAME}-" | awk '{$3=null;print $0}'
 exit ${exitcode}
