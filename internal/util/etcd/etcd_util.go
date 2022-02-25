@@ -46,6 +46,7 @@ func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
 			cfg = embed.NewConfig()
 		}
 		cfg.Dir = etcdCfg.DataDir
+		cfg.LogLevel = etcdCfg.EtcdLogLevel
 		e, err := embed.StartEtcd(cfg)
 		if err != nil {
 			return err
