@@ -21,45 +21,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// Value is interface for kv-value, needed to support string and byte slice
-type Value interface {
-	Serialize() []byte
-	String() string
-}
-
-// StringValue type alias for string to implement Value
-type StringValue string
-
-// Serialize serialize the StringValue to byte array.
-func (s StringValue) Serialize() []byte {
-	return []byte(s)
-}
-
-// String return the value of StringValue.
-func (s StringValue) String() string {
-	return string(s)
-}
-
-// BytesValue type alias for byte slice to implement value
-type BytesValue []byte
-
-// Serialize return the byte array.
-func (s BytesValue) Serialize() []byte {
-	return s
-}
-
-// String return the string of byte array.
-func (s BytesValue) String() string {
-	return string(s)
-}
-
-// ValueKV example usage to change KV interface to
-type ValueKV interface {
-	Save(key string, value Value) error
-	Load(key string) (Value, error)
-}
-
-// BaseKV contains basic kv operations, including save, load and remove.
+// BaseKV contains base operations of kv. Include save, load and remove.
 type BaseKV interface {
 	Load(key string) (string, error)
 	MultiLoad(keys []string) ([]string, error)
