@@ -60,6 +60,10 @@ type segmentLoader struct {
 }
 
 func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
+	if req.Base == nil {
+		return fmt.Errorf("nil base message when load segment, collectionID = %d", req.CollectionID)
+	}
+
 	// no segment needs to load, return
 	if len(req.Infos) == 0 {
 		return nil
