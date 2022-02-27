@@ -16,7 +16,6 @@ func TestBytesConverter(t *testing.T) {
 	defer Release(lease)
 	equalBytes(t, data, goBytes)
 
-	// data = make([]byte, maxByteArrayLen)
 	v := byte(0x57)
 	length = maxByteArrayLen
 	cbytes = mallocCBytes(v, maxByteArrayLen)
@@ -27,8 +26,6 @@ func TestBytesConverter(t *testing.T) {
 	if !isAll(goBytes, v) {
 		t.Errorf("incorrect value, all bytes should be %v", v)
 	}
-
-	// equalBytes(t, data, goBytes)
 }
 
 func TestConcurrentBytesConverter(t *testing.T) {

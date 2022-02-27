@@ -56,6 +56,12 @@ func (converter *BytesConverter) UnsafeGoBytes(cbytes *unsafe.Pointer, len int) 
 }
 
 func (converter *BytesConverter) Release(lease int32) {
+	p := converter.Extract(lease)
+
+	C.free(p)
+}
+
+func (converter *BytesConverter) Extract(lease int32) unsafe.Pointer {
 	pI, ok := converter.pointers.LoadAndDelete(lease)
 	if !ok {
 		panic("try to release the resource that doesn't exist")
@@ -66,7 +72,7 @@ func (converter *BytesConverter) Release(lease int32) {
 		panic("incorrect value type")
 	}
 
-	C.free(p)
+	return p
 }
 
 // Make sure only the caller own the converter
@@ -88,6 +94,10 @@ func UnsafeGoBytes(cbytes *unsafe.Pointer, len int) (int32, []byte) {
 
 func Release(lease int32) {
 	globalConverter.Release(lease)
+}
+
+func Extract(lease int32) unsafe.Pointer {
+	return globalConverter.Extract(lease)
 }
 
 // DO NOT provide ReleaseAll() method for global converter
