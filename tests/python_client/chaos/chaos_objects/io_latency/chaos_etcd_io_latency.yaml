@@ -1,0 +1,21 @@
+kind: IOChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-etcd-io-latency
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/name: etcd
+      app.kubernetes.io/instance: milvus-chaos
+  mode: all
+  action: latency
+  delay: 200ms
+  methods:
+    - read
+    - write
+    - flush
+  percent: 100
+  volumePath: /bitnami/etcd
