@@ -55,8 +55,9 @@ GPU_VERSION="OFF" #defaults to CPU version
 WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
+EMBEDDED_MILVUS="OFF"
 
-while getopts "p:d:t:s:f:ulrcghzme" arg; do
+while getopts "p:d:t:s:f:ulrcghzmeb" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -97,6 +98,9 @@ while getopts "p:d:t:s:f:ulrcghzme" arg; do
   s)
     CUDA_ARCH=$OPTARG
     ;;
+  b)
+    EMBEDDED_MILVUS=$OPTARG
+    ;;
   h) # help
     echo "
 
@@ -113,10 +117,11 @@ parameter:
 -g: build GPU version(default: OFF)
 -e: build without prometheus(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
+-b: build embedded milvus(default: OFF)
 -h: help
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b]
                 "
     exit 0
     ;;
@@ -171,6 +176,7 @@ CMAKE_CMD="cmake \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
+-DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 ${CPP_SRC_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}
