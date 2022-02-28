@@ -29,6 +29,7 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -573,6 +574,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 			go node.start()
 		}
 		c.nodes[id] = node
+		metrics.QueryCoordNumQueryNodes.WithLabelValues().Inc()
 		log.Debug("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
@@ -605,6 +607,7 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 	}
 
 	delete(c.nodes, nodeID)
+	metrics.QueryCoordNumQueryNodes.WithLabelValues().Dec()
 	log.Debug("removeNodeInfo: delete nodeInfo in cluster MetaReplica", zap.Int64("nodeID", nodeID))
 
 	return nil

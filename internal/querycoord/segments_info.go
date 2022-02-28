@@ -22,6 +22,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
 )
@@ -57,6 +58,7 @@ func (s *segmentsInfo) loadSegments() error {
 				return
 			}
 			s.segmentIDMap[segment.GetSegmentID()] = segment
+			metrics.QueryCoordNumEntities.WithLabelValues(fmt.Sprint(segment.CollectionID)).Add(float64(segment.NumRows))
 		}
 	})
 	return err
@@ -75,6 +77,7 @@ func (s *segmentsInfo) saveSegment(segment *querypb.SegmentInfo) error {
 		return err
 	}
 	s.segmentIDMap[segment.GetSegmentID()] = segment
+	metrics.QueryCoordNumEntities.WithLabelValues(fmt.Sprint(segment.CollectionID)).Add(float64(segment.NumRows))
 	return nil
 }
 
@@ -86,6 +89,7 @@ func (s *segmentsInfo) removeSegment(segment *querypb.SegmentInfo) error {
 		return err
 	}
 	delete(s.segmentIDMap, segment.GetSegmentID())
+	metrics.QueryCoordNumEntities.WithLabelValues(fmt.Sprint(segment.CollectionID)).Sub(float64(segment.NumRows))
 	return nil
 }
 

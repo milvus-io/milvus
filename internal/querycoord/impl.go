@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -158,6 +159,8 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 
 // LoadCollection loads all the sealed segments of this collection to queryNodes, and assigns watchDmChannelRequest to queryNodes
 func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
+	metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelTotal).Inc()
+
 	collectionID := req.CollectionID
 	//schema := req.Schema
 	log.Debug("loadCollectionRequest received",
@@ -173,6 +176,8 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
 		log.Error("load collection failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -183,6 +188,8 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 				zap.String("role", typeutil.QueryCoordRole),
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("msgID", req.Base.MsgID))
+
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
 			return status, nil
 		}
 		// if some partitions of the collection have been loaded by load partitions request, return error
@@ -198,6 +205,8 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 				zap.Int64s("loaded partitionIDs", collectionInfo.PartitionIDs),
 				zap.Int64("msgID", req.Base.MsgID),
 				zap.Error(err))
+
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 			return status, nil
 		}
 	}
@@ -219,6 +228,8 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 			zap.Error(err))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -231,6 +242,8 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 			zap.Error(err))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -244,6 +257,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 
 // ReleaseCollection clears all data related to this collecion on the querynode
 func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelTotal).Inc()
 	//dbID := req.DbID
 	collectionID := req.CollectionID
 	log.Debug("releaseCollectionRequest received",
@@ -259,6 +273,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
 		log.Error("release collection failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -269,6 +285,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 			zap.String("role", typeutil.QueryCoordRole),
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("msgID", req.Base.MsgID))
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
 		return status, nil
 	}
 
@@ -289,6 +307,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 			zap.Error(err))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -301,6 +321,8 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 			zap.Error(err))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -310,6 +332,9 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		zap.Int64("msgID", req.Base.MsgID))
 	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()
+
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
+	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(releaseCollectionTask.elapseSpan().Milliseconds()))
 	return status, nil
 }
 
@@ -404,6 +429,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 
 // LoadPartitions loads all the sealed segments of this partition to queryNodes, and assigns watchDmChannelRequest to queryNodes
 func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelTotal).Inc()
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
 
@@ -421,6 +447,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
 		log.Error("load partition failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -436,6 +464,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 			zap.Int64("msgID", req.Base.MsgID),
 			zap.Error(err))
 
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -475,6 +504,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 				zap.Int64s("partitionIDs", partitionIDs),
 				zap.Int64("msgID", req.Base.MsgID),
 				zap.Error(err))
+
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 			return status, nil
 		}
 
@@ -483,6 +514,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 			zap.Int64("collectionID", req.CollectionID),
 			zap.Int64s("partitionIDs", partitionIDs),
 			zap.Int64("msgID", req.Base.MsgID))
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
 		return status, nil
 	}
 
@@ -504,6 +537,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 			zap.Error(err))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -517,6 +552,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 			zap.Int64s("partitionIDs", partitionIDs),
 			zap.Int64("msgID", req.Base.MsgID),
 			zap.Error(err))
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -531,6 +568,8 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 
 // ReleasePartitions clears all data related to this partition on the querynode
 func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelTotal).Inc()
+
 	//dbID := req.DbID
 	collectionID := req.CollectionID
 	partitionIDs := req.PartitionIDs
@@ -548,6 +587,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
 		log.Error("release partition failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -561,6 +602,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 			zap.Int64s("partitionIDs", partitionIDs),
 			zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
 
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -579,6 +621,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 				zap.Int64s("partitionIDs", partitionIDs),
 				zap.Int64("msgID", req.Base.MsgID),
 				zap.Error(err))
+
+			metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 			return status, nil
 		}
 
@@ -599,6 +643,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 			zap.String("role", typeutil.QueryCoordRole),
 			zap.Int64("collectionID", req.CollectionID),
 			zap.Int64("msgID", req.Base.MsgID))
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
 		return status, nil
 	}
 
@@ -608,6 +654,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 			zap.Int64("collectionID", req.CollectionID),
 			zap.Int64s("partitionIDs", partitionIDs),
 			zap.Int64("msgID", req.Base.MsgID))
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
 		return status, nil
 	}
 
@@ -650,6 +698,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 			zap.Error(err))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -663,6 +713,8 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 			zap.Error(err))
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
+
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelFail).Inc()
 		return status, nil
 	}
 
@@ -674,6 +726,9 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 
 	//qc.MetaReplica.printMeta()
 	//qc.cluster.printMeta()
+
+	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
+	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(releaseTask.elapseSpan().Milliseconds()))
 	return status, nil
 }
 

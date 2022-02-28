@@ -18,7 +18,6 @@ package metrics
 
 import (
 	"net/http"
-
 	// nolint:gosec
 	_ "net/http/pprof"
 
@@ -585,11 +584,6 @@ func RegisterProxy() {
 	prometheus.MustRegister(ProxyReleaseDQLMessageStreamCounter)
 
 	prometheus.MustRegister(ProxyDmlChannelTimeTick)
-}
-
-//RegisterQueryCoord registers QueryCoord metrics
-func RegisterQueryCoord() {
-
 }
 
 //RegisterQueryNode registers QueryNode metrics
