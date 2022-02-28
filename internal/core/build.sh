@@ -29,7 +29,6 @@ BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="${SCRIPTS_DIR}/output"
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
-DB_PATH="/tmp/milvus"
 PROFILING="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
@@ -38,7 +37,7 @@ WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 
-while getopts "p:d:t:s:f:o:ulrcghzme" arg; do
+while getopts "p:t:s:f:o:ulrcghzme" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -48,9 +47,6 @@ while getopts "p:d:t:s:f:o:ulrcghzme" arg; do
     ;;
   o)
     BUILD_OUTPUT_DIR=$OPTARG
-    ;;
-  d)
-    DB_PATH=$OPTARG
     ;;
   t)
     BUILD_TYPE=$OPTARG # BUILD_TYPE
@@ -149,7 +145,6 @@ CMAKE_CMD="cmake \
 -DOpenBLAS_SOURCE=AUTO \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
--DMILVUS_DB_PATH=${DB_PATH} \
 -DENABLE_CPU_PROFILING=${PROFILING} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \

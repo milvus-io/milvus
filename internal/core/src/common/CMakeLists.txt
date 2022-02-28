@@ -21,3 +21,5 @@ add_library(milvus_common SHARED
         )
 
 target_link_libraries(milvus_common milvus_utils milvus_config log knowhere milvus_proto yaml-cpp )
+
+install(TARGETS milvus_common DESTINATION lib)

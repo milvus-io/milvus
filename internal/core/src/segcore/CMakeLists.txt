@@ -49,3 +49,4 @@ target_link_libraries(milvus_segcore
 #        gperftools
         )
 
+install(TARGETS milvus_segcore DESTINATION lib)

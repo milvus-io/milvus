@@ -20,6 +20,7 @@ project(wrapper)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include( GNUInstallDirs )
 include( ExternalProject )
 set( ARROW_VERSION "6.0.1" )
 set( ARROW_SOURCE_URL
@@ -83,9 +84,6 @@ macro( build_arrow )
     if( NOT IS_DIRECTORY ${INSTALL_DIR}/include )
         file( MAKE_DIRECTORY "${INSTALL_DIR}/include" )
     endif()
-
-    include(GNUInstallDirs)
-    set( CMAKE_INSTALL_LIBDIR lib )
 
     add_library( arrow_bundled STATIC IMPORTED )
     set_target_properties( arrow_bundled
