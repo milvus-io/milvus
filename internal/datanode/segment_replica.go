@@ -30,12 +30,12 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
-
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 const (
@@ -194,6 +194,7 @@ func (replica *SegmentReplica) new2FlushedSegment(segID UniqueID) {
 	replica.flushedSegments[segID] = &seg
 
 	delete(replica.newSegments, segID)
+	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(seg.collectionID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
 }
 
 // normal2FlushedSegment transfers a segment from *normal* to *flushed* by changing *isFlushed*
@@ -205,6 +206,7 @@ func (replica *SegmentReplica) normal2FlushedSegment(segID UniqueID) {
 	replica.flushedSegments[segID] = &seg
 
 	delete(replica.normalSegments, segID)
+	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(seg.collectionID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
 }
 
 func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error) {
@@ -266,6 +268,7 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 	replica.newSegments[segID] = seg
+	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(collID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 	return nil
 }
 
@@ -360,6 +363,7 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 	replica.segMu.Lock()
 	replica.normalSegments[segID] = seg
 	replica.segMu.Unlock()
+	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(collID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 
 	return nil
 }
@@ -556,6 +560,15 @@ func (replica *SegmentReplica) removeSegments(segIDs ...UniqueID) {
 	defer replica.segMu.Unlock()
 
 	log.Debug("remove segments if exist", zap.Int64s("segmentIDs", segIDs))
+
+	for _, segID := range segIDs {
+		if seg, ok := replica.newSegments[segID]; ok {
+			metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(seg.collectionID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
+		}
+		if seg, ok := replica.normalSegments[segID]; ok {
+			metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(seg.collectionID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
+		}
+	}
 
 	for _, segID := range segIDs {
 		delete(replica.newSegments, segID)

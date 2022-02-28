@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -30,17 +31,17 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 type (
@@ -299,6 +300,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 					flushed:   false,
 					dropped:   false,
 				})
+
+				metrics.DataNodeAutoFlushSegmentCount.WithLabelValues(ibNode.channelName, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 			}
 		}
 
@@ -343,10 +346,13 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		err := ibNode.flushManager.flushBufferData(task.buffer, task.segmentID, task.flushed, task.dropped, endPositions[0])
 		if err != nil {
 			log.Warn("failed to invoke flushBufferData", zap.Error(err))
+			metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.DataNodeMetricLabelFail, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 		} else {
 			segmentsToFlush = append(segmentsToFlush, task.segmentID)
 			ibNode.insertBuffer.Delete(task.segmentID)
+			metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.DataNodeMetricLabelSuccess, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 		}
+		metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.DataNodeMetricLabelTotal, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 	}
 
 	if err := ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, seg2Upload); err != nil {
@@ -673,6 +679,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 
 	// update buffer size
 	buffer.updateSize(int64(len(msg.RowData)))
+	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(metrics.DataNodeMsgTypeInsert, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(msg.RowData)))
 
 	// store in buffer
 	ibNode.insertBuffer.Store(currentSegID, buffer)
@@ -703,7 +710,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return ibNode.replica.getCollectionAndPartitionID(segmentID)
 }
 
-func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushManager,
+func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan flushMsg, fm flushManager,
 	flushingSegCache *Cache, config *nodeConfig) (*insertBufferNode, error) {
 
 	baseNode := BaseNode{}
@@ -716,6 +723,7 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 		return nil, err
 	}
 	wTt.AsProducer([]string{Params.MsgChannelCfg.DataCoordTimeTick})
+	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(collID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 	log.Debug("datanode AsProducer", zap.String("TimeTickChannelName", Params.MsgChannelCfg.DataCoordTimeTick))
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
@@ -729,6 +737,7 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 				continue
 			}
 			stats = append(stats, stat)
+			metrics.DataNodeSegmentRowsCount.WithLabelValues(fmt.Sprint(collID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(stat.NumRows))
 		}
 		msgPack := msgstream.MsgPack{}
 		timeTickMsg := msgstream.DataNodeTtMsg{
@@ -749,6 +758,8 @@ func newInsertBufferNode(ctx context.Context, flushCh <-chan flushMsg, fm flushM
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
+		pt, _ := tsoutil.ParseHybridTs(ts)
+		metrics.DataNodeTimeSync.WithLabelValues(config.vChannelName, fmt.Sprint(Params.DataNodeCfg.NodeID)).Set(float64(pt))
 		return wTtMsgStream.Produce(&msgPack)
 	})
 

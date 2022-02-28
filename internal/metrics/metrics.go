@@ -628,12 +628,6 @@ var (
 		}, []string{"type"})
 )
 
-//RegisterDataNode registers DataNode metrics
-func RegisterDataNode() {
-	prometheus.MustRegister(DataNodeFlushSegmentsCounter)
-	prometheus.MustRegister(DataNodeWatchDmChannelsCounter)
-}
-
 //RegisterIndexNode registers IndexNode metrics
 func RegisterIndexNode() {
 

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -78,6 +80,7 @@ type compactionTask struct {
 	cancel context.CancelFunc
 
 	wg sync.WaitGroup
+	tr *timerecord.TimeRecorder
 }
 
 // check if compactionTask implements compactor
@@ -105,6 +108,7 @@ func newCompactionTask(
 		allocatorInterface: alloc,
 		dc:                 dc,
 		plan:               plan,
+		tr:                 timerecord.NewTimeRecorder("compactionTask"),
 	}
 }
 
@@ -538,6 +542,8 @@ func (t *compactionTask) compact() error {
 	)
 
 	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(time.Since(compactStart))))
+	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(collID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
+
 	return nil
 }
 
