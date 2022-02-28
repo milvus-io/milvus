@@ -22,6 +22,7 @@ package querynode
 
 #cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
 #cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo windows LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -34,6 +35,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -156,7 +158,9 @@ func (node *QueryNode) Register() error {
 		}
 		// manually send signal to starter goroutine
 		if node.session.TriggerKill {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				p.Signal(syscall.SIGINT)
+			}
 		}
 	})
 
@@ -222,7 +226,9 @@ func (node *QueryNode) watchService(ctx context.Context) {
 				// need to call stop in separate goroutine
 				go node.Stop()
 				if node.session.TriggerKill {
-					syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+					if p, err := os.FindProcess(os.Getpid()); err == nil {
+						p.Signal(syscall.SIGINT)
+					}
 				}
 				return
 			}

@@ -22,7 +22,7 @@ add_library(milvus_indexbuilder SHARED
 find_library(TBB NAMES tbb)
 set(PLATFORM_LIBS dl)
 if (MSYS)
-set(PLATFORM_LIBS )
+set(PLATFORM_LIBS -Wl,--allow-multiple-definition)
 endif ()
 
 # link order matters

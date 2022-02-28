@@ -53,7 +53,7 @@ void
 DeleteIndex(CIndex index) {
     auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
     delete cIndex;
-#ifndef __APPLE__
+#ifdef __linux__
     malloc_trim(0);
 #endif
 }

@@ -28,7 +28,7 @@ void
 DeleteCollection(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
     delete col;
-#ifndef __APPLE__
+#ifdef __linux__
     malloc_trim(0);
 #endif
 }

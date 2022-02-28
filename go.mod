@@ -15,6 +15,7 @@ require (
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-basic/ipv4 v1.0.0
+	github.com/gofrs/flock v0.8.1 // indirect
 	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1

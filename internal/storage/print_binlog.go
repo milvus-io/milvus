@@ -21,7 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"syscall"
+
+	"golang.org/x/exp/mmap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -54,13 +55,14 @@ func printBinlogFile(filename string) error {
 
 	fmt.Printf("file size = %d\n", fileInfo.Size())
 
-	b, err := syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+	at, err := mmap.Open(filename)
 	if err != nil {
 		return nil
 	}
-	defer syscall.Munmap(b)
+	defer at.Close()
 
-	fmt.Printf("buf size = %d\n", len(b))
+	b := make([]byte, fileInfo.Size())
+	at.ReadAt(b, 0)
 
 	r, err := NewBinlogReader(b)
 	if err != nil {

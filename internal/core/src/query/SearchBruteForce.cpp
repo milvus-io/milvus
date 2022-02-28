@@ -15,7 +15,7 @@
 #ifdef __APPLE__
 #include "knowhere/index/vector_index/impl/bruteforce/BruteForce.h"
 #include "knowhere/common/Heap.h"
-#elif __linux__
+#elif defined(__linux__) || defined(__MINGW64__)
 #include <faiss/utils/BinaryDistance.h>
 #include <faiss/utils/distances.h>
 #else
@@ -42,7 +42,7 @@ raw_search(MetricType metric_type,
            float* D,
            idx_t* labels,
            const BitsetView bitset) {
-#ifdef __linux__
+#if defined(__linux__) || defined(__MINGW64__)
     using namespace faiss;  // NOLINT
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float_maxheap_array_t res = {size_t(n), size_t(k), labels, D};
@@ -121,7 +121,7 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
                                             sub_qr.get_distances()};
         knowhere::knn_inner_product_sse(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
     }
-#elif __linux__
+#elif defined(__linux__) || defined(__MINGW64__)
     if (metric_type == MetricType::METRIC_L2) {
         faiss::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_ids(), sub_qr.get_distances()};
         faiss::knn_L2sqr(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
