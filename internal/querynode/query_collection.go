@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -50,6 +52,9 @@ type queryMsg interface {
 	GuaranteeTs() Timestamp
 	TravelTs() Timestamp
 	TimeoutTs() Timestamp
+	SetTimeRecorder()
+	ElapseSpan() time.Duration
+	RecordSpan() time.Duration
 }
 
 // queryCollection manages and executes the retrieve and search tasks, it can be created
@@ -334,6 +339,8 @@ func (q *queryCollection) setServiceableTime(t Timestamp) {
 		return
 	}
 	q.serviceableTime = t
+	ps, _ := tsoutil.ParseHybridTs(t)
+	metrics.QueryNodeServiceTime.WithLabelValues(fmt.Sprint(q.collectionID), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(ps))
 }
 
 func (q *queryCollection) checkTimeout(msg queryMsg) bool {
@@ -446,6 +453,8 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	var collectionID UniqueID
 	var msgTypeStr string
 
+	msg.SetTimeRecorder()
+
 	switch msgType {
 	case commonpb.MsgType_Retrieve:
 		collectionID = msg.(*msgstream.RetrieveMsg).CollectionID
@@ -532,6 +541,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 			zap.Any("msgID", msg.ID()),
 			zap.String("msgType", msgTypeStr),
 		)
+		msg.RecordSpan()
 		q.addToUnsolvedMsg(msg)
 		sp.LogFields(
 			oplog.String("send to unsolved buffer", "send to unsolved buffer"),
@@ -667,8 +677,12 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 				)
 				switch msgType {
 				case commonpb.MsgType_Retrieve:
+					metrics.QueryNodeSQLatencyInQueue.WithLabelValues(metrics.QueryNodeQueryTypeQuery,
+						fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(m.RecordSpan().Milliseconds()))
 					err = q.retrieve(m)
 				case commonpb.MsgType_Search:
+					metrics.QueryNodeSQLatencyInQueue.WithLabelValues(metrics.QueryNodeQueryTypeSearch,
+						fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(m.RecordSpan().Milliseconds()))
 					err = q.search(m)
 				default:
 					err := fmt.Errorf("receive invalid msgType = %d", msgType)
@@ -700,6 +714,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 }
 
 func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]byte) (*schemapb.SearchResultData, error) {
+	tr := timerecord.NewTimeRecorder("translateHitsDuration")
 	log.Debug("translateHits:", zap.Any("lenOfFieldIDs", len(fieldIDs)), zap.Any("lenOfRawHits", len(rawHits)))
 	if len(rawHits) == 0 {
 		return nil, fmt.Errorf("empty results")
@@ -974,6 +989,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 		}
 	}
 
+	metrics.QueryNodeTranslateHitsLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return finalResult, nil
 }
 
@@ -1119,6 +1135,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 			if err != nil {
 				return err
 			}
+			metrics.QueryNodeSQReqLatency.WithLabelValues(metrics.QueryNodeQueryTypeSearch, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(msg.ElapseSpan().Milliseconds()))
+			metrics.QueryNodeSQCount.WithLabelValues(metrics.QueryNodeMetricLabelSuccess, metrics.QueryNodeQueryTypeSearch, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+
 			tr.Record(fmt.Sprintf("publish empty search result done, msgID = %d", searchMsg.ID()))
 			tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))
 			return nil
@@ -1128,6 +1147,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	numSegment := int64(len(searchResults))
 	var marshaledHits *MarshaledHits
 	log.Debug("QueryNode reduce data", zap.Int64("msgID", searchMsg.ID()), zap.Int64("numSegment", numSegment))
+	tr.RecordSpan()
 	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
 	log.Debug("QueryNode reduce data finished", zap.Int64("msgID", searchMsg.ID()))
 	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
@@ -1147,7 +1167,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	tr.Record(fmt.Sprintf("reduce result done, msgID = %d", searchMsg.ID()))
+	metrics.QueryNodeReduceLatency.WithLabelValues(metrics.QueryNodeQueryTypeSearch, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.RecordSpan().Milliseconds()))
 
 	var offset int64
 	for index := range searchRequests {
@@ -1227,6 +1247,11 @@ func (q *queryCollection) search(msg queryMsg) error {
 		if err != nil {
 			return err
 		}
+		metrics.QueryNodeSQReqLatency.WithLabelValues(metrics.QueryNodeQueryTypeSearch,
+			fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(msg.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(metrics.QueryNodeMetricLabelSuccess,
+			metrics.QueryNodeQueryTypeSearch,
+			fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 		tr.Record(fmt.Sprintf("publish search result, msgID = %d", searchMsg.ID()))
 	}
 	sp.LogFields(oplog.String("statistical time", "stats done"))
@@ -1309,7 +1334,8 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	tr.Record(fmt.Sprintf("merge result done, msgID = %d", retrieveMsg.ID()))
+	reduceDuration := tr.Record(fmt.Sprintf("merge result done, msgID = %d", retrieveMsg.ID()))
+	metrics.QueryNodeReduceLatency.WithLabelValues(metrics.QueryNodeQueryTypeQuery, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(reduceDuration.Milliseconds()))
 
 	resultChannelInt := 0
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
@@ -1334,6 +1360,9 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
+	metrics.QueryNodeSQCount.WithLabelValues(metrics.QueryNodeMetricLabelSuccess, metrics.QueryNodeQueryTypeQuery, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(metrics.QueryNodeQueryTypeQuery, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(msg.ElapseSpan().Milliseconds()))
+
 	log.Debug("QueryNode publish RetrieveResultMsg",
 		zap.Int64("msgID", retrieveMsg.ID()),
 		zap.Any("vChannels", collection.getVChannels()),
@@ -1403,6 +1432,7 @@ func (q *queryCollection) publishSearchResultWithCtx(ctx context.Context, result
 }
 
 func (q *queryCollection) publishSearchResult(result *internalpb.SearchResults, nodeID UniqueID) error {
+	metrics.QueryNodeSQCount.WithLabelValues(metrics.QueryNodeMetricLabelTotal, metrics.QueryNodeQueryTypeSearch, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	return q.publishSearchResultWithCtx(q.releaseCtx, result, nodeID)
 }
 
@@ -1411,6 +1441,7 @@ func (q *queryCollection) publishRetrieveResultWithCtx(ctx context.Context, resu
 }
 
 func (q *queryCollection) publishRetrieveResult(result *internalpb.RetrieveResults, nodeID UniqueID) error {
+	metrics.QueryNodeSQCount.WithLabelValues(metrics.QueryNodeMetricLabelTotal, metrics.QueryNodeQueryTypeQuery, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	return q.publishRetrieveResultWithCtx(q.releaseCtx, result, nodeID)
 }
 
@@ -1430,6 +1461,7 @@ func (q *queryCollection) publishFailedQueryResultWithCtx(ctx context.Context, m
 	case commonpb.MsgType_Retrieve:
 		retrieveMsg := msg.(*msgstream.RetrieveMsg)
 		baseResult.MsgType = commonpb.MsgType_RetrieveResult
+		metrics.QueryNodeSQCount.WithLabelValues(metrics.QueryNodeMetricLabelFail, metrics.QueryNodeQueryTypeQuery, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 		return q.publishRetrieveResult(&internalpb.RetrieveResults{
 			Base:            baseResult,
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
@@ -1440,6 +1472,7 @@ func (q *queryCollection) publishFailedQueryResultWithCtx(ctx context.Context, m
 	case commonpb.MsgType_Search:
 		searchMsg := msg.(*msgstream.SearchMsg)
 		baseResult.MsgType = commonpb.MsgType_SearchResult
+		metrics.QueryNodeSQCount.WithLabelValues(metrics.QueryNodeMetricLabelFail, metrics.QueryNodeQueryTypeSearch, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 		return q.publishSearchResultWithCtx(ctx, &internalpb.SearchResults{
 			Base:            baseResult,
 			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},

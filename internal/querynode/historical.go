@@ -25,8 +25,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 // historical is in charge of historical data in query node
@@ -177,11 +179,15 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 				if !seg.getOnService() {
 					return
 				}
+				tr := timerecord.NewTimeRecorder("searchOnSealed")
 				searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 				if err != nil {
 					err2 = err
 					return
 				}
+				metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.QueryNodeQueryTypeSearch,
+					metrics.QueryNodeSegTypeSealed,
+					fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 				segmentLock.Lock()
 				searchResults = append(searchResults, searchResult)

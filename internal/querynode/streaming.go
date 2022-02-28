@@ -26,8 +26,10 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 // streaming is in charge of streaming data in query node
@@ -206,11 +208,15 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 				//	continue
 				//}
 
+				tr := timerecord.NewTimeRecorder("searchOnGrowing")
 				searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 				if err != nil {
 					err2 = err
 					return
 				}
+				metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.QueryNodeQueryTypeSearch,
+					metrics.QueryNodeSegTypeGrowing,
+					fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 				segmentLock.Lock()
 				searchResults = append(searchResults, searchResult)
 				searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)
