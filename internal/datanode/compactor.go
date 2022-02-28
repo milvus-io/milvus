@@ -466,17 +466,18 @@ func (t *compactionTask) compact() error {
 	}
 
 	uploadStart := time.Now()
-	cpaths, err := t.upload(ctxTimeout, targetSegID, partID, iDatas, deltaBuf.delData, meta)
+	segPaths, err := t.upload(ctxTimeout, targetSegID, partID, iDatas, deltaBuf.delData, meta)
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return err
 	}
+
 	uploadEnd := time.Now()
 	defer func() {
 		log.Debug("upload elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(uploadEnd.Sub(uploadStart))))
 	}()
 
-	for _, fbl := range cpaths.deltaInfo {
+	for _, fbl := range segPaths.deltaInfo {
 		for _, deltaLogInfo := range fbl.GetBinlogs() {
 			deltaLogInfo.LogSize = deltaBuf.GetLogSize()
 			deltaLogInfo.TimestampFrom = deltaBuf.GetTimestampFrom()
@@ -488,9 +489,9 @@ func (t *compactionTask) compact() error {
 	pack := &datapb.CompactionResult{
 		PlanID:              t.plan.GetPlanID(),
 		SegmentID:           targetSegID,
-		InsertLogs:          cpaths.inPaths,
-		Field2StatslogPaths: cpaths.statsPaths,
-		Deltalogs:           cpaths.deltaInfo,
+		InsertLogs:          segPaths.inPaths,
+		Field2StatslogPaths: segPaths.statsPaths,
+		Deltalogs:           segPaths.deltaInfo,
 		NumOfRows:           numRows,
 	}
 
@@ -512,7 +513,11 @@ func (t *compactionTask) compact() error {
 	//  Compaction I: update pk range.
 	//  Compaction II: remove the segments and add a new flushed segment with pk range.
 	if t.hasSegment(targetSegID, true) {
-		t.refreshFlushedSegStatistics(targetSegID, numRows)
+		if numRows <= 0 {
+			t.removeSegments(targetSegID)
+		} else {
+			t.refreshFlushedSegStatistics(targetSegID, numRows)
+		}
 		// no need to shorten the PK range of a segment, deleting dup PKs is valid
 	} else {
 		t.mergeFlushedSegments(targetSegID, collID, partID, t.plan.GetPlanID(), segIDs, t.plan.GetChannel(), numRows)
@@ -527,9 +532,9 @@ func (t *compactionTask) compact() error {
 
 	log.Info("compaction done",
 		zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Int("num of binlog paths", len(cpaths.inPaths)),
-		zap.Int("num of stats paths", len(cpaths.statsPaths)),
-		zap.Int("num of delta paths", len(cpaths.deltaInfo)),
+		zap.Int("num of binlog paths", len(segPaths.inPaths)),
+		zap.Int("num of stats paths", len(segPaths.statsPaths)),
+		zap.Int("num of delta paths", len(segPaths.deltaInfo)),
 	)
 
 	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(time.Since(compactStart))))
