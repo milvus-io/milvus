@@ -256,42 +256,20 @@ endif ()
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 # **************************** Install ****************************
-if ( NOT MILVUS_DB_PATH )
-    set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
-endif ()
-
-set( GPU_ENABLE "false" )
-
 # Install segcore
-install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
         DESTINATION include/segcore
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(
-	FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore${CMAKE_SHARED_LIBRARY_SUFFIX}
-        DESTINATION lib
-)
-
 # Install indexbuilder
-install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
         DESTINATION include/indexbuilder
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder${CMAKE_SHARED_LIBRARY_SUFFIX}
-        DESTINATION lib
-)
-
-install(FILES ${CMAKE_BINARY_DIR}/src/common/libmilvus_common${CMAKE_SHARED_LIBRARY_SUFFIX}
-        DESTINATION lib
-)
-
 # Install common
-install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
 )

@@ -34,3 +34,4 @@ target_link_libraries(milvus_indexbuilder
         pthread
         )
 
+install(TARGETS milvus_indexbuilder DESTINATION lib)
