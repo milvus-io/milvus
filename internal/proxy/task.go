@@ -783,6 +783,9 @@ func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	}
 	tsMsgs := pack.Msgs
 	hashKeys := stream.ComputeProduceChannelIndexes(tsMsgs)
+	if len(hashKeys) == 0{
+		return nil, fmt.Errorf("the length of hashKeys is 0")
+	}
 	reqID := it.Base.MsgID
 	channelCountMap := make(map[int32]uint32)    //   channelID to count
 	channelMaxTSMap := make(map[int32]Timestamp) //  channelID to max Timestamp
