@@ -413,6 +413,7 @@ class TestCompactionOperation(TestcaseBase):
         for hits in search_res:
             assert len(hits) == ct.default_limit
 
+    @pytest.mark.skip(reason="ToDo: @ThreadDao redesign test cases ")
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_after_binary_index(self):
         """
