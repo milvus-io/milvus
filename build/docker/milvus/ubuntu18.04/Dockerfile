@@ -39,4 +39,3 @@ RUN chmod +x /tini
 ENTRYPOINT ["/tini", "--"]
 
 WORKDIR /milvus/
-
