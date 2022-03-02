@@ -21,6 +21,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const (
+	UnissuedIndexTaskLabel   = "unissued"
+	InProgressIndexTaskLabel = "in-progress"
+	FinishedIndexTaskLabel   = "finished"
+	FailedIndexTaskLabel     = "failed"
+	RecycledIndexTaskLabel   = "recycled"
+)
+
 var (
 	// IndexCoordIndexRequestCounter records the number of the index requests.
 	IndexCoordIndexRequestCounter = prometheus.NewCounterVec(
