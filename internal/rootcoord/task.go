@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -876,9 +878,16 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
 
+	collectionID := collMeta.ID
+	cnt := 0
+
+	defer func() {
+		metrics.RootCoordNumOfIndexedSegments.WithLabelValues(strconv.FormatInt(collectionID, 10)).Add(float64(cnt))
+	}()
+
 	for _, segID := range segIDs {
 		info := etcdpb.SegmentIndexInfo{
-			CollectionID: collMeta.ID,
+			CollectionID: collectionID,
 			PartitionID:  segID2PartID[segID],
 			SegmentID:    segID,
 			FieldID:      field.FieldID,
@@ -895,6 +904,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		if err := t.core.MetaTable.AddIndex(&info); err != nil {
 			log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
 		}
+		cnt++
 	}
 
 	return nil
