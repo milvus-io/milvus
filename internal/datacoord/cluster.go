@@ -122,7 +122,7 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 			SegmentIDs:     segments,
 			MarkSegmentIDs: marks,
 		}
-		log.Warn("Plan to flush", zap.Int64("node_id", nodeID), zap.Int64s("segments", segments), zap.Int64s("marks", marks))
+		log.Info("Plan to flush", zap.Int64("node_id", nodeID), zap.Int64s("segments", segments), zap.Int64s("marks", marks))
 		c.sessionManager.Flush(ctx, nodeID, req)
 	}
 }

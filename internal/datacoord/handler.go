@@ -51,7 +51,7 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel
 	})
-	log.Debug("GetSegmentsByChannel",
+	log.Info("GetSegmentsByChannel",
 		zap.Any("collectionID", collectionID),
 		zap.Any("channel", channel),
 		zap.Any("numOfSegments", len(segments)),

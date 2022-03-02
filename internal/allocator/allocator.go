@@ -254,7 +254,7 @@ func (ta *Allocator) failRemainRequest() {
 		err = errors.New(errMsg)
 	}
 	if len(ta.ToDoReqs) > 0 {
-		log.Debug("Allocator has some reqs to fail",
+		log.Warn("Allocator has some reqs to fail",
 			zap.Any("Role", ta.Role),
 			zap.Any("reqLen", len(ta.ToDoReqs)))
 	}

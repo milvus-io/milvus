@@ -206,7 +206,7 @@ func (node *DataNode) initSession() error {
 
 // Init function does nothing now.
 func (node *DataNode) Init() error {
-	log.Debug("DataNode Init",
+	log.Info("DataNode Init",
 		zap.String("TimeTickChannelName", Params.MsgChannelCfg.DataCoordTimeTick),
 	)
 	if err := node.initSession(); err != nil {
@@ -225,7 +225,7 @@ func (node *DataNode) Init() error {
 			zap.Error(err))
 		return err
 	}
-	log.Debug("DataNode Init",
+	log.Info("DataNode Init successfully",
 		zap.String("MsgChannelSubName", Params.MsgChannelCfg.DataNodeSubName))
 
 	return nil
@@ -246,7 +246,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("watch etcd loop quit")
+			log.Info("watch etcd loop quit")
 			return
 		case event := <-evtChan:
 			if event.Canceled { // event canceled
@@ -373,7 +373,7 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo) error {
 	if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
 		return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
 	}
-	log.Debug("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+	log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
 
 	watchInfo.State = datapb.ChannelWatchState_Complete
 	v, err := proto.Marshal(watchInfo)
@@ -382,7 +382,7 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo) error {
 	}
 
 	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), vChanName)
-	log.Debug("handle put event: try to save completed state", zap.String("key", k))
+	log.Info("handle put event: try to save completed state", zap.String("key", k))
 
 	err = node.watchKv.Save(k, string(v))
 	// TODO DataNode unable to save into etcd, may need to panic
@@ -552,7 +552,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return status, nil
 	}
 
-	log.Debug("Receive FlushSegments req",
+	log.Info("Receive FlushSegments req",
 		zap.Int64("collectionID", req.GetCollectionID()), zap.Int("num", len(req.SegmentIDs)),
 		zap.Int64s("segments", req.SegmentIDs),
 	)
@@ -586,7 +586,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 				flushed:      flushed,
 			}
 		}
-		log.Debug("Flowgraph flushSegment tasks triggered", zap.Bool("flushed", flushed),
+		log.Info("Flowgraph flushSegment tasks triggered", zap.Bool("flushed", flushed),
 			zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("segments", segmentIDs))
 
 		return noErr

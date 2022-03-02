@@ -320,7 +320,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		return nil, err
 	}
 	s.segments = append(s.segments, id)
-	log.Debug("datacoord: estimateTotalRows: ",
+	log.Info("datacoord: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", maxNumOfRows),

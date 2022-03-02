@@ -76,7 +76,7 @@ func (e *channelEventManager) Run() {
 
 							err = e.handlePutEvent(event.info)
 							if err == nil {
-								log.Debug("retry to handle put event successfully",
+								log.Info("retry to handle put event successfully",
 									zap.String("vChanName", event.vChanName))
 								return
 							}

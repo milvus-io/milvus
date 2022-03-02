@@ -103,7 +103,7 @@ func (t *compactionTrigger) start() {
 		for {
 			select {
 			case <-t.quit:
-				log.Debug("compaction trigger quit")
+				log.Info("compaction trigger quit")
 				return
 			case signal := <-t.signals:
 				switch {

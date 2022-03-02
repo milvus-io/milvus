@@ -450,7 +450,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 	kvs := map[string]string{blobPath: string(blob.Value[:])}
 	data.LogSize = int64(len(blob.Value))
 	data.LogPath = blobPath
-	log.Debug("delete blob path", zap.String("path", blobPath))
+	log.Info("delete blob path", zap.String("path", blobPath))
 	m.handleDeleteTask(segmentID, &flushBufferDeleteTask{
 		BaseKV: m.BaseKV,
 		data:   kvs,
@@ -737,7 +737,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 
 		startPos := dsService.replica.listNewSegmentsStartPositions()
 
-		log.Debug("SaveBinlogPath",
+		log.Info("SaveBinlogPath",
 			zap.Int64("SegmentID", pack.segmentID),
 			zap.Int64("CollectionID", dsService.collectionID),
 			zap.Any("startPos", startPos),
