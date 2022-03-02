@@ -586,11 +586,6 @@ func RegisterProxy() {
 	prometheus.MustRegister(ProxyDmlChannelTimeTick)
 }
 
-//RegisterQueryNode registers QueryNode metrics
-func RegisterQueryNode() {
-
-}
-
 var (
 	//DataCoordDataNodeList records the num of regsitered data nodes
 	DataCoordDataNodeList = prometheus.NewGaugeVec(

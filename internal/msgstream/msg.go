@@ -19,6 +19,7 @@ package msgstream
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 // MsgType is an alias of commonpb.MsgType
@@ -242,6 +244,7 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type SearchMsg struct {
 	BaseMsg
 	internalpb.SearchRequest
+	tr *timerecord.TimeRecorder
 }
 
 // interface implementation validation
@@ -277,6 +280,21 @@ func (st *SearchMsg) TravelTs() Timestamp {
 // TimeoutTs returns the timestamp of timeout
 func (st *SearchMsg) TimeoutTs() Timestamp {
 	return st.GetTimeoutTimestamp()
+}
+
+// SetTimeRecorder sets the timeRecorder for RetrieveMsg
+func (st *SearchMsg) SetTimeRecorder() {
+	st.tr = timerecord.NewTimeRecorder("searchMsg")
+}
+
+// ElapseSpan returns the duration from the beginning
+func (st *SearchMsg) ElapseSpan() time.Duration {
+	return st.tr.ElapseSpan()
+}
+
+// RecordSpan returns the duration from last record
+func (st *SearchMsg) RecordSpan() time.Duration {
+	return st.tr.RecordSpan()
 }
 
 // Marshal is used to serializing a message pack to byte array
@@ -369,6 +387,7 @@ func (srt *SearchResultMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 type RetrieveMsg struct {
 	BaseMsg
 	internalpb.RetrieveRequest
+	tr *timerecord.TimeRecorder
 }
 
 // interface implementation validation
@@ -404,6 +423,21 @@ func (rm *RetrieveMsg) TravelTs() Timestamp {
 // TimeoutTs returns the timestamp of timeout
 func (rm *RetrieveMsg) TimeoutTs() Timestamp {
 	return rm.GetTimeoutTimestamp()
+}
+
+// SetTimeRecorder sets the timeRecorder for RetrieveMsg
+func (rm *RetrieveMsg) SetTimeRecorder() {
+	rm.tr = timerecord.NewTimeRecorder("retrieveMsg")
+}
+
+// ElapseSpan returns the duration from the beginning
+func (rm *RetrieveMsg) ElapseSpan() time.Duration {
+	return rm.tr.ElapseSpan()
+}
+
+// RecordSpan returns the duration from last record
+func (rm *RetrieveMsg) RecordSpan() time.Duration {
+	return rm.tr.RecordSpan()
 }
 
 // Marshal is used to serializing a message pack to byte array

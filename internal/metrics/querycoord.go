@@ -28,9 +28,6 @@ const (
 	QueryCoordMetricLabelSuccess = "success"
 	QueryCoordMetricLabelFail    = "fail"
 	QueryCoordMetricLabelTotal   = "total"
-
-	// TODO: move to metrics.go
-	collectionIDLabel = "collection_id"
 )
 
 // queryCoordLoadBuckets involves durations in milliseconds,

@@ -31,6 +31,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"math"
 	"sync"
 	"unsafe"
@@ -115,6 +116,8 @@ OUTER:
 		)
 		c.vChannels = append(c.vChannels, dstChan)
 	}
+
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vChannels)))
 }
 
 // getVChannels get virtual channels of collection
@@ -141,6 +144,8 @@ func (c *Collection) removeVChannel(channel Channel) {
 		zap.Any("collectionID", c.ID()),
 		zap.Any("channel", channel),
 	)
+
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vChannels)))
 }
 
 // addPChannels add physical channels to physical channels of collection
@@ -236,6 +241,8 @@ OUTER:
 		)
 		c.vDeltaChannels = append(c.vDeltaChannels, dstChan)
 	}
+
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vDeltaChannels)))
 }
 
 func (c *Collection) removeVDeltaChannel(channel Channel) {
@@ -252,6 +259,8 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 		zap.Any("collectionID", c.ID()),
 		zap.Any("channel", channel),
 	)
+
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vDeltaChannels)))
 }
 
 // setReleaseTime records when collection is released

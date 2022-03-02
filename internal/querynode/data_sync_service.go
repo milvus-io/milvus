@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 )
 
@@ -67,6 +68,7 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
 		results[channel] = newFlowGraph
+		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	}
 
 	return results
@@ -98,6 +100,7 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
 		results[channel] = newFlowGraph
+		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	}
 
 	return results
@@ -170,6 +173,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDMLChannels(channels []Chann
 		if _, ok := dsService.dmlChannel2FlowGraph[channel]; ok {
 			// close flow graph
 			dsService.dmlChannel2FlowGraph[channel].close()
+			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Dec()
 		}
 		delete(dsService.dmlChannel2FlowGraph, channel)
 	}
@@ -184,6 +188,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDeltaChannels(channels []Cha
 		if _, ok := dsService.deltaChannel2FlowGraph[channel]; ok {
 			// close flow graph
 			dsService.deltaChannel2FlowGraph[channel].close()
+			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Dec()
 		}
 		delete(dsService.deltaChannel2FlowGraph, channel)
 	}

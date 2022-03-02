@@ -1161,10 +1161,12 @@ func genSimpleSearchMsg() (*msgstream.SearchMsg, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &msgstream.SearchMsg{
+	msg := &msgstream.SearchMsg{
 		BaseMsg:       genMsgStreamBaseMsg(),
 		SearchRequest: *req,
-	}, nil
+	}
+	msg.SetTimeRecorder()
+	return msg, nil
 }
 
 func genSimpleRetrieveMsg() (*msgstream.RetrieveMsg, error) {
@@ -1172,10 +1174,12 @@ func genSimpleRetrieveMsg() (*msgstream.RetrieveMsg, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &msgstream.RetrieveMsg{
+	msg := &msgstream.RetrieveMsg{
 		BaseMsg:         genMsgStreamBaseMsg(),
 		RetrieveRequest: *req,
-	}, nil
+	}
+	msg.SetTimeRecorder()
+	return msg, nil
 }
 
 func genQueryChannel() Channel {
