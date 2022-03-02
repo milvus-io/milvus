@@ -16,9 +16,9 @@ DELTA_PER_INS = 10  # entities per insert
 ENTITIES_FOR_SEARCH = 3000  # entities for search_collection
 
 CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'  # env variables for chao path
-TESTS_CONFIG_LOCATION = 'chaos_objects/pod_kill/'
-ALL_CHAOS_YAMLS = 'chaos_allstandalone_pod_kill.yaml'
-RELEASE_NAME = 'test-allstandalone-pod-kill-19-25-26'
+TESTS_CONFIG_LOCATION = 'chaos_objects/network_latency/'
+ALL_CHAOS_YAMLS = 'chaos_datanode_network_latency.yaml'
+RELEASE_NAME = 'datanode-network-latency-16-21-00'
 WAIT_PER_OP = 10  # time to wait in seconds between operations
 CHAOS_DURATION = 120  # chaos duration time in seconds
 DEFAULT_INDEX_PARAM = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}

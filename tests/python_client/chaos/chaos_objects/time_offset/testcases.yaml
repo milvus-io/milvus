@@ -1,0 +1,12 @@
+Collections:
+  -
+    testcase:
+      name: test_rootcoord_time_offset
+      chaos: chaos_rootcoord_time_offset.yaml
+      expectation:
+          cluster_1_node:
+            search: fail
+            query: fail
+          cluster_n_nodes:
+            search: degrade
+            query: degrade

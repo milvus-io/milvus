@@ -1,0 +1,14 @@
+kind: TimeChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-rootcoord-time-offset
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: pulsar-mem-stress-14-04-25
+      component: rootcoord
+  mode: all
+  timeOffset: '-10m'

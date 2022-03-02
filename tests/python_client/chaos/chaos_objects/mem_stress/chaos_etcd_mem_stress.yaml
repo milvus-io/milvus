@@ -1,0 +1,21 @@
+kind: StressChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-etcd-memory-stress
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: milvus-chaos
+      app.kubernetes.io/name: etcd
+  mode: all
+  stressors:
+    cpu:
+      workers: 10
+      load: 80
+    memory:
+      workers: 4
+      size: 2048Mi
+  duration: 5m

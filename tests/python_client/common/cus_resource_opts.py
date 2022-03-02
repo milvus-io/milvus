@@ -44,7 +44,7 @@ class CustomResourceOperations(object):
             log.debug(f"delete custom resource response: {api_response}")
         except ApiException as e:
             if raise_ex:
-                log.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
+                log.info("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
                 raise Exception(str(e))
 
     def patch(self, metadata_name, body):

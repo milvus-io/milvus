@@ -1,23 +1,23 @@
-name: IO Latency Chaos Test
+name: Network Latency Chaos Test
 
 on:
   workflow_dispatch:
 jobs:
   
-  test-io-latency-chaos:
+  test-network-latency-chaos:
    
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        pod: [pulsar, etcd, minio]
+        pod: [datacoord, datanode, indexcoord, indexnode, proxy, pulsar, querycoord, querynode, rootcoord, etcd, minio]
     
     steps:
 
       - name: Set env param
         run: |
-          echo "RELEASE=test-${{ matrix.pod }}-io-latency" >> $GITHUB_ENV
+          echo "RELEASE=test-${{ matrix.pod }}-network-latency" >> $GITHUB_ENV
 
       - name: Creating kind cluster
         uses: helm/kind-action@v1.2.0
@@ -84,8 +84,8 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           # replace chaos object
-          sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/io_latency\/'/g" constants.py
-          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_io_latency.yaml\'/g" constants.py
+          sed -i "s/TESTS_CONFIG_LOCATION =.*/TESTS_CONFIG_LOCATION = \'chaos_objects\/network_latency\/'/g" constants.py
+          sed -i "s/ALL_CHAOS_YAMLS =.*/ALL_CHAOS_YAMLS = \'chaos_${{ matrix.pod }}_network_latency.yaml\'/g" constants.py
           sed -i "s/RELEASE_NAME =.*/RELEASE_NAME = \'${{ env.RELEASE }}\'/g" constants.py
           cat constants.py
           timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
@@ -104,7 +104,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client
         run: |
-          kubectl get iochaos -n chaos-testing
+          kubectl get networkchaos -n chaos-testing
           kubectl get pod -n chaos-testing
           # wait all pod to be ready
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
@@ -115,7 +115,7 @@ jobs:
 
           sleep 20s
           nc -vz 127.0.0.1 19530
- 
+
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
 

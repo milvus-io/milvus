@@ -11,6 +11,8 @@ from chaos.chaos_commons import gen_experiment_config, get_chaos_yamls, reconnec
 from common.common_type import CaseLabel
 from chaos import constants
 from utils.util_log import test_log as log
+from utils.util_k8s import wait_pods_ready
+from chaos import chaos_commons as cc
 
 
 def reboot_pod(chaos_yaml):
@@ -36,10 +38,9 @@ class TestChaosData:
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port):
         connections.add_connection(default={"host": host, "port": port})
-        conn = connections.connect(alias='default')
-        if conn is None:
+        connections.connect(alias='default')
+        if connections.has_connection("default") is False:
             raise Exception("no connections")
-        return conn
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize('chaos_yaml', get_chaos_yamls())
@@ -112,6 +113,17 @@ class TestChaosData:
 
         # reboot a pod
         reboot_pod(chaos_yaml)
+
+        # parse chaos object
+        chaos_config = cc.gen_experiment_config(chaos_yaml)
+        meta_name = chaos_config.get('metadata', None).get('name', None)
+
+        # wait all pods ready
+        log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={meta_name}")
+        wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={meta_name}")
+        log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={meta_name}")
+        wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={meta_name}")
+        log.info("all pods are ready")
 
         # reconnect if needed
         sleep(constants.WAIT_PER_OP * 3)
