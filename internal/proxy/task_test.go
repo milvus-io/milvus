@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
@@ -809,6 +811,7 @@ func TestSearchTask(t *testing.T) {
 		query:     nil,
 		chMgr:     nil,
 		qc:        nil,
+		tr:        timerecord.NewTimeRecorder("search"),
 	}
 
 	// no result
@@ -839,6 +842,7 @@ func TestSearchTask(t *testing.T) {
 		query:     nil,
 		chMgr:     nil,
 		qc:        nil,
+		tr:        timerecord.NewTimeRecorder("search"),
 	}
 
 	// no result
@@ -874,6 +878,7 @@ func TestSearchTask(t *testing.T) {
 		query:     nil,
 		chMgr:     nil,
 		qc:        nil,
+		tr:        timerecord.NewTimeRecorder("search"),
 	}
 
 	// no result
@@ -1826,6 +1831,7 @@ func TestSearchTask_all(t *testing.T) {
 		query:     req,
 		chMgr:     chMgr,
 		qc:        qc,
+		tr:        timerecord.NewTimeRecorder("search"),
 	}
 
 	// simple mock for query node
@@ -2172,6 +2178,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 		query:     req,
 		chMgr:     chMgr,
 		qc:        qc,
+		tr:        timerecord.NewTimeRecorder("search"),
 	}
 
 	// simple mock for query node
@@ -2512,6 +2519,7 @@ func TestSearchTask_7803_reduce(t *testing.T) {
 		query:     req,
 		chMgr:     chMgr,
 		qc:        qc,
+		tr:        timerecord.NewTimeRecorder("search"),
 	}
 
 	// simple mock for query node
@@ -2649,6 +2657,7 @@ func TestSearchTask_Type(t *testing.T) {
 		SearchRequest: &internalpb.SearchRequest{
 			Base: nil,
 		},
+		tr: timerecord.NewTimeRecorder("search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 	assert.Equal(t, commonpb.MsgType_Search, task.Type())
@@ -2661,6 +2670,7 @@ func TestSearchTask_Ts(t *testing.T) {
 		SearchRequest: &internalpb.SearchRequest{
 			Base: nil,
 		},
+		tr: timerecord.NewTimeRecorder("search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 
@@ -2705,6 +2715,7 @@ func TestSearchTask_Channels(t *testing.T) {
 			CollectionName: collectionName,
 		},
 		chMgr: chMgr,
+		tr:    timerecord.NewTimeRecorder("search"),
 	}
 
 	// collection not exist
@@ -2794,6 +2805,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		},
 		chMgr: chMgr,
 		qc:    qc,
+		tr:    timerecord.NewTimeRecorder("search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 
@@ -3092,6 +3104,7 @@ func TestSearchTask_Execute(t *testing.T) {
 		},
 		chMgr: chMgr,
 		qc:    qc,
+		tr:    timerecord.NewTimeRecorder("search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 

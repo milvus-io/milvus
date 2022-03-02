@@ -20,8 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
+	"github.com/milvus-io/milvus/internal/metrics"
 
 	"github.com/milvus-io/milvus/internal/common"
 
@@ -105,6 +110,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 	collInfo, ok := m.collInfo[collectionName]
 
 	if !ok {
+		metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollection", metrics.CacheMissLabel).Inc()
 		m.mu.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
@@ -112,11 +118,14 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
+		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.updateCollection(coll, collectionName)
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		collInfo = m.collInfo[collectionName]
 		return collInfo.collID, nil
 	}
 	defer m.mu.RUnlock()
+	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollection", metrics.CacheHitLabel).Inc()
 
 	return collInfo.collID, nil
 }
