@@ -42,13 +42,13 @@ $ helm repo update
 
 #### 2. Get Kubernetes manifests of Milvus standalone
 ```shell
-$ helm template my-release milvus/milvus > milvus_manifest.yaml
+$ helm template my-release milvus/milvus --set cluster.enabled=false --set pulsar.enabled=false --set minio.mode=standalone --set etcd.replicaCount=1 > milvus_manifest.yaml
 ```
 
 &nbsp;&nbsp;&nbsp;or get Kubernetes manifests of Milvus cluster
 
 ```shell
-$ helm template --set cluster.enabled=true my-release milvus/milvus > milvus_manifest.yaml
+$ helm template my-release milvus/milvus > milvus_manifest.yaml
 ```
 
 #### 3. Pull and save Docker images
