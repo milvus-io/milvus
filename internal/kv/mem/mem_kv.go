@@ -80,9 +80,8 @@ func (kv *MemoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
-	// TODO，load unexisted key behavior is weird
 	if item == nil {
-		return "", nil
+		return "", fmt.Errorf("invalid key: %s", key)
 	}
 	return item.(memoryKVItem).value.String(), nil
 }
@@ -92,9 +91,8 @@ func (kv *MemoryKV) LoadBytes(key string) ([]byte, error) {
 	kv.RLock()
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
-	// TODO，load unexisted key behavior is weird
 	if item == nil {
-		return []byte{}, nil
+		return []byte{}, fmt.Errorf("invalid key: %s", key)
 	}
 	return item.(memoryKVItem).value.ByteSlice(), nil
 }
@@ -104,7 +102,6 @@ func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
 	kv.RLock()
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
-
 	if item == nil {
 		return defaultValue
 	}
@@ -116,7 +113,6 @@ func (kv *MemoryKV) LoadBytesWithDefault(key string, defaultValue []byte) []byte
 	kv.RLock()
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
-
 	if item == nil {
 		return defaultValue
 	}

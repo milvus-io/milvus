@@ -94,7 +94,7 @@ func TestGetBinlogSize(t *testing.T) {
 
 	// key not in memoryKV
 	size, err = GetBinlogSize(memoryKV, key)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.Zero(t, size)
 
 	// normal binlog key, for example, index binlog
