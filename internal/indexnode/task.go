@@ -427,8 +427,8 @@ func (it *IndexBuildTask) buildIndex(ctx context.Context) ([]*storage.Blob, erro
 			err := it.index.BuildBinaryVecIndexWithoutIds(binaryVectorFieldData.Data)
 			if err != nil {
 				log.Error("IndexNode BuildBinaryVecIndexWithoutIds failed", zap.Error(err))
+				return nil, err
 			}
-			return nil, err
 		}
 
 		if !fOk && !bOk {
