@@ -34,9 +34,7 @@ type ComponentParam struct {
 	ServiceParam
 	once sync.Once
 
-	CommonCfg     commonConfig
-	KnowhereCfg   knowhereConfig
-	MsgChannelCfg msgChannelConfig
+	CommonCfg commonConfig
 
 	RootCoordCfg  rootCoordConfig
 	ProxyCfg      proxyConfig
@@ -60,8 +58,6 @@ func (p *ComponentParam) Init() {
 	p.ServiceParam.Init()
 
 	p.CommonCfg.init(&p.BaseTable)
-	p.KnowhereCfg.init(&p.BaseTable)
-	p.MsgChannelCfg.init(&p.BaseTable)
 
 	p.RootCoordCfg.init(&p.BaseTable)
 	p.ProxyCfg.init(&p.BaseTable)
@@ -82,54 +78,6 @@ func (p *ComponentParam) SetLogConfig(role string) {
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {
-	Base *BaseTable
-
-	DefaultPartitionName string
-	DefaultIndexName     string
-	RetentionDuration    int64
-}
-
-func (p *commonConfig) init(base *BaseTable) {
-	p.Base = base
-
-	p.initDefaultPartitionName()
-	p.initDefaultIndexName()
-	p.initRetentionDuration()
-}
-
-func (p *commonConfig) initDefaultPartitionName() {
-	p.DefaultPartitionName = p.Base.LoadWithDefault("common.defaultPartitionName", "_default")
-}
-
-func (p *commonConfig) initDefaultIndexName() {
-	p.DefaultIndexName = p.Base.LoadWithDefault("common.defaultIndexName", "_default_idx")
-}
-
-func (p *commonConfig) initRetentionDuration() {
-	p.RetentionDuration = p.Base.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- knowhere ---
-type knowhereConfig struct {
-	Base *BaseTable
-
-	SimdType string
-}
-
-func (p *knowhereConfig) init(base *BaseTable) {
-	p.Base = base
-
-	p.initSimdType()
-}
-
-func (p *knowhereConfig) initSimdType() {
-	p.SimdType = p.Base.LoadWithDefault("knowhere.simdType", "auto")
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// --- msgChannel ---
-type msgChannelConfig struct {
 	Base *BaseTable
 
 	ClusterPrefix string
@@ -153,9 +101,15 @@ type msgChannelConfig struct {
 	DataCoordSegmentInfo string
 	DataCoordSubName     string
 	DataNodeSubName      string
+
+	DefaultPartitionName string
+	DefaultIndexName     string
+	RetentionDuration    int64
+
+	SimdType string
 }
 
-func (p *msgChannelConfig) init(base *BaseTable) {
+func (p *commonConfig) init(base *BaseTable) {
 	p.Base = base
 
 	// must init cluster prefix first
@@ -180,18 +134,28 @@ func (p *msgChannelConfig) init(base *BaseTable) {
 	p.initDataCoordSegmentInfo()
 	p.initDataCoordSubName()
 	p.initDataNodeSubName()
+
+	p.initDefaultPartitionName()
+	p.initDefaultIndexName()
+	p.initRetentionDuration()
+
+	p.initSimdType()
 }
 
-func (p *msgChannelConfig) initClusterPrefix() {
-	str, err := p.Base.Load("msgChannel.chanNamePrefix.cluster")
+func (p *commonConfig) initClusterPrefix() {
+	keys := []string{
+		"common.chanNamePrefix.cluster",
+		"msgChannel.chanNamePrefix.cluster",
+	}
+	str, err := p.Base.Load2(keys)
 	if err != nil {
 		panic(err)
 	}
 	p.ClusterPrefix = str
 }
 
-func (p *msgChannelConfig) initChanNamePrefix(cfg string) string {
-	value, err := p.Base.Load(cfg)
+func (p *commonConfig) initChanNamePrefix(keys []string) string {
+	value, err := p.Base.Load2(keys)
 	if err != nil {
 		panic(err)
 	}
@@ -200,72 +164,156 @@ func (p *msgChannelConfig) initChanNamePrefix(cfg string) string {
 }
 
 // --- proxy ---
-func (p *msgChannelConfig) initProxySubName() {
-	p.ProxySubName = p.initChanNamePrefix("msgChannel.subNamePrefix.proxySubNamePrefix")
+func (p *commonConfig) initProxySubName() {
+	keys := []string{
+		"common.subNamePrefix.proxySubNamePrefix",
+		"msgChannel.subNamePrefix.proxySubNamePrefix",
+	}
+	p.ProxySubName = p.initChanNamePrefix(keys)
 }
 
 // --- rootcoord ---
-func (p *msgChannelConfig) initRootCoordTimeTick() {
-	p.RootCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordTimeTick")
+func (p *commonConfig) initRootCoordTimeTick() {
+	keys := []string{
+		"common.chanNamePrefix.rootCoordTimeTick",
+		"msgChannel.chanNamePrefix.rootCoordTimeTick",
+	}
+	p.RootCoordTimeTick = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initRootCoordStatistics() {
-	p.RootCoordStatistics = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordStatistics")
+func (p *commonConfig) initRootCoordStatistics() {
+	keys := []string{
+		"common.chanNamePrefix.rootCoordStatistics",
+		"msgChannel.chanNamePrefix.rootCoordStatistics",
+	}
+	p.RootCoordStatistics = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initRootCoordDml() {
-	p.RootCoordDml = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDml")
+func (p *commonConfig) initRootCoordDml() {
+	keys := []string{
+		"common.chanNamePrefix.rootCoordDml",
+		"msgChannel.chanNamePrefix.rootCoordDml",
+	}
+	p.RootCoordDml = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initRootCoordDelta() {
-	p.RootCoordDelta = p.initChanNamePrefix("msgChannel.chanNamePrefix.rootCoordDelta")
+func (p *commonConfig) initRootCoordDelta() {
+	keys := []string{
+		"common.chanNamePrefix.rootCoordDelta",
+		"msgChannel.chanNamePrefix.rootCoordDelta",
+	}
+	p.RootCoordDelta = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initRootCoordSubName() {
-	p.RootCoordSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.rootCoordSubNamePrefix")
+func (p *commonConfig) initRootCoordSubName() {
+	keys := []string{
+		"common.subNamePrefix.rootCoordSubNamePrefix",
+		"msgChannel.subNamePrefix.rootCoordSubNamePrefix",
+	}
+	p.RootCoordSubName = p.initChanNamePrefix(keys)
 }
 
 // --- querycoord ---
-func (p *msgChannelConfig) initQueryCoordSearch() {
-	p.QueryCoordSearch = p.initChanNamePrefix("msgChannel.chanNamePrefix.search")
+func (p *commonConfig) initQueryCoordSearch() {
+	keys := []string{
+		"common.chanNamePrefix.search",
+		"msgChannel.chanNamePrefix.search",
+	}
+	p.QueryCoordSearch = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initQueryCoordSearchResult() {
-	p.QueryCoordSearchResult = p.initChanNamePrefix("msgChannel.chanNamePrefix.searchResult")
+func (p *commonConfig) initQueryCoordSearchResult() {
+	keys := []string{
+		"common.chanNamePrefix.searchResult",
+		"msgChannel.chanNamePrefix.searchResult",
+	}
+	p.QueryCoordSearchResult = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initQueryCoordTimeTick() {
-	p.QueryCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryTimeTick")
+func (p *commonConfig) initQueryCoordTimeTick() {
+	keys := []string{
+		"common.chanNamePrefix.queryTimeTick",
+		"msgChannel.chanNamePrefix.queryTimeTick",
+	}
+	p.QueryCoordTimeTick = p.initChanNamePrefix(keys)
 }
 
 // --- querynode ---
-func (p *msgChannelConfig) initQueryNodeStats() {
-	p.QueryNodeStats = p.initChanNamePrefix("msgChannel.chanNamePrefix.queryNodeStats")
+func (p *commonConfig) initQueryNodeStats() {
+	keys := []string{
+		"common.chanNamePrefix.queryNodeStats",
+		"msgChannel.chanNamePrefix.queryNodeStats",
+	}
+	p.QueryNodeStats = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initQueryNodeSubName() {
-	p.QueryNodeSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.queryNodeSubNamePrefix")
+func (p *commonConfig) initQueryNodeSubName() {
+	keys := []string{
+		"common.subNamePrefix.queryNodeSubNamePrefix",
+		"msgChannel.subNamePrefix.queryNodeSubNamePrefix",
+	}
+	p.QueryNodeSubName = p.initChanNamePrefix(keys)
 }
 
 // --- datacoord ---
-func (p *msgChannelConfig) initDataCoordStatistic() {
-	p.DataCoordStatistic = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordStatistic")
+func (p *commonConfig) initDataCoordStatistic() {
+	keys := []string{
+		"common.chanNamePrefix.dataCoordStatistic",
+		"msgChannel.chanNamePrefix.dataCoordStatistic",
+	}
+	p.DataCoordStatistic = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initDataCoordTimeTick() {
-	p.DataCoordTimeTick = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordTimeTick")
+func (p *commonConfig) initDataCoordTimeTick() {
+	keys := []string{
+		"common.chanNamePrefix.dataCoordTimeTick",
+		"msgChannel.chanNamePrefix.dataCoordTimeTick",
+	}
+	p.DataCoordTimeTick = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initDataCoordSegmentInfo() {
-	p.DataCoordSegmentInfo = p.initChanNamePrefix("msgChannel.chanNamePrefix.dataCoordSegmentInfo")
+func (p *commonConfig) initDataCoordSegmentInfo() {
+	keys := []string{
+		"common.chanNamePrefix.dataCoordSegmentInfo",
+		"msgChannel.chanNamePrefix.dataCoordSegmentInfo",
+	}
+	p.DataCoordSegmentInfo = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initDataCoordSubName() {
-	p.DataCoordSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.dataCoordSubNamePrefix")
+func (p *commonConfig) initDataCoordSubName() {
+	keys := []string{
+		"common.subNamePrefix.dataCoordSubNamePrefix",
+		"msgChannel.subNamePrefix.dataCoordSubNamePrefix",
+	}
+	p.DataCoordSubName = p.initChanNamePrefix(keys)
 }
 
-func (p *msgChannelConfig) initDataNodeSubName() {
-	p.DataNodeSubName = p.initChanNamePrefix("msgChannel.subNamePrefix.dataNodeSubNamePrefix")
+func (p *commonConfig) initDataNodeSubName() {
+	keys := []string{
+		"common.subNamePrefix.dataNodeSubNamePrefix",
+		"msgChannel.subNamePrefix.dataNodeSubNamePrefix",
+	}
+	p.DataNodeSubName = p.initChanNamePrefix(keys)
+}
+
+func (p *commonConfig) initDefaultPartitionName() {
+	p.DefaultPartitionName = p.Base.LoadWithDefault("common.defaultPartitionName", "_default")
+}
+
+func (p *commonConfig) initDefaultIndexName() {
+	p.DefaultIndexName = p.Base.LoadWithDefault("common.defaultIndexName", "_default_idx")
+}
+
+func (p *commonConfig) initRetentionDuration() {
+	p.RetentionDuration = p.Base.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
+}
+
+func (p *commonConfig) initSimdType() {
+	keys := []string{
+		"common.simdType",
+		"knowhere.simdType",
+	}
+	p.SimdType = p.Base.LoadWithDefault2(keys, "auto")
 }
 
 ///////////////////////////////////////////////////////////////////////////////

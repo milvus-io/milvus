@@ -73,6 +73,23 @@ func TestBaseTable_LoadFromKVPair(t *testing.T) {
 	v, err = baseParams.Load("k2")
 	assert.Nil(t, err)
 	assert.Equal(t, "v2", v)
+
+	v, err = baseParams.Load2([]string{"k2_new"})
+	assert.NotNil(t, err)
+	assert.Equal(t, "", v)
+
+	v, err = baseParams.Load2([]string{"k2_new", "k2"})
+	assert.Nil(t, err)
+	assert.Equal(t, "v2", v)
+
+	v = baseParams.LoadWithDefault("k2_new", "v2_new")
+	assert.Equal(t, "v2_new", v)
+
+	v = baseParams.LoadWithDefault2([]string{"k2_new"}, "v2_new")
+	assert.Equal(t, "v2_new", v)
+
+	v = baseParams.LoadWithDefault2([]string{"k2_new", "k2"}, "v2_new")
+	assert.Equal(t, "v2", v)
 }
 
 func TestBaseTable_LoadRange(t *testing.T) {
