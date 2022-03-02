@@ -70,7 +70,7 @@ func RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
 	return false
 }
 
-// RatedInfo print logs at debug level
+// RatedInfo print logs at info level
 // it limit log print to avoid too many logs
 // return true if log successfully
 func RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
@@ -81,7 +81,7 @@ func RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
 	return false
 }
 
-// RatedWarn print logs at debug level
+// RatedWarn print logs at warn level
 // it limit log print to avoid too many logs
 // return true if log successfully
 func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {

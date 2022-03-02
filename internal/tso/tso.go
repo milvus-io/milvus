@@ -30,7 +30,6 @@
 package tso
 
 import (
-	"log"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -38,6 +37,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/pkg/errors"
@@ -118,8 +118,7 @@ func (t *timestampOracle) InitTimestamp() error {
 		return err
 	}
 
-	log.Print("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
-
+	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 	current := &atomicObject{
 		physical: next,
 	}
@@ -175,7 +174,8 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
 	if jetLag > 3*UpdateTimestampStep {
-		log.Print("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prev.physical), zap.Time("now", now))
+		log.RatedWarn(60.0, "clock offset is huge, check network latency and clock skew", zap.Duration("jet-lag", jetLag),
+			zap.Time("prev-physical", prev.physical), zap.Time("now", now))
 	}
 
 	var next time.Time
@@ -186,7 +186,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	} else if prevLogical > maxLogical/2 {
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
 		// Because there is enough timestamp can be allocated before next update.
-		log.Print("the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
+		log.Warn("the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
 		next = prev.physical.Add(time.Millisecond)
 	} else {
 		// It will still use the previous physical time to alloc the timestamp.
