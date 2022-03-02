@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -656,7 +657,9 @@ func (it *insertTask) checkFieldAutoIDAndHashPK() error {
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 
+	tr := timerecord.NewTimeRecorder("applyPK")
 	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(rowNums)
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan()))
 
 	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
 	for i := rowIDBegin; i < rowIDEnd; i++ {
@@ -759,10 +762,12 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	tr := timerecord.NewTimeRecorder("ColumnToRow")
 	err = it.transferColumnBasedRequestToRowBasedData()
 	if err != nil {
 		return err
 	}
+	metrics.ProxyInsertColToRowLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	rowNum := len(it.RowData)
 	it.Timestamps = make([]uint64, rowNum)
@@ -1046,12 +1051,14 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 	tr.Record("assign segment id")
 
+	tr.Record("sendInsertMsg")
 	err = stream.Produce(pack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
+	metrics.ProxySendInsertReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName).Observe(float64(tr.RecordSpan().Milliseconds()))
 	tr.Record("send insert request to message stream")
 
 	return nil
@@ -1341,6 +1348,9 @@ type searchTask struct {
 	chMgr          channelsMgr
 	qc             types.QueryCoord
 	collectionName string
+
+	tr           *timerecord.TimeRecorder
+	collectionID UniqueID
 }
 
 func (st *searchTask) TraceCtx() context.Context {
@@ -1431,6 +1441,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+	st.collectionID = collID
 
 	if err := validateCollectionName(st.query.CollectionName); err != nil {
 		return err
@@ -1690,11 +1701,12 @@ func (st *searchTask) Execute(ctx context.Context) error {
 		}
 	}
 	tr.Record("get used message stream")
-
 	err = stream.Produce(&msgPack)
 	if err != nil {
 		log.Debug("proxy", zap.String("send search request failed", err.Error()))
 	}
+	metrics.ProxySendMessageLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName, metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	st.tr.Record("send message done")
 	log.Debug("proxy sent one searchMsg",
 		zap.Int64("collectionID", st.CollectionID),
 		zap.Int64("msgID", tsMsg.ID()),
@@ -1915,6 +1927,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 
 			log.Debug("Proxy Search PostExecute stage1",
 				zap.Any("len(filterSearchResults)", len(filterSearchResults)))
+			metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SearchLabel).Observe(float64(st.tr.RecordSpan().Milliseconds()))
 			tr.Record("Proxy Search PostExecute stage1 done")
 			if len(filterSearchResults) <= 0 {
 				st.result = &milvuspb.SearchResults{
@@ -1926,12 +1939,12 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 				}
 				return fmt.Errorf("no Available QueryNode result, filter reason %s: id %d", filterReason, st.ID())
 			}
-
+			tr.Record("decodeResultStart")
 			validSearchResults, err := decodeSearchResults(filterSearchResults)
 			if err != nil {
 				return err
 			}
-
+			metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 			log.Debug("Proxy Search PostExecute stage2", zap.Any("len(validSearchResults)", len(validSearchResults)))
 			if len(validSearchResults) <= 0 {
 				filterReason += "empty search result\n"
@@ -1951,10 +1964,12 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 				return nil
 			}
 
+			tr.Record("reduceResultStart")
 			st.result, err = reduceSearchResultData(validSearchResults, searchResults[0].NumQueries, searchResults[0].TopK, searchResults[0].MetricType)
 			if err != nil {
 				return err
 			}
+			metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SuccessLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 			st.result.CollectionName = st.collectionName
 
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, st.query.CollectionName)
@@ -1988,6 +2003,7 @@ type queryTask struct {
 	qc             types.QueryCoord
 	ids            *schemapb.IDs
 	collectionName string
+	collectionID   UniqueID
 }
 
 func (qt *queryTask) TraceCtx() context.Context {
@@ -2032,7 +2048,6 @@ func (qt *queryTask) getChannels() ([]pChan, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	var channels []pChan
 	channels, err = qt.chMgr.getChannels(collID)
 	if err != nil {
@@ -2630,6 +2645,8 @@ type getCollectionStatisticsTask struct {
 	ctx       context.Context
 	dataCoord types.DataCoord
 	result    *milvuspb.GetCollectionStatisticsResponse
+
+	collectionID UniqueID
 }
 
 func (g *getCollectionStatisticsTask) TraceCtx() context.Context {
@@ -2680,6 +2697,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	g.collectionID = collID
 	req := &datapb.GetCollectionStatisticsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_GetCollectionStatistics,
@@ -2717,6 +2735,8 @@ type getPartitionStatisticsTask struct {
 	ctx       context.Context
 	dataCoord types.DataCoord
 	result    *milvuspb.GetPartitionStatisticsResponse
+
+	collectionID UniqueID
 }
 
 func (g *getPartitionStatisticsTask) TraceCtx() context.Context {
@@ -2767,6 +2787,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	g.collectionID = collID
 	partitionID, err := globalMetaCache.GetPartitionID(ctx, g.CollectionName, g.PartitionName)
 	if err != nil {
 		return err
@@ -3359,6 +3380,8 @@ type createIndexTask struct {
 	ctx       context.Context
 	rootCoord types.RootCoord
 	result    *commonpb.Status
+
+	collectionID UniqueID
 }
 
 func (cit *createIndexTask) TraceCtx() context.Context {
@@ -3448,6 +3471,8 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("invalid index params: %v", cit.CreateIndexRequest.ExtraParams)
 	}
 
+	collID, _ := globalMetaCache.GetCollectionID(ctx, collName)
+	cit.collectionID = collID
 	return nil
 }
 
@@ -3473,6 +3498,8 @@ type describeIndexTask struct {
 	ctx       context.Context
 	rootCoord types.RootCoord
 	result    *milvuspb.DescribeIndexResponse
+
+	collectionID UniqueID
 }
 
 func (dit *describeIndexTask) TraceCtx() context.Context {
@@ -3525,6 +3552,8 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 		dit.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
+	collID, _ := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
+	dit.collectionID = collID
 	return nil
 }
 
@@ -3550,6 +3579,8 @@ type dropIndexTask struct {
 	*milvuspb.DropIndexRequest
 	rootCoord types.RootCoord
 	result    *commonpb.Status
+
+	collectionID UniqueID
 }
 
 func (dit *dropIndexTask) TraceCtx() context.Context {
@@ -3607,6 +3638,9 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 		dit.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
+	collID, _ := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
+	dit.collectionID = collID
+
 	return nil
 }
 
@@ -3634,6 +3668,8 @@ type getIndexBuildProgressTask struct {
 	rootCoord  types.RootCoord
 	dataCoord  types.DataCoord
 	result     *milvuspb.GetIndexBuildProgressResponse
+
+	collectionID UniqueID
 }
 
 func (gibpt *getIndexBuildProgressTask) TraceCtx() context.Context {
@@ -3690,6 +3726,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+	gibpt.collectionID = collectionID
 
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
@@ -3855,6 +3892,8 @@ type getIndexStateTask struct {
 	indexCoord types.IndexCoord
 	rootCoord  types.RootCoord
 	result     *milvuspb.GetIndexStateResponse
+
+	collectionID UniqueID
 }
 
 func (gist *getIndexStateTask) TraceCtx() context.Context {
@@ -3911,6 +3950,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
+	gist.collectionID = collectionID
 
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
@@ -4153,6 +4193,8 @@ type loadCollectionTask struct {
 	ctx        context.Context
 	queryCoord types.QueryCoord
 	result     *commonpb.Status
+
+	collectionID UniqueID
 }
 
 func (lct *loadCollectionTask) TraceCtx() context.Context {
@@ -4212,6 +4254,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	lct.collectionID = collID
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lct.CollectionName)
 	if err != nil {
 		return err
@@ -4251,6 +4294,8 @@ type releaseCollectionTask struct {
 	queryCoord types.QueryCoord
 	result     *commonpb.Status
 	chMgr      channelsMgr
+
+	collectionID UniqueID
 }
 
 func (rct *releaseCollectionTask) TraceCtx() context.Context {
@@ -4308,6 +4353,7 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	rct.collectionID = collID
 	request := &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ReleaseCollection,
@@ -4336,6 +4382,8 @@ type loadPartitionsTask struct {
 	ctx        context.Context
 	queryCoord types.QueryCoord
 	result     *commonpb.Status
+
+	collectionID UniqueID
 }
 
 func (lpt *loadPartitionsTask) TraceCtx() context.Context {
@@ -4394,6 +4442,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	lpt.collectionID = collID
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lpt.CollectionName)
 	if err != nil {
 		return err
@@ -4431,6 +4480,8 @@ type releasePartitionsTask struct {
 	ctx        context.Context
 	queryCoord types.QueryCoord
 	result     *commonpb.Status
+
+	collectionID UniqueID
 }
 
 func (rpt *releasePartitionsTask) TraceCtx() context.Context {
@@ -4489,6 +4540,7 @@ func (rpt *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	rpt.collectionID = collID
 	for _, partitionName := range rpt.PartitionNames {
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, rpt.CollectionName, partitionName)
 		if err != nil {
@@ -4527,6 +4579,8 @@ type deleteTask struct {
 	chTicker  channelsTimeTicker
 	vChannels []vChan
 	pChannels []pChan
+
+	collectionID UniqueID
 }
 
 func (dt *deleteTask) TraceCtx() context.Context {
@@ -4652,6 +4706,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	dt.DeleteRequest.CollectionID = collID
+	dt.collectionID = collID
 
 	// If partitionName is not empty, partitionID will be set.
 	if len(dt.req.PartitionName) > 0 {
