@@ -22,9 +22,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/mqclient"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -138,7 +138,7 @@ func (ms *FailMsgStream) Chan() <-chan *msgstream.MsgPack              { return 
 func (ms *FailMsgStream) AsProducer(channels []string)                 {}
 func (ms *FailMsgStream) AsConsumer(channels []string, subName string) {}
 func (ms *FailMsgStream) AsReader(channels []string, subName string)   {}
-func (ms *FailMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqclient.SubscriptionInitialPosition) {
+func (ms *FailMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
 func (ms *FailMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc)                   {}
 func (ms *FailMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 { return nil }

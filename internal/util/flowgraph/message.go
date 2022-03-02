@@ -17,7 +17,7 @@
 package flowgraph
 
 import (
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // Msg is an abstract class that contains a method to get the time tick of this message

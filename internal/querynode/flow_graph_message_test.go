@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 func TestFlowGraphMsg_insertMsg(t *testing.T) {

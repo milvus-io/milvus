@@ -17,7 +17,7 @@
 package querynode
 
 import (
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 

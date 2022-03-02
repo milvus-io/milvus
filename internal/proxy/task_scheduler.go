@@ -31,10 +31,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/mqclient"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
@@ -818,7 +818,7 @@ func (sched *taskScheduler) collectResultLoop() {
 	queryResultMsgStream, _ := sched.msFactory.NewQueryMsgStream(sched.ctx)
 	// proxy didn't need to walk through all the search results in channel, because it no longer has client connections.
 	consumeSubName := fmt.Sprintf("%s-%d", Params.MsgChannelCfg.ProxySubName, Params.ProxyCfg.ProxyID)
-	queryResultMsgStream.AsConsumerWithPosition(Params.ProxyCfg.SearchResultChannelNames, consumeSubName, mqclient.SubscriptionPositionLatest)
+	queryResultMsgStream.AsConsumerWithPosition(Params.ProxyCfg.SearchResultChannelNames, consumeSubName, mqwrapper.SubscriptionPositionLatest)
 	log.Debug("Proxy", zap.Strings("SearchResultChannelNames", Params.ProxyCfg.SearchResultChannelNames),
 		zap.Any("consumeSubName", consumeSubName))
 

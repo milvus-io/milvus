@@ -19,7 +19,7 @@ package proxy
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // insertRepackFunc deprecated, use defaultInsertRepackFunc instead.

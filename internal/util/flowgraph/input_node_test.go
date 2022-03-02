@@ -21,7 +21,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/stretchr/testify/assert"
 )
 
