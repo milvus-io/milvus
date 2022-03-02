@@ -36,7 +36,7 @@ func TestMemoryKV_SaveAndLoadBytes(t *testing.T) {
 
 	noKey := "no_key"
 	_value, err = mem.LoadBytes(noKey)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.Empty(t, _value)
 }
 
@@ -167,7 +167,7 @@ func TestMemoryKV_MultiSaveBytesAndRemove(t *testing.T) {
 
 	_value, err := mem.LoadBytes(keys[0])
 	assert.Empty(t, _value)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 
 	_values, err := mem.MultiLoadBytes(keys[1:])
 	assert.Equal(t, values[1:], _values)
@@ -255,6 +255,6 @@ func TestMemoryKV_GetSize(t *testing.T) {
 	key2 := "TestMemoryKV_GetSize_key2"
 
 	size, err = memKV.GetSize(key2)
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, int64(0), size)
 }

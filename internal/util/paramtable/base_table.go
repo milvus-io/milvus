@@ -34,7 +34,20 @@ import (
 // UniqueID is type alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
 
-const envPrefix string = "milvus"
+const (
+	DefaultMinioHost            = "localhost"
+	DefaultMinioPort            = "9000"
+	DefaultMinioAccessKey       = "minioadmin"
+	DefaultMinioSecretAccessKey = "minioadmin"
+	DefaultMinioUseSSL          = "false"
+	DefaultMinioBucketName      = "a-bucket"
+	DefaultPulsarHost           = "localhost"
+	DefaultPulsarPort           = "6650"
+	DefaultEtcdEndpoints        = "localhost:2379"
+	DefaultRocksmqPath          = "/var/lib/milvus/rdb_data"
+	DefaultInsertBufferSize     = "16777216"
+	DefaultEnvPrefix            = "milvus"
+)
 
 // Base abstracts BaseTable
 // TODO: it's never used, consider to substitute BaseTable or to remove it
@@ -112,100 +125,72 @@ func (gp *BaseTable) loadFromMilvusYaml() {
 }
 
 func (gp *BaseTable) tryloadFromEnv() {
-	var err error
+	// minio
 	minioAddress := os.Getenv("MINIO_ADDRESS")
 	if minioAddress == "" {
-		minioHost, err := gp.Load("minio.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("minio.port")
-		if err != nil {
-			panic(err)
-		}
+		minioHost := gp.LoadWithDefault("minio.address", DefaultMinioHost)
+		port := gp.LoadWithDefault("minio.port", DefaultMinioPort)
 		minioAddress = minioHost + ":" + port
 	}
 	gp.Save("_MinioAddress", minioAddress)
 
+	// etcd
 	etcdEndpoints := os.Getenv("ETCD_ENDPOINTS")
 	if etcdEndpoints == "" {
-		etcdEndpoints, err = gp.Load("etcd.endpoints")
-		if err != nil {
-			panic(err)
-		}
+		etcdEndpoints = gp.LoadWithDefault("etcd.endpoints", DefaultEtcdEndpoints)
 	}
 	gp.Save("_EtcdEndpoints", etcdEndpoints)
 
+	// pulsar
 	pulsarAddress := os.Getenv("PULSAR_ADDRESS")
 	if pulsarAddress == "" {
-		pulsarHost, err := gp.Load("pulsar.address")
-		if err != nil {
-			panic(err)
-		}
-		port, err := gp.Load("pulsar.port")
-		if err != nil {
-			panic(err)
-		}
+		pulsarHost := gp.LoadWithDefault("pulsar.address", DefaultPulsarHost)
+		port := gp.LoadWithDefault("pulsar.port", DefaultPulsarPort)
 		pulsarAddress = "pulsar://" + pulsarHost + ":" + port
 	}
 	gp.Save("_PulsarAddress", pulsarAddress)
 
+	// rocksmq
 	rocksmqPath := os.Getenv("ROCKSMQ_PATH")
 	if rocksmqPath == "" {
-		path, err := gp.Load("rocksmq.path")
-		if err != nil {
-			panic(err)
-		}
-		rocksmqPath = path
+		rocksmqPath = gp.LoadWithDefault("rocksmq.path", DefaultRocksmqPath)
 	}
 	gp.Save("_RocksmqPath", rocksmqPath)
 
 	insertBufferFlushSize := os.Getenv("DATA_NODE_IBUFSIZE")
 	if insertBufferFlushSize == "" {
-		insertBufferFlushSize = gp.LoadWithDefault("datanode.flush.insertBufSize", "16777216")
+		insertBufferFlushSize = gp.LoadWithDefault("datanode.flush.insertBufSize", DefaultInsertBufferSize)
 	}
 	gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
 
 	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
 	if minioAccessKey == "" {
-		minioAccessKey, err = gp.Load("minio.accessKeyID")
-		if err != nil {
-			panic(err)
-		}
+		minioAccessKey = gp.LoadWithDefault("minio.accessKeyID", DefaultMinioAccessKey)
 	}
 	gp.Save("_MinioAccessKeyID", minioAccessKey)
 
 	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
 	if minioSecretKey == "" {
-		minioSecretKey, err = gp.Load("minio.secretAccessKey")
-		if err != nil {
-			panic(err)
-		}
+		minioSecretKey = gp.LoadWithDefault("minio.secretAccessKey", DefaultMinioSecretAccessKey)
 	}
 	gp.Save("_MinioSecretAccessKey", minioSecretKey)
 
 	minioUseSSL := os.Getenv("MINIO_USE_SSL")
 	if minioUseSSL == "" {
-		minioUseSSL, err = gp.Load("minio.useSSL")
-		if err != nil {
-			panic(err)
-		}
+		minioUseSSL = gp.LoadWithDefault("minio.useSSL", DefaultMinioUseSSL)
 	}
 	gp.Save("_MinioUseSSL", minioUseSSL)
 
 	minioBucketName := os.Getenv("MINIO_BUCKET_NAME")
 	if minioBucketName == "" {
-		minioBucketName, err = gp.Load("minio.bucketName")
-		if err != nil {
-			panic(err)
-		}
+		minioBucketName = gp.LoadWithDefault("minio.bucketName", DefaultMinioBucketName)
 	}
 	gp.Save("_MinioBucketName", minioBucketName)
 
 	// try to load environment start with ENV_PREFIX
 	for _, e := range os.Environ() {
 		parts := strings.SplitN(e, "=", 2)
-		if strings.Contains(parts[0], envPrefix) {
+		if strings.Contains(parts[0], DefaultEnvPrefix) {
 			parts := strings.SplitN(e, "=", 2)
 			// remove the ENV PREFIX and use the rest as key
 			keyParts := strings.SplitAfterN(parts[0], ".", 2)

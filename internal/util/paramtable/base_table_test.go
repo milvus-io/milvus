@@ -122,7 +122,7 @@ func TestBaseTable_LoadYaml(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Panics(t, func() { baseParams.LoadYaml("advanced/not_exist.yaml") })
 
-	_, err = baseParams.Load("etcd.address")
+	_, err = baseParams.Load("etcd.endpoints")
 	assert.Nil(t, err)
 	_, err = baseParams.Load("pulsar.port")
 	assert.Nil(t, err)
