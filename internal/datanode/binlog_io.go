@@ -205,7 +205,7 @@ func (b *binlogIO) upload(
 			return nil, errUploadToBlobStorage
 		default:
 			if err != errStart {
-				log.Info("save binlog failed, retry in 50ms",
+				log.Warn("save binlog failed, retry in 50ms",
 					zap.Int64("collectionID", meta.GetID()),
 					zap.Int64("segmentID", segID))
 				<-time.After(50 * time.Millisecond)

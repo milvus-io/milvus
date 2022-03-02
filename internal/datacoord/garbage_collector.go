@@ -143,7 +143,7 @@ func (gc *garbageCollector) scan() {
 			}
 		}
 	}
-	log.Warn("scan result", zap.Int("valid", v), zap.Int("missing", m), zap.Strings("removed keys", removedKeys))
+	log.Info("scan result", zap.Int("valid", v), zap.Int("missing", m), zap.Strings("removed keys", removedKeys))
 }
 
 func (gc *garbageCollector) clearEtcd() {

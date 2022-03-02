@@ -390,10 +390,10 @@ func (s *Server) initGarbageCollection() error {
 func (s *Server) initServiceDiscovery() error {
 	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
 	if err != nil {
-		log.Debug("DataCoord failed to init service discovery", zap.Error(err))
+		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
 		return err
 	}
-	log.Debug("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
+	log.Info("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
 
 	datanodes := make([]*NodeInfo, 0, len(sessions))
 	for _, session := range sessions {
@@ -450,7 +450,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	}
 	ttMsgStream.AsConsumerWithPosition([]string{Params.MsgChannelCfg.DataCoordTimeTick},
 		Params.MsgChannelCfg.DataCoordSubName, mqclient.SubscriptionPositionLatest)
-	log.Debug("DataCoord creates the timetick channel consumer",
+	log.Info("DataCoord creates the timetick channel consumer",
 		zap.String("timeTickChannel", Params.MsgChannelCfg.DataCoordTimeTick),
 		zap.String("subscription", Params.MsgChannelCfg.DataCoordSubName))
 	ttMsgStream.Start()
@@ -481,13 +481,13 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("DataNode timetick loop shutdown")
+			log.Info("DataNode timetick loop shutdown")
 			return
 		default:
 		}
 		msgPack := ttMsgStream.Consume()
 		if msgPack == nil {
-			log.Debug("receive nil timetick msg and shutdown timetick channel")
+			log.Info("receive nil timetick msg and shutdown timetick channel")
 			return
 		}
 		for _, msg := range msgPack.Msgs {
@@ -537,7 +537,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		return nil
 	}
 
-	log.Debug("flush segments", zap.Int64s("segmentIDs", flushableIDs), zap.Int("markSegments count", len(staleSegments)))
+	log.Info("flush segments", zap.Int64s("segmentIDs", flushableIDs), zap.Int("markSegments count", len(staleSegments)))
 
 	s.setLastFlushTime(flushableSegments)
 	s.setLastFlushTime(staleSegments)
@@ -615,7 +615,7 @@ func (s *Server) watchService(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("watch service shutdown")
+			log.Info("watch service shutdown")
 			return
 		case event, ok := <-s.eventCh:
 			if !ok {
@@ -730,7 +730,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		log.Error("flush segment complete failed", zap.Error(err))
 		return err
 	}
-	log.Debug("flush segment complete", zap.Int64("id", segmentID))
+	log.Info("flush segment complete", zap.Int64("id", segmentID))
 	return nil
 }
 

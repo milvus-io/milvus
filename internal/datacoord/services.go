@@ -66,7 +66,7 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // this api only guarantees all the segments requested is sealed
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	log.Debug("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "DataCoord-Flush")
 	defer sp.Finish()
 	resp := &datapb.FlushResponse{
@@ -87,7 +87,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		resp.Status.Reason = fmt.Sprintf("failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
-	log.Debug("flush response with segments",
+	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Any("segments", sealedSegments))
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
@@ -111,7 +111,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 	assigns := make([]*datapb.SegmentIDAssignment, 0, len(req.SegmentIDRequests))
 
 	for _, r := range req.SegmentIDRequests {
-		log.Debug("handle assign segment request",
+		log.Info("handle assign segment request",
 			zap.Int64("collectionID", r.GetCollectionID()),
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
@@ -136,7 +136,7 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
 			continue
 		}
-		log.Debug("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segAlloc))
+		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segAlloc))
 
 		for _, allocation := range segAlloc {
 			result := &datapb.SegmentIDAssignment{
@@ -310,7 +310,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 
-	log.Debug("receive SaveBinlogPaths request",
+	log.Info("receive SaveBinlogPaths request",
 		zap.Int64("nodeID", req.GetBase().GetSourceID()),
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
@@ -359,7 +359,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 
-	log.Debug("flush segment with meta", zap.Int64("id", req.SegmentID),
+	log.Info("flush segment with meta", zap.Int64("id", req.SegmentID),
 		zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.GetFlushed() {
@@ -398,7 +398,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	}
 
 	channel := req.GetChannelName()
-	log.Debug("receive DropVirtualChannel request",
+	log.Info("receive DropVirtualChannel request",
 		zap.String("channel name", channel))
 
 	// validate
@@ -433,7 +433,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		return resp, nil
 	}
 
-	log.Debug("DropVChannel plan to remove", zap.String("channel", channel))
+	log.Info("DropVChannel plan to remove", zap.String("channel", channel))
 	err = s.channelManager.RemoveChannel(channel)
 	if err != nil {
 		log.Warn("DropVChannel failed to RemoveChannel", zap.String("channel", channel), zap.Error(err))
@@ -703,7 +703,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		return metrics, nil
 	}
 
-	log.Debug("DataCoord.GetMetrics failed, request metric type is not implemented yet",
+	log.RatedWarn(60.0, "DataCoord.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.DataCoordCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
@@ -719,7 +719,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 // CompleteCompaction completes a compaction with the result
 func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
-	log.Debug("receive complete compaction request", zap.Int64("planID", req.PlanID), zap.Int64("segmentID", req.GetSegmentID()))
+	log.Info("receive complete compaction request", zap.Int64("planID", req.PlanID), zap.Int64("segmentID", req.GetSegmentID()))
 
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -744,14 +744,14 @@ func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionR
 		return resp, nil
 	}
 
-	log.Debug("success to complete compaction", zap.Int64("planID", req.PlanID))
+	log.Info("success to complete compaction", zap.Int64("planID", req.PlanID))
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
 
 // ManualCompaction triggers a compaction for a collection
 func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
-	log.Debug("received manual compaction", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("received manual compaction", zap.Int64("collectionID", req.GetCollectionID()))
 
 	resp := &milvuspb.ManualCompactionResponse{
 		Status: &commonpb.Status{
@@ -785,7 +785,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	log.Debug("success to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("compactionID", id))
+	log.Info("success to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("compactionID", id))
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.CompactionID = id
 	return resp, nil
@@ -793,7 +793,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 // GetCompactionState gets the state of a compaction
 func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	log.Debug("received get compaction state request", zap.Int64("compactionID", req.GetCompactionID()))
+	log.Info("received get compaction state request", zap.Int64("compactionID", req.GetCompactionID()))
 	resp := &milvuspb.GetCompactionStateResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -820,14 +820,14 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	resp.CompletedPlanNo = int64(completedCnt)
 	resp.TimeoutPlanNo = int64(timeoutCnt)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	log.Debug("success to get compaction state", zap.Any("state", state), zap.Int("executing", executingCnt),
+	log.Info("success to get compaction state", zap.Any("state", state), zap.Int("executing", executingCnt),
 		zap.Int("completed", completedCnt), zap.Int("timeout", timeoutCnt))
 	return resp, nil
 }
 
 // GetCompactionStateWithPlans returns the compaction state of given plan
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
-	log.Debug("received the request to get compaction state with plans", zap.Int64("compactionID", req.GetCompactionID()))
+	log.Info("received the request to get compaction state with plans", zap.Int64("compactionID", req.GetCompactionID()))
 
 	resp := &milvuspb.GetCompactionPlansResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
@@ -853,7 +853,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.State = state
-	log.Debug("success to get state with plans", zap.Any("state", state), zap.Any("merge infos", resp.MergeInfos))
+	log.Info("success to get state with plans", zap.Any("state", state), zap.Any("merge infos", resp.MergeInfos))
 	return resp, nil
 }
 
@@ -896,7 +896,7 @@ func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState
 
 // WatchChannels notifies DataCoord to watch vchannels of a collection.
 func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
-	log.Debug("receive watch channels request", zap.Any("channels", req.GetChannelNames()))
+	log.Info("receive watch channels request", zap.Any("channels", req.GetChannelNames()))
 	resp := &datapb.WatchChannelsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -928,7 +928,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 
 // GetFlushState gets the flush state of multiple segments
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log.Debug("received get flush state request", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
+	log.Info("received get flush state request", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
 
 	resp := &milvuspb.GetFlushStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
 	if s.isClosed() {
@@ -951,10 +951,10 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	}
 
 	if len(unflushed) != 0 {
-		log.Debug("[flush state] unflushed segment ids", zap.Int64s("segmentIDs", unflushed), zap.Int("len", len(unflushed)))
+		log.Info("[flush state] unflushed segment ids", zap.Int64s("segmentIDs", unflushed), zap.Int("len", len(unflushed)))
 		resp.Flushed = false
 	} else {
-		log.Debug("[flush state] all segment is flushed", zap.Int64s("segment ids", req.GetSegmentIDs()))
+		log.Info("[flush state] all segment is flushed", zap.Int64s("segment ids", req.GetSegmentIDs()))
 		resp.Flushed = true
 	}
 

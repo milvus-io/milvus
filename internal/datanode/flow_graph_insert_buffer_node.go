@@ -237,7 +237,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			continue
 		}
 
-		log.Debug("insert seg buffer status", zap.Int("No.", k),
+		log.Info("insert seg buffer status", zap.Int("No.", k),
 			zap.Int64("segmentID", segID),
 			zap.String("vchannel name", ibNode.channelName),
 			zap.Int64("buffer size", bd.(*BufferData).size),
@@ -259,7 +259,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	if fgMsg.dropCollection {
 		segmentsToFlush := ibNode.replica.listAllSegmentIDs()
-		log.Debug("Recive drop collection req and flushing all segments",
+		log.Info("Receive drop collection req and flushing all segments",
 			zap.Any("segments", segmentsToFlush),
 			zap.String("vchannel name", ibNode.channelName),
 		)
@@ -309,7 +309,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		select {
 		case fmsg := <-ibNode.flushChan:
 
-			log.Debug(". Receiving flush message",
+			log.Info(". Receiving flush message",
 				zap.Int64("segmentID", fmsg.segmentID),
 				zap.Int64("collectionID", fmsg.collectionID),
 				zap.String("vchannel name", ibNode.channelName),
