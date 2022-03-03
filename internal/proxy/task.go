@@ -1147,23 +1147,32 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	// validate whether field names duplicates
 	if err := validateDuplicatedFieldName(cct.schema.Fields); err != nil {
 		return err
 	}
 
+	// validate primary key definition
 	if err := validatePrimaryKey(cct.schema); err != nil {
 		return err
 	}
 
+	// validate auto id definition
 	if err := ValidateFieldAutoID(cct.schema); err != nil {
 		return err
 	}
 
-	// validate field name
+	// validate field type definition
+	if err := validateFieldType(cct.schema); err != nil {
+		return err
+	}
+
 	for _, field := range cct.schema.Fields {
+		// validate field name
 		if err := validateFieldName(field.Name); err != nil {
 			return err
 		}
+		// validate vector field type parameters
 		if field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector {
 			exist := false
 			var dim int64
