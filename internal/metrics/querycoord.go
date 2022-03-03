@@ -22,18 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const (
-	// TODO: move to metrics.go
-	queryCoordStatusLabel        = "status"
-	QueryCoordMetricLabelSuccess = "success"
-	QueryCoordMetricLabelFail    = "fail"
-	QueryCoordMetricLabelTotal   = "total"
-)
-
-// queryCoordLoadBuckets involves durations in milliseconds,
-// [10 20 40 80 160 320 640 1280 2560 5120 10240 20480 40960 81920 163840 327680 655360 1.31072e+06]
-var queryCoordLoadBuckets = prometheus.ExponentialBuckets(10, 2, 18)
-
 var (
 	QueryCoordNumCollections = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -50,7 +38,7 @@ var (
 			Name:      "num_entities",
 			Help:      "Number of entities in collection.",
 		}, []string{
-			collectionIDLabel,
+			collectionIDLabelName,
 		})
 
 	QueryCoordLoadCount = prometheus.NewCounterVec(
@@ -60,7 +48,7 @@ var (
 			Name:      "load_count",
 			Help:      "Load request statistic in QueryCoord.",
 		}, []string{
-			queryCoordStatusLabel,
+			statusLabelName,
 		})
 
 	QueryCoordReleaseCount = prometheus.NewCounterVec(
@@ -70,7 +58,7 @@ var (
 			Name:      "release_count",
 			Help:      "Release request statistic in QueryCoord.",
 		}, []string{
-			queryCoordStatusLabel,
+			statusLabelName,
 		})
 
 	QueryCoordLoadLatency = prometheus.NewHistogramVec(
@@ -79,7 +67,7 @@ var (
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "load_latency",
 			Help:      "Load request latency in QueryCoord",
-			Buckets:   queryCoordLoadBuckets,
+			Buckets:   buckets,
 		}, []string{})
 
 	QueryCoordReleaseLatency = prometheus.NewHistogramVec(
@@ -113,7 +101,7 @@ var (
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "child_task_latency",
 			Help:      "Child tasks latency in QueryCoord.",
-			Buckets:   queryCoordLoadBuckets,
+			Buckets:   buckets,
 		}, []string{})
 
 	QueryCoordNumQueryNodes = prometheus.NewGaugeVec(

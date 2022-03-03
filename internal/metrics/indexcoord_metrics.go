@@ -21,14 +21,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const (
-	UnissuedIndexTaskLabel   = "unissued"
-	InProgressIndexTaskLabel = "in-progress"
-	FinishedIndexTaskLabel   = "finished"
-	FailedIndexTaskLabel     = "failed"
-	RecycledIndexTaskLabel   = "recycled"
-)
-
 var (
 	// IndexCoordIndexRequestCounter records the number of the index requests.
 	IndexCoordIndexRequestCounter = prometheus.NewCounterVec(
@@ -37,7 +29,7 @@ var (
 			Subsystem: typeutil.IndexCoordRole,
 			Name:      "index_req_counter",
 			Help:      "The number of requests to build index",
-		}, []string{"status"})
+		}, []string{statusLabelName})
 
 	// IndexCoordIndexTaskCounter records the number of index tasks of each type.
 	IndexCoordIndexTaskCounter = prometheus.NewGaugeVec(
@@ -46,7 +38,7 @@ var (
 			Subsystem: typeutil.IndexCoordRole,
 			Name:      "index_task_counter",
 			Help:      "The number of index tasks of each type",
-		}, []string{"type"})
+		}, []string{"index_task_status"})
 
 	// IndexCoordIndexNodeNum records the number of IndexNodes managed by IndexCoord.
 	IndexCoordIndexNodeNum = prometheus.NewGaugeVec(

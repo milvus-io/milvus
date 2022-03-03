@@ -22,34 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const (
-	// TODO: use the common status label
-	queryNodeStatusLabel        = "status"
-	QueryNodeMetricLabelSuccess = "success"
-	QueryNodeMetricLabelFail    = "fail"
-	QueryNodeMetricLabelTotal   = "total"
-
-	// TODO: use the common status label
-	nodeIDLabel       = "node_id"
-	collectionIDLabel = "collection_id"
-)
-
-const (
-	// query type
-	queryTypeLabel           = "query_type"
-	QueryNodeQueryTypeSearch = "search"
-	QueryNodeQueryTypeQuery  = "query"
-
-	// segment type
-	segmentTypeLabel        = "segment_type"
-	QueryNodeSegTypeSealed  = "sealed"
-	QueryNodeSegTypeGrowing = "growing"
-)
-
-// queryNodeDurationBuckets involves durations in milliseconds,
-// [10 20 40 80 160 320 640 1280 2560 5120 10240 20480 40960 81920 163840 327680 655360 1.31072e+06]
-var queryNodeDurationBuckets = prometheus.ExponentialBuckets(10, 2, 18)
-
 var (
 	QueryNodeNumCollections = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -58,7 +30,7 @@ var (
 			Name:      "num_collections",
 			Help:      "Number of collections in QueryNode.",
 		}, []string{
-			nodeIDLabel,
+			nodeIDLabelName,
 		})
 
 	QueryNodeNumPartitions = prometheus.NewGaugeVec(
@@ -68,8 +40,8 @@ var (
 			Name:      "num_partitions",
 			Help:      "Number of partitions per collection in QueryNode.",
 		}, []string{
-			collectionIDLabel,
-			nodeIDLabel,
+			collectionIDLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeNumSegments = prometheus.NewGaugeVec(
@@ -79,8 +51,8 @@ var (
 			Name:      "num_segments",
 			Help:      "Number of segments per collection in QueryNode.",
 		}, []string{
-			collectionIDLabel,
-			nodeIDLabel,
+			collectionIDLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
@@ -90,8 +62,8 @@ var (
 			Name:      "num_dml_channels",
 			Help:      "Number of dmlChannels per collection in QueryNode.",
 		}, []string{
-			collectionIDLabel,
-			nodeIDLabel,
+			collectionIDLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeNumDeltaChannels = prometheus.NewGaugeVec(
@@ -101,8 +73,8 @@ var (
 			Name:      "num_delta_channels",
 			Help:      "Number of deltaChannels per collection in QueryNode.",
 		}, []string{
-			collectionIDLabel,
-			nodeIDLabel,
+			collectionIDLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeNumConsumers = prometheus.NewGaugeVec(
@@ -112,8 +84,8 @@ var (
 			Name:      "num_consumers",
 			Help:      "Number of consumers per collection in QueryNode.",
 		}, []string{
-			collectionIDLabel,
-			nodeIDLabel,
+			collectionIDLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeNumReaders = prometheus.NewGaugeVec(
@@ -123,8 +95,8 @@ var (
 			Name:      "num_readers",
 			Help:      "Number of readers per collection in QueryNode.",
 		}, []string{
-			collectionIDLabel,
-			nodeIDLabel,
+			collectionIDLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeSQCount = prometheus.NewCounterVec(
@@ -134,9 +106,9 @@ var (
 			Name:      "sq_count",
 			Help:      "Search and query requests statistic in QueryNode.",
 		}, []string{
-			queryNodeStatusLabel,
-			queryTypeLabel,
-			nodeIDLabel,
+			statusLabelName,
+			queryTypeLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeSQReqLatency = prometheus.NewHistogramVec(
@@ -145,10 +117,10 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_latency",
 			Help:      "Search and query requests latency in QueryNode.",
-			Buckets:   queryNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
-			queryTypeLabel,
-			nodeIDLabel,
+			queryTypeLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeSQLatencyInQueue = prometheus.NewHistogramVec(
@@ -157,10 +129,10 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_latency_in_queue",
 			Help:      "The search and query latency in queue(unsolved buffer) in QueryNode.",
-			Buckets:   queryNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
-			queryTypeLabel,
-			nodeIDLabel,
+			queryTypeLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeSQSegmentLatency = prometheus.NewHistogramVec(
@@ -169,11 +141,11 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_latency_per_segment",
 			Help:      "The search and query on segments(sealed/growing segments).",
-			Buckets:   queryNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
-			queryTypeLabel,
-			segmentTypeLabel,
-			nodeIDLabel,
+			queryTypeLabelName,
+			segmentTypeLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeSQSegmentLatencyInCore = prometheus.NewHistogramVec(
@@ -182,10 +154,10 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "sq_latency_in_core",
 			Help:      "The search and query latency in core.",
-			Buckets:   queryNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
-			queryTypeLabel,
-			nodeIDLabel,
+			queryTypeLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeTranslateHitsLatency = prometheus.NewHistogramVec(
@@ -194,9 +166,9 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "translate_hits_latency",
 			Help:      "The search and query latency in translate hits.",
-			Buckets:   queryNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
-			nodeIDLabel,
+			nodeIDLabelName,
 		})
 
 	QueryNodeReduceLatency = prometheus.NewHistogramVec(
@@ -205,10 +177,10 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "reduce_latency",
 			Help:      "The search and query latency in reduce(local reduce) in QueryNode.",
-			Buckets:   queryNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
-			segmentTypeLabel,
-			nodeIDLabel,
+			segmentTypeLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeLoadSegmentLatency = prometheus.NewHistogramVec(
@@ -217,9 +189,9 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "load_latency_per_segment",
 			Help:      "The load latency per segment in QueryNode.",
-			Buckets:   queryNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
-			nodeIDLabel,
+			nodeIDLabelName,
 		})
 
 	QueryNodeServiceTime = prometheus.NewGaugeVec(
@@ -229,8 +201,8 @@ var (
 			Name:      "service_time",
 			Help:      "ServiceTimes of collections in QueryNode.",
 		}, []string{
-			collectionIDLabel,
-			nodeIDLabel,
+			collectionIDLabelName,
+			nodeIDLabelName,
 		})
 
 	QueryNodeNumFlowGraphs = prometheus.NewGaugeVec(
@@ -240,7 +212,7 @@ var (
 			Name:      "num_flow_graphs",
 			Help:      "Number of flow graphs in QueryNode.",
 		}, []string{
-			nodeIDLabel,
+			nodeIDLabelName,
 		})
 )
 

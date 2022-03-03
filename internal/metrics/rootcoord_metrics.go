@@ -13,7 +13,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "list_of_proxy",
 			Help:      "List of proxy nodes which have registered with etcd",
-		}, []string{"node_id"})
+		}, []string{nodeIDLabelName})
 
 	////////////////////////////////////////////////////////////////////////////
 	// for grpc
@@ -25,7 +25,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "create_collection_total",
 			Help:      "Counter of create collection",
-		}, []string{"status"})
+		}, []string{statusLabelName})
 
 	// RootCoordDropCollectionCounter counts the num of calls of DropCollection
 	RootCoordDropCollectionCounter = prometheus.NewCounterVec(
@@ -34,7 +34,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "drop_collection_total",
 			Help:      "Counter of drop collection",
-		}, []string{"status"})
+		}, []string{statusLabelName})
 
 	// RootCoordHasCollectionCounter counts the num of calls of HasCollection
 	RootCoordHasCollectionCounter = prometheus.NewCounterVec(
@@ -43,7 +43,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "has_collection_total",
 			Help:      "Counter of has collection",
-		}, []string{"status"})
+		}, []string{statusLabelName})
 
 	// RootCoordDescribeCollectionCounter counts the num of calls of DescribeCollection
 	RootCoordDescribeCollectionCounter = prometheus.NewCounterVec(
@@ -52,7 +52,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "describe_collection_total",
 			Help:      "Counter of describe collection",
-		}, []string{"status"})
+		}, []string{statusLabelName})
 
 	// RootCoordShowCollectionsCounter counts the num of calls of ShowCollections
 	RootCoordShowCollectionsCounter = prometheus.NewCounterVec(
@@ -61,7 +61,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "show_collections_total",
 			Help:      "Counter of show collections",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordCreatePartitionCounter counts the num of calls of CreatePartition
 	RootCoordCreatePartitionCounter = prometheus.NewCounterVec(
@@ -70,7 +70,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "create_partition_total",
 			Help:      "Counter of create partition",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordDropPartitionCounter counts the num of calls of DropPartition
 	RootCoordDropPartitionCounter = prometheus.NewCounterVec(
@@ -79,7 +79,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "drop_partition_total",
 			Help:      "Counter of drop partition",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordHasPartitionCounter counts the num of calls of HasPartition
 	RootCoordHasPartitionCounter = prometheus.NewCounterVec(
@@ -88,7 +88,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "has_partition_total",
 			Help:      "Counter of has partition",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordShowPartitionsCounter counts the num of calls of ShowPartitions
 	RootCoordShowPartitionsCounter = prometheus.NewCounterVec(
@@ -97,7 +97,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "show_partitions_total",
 			Help:      "Counter of show partitions",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordCreateIndexCounter counts the num of calls of CreateIndex
 	RootCoordCreateIndexCounter = prometheus.NewCounterVec(
@@ -106,7 +106,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "create_index_total",
 			Help:      "Counter of create index",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordDropIndexCounter counts the num of calls of DropIndex
 	RootCoordDropIndexCounter = prometheus.NewCounterVec(
@@ -115,7 +115,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "drop_index_total",
 			Help:      "Counter of drop index",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordDescribeIndexCounter counts the num of calls of DescribeIndex
 	RootCoordDescribeIndexCounter = prometheus.NewCounterVec(
@@ -124,7 +124,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "describe_index_total",
 			Help:      "Counter of describe index",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordDescribeSegmentCounter counts the num of calls of DescribeSegment
 	RootCoordDescribeSegmentCounter = prometheus.NewCounterVec(
@@ -133,7 +133,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "describe_segment_total",
 			Help:      "Counter of describe segment",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	// RootCoordShowSegmentsCounter counts the num of calls of ShowSegments
 	RootCoordShowSegmentsCounter = prometheus.NewCounterVec(
@@ -142,7 +142,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "show_segments_total",
 			Help:      "Counter of show segments",
-		}, []string{"type"})
+		}, []string{statusLabelName})
 
 	////////////////////////////////////////////////////////////////////////////
 	// for time tick
@@ -163,7 +163,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "ddl_read_type_latency",
 			Help:      "The latency for read type of DDL operations",
-		}, []string{"function_name", "collection_id"})
+		}, []string{functionLabelName, collectionIDLabelName})
 
 	// RootCoordDDLWriteTypeLatency records the latency for write type of DDL operations.
 	RootCoordDDLWriteTypeLatency = prometheus.NewHistogramVec(
@@ -172,7 +172,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "ddl_write_type_latency",
 			Help:      "The latency for write type of DDL operations",
-		}, []string{"function_name", "collection_name"})
+		}, []string{functionLabelName, collectionIDLabelName})
 
 	// RootCoordSyncTimeTickLatency records the latency of sync time tick.
 	RootCoordSyncTimeTickLatency = prometheus.NewHistogram(
@@ -226,7 +226,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "num_of_partitions",
 			Help:      "The number of partitions per collection",
-		}, []string{"collection_id"})
+		}, []string{collectionIDLabelName})
 
 	// RootCoordNumOfSegments counts the number of segments per collections.
 	RootCoordNumOfSegments = prometheus.NewGaugeVec(
@@ -235,7 +235,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "num_of_segments",
 			Help:      "The number of segments per collection",
-		}, []string{"collection_id"})
+		}, []string{collectionIDLabelName})
 
 	// RootCoordNumOfIndexedSegments counts the number of indexed segments per collection.
 	RootCoordNumOfIndexedSegments = prometheus.NewGaugeVec(
@@ -244,7 +244,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "num_of_indexed_segments",
 			Help:      "The number of indexed segments per collection",
-		}, []string{"collection_id"})
+		}, []string{collectionIDLabelName})
 
 	// RootCoordNumOfDMLChannel counts the number of DML channels.
 	RootCoordNumOfDMLChannel = prometheus.NewGauge(

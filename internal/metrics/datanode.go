@@ -17,34 +17,9 @@
 package metrics
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
-
-const (
-	// TODO: use the common status label
-	DataNodeMetricLabelSuccess = "success"
-	DataNodeMetricLabelFail    = "fail"
-	DataNodeMetricLabelTotal   = "total"
-
-	DataNodeMsgTypeInsert = "insert"
-	DataNodeMsgTypeDelete = "delete"
-)
-
-// TODO: move to metrics.go
-const (
-	nodeIDLabelName  = "node_id"
-	statusLabelName  = "status"
-	msgTypeLabelName = "msg_type"
-
-	collectionIDLabelName = "collection_id"
-	channelNameLabelName  = "channel_name"
-)
-
-// dataNodeDurationBuckets involves durations in milliseconds,
-// [10 20 40 80 160 320 640 1280 2560 5120 10240 20480 40960 81920 163840 327680 655360 1.31072e+06]
-var dataNodeDurationBuckets = prometheus.ExponentialBuckets(10, 2, 18)
 
 var (
 	DataNodeNumFlowGraphs = prometheus.NewGaugeVec(
@@ -162,7 +137,7 @@ var (
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "flush_segment_latency",
 			Help:      "The flush segment latency in DataNode.",
-			Buckets:   dataNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
 			collectionIDLabelName,
 			nodeIDLabelName,
@@ -208,7 +183,7 @@ var (
 			Subsystem: typeutil.DataNodeRole,
 			Name:      "compaction_latency",
 			Help:      "Compaction latency in DataNode.",
-			Buckets:   dataNodeDurationBuckets,
+			Buckets:   buckets,
 		}, []string{
 			collectionIDLabelName,
 			nodeIDLabelName,

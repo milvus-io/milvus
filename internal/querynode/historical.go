@@ -185,8 +185,8 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 					err2 = err
 					return
 				}
-				metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.QueryNodeQueryTypeSearch,
-					metrics.QueryNodeSegTypeSealed,
+				metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.SearchLabel,
+					metrics.SealedSegmentLabel,
 					fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 				segmentLock.Lock()

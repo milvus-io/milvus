@@ -344,7 +344,7 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 			lct.setResultInfo(err)
 		}
 		lct.once.Do(func() {
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lct.elapseSpan().Milliseconds()))
 			metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lct.getChildTask())))
 		})
@@ -698,7 +698,7 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 			}
 		}
 		lpt.once.Do(func() {
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.QueryCoordMetricLabelSuccess).Inc()
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lpt.elapseSpan().Milliseconds()))
 			metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lpt.getChildTask())))
 		})
