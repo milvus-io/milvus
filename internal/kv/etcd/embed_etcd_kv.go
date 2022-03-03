@@ -104,6 +104,26 @@ func (kv *EmbedEtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return keys, values, nil
 }
 
+// LoadBytesWithPrefix returns all the keys and values with the given key prefix
+func (kv *EmbedEtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
+	key = path.Join(kv.rootPath, key)
+	log.Debug("LoadBytesWithPrefix ", zap.String("prefix", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		return nil, nil, err
+	}
+	keys := make([]string, 0, resp.Count)
+	values := make([][]byte, 0, resp.Count)
+	for _, kv := range resp.Kvs {
+		keys = append(keys, string(kv.Key))
+		values = append(values, kv.Value)
+	}
+	return keys, values, nil
+}
+
 // LoadWithPrefix2 returns all the keys and values with versions by the given key prefix
 func (kv *EmbedEtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
 	key = path.Join(kv.rootPath, key)
@@ -126,6 +146,29 @@ func (kv *EmbedEtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64,
 	return keys, values, versions, nil
 }
 
+// LoadBytesWithPrefix2 returns all the keys and values with versions by the given key prefix
+func (kv *EmbedEtcdKV) LoadBytesWithPrefix2(key string) ([]string, [][]byte, []int64, error) {
+	key = path.Join(kv.rootPath, key)
+	log.Debug("LoadBytesWithPrefix2 ", zap.String("prefix", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	keys := make([]string, 0, resp.Count)
+	values := make([][]byte, 0, resp.Count)
+	versions := make([]int64, 0, resp.Count)
+	for _, kv := range resp.Kvs {
+		keys = append(keys, string(kv.Key))
+		values = append(values, kv.Value)
+		versions = append(versions, kv.Version)
+	}
+	return keys, values, versions, nil
+}
+
+// Load returns value of the given key
 func (kv *EmbedEtcdKV) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -141,6 +184,23 @@ func (kv *EmbedEtcdKV) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
+// LoadBytes returns value of the given key
+func (kv *EmbedEtcdKV) LoadBytes(key string) ([]byte, error) {
+	key = path.Join(kv.rootPath, key)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Count <= 0 {
+		return nil, fmt.Errorf("there is no value on key = %s", key)
+	}
+
+	return resp.Kvs[0].Value, nil
+}
+
+// MultiLoad returns values of a set of keys
 func (kv *EmbedEtcdKV) MultiLoad(keys []string) ([]string, error) {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, keyLoad := range keys {
@@ -151,7 +211,7 @@ func (kv *EmbedEtcdKV) MultiLoad(keys []string) ([]string, error) {
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	if err != nil {
-		return []string{}, err
+		return nil, err
 	}
 
 	result := make([]string, 0, len(keys))
@@ -176,6 +236,43 @@ func (kv *EmbedEtcdKV) MultiLoad(keys []string) ([]string, error) {
 	return result, nil
 }
 
+// MultiLoadBytes returns values of a set of keys
+func (kv *EmbedEtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
+	ops := make([]clientv3.Op, 0, len(keys))
+	for _, keyLoad := range keys {
+		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([][]byte, 0, len(keys))
+	invalid := make([]string, 0, len(keys))
+	for index, rp := range resp.Responses {
+		if rp.GetResponseRange().Kvs == nil || len(rp.GetResponseRange().Kvs) == 0 {
+			invalid = append(invalid, keys[index])
+			result = append(result, []byte{})
+		}
+		for _, ev := range rp.GetResponseRange().Kvs {
+			log.Debug("MultiLoadBytes", zap.ByteString("key", ev.Key),
+				zap.ByteString("value", ev.Value))
+			result = append(result, ev.Value)
+		}
+	}
+	if len(invalid) != 0 {
+		log.Debug("MultiLoadBytes: there are invalid keys",
+			zap.Strings("keys", invalid))
+		err = fmt.Errorf("there are invalid keys: %s", invalid)
+		return result, err
+	}
+	return result, nil
+}
+
+// LoadWithRevision returns keys, values and revision with given key prefix.
 func (kv *EmbedEtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
 	key = path.Join(kv.rootPath, key)
 	log.Debug("LoadWithPrefix ", zap.String("prefix", key))
@@ -195,11 +292,41 @@ func (kv *EmbedEtcdKV) LoadWithRevision(key string) ([]string, []string, int64, 
 	return keys, values, resp.Header.Revision, nil
 }
 
+// LoadBytesWithRevision returns keys, values and revision with given key prefix.
+func (kv *EmbedEtcdKV) LoadBytesWithRevision(key string) ([]string, [][]byte, int64, error) {
+	key = path.Join(kv.rootPath, key)
+	log.Debug("LoadBytesWithRevision ", zap.String("prefix", key))
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	keys := make([]string, 0, resp.Count)
+	values := make([][]byte, 0, resp.Count)
+	for _, kv := range resp.Kvs {
+		keys = append(keys, string(kv.Key))
+		values = append(values, kv.Value)
+	}
+	return keys, values, resp.Header.Revision, nil
+}
+
+// Save saves the key-value pair.
 func (kv *EmbedEtcdKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	_, err := kv.client.Put(ctx, key, value)
+	return err
+}
+
+// SaveBytes saves the key-value pair.
+func (kv *EmbedEtcdKV) SaveBytes(key string, value []byte) error {
+	key = path.Join(kv.rootPath, key)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	_, err := kv.client.Put(ctx, key, string(value))
 	return err
 }
 
@@ -212,6 +339,16 @@ func (kv *EmbedEtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) err
 	return err
 }
 
+// SaveBytesWithLease is a function to put value in etcd with etcd lease options.
+func (kv *EmbedEtcdKV) SaveBytesWithLease(key string, value []byte, id clientv3.LeaseID) error {
+	key = path.Join(kv.rootPath, key)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	_, err := kv.client.Put(ctx, key, string(value), clientv3.WithLease(id))
+	return err
+}
+
+// MultiSave saves the key-value pairs in a transaction.
 func (kv *EmbedEtcdKV) MultiSave(kvs map[string]string) error {
 	ops := make([]clientv3.Op, 0, len(kvs))
 	for key, value := range kvs {
@@ -225,6 +362,21 @@ func (kv *EmbedEtcdKV) MultiSave(kvs map[string]string) error {
 	return err
 }
 
+// MultiSaveBytes saves the key-value pairs in a transaction.
+func (kv *EmbedEtcdKV) MultiSaveBytes(kvs map[string][]byte) error {
+	ops := make([]clientv3.Op, 0, len(kvs))
+	for key, value := range kvs {
+		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
+	}
+
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	return err
+}
+
+// RemoveWithPrefix removes the keys with given prefix.
 func (kv *EmbedEtcdKV) RemoveWithPrefix(prefix string) error {
 	key := path.Join(kv.rootPath, prefix)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -234,6 +386,7 @@ func (kv *EmbedEtcdKV) RemoveWithPrefix(prefix string) error {
 	return err
 }
 
+// Remove removes the key.
 func (kv *EmbedEtcdKV) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
@@ -243,6 +396,7 @@ func (kv *EmbedEtcdKV) Remove(key string) error {
 	return err
 }
 
+// MultiRemove removes the keys in a transaction.
 func (kv *EmbedEtcdKV) MultiRemove(keys []string) error {
 	ops := make([]clientv3.Op, 0, len(keys))
 	for _, key := range keys {
@@ -256,6 +410,7 @@ func (kv *EmbedEtcdKV) MultiRemove(keys []string) error {
 	return err
 }
 
+// MultiSaveAndRemove saves the key-value pairs and removes the keys in a transaction.
 func (kv *EmbedEtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for key, value := range saves {
@@ -267,6 +422,25 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(saves map[string]string, removals []st
 	}
 
 	log.Debug("MultiSaveAndRemove")
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	return err
+}
+
+// MultiSaveBytesAndRemove saves the key-value pairs and removes the keys in a transaction.
+func (kv *EmbedEtcdKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []string) error {
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
+	for key, value := range saves {
+		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
+	}
+
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
+	}
+
+	log.Debug("MultiSaveBytesAndRemove")
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
@@ -306,8 +480,9 @@ func (kv *EmbedEtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	return err
 }
 
+// MultiSaveAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
 func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
-	ops := make([]clientv3.Op, 0, len(saves))
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
@@ -317,6 +492,25 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, rem
 	}
 
 	log.Debug("MultiSaveAndRemove")
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	return err
+}
+
+// MultiSaveBytesAndRemoveWithPrefix saves kv in @saves and removes the keys with given prefix in @removals.
+func (kv *EmbedEtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, removals []string) error {
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
+	for key, value := range saves {
+		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
+	}
+
+	for _, keyDelete := range removals {
+		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
+	}
+
+	log.Debug("MultiSaveBytesAndRemoveWithPrefix")
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
@@ -355,7 +549,28 @@ func (kv *EmbedEtcdKV) CompareValueAndSwap(key, value, target string, opts ...cl
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+		return fmt.Errorf("function CompareValueAndSwap error for compare is false for key: %s", key)
+	}
+
+	return nil
+}
+
+// CompareValueAndSwapBytes compares the existing value with compare, and if they are
+// equal, the target is stored in etcd.
+func (kv *EmbedEtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opts ...clientv3.OpOption) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Txn(ctx).If(
+		clientv3.Compare(
+			clientv3.Value(path.Join(kv.rootPath, key)),
+			"=",
+			string(value))).
+		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
+	if err != nil {
+		return err
+	}
+	if !resp.Succeeded {
+		return fmt.Errorf("function CompareValueAndSwapBytes error for compare is false for key: %s", key)
 	}
 
 	return nil
@@ -377,6 +592,27 @@ func (kv *EmbedEtcdKV) CompareVersionAndSwap(key string, version int64, target s
 	}
 	if !resp.Succeeded {
 		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+	}
+
+	return nil
+}
+
+// CompareVersionAndSwapBytes compares the existing key-value's version with version, and if
+// they are equal, the target is stored in etcd.
+func (kv *EmbedEtcdKV) CompareVersionAndSwapBytes(key string, version int64, target []byte, opts ...clientv3.OpOption) error {
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+	resp, err := kv.client.Txn(ctx).If(
+		clientv3.Compare(
+			clientv3.Version(path.Join(kv.rootPath, key)),
+			"=",
+			version)).
+		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
+	if err != nil {
+		return err
+	}
+	if !resp.Succeeded {
+		return fmt.Errorf("function CompareVersionAndSwapBytes error for compare is false for key: %s", key)
 	}
 
 	return nil
