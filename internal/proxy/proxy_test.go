@@ -797,6 +797,22 @@ func TestProxy(t *testing.T) {
 		resp, err = proxy.CreateCollection(ctx, req2)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		reqInvalidField := constructCreateCollectionRequest()
+		schema := constructCollectionSchema()
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			Name:     "StringField",
+			DataType: schemapb.DataType_String,
+		})
+		bs, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		reqInvalidField.CollectionName = "invalid_field_coll"
+		reqInvalidField.Schema = bs
+
+		resp, err = proxy.CreateCollection(ctx, reqInvalidField)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
 	})
 
 	wg.Add(1)

@@ -196,6 +196,77 @@ func TestValidatePrimaryKey(t *testing.T) {
 	assert.NotNil(t, validateSchema(&coll))
 }
 
+func TestValidateFieldType(t *testing.T) {
+	type testCase struct {
+		dt       schemapb.DataType
+		validate bool
+	}
+	cases := []testCase{
+		{
+			dt:       schemapb.DataType_Bool,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Int8,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Int16,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Int32,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Int64,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Float,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_Double,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_FloatVector,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_BinaryVector,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_None,
+			validate: false,
+		},
+		{
+			dt:       schemapb.DataType_String,
+			validate: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.dt.String(), func(t *testing.T) {
+			sch := &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						DataType: tc.dt,
+					},
+				},
+			}
+			err := validateFieldType(sch)
+			if tc.validate {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
+}
+
 func TestValidateSchema(t *testing.T) {
 	coll := &schemapb.CollectionSchema{
 		Name:        "coll1",

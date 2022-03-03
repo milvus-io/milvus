@@ -184,6 +184,19 @@ func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 	return nil
 }
 
+func validateFieldType(schema *schemapb.CollectionSchema) error {
+	for _, field := range schema.GetFields() {
+		switch field.GetDataType() {
+		//TODO remove String check after supported in 2.1
+		case schemapb.DataType_String:
+			return errors.New("string data type not supported yet")
+		case schemapb.DataType_None:
+			return errors.New("data type None is not valid")
+		}
+	}
+	return nil
+}
+
 //ValidateFieldAutoID call after validatePrimaryKey
 func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 	var idx = -1
