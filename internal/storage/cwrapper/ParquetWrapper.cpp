@@ -302,6 +302,7 @@ CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
     st.error_msg = ErrorMsg("arrow builder is nullptr");
     return st;
   }
+
   if (p->output == nullptr) {
     std::shared_ptr<arrow::Array> array;
     auto ast = p->builder->Finish(&array);
@@ -310,10 +311,14 @@ CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
       st.error_msg = ErrorMsg(ast.message());
       return st;
     }
+
     auto table = arrow::Table::Make(p->schema, {array});
     p->output = std::make_shared<wrapper::PayloadOutputStream>();
     auto mem_pool = arrow::default_memory_pool();
-    ast = parquet::arrow::WriteTable(*table, mem_pool, p->output, 1024 * 1024 * 1024);
+    ast = parquet::arrow::WriteTable(*table, mem_pool, p->output, 1024 * 1024 * 1024, 
+      parquet::WriterProperties::Builder().compression(arrow::Compression::ZSTD)
+      ->compression_level(3)->build());
+      
     if (!ast.ok()) {
       st.error_code = static_cast<int>(ErrorCode::UNEXPECTED_ERROR);
       st.error_msg = ErrorMsg(ast.message());
