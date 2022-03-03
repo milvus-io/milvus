@@ -38,14 +38,12 @@ echo "Running go unittest under $MILVUS_DIR"
 
 go test -race -cover "${MILVUS_DIR}/allocator/..." -failfast
 go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
-go test -race -cover "${MILVUS_DIR}/msgstream/..." -failfast
+go test -race -cover "${MILVUS_DIR}/mq/..." -failfast
 go test -race -cover "${MILVUS_DIR}/storage" -failfast
 go test -race -cover "${MILVUS_DIR}/tso/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/funcutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/mqclient/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/paramtable/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/retry/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/rocksmq/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/trace/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast

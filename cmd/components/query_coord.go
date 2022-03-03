@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // QueryCoord implements QueryCoord grpc server

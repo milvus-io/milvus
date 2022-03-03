@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/opentracing/opentracing-go"
 )
 

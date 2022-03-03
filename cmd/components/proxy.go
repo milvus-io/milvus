@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // Proxy implements Proxy grpc server

@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // QueryNode implements QueryNode grpc server

@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // DataCoord implements grpc server of DataCoord server

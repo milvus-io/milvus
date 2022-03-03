@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/components"
@@ -36,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/querycoord"
@@ -47,7 +49,6 @@ import (
 	logutil "github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/rocksmq/server/rocksmq"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -62,12 +63,12 @@ func newMsgFactory(localMsg bool) msgstream.Factory {
 }
 
 func initRocksmq() error {
-	err := rocksmq.InitRocksMQ()
+	err := rocksmqimpl.InitRocksMQ()
 	return err
 }
 
 func stopRocksmq() {
-	rocksmq.CloseRocksMQ()
+	rocksmqimpl.CloseRocksMQ()
 }
 
 // MilvusRoles decides which components are brought up with Milvus.
