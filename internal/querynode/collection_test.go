@@ -121,21 +121,6 @@ func TestCollection_releaseTime(t *testing.T) {
 	assert.Equal(t, t0, t1)
 }
 
-func TestCollection_releasePartition(t *testing.T) {
-	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	collection.addReleasedPartition(defaultPartitionID)
-	assert.Equal(t, 1, len(collection.releasedPartitions))
-	err := collection.checkReleasedPartitions([]UniqueID{defaultPartitionID})
-	assert.Error(t, err)
-	err = collection.checkReleasedPartitions([]UniqueID{UniqueID(1000)})
-	assert.NoError(t, err)
-	collection.deleteReleasedPartition(defaultPartitionID)
-	assert.Equal(t, 0, len(collection.releasedPartitions))
-}
-
 func TestCollection_loadType(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionID, false)

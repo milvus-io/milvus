@@ -761,7 +761,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("test execute, remove deltaVChannel", func(t *testing.T) {
+	t.Run("test execute remove deltaVChannel", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 

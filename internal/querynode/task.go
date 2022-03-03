@@ -253,6 +253,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("Starting WatchDmChannels ...",
 		zap.String("collectionName", w.req.Schema.Name),
 		zap.Int64("collectionID", collectionID),
+		zap.Any("load type", lType),
 		zap.Strings("vChannels", vChannels),
 		zap.Strings("pChannels", pChannels),
 	)
@@ -290,6 +291,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		CollectionID: collectionID,
 		Schema:       w.req.Schema,
 	}
+
+	// update partition info
+	for _, info := range req.Infos {
+		w.node.streaming.replica.addPartition(collectionID, info.PartitionID)
+		w.node.historical.replica.addPartition(collectionID, info.PartitionID)
+	}
+
 	log.Debug("loading growing segments in WatchDmChannels...",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("unFlushedSegmentIDs", unFlushedSegmentIDs),
@@ -425,14 +433,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	hCol.addVChannels(vChannels)
 	hCol.addPChannels(pChannels)
 	hCol.setLoadType(lType)
-	if lType == loadTypePartition {
-		for _, partitionID := range partitionIDs {
-			sCol.deleteReleasedPartition(partitionID)
-			hCol.deleteReleasedPartition(partitionID)
-			w.node.streaming.replica.addPartition(collectionID, partitionID)
-			w.node.historical.replica.addPartition(collectionID, partitionID)
-		}
-	}
+
 	log.Debug("watchDMChannel, init replica done", zap.Int64("collectionID", collectionID), zap.Strings("vChannels", vChannels))
 
 	// create tSafe
@@ -645,21 +646,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	for _, info := range l.req.Infos {
-		collectionID := info.CollectionID
-		partitionID := info.PartitionID
-		sCol, err := l.node.streaming.replica.getCollectionByID(collectionID)
-		if err != nil {
-			return err
-		}
-		sCol.deleteReleasedPartition(partitionID)
-		hCol, err := l.node.historical.replica.getCollectionByID(collectionID)
-		if err != nil {
-			return err
-		}
-		hCol.deleteReleasedPartition(partitionID)
-	}
-
 	log.Debug("LoadSegments done", zap.String("SegmentLoadInfos", fmt.Sprintln(l.req.Infos)))
 	return nil
 }
@@ -805,11 +791,11 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	time.Sleep(gracefulReleaseTime * time.Second)
 
 	// get collection from streaming and historical
-	hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+	_, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		return fmt.Errorf("release partitions failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
-	sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
+	_, err = r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		return fmt.Errorf("release partitions failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
@@ -833,9 +819,6 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				log.Warn(err.Error())
 			}
 		}
-
-		hCol.addReleasedPartition(id)
-		sCol.addReleasedPartition(id)
 	}
 
 	log.Debug("Release partition task done",

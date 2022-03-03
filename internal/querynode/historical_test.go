@@ -104,25 +104,4 @@ func TestHistorical_Search(t *testing.T) {
 		assert.Equal(t, 0, len(ids))
 		assert.NoError(t, err)
 	})
-
-	t.Run("test load collection partition released in collection", func(t *testing.T) {
-		tSafe := newTSafeReplica()
-		his, err := genSimpleHistorical(ctx, tSafe)
-		assert.NoError(t, err)
-
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
-		assert.NoError(t, err)
-
-		col, err := his.replica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		col.addReleasedPartition(defaultPartitionID)
-
-		err = his.replica.removePartition(defaultPartitionID)
-		assert.NoError(t, err)
-
-		res, ids, _, err := his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
-		assert.Equal(t, 0, len(res))
-		assert.Equal(t, 0, len(ids))
-		assert.Error(t, err)
-	})
 }
