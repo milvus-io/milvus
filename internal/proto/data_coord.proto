@@ -263,8 +263,14 @@ message SegmentStats {
 }
 
 enum ChannelWatchState {
-  Uncomplete = 0;
-  Complete = 1;
+  Uncomplete = 0; // deprecated, keep it for compatibility
+  Complete = 1; // deprecated, keep it for compatibility
+  ToWatch = 2;
+  WatchSuccess = 3;
+  WatchFailure = 4;
+  ToRelease = 5;
+  ReleaseSuccess = 6;
+  ReleaseFailure = 7;
 }
 
 message ChannelStatus {
@@ -332,6 +338,9 @@ message ChannelWatchInfo {
     VchannelInfo vchan= 1;
     int64 startTs = 2;
     ChannelWatchState state = 3;
+    // the timeout ts, datanode shall do nothing after it
+    // if the timeout is not set(= 0), original infinite retry logic shall be applied
+    int64 timeoutTs = 4;
 }
 
 enum CompactionType {
