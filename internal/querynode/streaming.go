@@ -214,8 +214,8 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 					err2 = err
 					return
 				}
-				metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.QueryNodeQueryTypeSearch,
-					metrics.QueryNodeSegTypeGrowing,
+				metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.SearchLabel,
+					metrics.GrowingSegmentLabel,
 					fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 				segmentLock.Lock()
 				searchResults = append(searchResults, searchResult)

@@ -22,11 +22,6 @@ import (
 )
 
 var (
-	coarseGrainedBuckets = []float64{1, 10, 20, 50, 100, 200, 500, 1000, 5000, 10000} // unit: ms
-	fineGrainedBuckets   = []float64{1, 2, 5, 8, 10, 20, 30, 40, 50, 100}             // unit: ms
-)
-
-var (
 	// ProxyDmlChannelTimeTick counts the time tick value of dml channels
 	ProxyDmlChannelTimeTick = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -34,7 +29,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "dml_channels_time_tick",
 			Help:      "Time tick of dml channels",
-		}, []string{"node_id", "pchan"})
+		}, []string{nodeIDLabelName, "pchan"})
 
 	// ProxySearchCount record the number of times search succeeded or failed.
 	ProxySearchCount = prometheus.NewCounterVec(
@@ -43,7 +38,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "search_counter",
 			Help:      "The number of times search succeeded or failed",
-		}, []string{"node_id", "collection_id", "type", "status"})
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName, statusLabelName})
 
 	// ProxyInsertCount record the number of times insert succeeded or failed.
 	ProxyInsertCount = prometheus.NewCounterVec(
@@ -52,7 +47,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "insert_counter",
 			Help:      "The number of times insert succeeded or failed",
-		}, []string{"node_id", "collection_id", "status"})
+		}, []string{nodeIDLabelName, collectionIDLabelName, statusLabelName})
 
 	// ProxySearchVectors record the number of vectors search successfully.
 	ProxySearchVectors = prometheus.NewGaugeVec(
@@ -61,7 +56,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "search_vectors",
 			Help:      "The number of vectors search successfully",
-		}, []string{"node_id", "collection_id", "type"})
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
 
 	// ProxyInsertVectors record the number of vectors insert successfully.
 	ProxyInsertVectors = prometheus.NewGaugeVec(
@@ -70,7 +65,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "insert_vectors",
 			Help:      "The number of vectors insert successfully",
-		}, []string{"node_id", "collection_id"})
+		}, []string{nodeIDLabelName, collectionIDLabelName})
 
 	// ProxyLinkedSDKs record The number of SDK linked proxy.
 	// TODO: how to know when sdk disconnect?
@@ -80,7 +75,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "linked_sdk_numbers",
 			Help:      "The number of SDK linked proxy",
-		}, []string{"node_id"})
+		}, []string{nodeIDLabelName})
 
 	// ProxySearchLatency record the latency of search successfully.
 	ProxySearchLatency = prometheus.NewHistogramVec(
@@ -89,8 +84,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "search_latency",
 			Help:      "The latency of search successfully",
-			Buckets:   coarseGrainedBuckets,
-		}, []string{"node_id", "collection_id", "type"})
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
 
 	// ProxySendMessageLatency record the latency that the proxy sent the search request to the message stream.
 	ProxySendMessageLatency = prometheus.NewHistogramVec(
@@ -99,8 +94,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "send_search_msg_time",
 			Help:      "The latency that the proxy sent the search request to the message stream",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id", "collection_id", "type"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
 
 	// ProxyWaitForSearchResultLatency record the time that the proxy waits for the search result.
 	ProxyWaitForSearchResultLatency = prometheus.NewHistogramVec(
@@ -109,8 +104,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "wait_for_search_result_time",
 			Help:      "The time that the proxy waits for the search result",
-			Buckets:   coarseGrainedBuckets, // unit: ms
-		}, []string{"node_id", "collection_id", "type"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
 
 	// ProxyReduceSearchResultLatency record the time that the proxy reduces search result.
 	ProxyReduceSearchResultLatency = prometheus.NewHistogramVec(
@@ -119,8 +114,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "reduce_search_result_time",
 			Help:      "The time that the proxy reduces search result",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id", "collection_id", "type"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
 
 	// ProxyDecodeSearchResultLatency record the time that the proxy decodes the search result.
 	ProxyDecodeSearchResultLatency = prometheus.NewHistogramVec(
@@ -129,8 +124,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "decode_search_result_time",
 			Help:      "The time that the proxy decodes the search result",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id", "collection_id", "type"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
 
 	// ProxyMsgStreamObjectsForPChan record the number of MsgStream objects per PChannel on each collection_id on Proxy.
 	ProxyMsgStreamObjectsForPChan = prometheus.NewGaugeVec(
@@ -139,7 +134,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "msg_stream_obj_for_PChan",
 			Help:      "The number of MsgStream objects per PChannel on each collection on Proxy",
-		}, []string{"node_id", "collection_id"})
+		}, []string{nodeIDLabelName, collectionIDLabelName})
 
 	// ProxyMsgStreamObjectsForSearch record the number of MsgStream objects for search per collection_id.
 	ProxyMsgStreamObjectsForSearch = prometheus.NewGaugeVec(
@@ -148,7 +143,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "msg_stream_obj_for_search",
 			Help:      "The number of MsgStream objects for search per collection",
-		}, []string{"node_id", "collection_id", "type"})
+		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
 
 	// ProxyInsertLatency record the latency that insert successfully.
 	ProxyInsertLatency = prometheus.NewHistogramVec(
@@ -157,8 +152,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "insert_latency",
 			Help:      "The latency that insert successfully.",
-			Buckets:   coarseGrainedBuckets, // unit: ms
-		}, []string{"node_id", "collection_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, collectionIDLabelName})
 
 	// ProxyInsertColToRowLatency record the latency that column to row for inserting in Proxy.
 	ProxyInsertColToRowLatency = prometheus.NewHistogramVec(
@@ -167,8 +162,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "col_to_row_latency",
 			Help:      "The time that column to row for inserting in Proxy",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id", "collection_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, collectionIDLabelName})
 
 	// ProxySendInsertReqLatency record the latency that Proxy send insert request to MsgStream.
 	ProxySendInsertReqLatency = prometheus.NewHistogramVec(
@@ -177,8 +172,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "send_insert_req_latency",
 			Help:      "The latency that Proxy send insert request to MsgStream",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id", "collection_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, collectionIDLabelName})
 
 	// ProxyCacheHitCounter record the number of Proxy cache hits or miss.
 	// TODO: @xiaocai2333 add more cache type
@@ -188,7 +183,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "cache_hits",
 			Help:      "Proxy cache hits",
-		}, []string{"node_id", "cache_type", "hit_type"})
+		}, []string{nodeIDLabelName, "cache_type", "hit_type"})
 
 	// ProxyUpdateCacheLatency record the time that proxy update cache when cache miss.
 	ProxyUpdateCacheLatency = prometheus.NewHistogramVec(
@@ -197,8 +192,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "update_cache_latency",
 			Help:      "The time that proxy update cache when cache miss",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName})
 
 	// ProxySyncTimeTick record Proxy synchronization timestamp statistics, differentiated by Channel.
 	ProxySyncTimeTick = prometheus.NewGaugeVec(
@@ -207,7 +202,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "sync_time_tick",
 			Help:      "Proxy synchronization timestamp statistics, differentiated by Channel",
-		}, []string{"node_id", "channel"})
+		}, []string{nodeIDLabelName, channelNameLabelName})
 
 	// ProxyApplyPrimaryKeyLatency record the latency that apply primary key.
 	ProxyApplyPrimaryKeyLatency = prometheus.NewHistogramVec(
@@ -216,8 +211,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "apply_pk_latency",
 			Help:      "The latency that apply primary key",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName})
 
 	// ProxyApplyTimestampLatency record the latency that proxy apply timestamp.
 	ProxyApplyTimestampLatency = prometheus.NewHistogramVec(
@@ -226,8 +221,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "apply_timestamp_latency",
 			Help:      "The latency that proxy apply timestamp",
-			Buckets:   fineGrainedBuckets, // unit: ms
-		}, []string{"node_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName})
 
 	// ProxyDDLFunctionCall records the number of times the function of the DDL operation was executed, like `CreateCollection`.
 	ProxyDDLFunctionCall = prometheus.NewCounterVec(
@@ -236,7 +231,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DDL_call_counter",
 			Help:      "the number of times the function of the DDL operation was executed",
-		}, []string{"node_id", "function", "status"})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
 
 	// ProxyDQLFunctionCall records the number of times the function of the DQL operation was executed, like `HasCollection`.
 	ProxyDQLFunctionCall = prometheus.NewCounterVec(
@@ -245,7 +240,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DQL_call_counter",
 			Help:      "",
-		}, []string{"node_id", "function", "collection_id", "status"})
+		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName, statusLabelName})
 
 	// ProxyDMLFunctionCall records the number of times the function of the DML operation was executed, like `LoadCollection`.
 	ProxyDMLFunctionCall = prometheus.NewCounterVec(
@@ -254,7 +249,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DML_call_counter",
 			Help:      "",
-		}, []string{"node_id", "function", "collection_id", "status"})
+		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName, statusLabelName})
 
 	// ProxyDDLReqLatency records the latency that for DML request, like "CreateCollection".
 	ProxyDDLReqLatency = prometheus.NewHistogramVec(
@@ -263,8 +258,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DDL_call_latency",
 			Help:      "The latency that for DDL request",
-			Buckets:   coarseGrainedBuckets, // unit: ms
-		}, []string{"node_id", "function"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, functionLabelName})
 
 	// ProxyDMLReqLatency records the latency that for DML request.
 	ProxyDMLReqLatency = prometheus.NewHistogramVec(
@@ -273,8 +268,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DML_call_latency",
 			Help:      "The latency that for DML request",
-			Buckets:   coarseGrainedBuckets, // unit: ms
-		}, []string{"node_id", "function", "collection_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName})
 
 	// ProxyDQLReqLatency record the latency that for DQL request, like "HasCollection".
 	ProxyDQLReqLatency = prometheus.NewHistogramVec(
@@ -283,8 +278,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DQL_call_latency",
 			Help:      "The latency that for DQL request",
-			Buckets:   coarseGrainedBuckets, // unit: ms
-		}, []string{"node_id", "function", "collection_id"})
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName})
 
 	// ProxySearchLatencyPerNQ records the latency for searching.
 	ProxySearchLatencyPerNQ = prometheus.NewHistogramVec(
@@ -293,8 +288,8 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "proxy_search_latency_count",
 			Help:      "The latency for searching",
-			Buckets:   fineGrainedBuckets,
-		}, []string{"node_id", "collection_id"})
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, collectionIDLabelName})
 )
 
 //RegisterProxy registers Proxy metrics

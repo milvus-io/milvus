@@ -21,12 +21,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const (
-	SuccessLabel = "success"
-	FailLabel    = "fail"
-	TotalLabel   = "total"
-)
-
 var (
 	IndexNodeBuildIndexTaskCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -34,7 +28,7 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "index_task_counter",
 			Help:      "The number of tasks that index node received",
-		}, []string{"node_id", "status"})
+		}, []string{nodeIDLabelName, statusLabelName})
 
 	IndexNodeLoadBinlogLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -42,7 +36,8 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "load_segment_latency",
 			Help:      "The latency of loading the segment",
-		}, []string{"node_id", "segment_id"})
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, segmentIDLabelName})
 
 	IndexNodeDecodeBinlogLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -50,7 +45,8 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "decode_binlog_latency",
 			Help:      "The latency of decode the binlog",
-		}, []string{"node_id", "segment_id"})
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, segmentIDLabelName})
 
 	IndexNodeKnowhereBuildIndexLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -58,7 +54,8 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "knowhere_build_index_latency",
 			Help:      "The latency of knowhere building the index",
-		}, []string{"node_id", "segment_id"})
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, segmentIDLabelName})
 
 	IndexNodeEncodeIndexFileLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -66,7 +63,8 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "encode_index_file_latency",
 			Help:      "The latency of encoding the index file",
-		}, []string{"node_id", "segment_id"})
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, segmentIDLabelName})
 
 	IndexNodeSaveIndexFileLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -74,7 +72,8 @@ var (
 			Subsystem: typeutil.IndexNodeRole,
 			Name:      "save_index_file_latency",
 			Help:      "The latency of saving the index file",
-		}, []string{"node_id", "segment_id"})
+			Buckets:   buckets,
+		}, []string{nodeIDLabelName, segmentIDLabelName})
 )
 
 //RegisterIndexNode registers IndexNode metrics

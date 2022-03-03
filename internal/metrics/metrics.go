@@ -34,12 +34,42 @@ const (
 	milvusNamespace = "milvus"
 
 	AbandonLabel = "abandon"
+	SuccessLabel = "success"
+	FailLabel    = "fail"
+	TotalLabel   = "total"
 
+	InsertLabel = "insert"
+	DeleteLabel = "delete"
 	SearchLabel = "search"
 	QueryLabel  = "query"
 
 	CacheHitLabel  = "hit"
 	CacheMissLabel = "miss"
+
+	UnissuedIndexTaskLabel   = "unissued"
+	InProgressIndexTaskLabel = "in-progress"
+	FinishedIndexTaskLabel   = "finished"
+	FailedIndexTaskLabel     = "failed"
+	RecycledIndexTaskLabel   = "recycled"
+
+	SealedSegmentLabel  = "sealed"
+	GrowingSegmentLabel = "growing"
+
+	nodeIDLabelName       = "node_id"
+	statusLabelName       = "status"
+	msgTypeLabelName      = "msg_type"
+	collectionIDLabelName = "collection_id"
+	channelNameLabelName  = "channel_name"
+	segmentIDLabelName    = "segment_id"
+	functionLabelName     = "function_name"
+	queryTypeLabelName    = "query_type"
+	segmentTypeLabelName  = "segment_type"
+)
+
+var (
+	// buckets involves durations in milliseconds,
+	// [1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 1.31072e+05]
+	buckets = prometheus.ExponentialBuckets(1, 2, 18)
 )
 
 var (

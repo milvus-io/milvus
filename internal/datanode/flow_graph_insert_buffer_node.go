@@ -346,13 +346,13 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		err := ibNode.flushManager.flushBufferData(task.buffer, task.segmentID, task.flushed, task.dropped, endPositions[0])
 		if err != nil {
 			log.Warn("failed to invoke flushBufferData", zap.Error(err))
-			metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.DataNodeMetricLabelFail, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
+			metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.FailLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 		} else {
 			segmentsToFlush = append(segmentsToFlush, task.segmentID)
 			ibNode.insertBuffer.Delete(task.segmentID)
-			metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.DataNodeMetricLabelSuccess, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
+			metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.SuccessLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 		}
-		metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.DataNodeMetricLabelTotal, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
+		metrics.DataNodeFlushSegmentCount.WithLabelValues(metrics.TotalLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 	}
 
 	if err := ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, seg2Upload); err != nil {
@@ -679,7 +679,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 
 	// update buffer size
 	buffer.updateSize(int64(len(msg.RowData)))
-	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(metrics.DataNodeMsgTypeInsert, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(msg.RowData)))
+	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(metrics.InsertLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(msg.RowData)))
 
 	// store in buffer
 	ibNode.insertBuffer.Store(currentSegID, buffer)
