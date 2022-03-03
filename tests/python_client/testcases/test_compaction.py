@@ -406,6 +406,7 @@ class TestCompactionOperation(TestcaseBase):
 
         # search
         collection_w.load()
+        self.utility_wrap.get_query_segment_info(collection_w.name)
         search_res, _ = collection_w.search(cf.gen_vectors(ct.default_nq, ct.default_dim),
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)
@@ -413,7 +414,6 @@ class TestCompactionOperation(TestcaseBase):
         for hits in search_res:
             assert len(hits) == ct.default_limit
 
-    @pytest.mark.skip(reason="ToDo: @ThreadDao redesign test cases ")
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_after_binary_index(self):
         """
@@ -424,6 +424,7 @@ class TestCompactionOperation(TestcaseBase):
                 4.search
         expected: Verify segment info and index info
         """
+        # create collection with 1 shard and insert 2 segments
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1,
                                                  schema=cf.gen_default_binary_collection_schema())
         for i in range(2):
@@ -435,39 +436,35 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.create_index(ct.default_binary_vec_field_name, ct.default_binary_index)
         log.debug(collection_w.index())
 
+        # load and search
         collection_w.load()
-
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        vectors = cf.gen_binary_vectors(ct.default_nq, ct.default_dim)[1]
-        search_res_one, _ = collection_w.search(vectors,
-                                                ct.default_binary_vec_field_name,
-                                                search_params, ct.default_limit)
-        assert len(search_res_one) == ct.default_nq
-        for hits in search_res_one:
-            assert len(hits) == ct.default_limit
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}
+        search_res_one, _ = collection_w.search(df[ct.default_binary_vec_field_name][:ct.default_nq].to_list(),
+                                                ct.default_binary_vec_field_name, search_params, ct.default_limit)
 
         # compact
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
-        collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)
+        c_plans = collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)[0]
 
-        # verify index re-build and re-load
-        search_params = {"metric_type": "L1", "params": {"nprobe": 10}}
-        search_res_two, _ = collection_w.search(vectors,
-                                                ct.default_binary_vec_field_name,
-                                                search_params, ct.default_limit,
-                                                check_task=CheckTasks.err_res,
-                                                check_items={ct.err_code: 1,
-                                                             ct.err_msg: "metric type not found: (L1)"})
+        # waiting for handoff completed and search
+        cost = 1
+        start = time()
+        while True:
+            sleep(5)
+            segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            if len(segment_info) != 0 and segment_info[0].segmentID == c_plans.plans[0].target:
+                log.debug(segment_info)
+                break
+            if time() - start > cost:
+                raise BaseException(1, f"Handoff after compact and index cost more than {cost}s")
 
         # verify search result
-        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        search_res_two, _ = collection_w.search(vectors,
-                                                ct.default_binary_vec_field_name,
-                                                search_params, ct.default_limit)
-        for i in range(ct.default_nq):
-            for j in range(ct.default_limit):
-                assert search_res_two[i][j].id == search_res_one[i][j].id
+        search_res_two, _ = collection_w.search(df[ct.default_binary_vec_field_name][:ct.default_nq].to_list(),
+                                                ct.default_binary_vec_field_name, search_params, ct.default_limit)
+        assert len(search_res_one) == ct.default_nq
+        for hits in search_res_one:
+            assert len(hits) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_and_index(self):

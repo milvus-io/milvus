@@ -263,5 +263,5 @@ class ApiCollectionWrapper:
     def wait_for_compaction_completed(self, timeout=None, **kwargs):
         timeout = TIMEOUT * 3 if timeout is None else timeout
         res = self.collection.wait_for_compaction_completed(timeout, **kwargs)
-        log.debug(res)
+        # log.debug(res)
         return res
