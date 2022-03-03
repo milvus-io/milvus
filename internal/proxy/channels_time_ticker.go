@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/milvus-io/milvus/internal/metrics"
 
 	"go.uber.org/zap"
@@ -93,13 +95,13 @@ func (ticker *channelsTimeTickerImpl) initCurrents(current Timestamp) {
 }
 
 func (ticker *channelsTimeTickerImpl) tick() error {
-	applyStart := time.Now()
+	tr := timerecord.NewTimeRecorder("applyTimestamp")
 	now, err := ticker.tso.AllocOne()
 	if err != nil {
 		log.Warn("Proxy channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
 		return err
 	}
-	metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(time.Since(applyStart).Milliseconds()))
+	metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	stats, err := ticker.getStatisticsFunc()
 	if err != nil {
