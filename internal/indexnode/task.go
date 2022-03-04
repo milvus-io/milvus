@@ -477,8 +477,9 @@ func (it *IndexBuildTask) buildIndex(ctx context.Context) ([]*storage.Blob, erro
 	if err != nil {
 		return nil, err
 	}
-	it.tr.Record("index codec serialize done")
-	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.NodeID, 10), strconv.FormatInt(it.segmentID, 10)).Observe(float64(it.tr.RecordSpan()))
+	encodeIndexFileDur := it.tr.Record("index codec serialize done")
+	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.NodeID, 10),
+		strconv.FormatInt(it.segmentID, 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
 	return serializedIndexBlobs, nil
 }
 
@@ -591,8 +592,9 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 		it.SetState(TaskStateRetry)
 		return err
 	}
-	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.NodeID, 10), strconv.FormatInt(it.segmentID, 10)).Observe(float64(it.tr.RecordSpan()))
-	it.tr.Record("index file save done")
+	saveIndexFileDur := it.tr.Record("index file save done")
+	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.NodeID, 10),
+		strconv.FormatInt(it.segmentID, 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
 	it.tr.Elapse("index building all done")
 	log.Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
 		zap.Int64("partition", it.partitionID), zap.Int64("segment", it.segmentID))

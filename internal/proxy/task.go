@@ -832,8 +832,8 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		it.result.Status.Reason = err.Error()
 		return err
 	}
-	metrics.ProxySendInsertReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName).Observe(float64(tr.RecordSpan().Milliseconds()))
-	tr.Record("send insert request to message stream")
+	sendMsgDur := tr.Record("send insert request to message stream")
+	metrics.ProxySendInsertReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName).Observe(float64(sendMsgDur.Milliseconds()))
 
 	return nil
 }
@@ -1488,14 +1488,14 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	if err != nil {
 		log.Debug("proxy", zap.String("send search request failed", err.Error()))
 	}
-	metrics.ProxySendMessageLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName, metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	st.tr.Record("send message done")
 	log.Debug("proxy sent one searchMsg",
 		zap.Int64("collectionID", st.CollectionID),
 		zap.Int64("msgID", tsMsg.ID()),
 		zap.Int("length of search msg", len(msgPack.Msgs)),
 		zap.Uint64("timeoutTs", st.SearchRequest.TimeoutTimestamp))
-	tr.Record("send search msg to message stream")
+	sendMsgDur := tr.Record("send search msg to message stream")
+	metrics.ProxySendMessageLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName, metrics.SearchLabel).Observe(float64(sendMsgDur.Milliseconds()))
 
 	return err
 }

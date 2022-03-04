@@ -2535,10 +2535,11 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		strconv.FormatInt(qt.CollectionID, 10), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 		strconv.FormatInt(qt.CollectionID, 10), metrics.SearchLabel).Set(float64(qt.result.Results.NumQueries))
+	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySearchLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
-		strconv.FormatInt(qt.CollectionID, 10), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		strconv.FormatInt(qt.CollectionID, 10), metrics.SearchLabel).Observe(float64(searchDur))
 	metrics.ProxySearchLatencyPerNQ.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
-		strconv.FormatInt(qt.CollectionID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()) / float64(qt.result.Results.NumQueries))
+		strconv.FormatInt(qt.CollectionID, 10)).Observe(float64(searchDur) / float64(qt.result.Results.NumQueries))
 	return qt.result, nil
 }
 
