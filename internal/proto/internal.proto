@@ -128,6 +128,12 @@ message CreateIndexRequest {
   repeated common.KeyValuePair extra_params = 8;
 }
 
+enum InsertDataVersion {
+  // 0 must refer to row-based format, since it's the first version in Milvus.
+  RowBased = 0;
+  ColumnBased = 1;
+}
+
 message InsertRequest {
   common.MsgBase base = 1;
   string shardName = 2;
@@ -140,7 +146,11 @@ message InsertRequest {
   int64 segmentID = 9;
   repeated uint64 timestamps = 10;
   repeated int64 rowIDs = 11;
+  // row_data was reserved for compatibility
   repeated common.Blob row_data = 12;
+  repeated schema.FieldData fields_data = 13;
+  uint64 num_rows = 14;
+  InsertDataVersion version = 15;
 }
 
 message SearchRequest {

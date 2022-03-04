@@ -136,6 +136,129 @@ func TestInsertMsg_Unmarshal_IllegalParameter(t *testing.T) {
 	assert.Nil(t, tsMsg)
 }
 
+func TestInsertMsg_RowBasedFormat(t *testing.T) {
+	msg := &InsertMsg{
+		InsertRequest: internalpb.InsertRequest{
+			Version: internalpb.InsertDataVersion_RowBased,
+		},
+	}
+	assert.True(t, msg.IsRowBased())
+}
+
+func TestInsertMsg_ColumnBasedFormat(t *testing.T) {
+	msg := &InsertMsg{
+		InsertRequest: internalpb.InsertRequest{
+			Version: internalpb.InsertDataVersion_ColumnBased,
+		},
+	}
+	assert.True(t, msg.IsColumnBased())
+}
+
+func TestInsertMsg_NRows(t *testing.T) {
+	msg1 := &InsertMsg{
+		InsertRequest: internalpb.InsertRequest{
+			RowData: []*commonpb.Blob{
+				{},
+				{},
+			},
+			FieldsData: nil,
+			Version:    internalpb.InsertDataVersion_RowBased,
+		},
+	}
+	assert.Equal(t, uint64(2), msg1.NRows())
+	msg2 := &InsertMsg{
+		InsertRequest: internalpb.InsertRequest{
+			RowData: nil,
+			FieldsData: []*schemapb.FieldData{
+				{},
+			},
+			NumRows: 2,
+			Version: internalpb.InsertDataVersion_ColumnBased,
+		},
+	}
+	assert.Equal(t, uint64(2), msg2.NRows())
+}
+
+func TestInsertMsg_CheckAligned(t *testing.T) {
+	msg1 := &InsertMsg{
+		InsertRequest: internalpb.InsertRequest{
+			Timestamps: []uint64{1},
+			RowIDs:     []int64{1},
+			RowData: []*commonpb.Blob{
+				{},
+			},
+			FieldsData: nil,
+			Version:    internalpb.InsertDataVersion_RowBased,
+		},
+	}
+	assert.True(t, msg1.CheckAligned())
+	msg1.InsertRequest.RowData = nil
+	msg1.InsertRequest.FieldsData = []*schemapb.FieldData{
+		{},
+	}
+	msg1.InsertRequest.NumRows = 1
+	msg1.Version = internalpb.InsertDataVersion_ColumnBased
+	assert.True(t, msg1.CheckAligned())
+}
+
+func TestInsertMsg_IndexMsg(t *testing.T) {
+	msg := &InsertMsg{
+		BaseMsg: BaseMsg{
+			BeginTimestamp: 1,
+			EndTimestamp:   2,
+		},
+		InsertRequest: internalpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Insert,
+				MsgID:     3,
+				Timestamp: 4,
+				SourceID:  5,
+			},
+			DbID:           6,
+			CollectionID:   7,
+			PartitionID:    8,
+			CollectionName: "test",
+			PartitionName:  "test",
+			SegmentID:      9,
+			ShardName:      "test",
+			Timestamps:     []uint64{10},
+			RowIDs:         []int64{11},
+			RowData: []*commonpb.Blob{
+				{
+					Value: []byte{1},
+				},
+			},
+			Version: internalpb.InsertDataVersion_RowBased,
+		},
+	}
+	indexMsg := msg.IndexMsg(0)
+	assert.Equal(t, uint64(10), indexMsg.GetTimestamps()[0])
+	assert.Equal(t, int64(11), indexMsg.GetRowIDs()[0])
+	assert.Equal(t, []byte{1}, indexMsg.GetRowData()[0].Value)
+
+	msg.Version = internalpb.InsertDataVersion_ColumnBased
+	msg.FieldsData = []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "test",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1},
+						},
+					},
+				},
+			},
+			FieldId: 0,
+		},
+	}
+	indexMsg = msg.IndexMsg(0)
+	assert.Equal(t, uint64(10), indexMsg.GetTimestamps()[0])
+	assert.Equal(t, int64(11), indexMsg.GetRowIDs()[0])
+	assert.Equal(t, int64(1), indexMsg.FieldsData[0].Field.(*schemapb.FieldData_Scalars).Scalars.Data.(*schemapb.ScalarField_LongData).LongData.Data[0])
+}
+
 func TestDeleteMsg(t *testing.T) {
 	deleteMsg := &DeleteMsg{
 		BaseMsg: generateBaseMsg(),

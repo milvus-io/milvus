@@ -505,3 +505,30 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, BinaryVector, result[5].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector)
 	assert.Equal(t, FloatVector, result[6].GetVectors().GetFloatVector().Data)
 }
+
+func TestFillFieldBySchema(t *testing.T) {
+	columns := []*schemapb.FieldData{
+		{},
+	}
+	schema := &schemapb.CollectionSchema{}
+	// length mismatch
+	assert.Error(t, FillFieldBySchema(columns, schema))
+	columns = []*schemapb.FieldData{
+		{
+			FieldId: 0,
+		},
+	}
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "TestFillFieldIDBySchema",
+				DataType: schemapb.DataType_Int64,
+				FieldID:  1,
+			},
+		},
+	}
+	assert.NoError(t, FillFieldBySchema(columns, schema))
+	assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
+	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
+	assert.Equal(t, int64(1), columns[0].FieldId)
+}

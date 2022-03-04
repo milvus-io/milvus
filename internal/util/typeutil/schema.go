@@ -196,6 +196,7 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 		case *schemapb.FieldData_Scalars:
 			if dst[i] == nil || dst[i].GetScalars() == nil {
 				dst[i] = &schemapb.FieldData{
+					Type:      fieldData.Type,
 					FieldName: fieldData.FieldName,
 					FieldId:   fieldData.FieldId,
 					Field: &schemapb.FieldData_Scalars{
@@ -262,6 +263,7 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 			dim := fieldType.Vectors.Dim
 			if dst[i] == nil || dst[i].GetVectors() == nil {
 				dst[i] = &schemapb.FieldData{
+					Type:      fieldData.Type,
 					FieldName: fieldData.FieldName,
 					FieldId:   fieldData.FieldId,
 					Field: &schemapb.FieldData_Vectors{
@@ -301,4 +303,19 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 			}
 		}
 	}
+}
+
+func FillFieldBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
+	if len(columns) != len(schema.GetFields()) {
+		return fmt.Errorf("len(columns) mismatch the len(fields), len(columns): %d, len(fields): %d",
+			len(columns), len(schema.GetFields()))
+	}
+
+	for idx, f := range schema.GetFields() {
+		columns[idx].FieldName = f.Name
+		columns[idx].Type = f.DataType
+		columns[idx].FieldId = f.FieldID
+	}
+
+	return nil
 }
