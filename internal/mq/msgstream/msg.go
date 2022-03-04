@@ -21,6 +21,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -169,6 +172,94 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	}
 
 	return insertMsg, nil
+}
+
+func (it *InsertMsg) IsRowBased() bool {
+	return it.GetVersion() == internalpb.InsertDataVersion_RowBased
+}
+
+func (it *InsertMsg) IsColumnBased() bool {
+	return it.GetVersion() == internalpb.InsertDataVersion_ColumnBased
+}
+
+func (it *InsertMsg) NRows() uint64 {
+	if it.IsRowBased() {
+		return uint64(len(it.RowData))
+	}
+	return it.InsertRequest.GetNumRows()
+}
+
+func (it *InsertMsg) CheckAligned() bool {
+	return len(it.GetRowIDs()) == len(it.GetTimestamps()) &&
+		uint64(len(it.GetRowIDs())) == it.NRows()
+}
+
+func (it *InsertMsg) rowBasedIndexRequest(index int) internalpb.InsertRequest {
+	return internalpb.InsertRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_Insert,
+			MsgID:     it.Base.MsgID,
+			Timestamp: it.Timestamps[index],
+			SourceID:  it.Base.SourceID,
+		},
+		DbID:           it.DbID,
+		CollectionID:   it.CollectionID,
+		PartitionID:    it.PartitionID,
+		CollectionName: it.CollectionName,
+		PartitionName:  it.PartitionName,
+		SegmentID:      it.SegmentID,
+		ShardName:      it.ShardName,
+		Timestamps:     []uint64{it.Timestamps[index]},
+		RowIDs:         []int64{it.RowIDs[index]},
+		RowData:        []*commonpb.Blob{it.RowData[index]},
+		Version:        internalpb.InsertDataVersion_RowBased,
+	}
+}
+
+func (it *InsertMsg) columnBasedIndexRequest(index int) internalpb.InsertRequest {
+	colNum := len(it.GetFieldsData())
+	fieldsData := make([]*schemapb.FieldData, colNum)
+	typeutil.AppendFieldData(fieldsData, it.GetFieldsData(), int64(index))
+	return internalpb.InsertRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_Insert,
+			MsgID:     it.Base.MsgID,
+			Timestamp: it.Timestamps[index],
+			SourceID:  it.Base.SourceID,
+		},
+		DbID:           it.DbID,
+		CollectionID:   it.CollectionID,
+		PartitionID:    it.PartitionID,
+		CollectionName: it.CollectionName,
+		PartitionName:  it.PartitionName,
+		SegmentID:      it.SegmentID,
+		ShardName:      it.ShardName,
+		Timestamps:     []uint64{it.Timestamps[index]},
+		RowIDs:         []int64{it.RowIDs[index]},
+		FieldsData:     fieldsData,
+		NumRows:        1,
+		Version:        internalpb.InsertDataVersion_ColumnBased,
+	}
+}
+
+func (it *InsertMsg) IndexRequest(index int) internalpb.InsertRequest {
+	if it.IsRowBased() {
+		return it.rowBasedIndexRequest(index)
+	}
+	return it.columnBasedIndexRequest(index)
+}
+
+func (it *InsertMsg) IndexMsg(index int) *InsertMsg {
+	return &InsertMsg{
+		BaseMsg: BaseMsg{
+			Ctx:            it.TraceCtx(),
+			BeginTimestamp: it.BeginTimestamp,
+			EndTimestamp:   it.EndTimestamp,
+			HashValues:     it.HashValues,
+			MsgPosition:    it.MsgPosition,
+		},
+		InsertRequest: it.IndexRequest(index),
+	}
 }
 
 /////////////////////////////////////////Delete//////////////////////////////////////////

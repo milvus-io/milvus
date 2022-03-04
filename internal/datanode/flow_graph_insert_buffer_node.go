@@ -17,13 +17,9 @@
 package datanode
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
-	"strconv"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -31,7 +27,6 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -421,7 +416,7 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 // 	1.3 Put back into buffer
 // 	1.4 Update related statistics
 func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos *internalpb.MsgPosition) error {
-	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
+	if !msg.CheckAligned() {
 		return errors.New("misaligned messages detected")
 	}
 	currentSegID := msg.GetSegmentID()
@@ -440,15 +435,10 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 		if field.DataType == schemapb.DataType_FloatVector ||
 			field.DataType == schemapb.DataType_BinaryVector {
 
-			for _, t := range field.TypeParams {
-				if t.Key == "dim" {
-					dimension, err = strconv.Atoi(t.Value)
-					if err != nil {
-						log.Error("strconv wrong on get dim", zap.Error(err))
-						return err
-					}
-					break
-				}
+			dimension, err = storage.GetDimFromParams(field.TypeParams)
+			if err != nil {
+				log.Error("failed to get dim from field", zap.Error(err))
+				return err
 			}
 			break
 		}
@@ -461,224 +451,26 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	bd, _ := ibNode.insertBuffer.LoadOrStore(currentSegID, newbd)
 
 	buffer := bd.(*BufferData)
-	idata := buffer.buffer
+	// idata := buffer.buffer
 
-	// 1.2 Get Fields
-	blobReaders := make([]io.Reader, 0)
-	for _, blob := range msg.RowData {
-		blobReaders = append(blobReaders, bytes.NewReader(blob.GetValue()))
+	addedBuffer, err := storage.InsertMsgToInsertData(msg, collSchema)
+	if err != nil {
+		log.Error("failed to transfer insert msg to insert data", zap.Error(err))
+		return err
 	}
 
-	for _, field := range collSchema.Fields {
-		switch field.DataType {
-		case schemapb.DataType_FloatVector:
-			var dim int
-			for _, t := range field.TypeParams {
-				if t.Key == "dim" {
-					dim, err = strconv.Atoi(t.Value)
-					if err != nil {
-						log.Error("strconv wrong on get dim", zap.Error(err))
-						break
-					}
-					break
-				}
-			}
-
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.FloatVectorFieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]float32, 0),
-					Dim:     dim,
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.FloatVectorFieldData)
-			for _, r := range blobReaders {
-				var v = make([]float32, dim)
-
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v...)
-			}
-
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-
-		case schemapb.DataType_BinaryVector:
-			var dim int
-			for _, t := range field.TypeParams {
-				if t.Key == "dim" {
-					dim, err = strconv.Atoi(t.Value)
-					if err != nil {
-						log.Error("strconv wrong on get dim", zap.Error(err))
-						return err
-					}
-					break
-				}
-			}
-
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.BinaryVectorFieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]byte, 0),
-					Dim:     dim,
-				}
-			}
-			fieldData := idata.Data[field.FieldID].(*storage.BinaryVectorFieldData)
-
-			for _, r := range blobReaders {
-				var v = make([]byte, dim/8)
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v...)
-			}
-
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-
-		case schemapb.DataType_Bool:
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.BoolFieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]bool, 0),
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.BoolFieldData)
-			for _, r := range blobReaders {
-				var v bool
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v)
-			}
-
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-
-		case schemapb.DataType_Int8:
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.Int8FieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]int8, 0),
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.Int8FieldData)
-			for _, r := range blobReaders {
-				var v int8
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v)
-			}
-
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-
-		case schemapb.DataType_Int16:
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.Int16FieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]int16, 0),
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.Int16FieldData)
-			for _, r := range blobReaders {
-				var v int16
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v)
-			}
-
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-
-		case schemapb.DataType_Int32:
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.Int32FieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]int32, 0),
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.Int32FieldData)
-			for _, r := range blobReaders {
-				var v int32
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v)
-			}
-
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-
-		case schemapb.DataType_Int64:
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.Int64FieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]int64, 0),
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.Int64FieldData)
-			switch field.FieldID {
-			case 0: // rowIDs
-				fieldData.Data = append(fieldData.Data, msg.RowIDs...)
-				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-			case 1: // Timestamps
-				for _, ts := range msg.Timestamps {
-					fieldData.Data = append(fieldData.Data, int64(ts))
-				}
-				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-			default:
-				for _, r := range blobReaders {
-					var v int64
-					readBinary(r, &v, field.DataType)
-
-					fieldData.Data = append(fieldData.Data, v)
-				}
-
-				fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-			}
-			if field.IsPrimaryKey {
-				// update segment pk filter
-				ibNode.replica.updateSegmentPKRange(currentSegID, fieldData.Data)
-			}
-
-		case schemapb.DataType_Float:
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.FloatFieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]float32, 0),
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.FloatFieldData)
-
-			for _, r := range blobReaders {
-				var v float32
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v)
-			}
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-
-		case schemapb.DataType_Double:
-			if _, ok := idata.Data[field.FieldID]; !ok {
-				idata.Data[field.FieldID] = &storage.DoubleFieldData{
-					NumRows: make([]int64, 0, 1),
-					Data:    make([]float64, 0),
-				}
-			}
-
-			fieldData := idata.Data[field.FieldID].(*storage.DoubleFieldData)
-
-			for _, r := range blobReaders {
-				var v float64
-				readBinary(r, &v, field.DataType)
-
-				fieldData.Data = append(fieldData.Data, v)
-			}
-			fieldData.NumRows = append(fieldData.NumRows, int64(len(msg.RowData)))
-		}
+	addedPfData, err := storage.GetPkFromInsertData(collSchema, addedBuffer)
+	if err != nil {
+		log.Warn("no primary field found in insert msg", zap.Error(err))
+	} else {
+		ibNode.replica.updateSegmentPKRange(currentSegID, addedPfData)
 	}
+
+	// Maybe there are large write zoom if frequent insert requests are met.
+	buffer.buffer = storage.MergeInsertData(buffer.buffer, addedBuffer)
 
 	// update buffer size
-	buffer.updateSize(int64(len(msg.RowData)))
+	buffer.updateSize(int64(msg.NRows()))
 	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(metrics.InsertLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(msg.RowData)))
 
 	// store in buffer
@@ -688,16 +480,6 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	ibNode.replica.updateSegmentEndPosition(currentSegID, endPos)
 
 	return nil
-}
-
-// readBinary read data in bytes and write it into receiver.
-//  The receiver can be any type in int8, int16, int32, int64, float32, float64 and bool
-//  readBinary uses LittleEndian ByteOrder.
-func readBinary(reader io.Reader, receiver interface{}, dataType schemapb.DataType) {
-	err := binary.Read(reader, common.Endian, receiver)
-	if err != nil {
-		log.Error("binary.Read failed", zap.Any("data type", dataType), zap.Error(err))
-	}
 }
 
 // writeHardTimeTick writes timetick once insertBufferNode operates.

@@ -35,12 +35,9 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 		insertRequest := request.(*InsertMsg)
 		keys := hashKeys[i]
 
-		timestampLen := len(insertRequest.Timestamps)
-		rowIDLen := len(insertRequest.RowIDs)
-		rowDataLen := len(insertRequest.RowData)
 		keysLen := len(keys)
 
-		if keysLen != timestampLen || keysLen != rowIDLen || keysLen != rowDataLen {
+		if !insertRequest.CheckAligned() || insertRequest.NRows() != uint64(keysLen) {
 			return nil, errors.New("the length of hashValue, timestamps, rowIDs, RowData are not equal")
 		}
 		for index, key := range keys {
@@ -50,31 +47,7 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 				result[key] = &msgPack
 			}
 
-			sliceRequest := internalpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Insert,
-					MsgID:     insertRequest.Base.MsgID,
-					Timestamp: insertRequest.Timestamps[index],
-					SourceID:  insertRequest.Base.SourceID,
-				},
-				DbID:           insertRequest.DbID,
-				CollectionID:   insertRequest.CollectionID,
-				PartitionID:    insertRequest.PartitionID,
-				CollectionName: insertRequest.CollectionName,
-				PartitionName:  insertRequest.PartitionName,
-				SegmentID:      insertRequest.SegmentID,
-				ShardName:      insertRequest.ShardName,
-				Timestamps:     []uint64{insertRequest.Timestamps[index]},
-				RowIDs:         []int64{insertRequest.RowIDs[index]},
-				RowData:        []*commonpb.Blob{insertRequest.RowData[index]},
-			}
-
-			insertMsg := &InsertMsg{
-				BaseMsg: BaseMsg{
-					Ctx: request.TraceCtx(),
-				},
-				InsertRequest: sliceRequest,
-			}
+			insertMsg := insertRequest.IndexMsg(index)
 			result[key].Msgs = append(result[key].Msgs, insertMsg)
 		}
 	}

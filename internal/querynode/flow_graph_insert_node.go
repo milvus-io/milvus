@@ -25,6 +25,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -99,15 +101,24 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// 1. hash insertMessages to insertData
-	for _, task := range iMsg.insertMessages {
+	for _, insertMsg := range iMsg.insertMessages {
+		if insertMsg.IsColumnBased() {
+			var err error
+			insertMsg.RowData, err = typeutil.TransferColumnBasedDataToRowBasedData(insertMsg.FieldsData)
+			if err != nil {
+				log.Error("failed to transfer column-based data to row-based data", zap.Error(err))
+				return []Msg{}
+			}
+		}
+
 		// if loadType is loadCollection, check if partition exists, if not, create partition
-		col, err := iNode.streamingReplica.getCollectionByID(task.CollectionID)
+		col, err := iNode.streamingReplica.getCollectionByID(insertMsg.CollectionID)
 		if err != nil {
 			log.Error(err.Error())
 			continue
 		}
 		if col.getLoadType() == loadTypeCollection {
-			err = iNode.streamingReplica.addPartition(task.CollectionID, task.PartitionID)
+			err = iNode.streamingReplica.addPartition(insertMsg.CollectionID, insertMsg.PartitionID)
 			if err != nil {
 				log.Error(err.Error())
 				continue
@@ -115,23 +126,24 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 
 		// check if segment exists, if not, create this segment
-		if !iNode.streamingReplica.hasSegment(task.SegmentID) {
-			err := iNode.streamingReplica.addSegment(task.SegmentID, task.PartitionID, task.CollectionID, task.ShardName, segmentTypeGrowing, true)
+		if !iNode.streamingReplica.hasSegment(insertMsg.SegmentID) {
+			err := iNode.streamingReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, segmentTypeGrowing, true)
 			if err != nil {
 				log.Warn(err.Error())
 				continue
 			}
 		}
 
-		iData.insertIDs[task.SegmentID] = append(iData.insertIDs[task.SegmentID], task.RowIDs...)
-		iData.insertTimestamps[task.SegmentID] = append(iData.insertTimestamps[task.SegmentID], task.Timestamps...)
-		iData.insertRecords[task.SegmentID] = append(iData.insertRecords[task.SegmentID], task.RowData...)
-		pks, err := getPrimaryKeys(task, iNode.streamingReplica)
+		iData.insertIDs[insertMsg.SegmentID] = append(iData.insertIDs[insertMsg.SegmentID], insertMsg.RowIDs...)
+		iData.insertTimestamps[insertMsg.SegmentID] = append(iData.insertTimestamps[insertMsg.SegmentID], insertMsg.Timestamps...)
+		// using insertMsg.RowData is valid here, since we have already transferred the column-based data.
+		iData.insertRecords[insertMsg.SegmentID] = append(iData.insertRecords[insertMsg.SegmentID], insertMsg.RowData...)
+		pks, err := getPrimaryKeys(insertMsg, iNode.streamingReplica)
 		if err != nil {
 			log.Warn(err.Error())
 			continue
 		}
-		iData.insertPKs[task.SegmentID] = append(iData.insertPKs[task.SegmentID], pks...)
+		iData.insertPKs[insertMsg.SegmentID] = append(iData.insertPKs[insertMsg.SegmentID], pks...)
 	}
 
 	// 2. do preInsert
@@ -333,7 +345,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 // TODO: remove this function to proper file
 // getPrimaryKeys would get primary keys by insert messages
 func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) ([]int64, error) {
-	if len(msg.RowIDs) != len(msg.Timestamps) || len(msg.RowIDs) != len(msg.RowData) {
+	if !msg.CheckAligned() {
 		log.Warn("misaligned messages detected")
 		return nil, errors.New("misaligned messages detected")
 	}
@@ -344,8 +356,20 @@ func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface)
 		log.Warn(err.Error())
 		return nil, err
 	}
+
+	return getPKs(msg, collection.schema)
+}
+
+func getPKs(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]int64, error) {
+	if msg.IsRowBased() {
+		return getPKsFromRowBasedInsertMsg(msg, schema)
+	}
+	return getPKsFromColumnBasedInsertMsg(msg, schema)
+}
+
+func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]int64, error) {
 	offset := 0
-	for _, field := range collection.schema.Fields {
+	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
 			break
 		}
@@ -406,6 +430,25 @@ func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface)
 	}
 
 	return pks, nil
+}
+
+func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]int64, error) {
+	loc := -1
+	for idx, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			loc = idx
+			break
+		}
+	}
+	if loc == -1 {
+		return nil, errors.New("no primary field found")
+	}
+
+	if len(msg.GetFieldsData()) <= loc {
+		return nil, errors.New("insert msg mismatch the schema")
+	}
+
+	return msg.GetFieldsData()[loc].GetScalars().GetLongData().GetData(), nil
 }
 
 // newInsertNode returns a new insertNode

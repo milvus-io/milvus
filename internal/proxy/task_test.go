@@ -3537,7 +3537,11 @@ func TestTask_all(t *testing.T) {
 	doubleField := "double"
 	floatVecField := "fvec"
 	binaryVecField := "bvec"
-	fieldsLen := len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField, binaryVecField})
+	var fieldsLen int
+	fieldsLen = len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField})
+	if enableMultipleVectorFields {
+		fieldsLen = len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField, binaryVecField})
+	}
 	dim := 128
 	nb := 10
 
@@ -3746,7 +3750,7 @@ func TestTask_all(t *testing.T) {
 
 		task.req.FieldsData[5] = &schemapb.FieldData{
 			Type:      schemapb.DataType_FloatVector,
-			FieldName: doubleField,
+			FieldName: floatVecField,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
 					Dim: int64(dim),
@@ -3760,18 +3764,20 @@ func TestTask_all(t *testing.T) {
 			FieldId: common.StartOfUserFieldID + 5,
 		}
 
-		task.req.FieldsData[6] = &schemapb.FieldData{
-			Type:      schemapb.DataType_BinaryVector,
-			FieldName: doubleField,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: int64(dim),
-					Data: &schemapb.VectorField_BinaryVector{
-						BinaryVector: generateBinaryVectors(nb, dim),
+		if enableMultipleVectorFields {
+			task.req.FieldsData[6] = &schemapb.FieldData{
+				Type:      schemapb.DataType_BinaryVector,
+				FieldName: binaryVecField,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Dim: int64(dim),
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: generateBinaryVectors(nb, dim),
+						},
 					},
 				},
-			},
-			FieldId: common.StartOfUserFieldID + 6,
+				FieldId: common.StartOfUserFieldID + 6,
+			}
 		}
 
 		assert.NoError(t, task.OnEnqueue())
