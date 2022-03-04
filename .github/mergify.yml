@@ -1,7 +1,9 @@
 pull_request_rules:
   - name: Add needs-dco label when DCO check failed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - -status-success=DCO
     actions:
       label:
@@ -12,7 +14,9 @@ pull_request_rules:
 
   - name: Add dco-passed label when DCO check passed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - status-success=DCO
     actions:
       label:
@@ -37,7 +41,9 @@ pull_request_rules:
 
   - name: Test passed for tests changed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - -files~=^(?!tests\/python_client).+
       - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
@@ -47,7 +53,9 @@ pull_request_rules:
   
   - name: Test passed for docs changed only
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - -files~=^(?!.*\.(md)).*$ 
     actions:
       label:
@@ -57,7 +65,9 @@ pull_request_rules:
 
   - name: Test passed for non go or c++ code changed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - -files~=^(?=.*\.(go|h|cpp)).*$
       - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
@@ -67,7 +77,9 @@ pull_request_rules:
 
   - name: Test passed for go unittest code changed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=Code Checker MacOS 11"
@@ -79,7 +91,9 @@ pull_request_rules:
 
   - name: Test passed for mergify changed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - -files~=^(?!\.github\/mergify\.yml).*$
     actions:
       label:
@@ -88,7 +102,9 @@ pull_request_rules:
 
   - name: Test passed for title skip e2e
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - title~=\[skip e2e\]
       - label=kind/improvement
       - -files~=^(?=.*\.(go|h|cpp)).*$
@@ -100,7 +116,9 @@ pull_request_rules:
 
   - name: Blocking PR if missing a related issue or PR doesn't have kind/improvement label
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - -body~=\#[0-9]{1,6}(\s+|$)
       - -label=kind/improvement
       - -title~=\[automated\]
@@ -117,7 +135,9 @@ pull_request_rules:
     conditions:
       - or:
         - and:
-          - base=master
+          - or:
+            - base=master
+            - base~=^2(\.\d+){2}$
           - body~=\#[0-9]{1,6}(\s+|$)
         - and:
           - base=master
@@ -129,7 +149,9 @@ pull_request_rules:
 
   - name: Dismiss block label if automated create PR
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - title~=\[automated\]
     actions:
       label:
@@ -138,7 +160,9 @@ pull_request_rules:
 
   - name: Test passed for skip e2e
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - title~=\[skip e2e\]
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
@@ -153,7 +177,9 @@ pull_request_rules:
 
   - name: Remove ci-passed label when status for code checker or ut  is not success
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - files~=^(?=.*\.(go|h|cpp)).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 18.04"
@@ -166,7 +192,9 @@ pull_request_rules:
 
   - name: Remove ci-passed label when  status for jenkins job is not success
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - -title~=\[skip e2e\]
       - files~=^(?!(internal\/.*_test\.go|.*\.md)).*$
       - "status-success!=continuous-integration/jenkins/pr-merge"        
@@ -178,7 +206,9 @@ pull_request_rules:
 
   - name: Add comment when jenkins job failed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - "check-failure=continuous-integration/jenkins/pr-merge"        
     actions:
       comment:
@@ -187,7 +217,9 @@ pull_request_rules:
 
   - name: Add comment when code checker or ut failed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - or:
         - "check-failure=Code Checker AMD64 Ubuntu 18.04"
         - "check-failure=Build and test AMD64 Ubuntu 18.04"       
@@ -201,7 +233,9 @@ pull_request_rules:
 
   - name: Add `needs-rebase` label when more than one commit in pr
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - "#commits>1"
     actions:
       comment:
@@ -213,7 +247,9 @@ pull_request_rules:
 
   - name: Remove `needs-rebase` label when only one commit in pr
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - "#commits=1"
     actions:
       label:
