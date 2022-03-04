@@ -1927,12 +1927,14 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			// fmt.Println("searchResults: ", searchResults)
 			filterSearchResults := make([]*internalpb.SearchResults, 0)
 			var filterReason string
+			errNum := 0
 			for _, partialSearchResult := range searchResults {
 				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_Success {
 					filterSearchResults = append(filterSearchResults, partialSearchResult)
 					// For debugging, please don't delete.
 					// printSearchResult(partialSearchResult)
 				} else {
+					errNum++
 					filterReason += partialSearchResult.Status.Reason + "\n"
 				}
 			}
@@ -1941,7 +1943,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 				zap.Any("len(filterSearchResults)", len(filterSearchResults)))
 			metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SearchLabel).Observe(float64(st.tr.RecordSpan().Milliseconds()))
 			tr.Record("Proxy Search PostExecute stage1 done")
-			if len(filterSearchResults) <= 0 {
+			if len(filterSearchResults) <= 0 || errNum > 0 {
 				st.result = &milvuspb.SearchResults{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1949,7 +1951,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 					},
 					CollectionName: st.collectionName,
 				}
-				return fmt.Errorf("no Available QueryNode result, filter reason %s: id %d", filterReason, st.ID())
+				return fmt.Errorf("QueryNode search fail, reason %s: id %d", filterReason, st.ID())
 			}
 			tr.Record("decodeResultStart")
 			validSearchResults, err := decodeSearchResults(filterSearchResults)
