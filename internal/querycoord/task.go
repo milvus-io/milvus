@@ -374,6 +374,20 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	}
 	log.Debug("loadCollectionTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toLoadPartitionIDs), zap.Int64("msgID", lct.Base.MsgID))
 
+	// Update the collection meta first. Avoid the compaction segment cannot be handoff to QueryNode after getting RecoveryInfo
+	err = lct.meta.addCollection(collectionID, querypb.LoadType_loadCollection, lct.Schema)
+	if err != nil {
+		log.Error("loadCollectionTask: add collection to meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
+		lct.setResultInfo(err)
+		return err
+	}
+	err = lct.meta.addPartitions(collectionID, toLoadPartitionIDs)
+	if err != nil {
+		log.Error("loadCollectionTask: add partitions to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toLoadPartitionIDs), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
+		lct.setResultInfo(err)
+		return err
+	}
+
 	loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
 	watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
 	var deltaChannelInfos []*datapb.VchannelInfo
@@ -449,19 +463,6 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	}
 	metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 	log.Debug("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
-
-	err = lct.meta.addCollection(collectionID, querypb.LoadType_loadCollection, lct.Schema)
-	if err != nil {
-		log.Error("loadCollectionTask: add collection to meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
-		lct.setResultInfo(err)
-		return err
-	}
-	err = lct.meta.addPartitions(collectionID, toLoadPartitionIDs)
-	if err != nil {
-		log.Error("loadCollectionTask: add partitions to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toLoadPartitionIDs), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
-		lct.setResultInfo(err)
-		return err
-	}
 
 	log.Debug("LoadCollection execute done",
 		zap.Int64("msgID", lct.getTaskID()),
@@ -719,6 +720,21 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	collectionID := lpt.CollectionID
 	partitionIDs := lpt.PartitionIDs
 
+	// Update the collection meta first. Avoid the compaction segment cannot be handoff to QueryNode after getting RecoveryInfo
+	err := lpt.meta.addCollection(collectionID, querypb.LoadType_LoadPartition, lpt.Schema)
+	if err != nil {
+		log.Error("loadPartitionTask: add collection to meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
+		lpt.setResultInfo(err)
+		return err
+	}
+
+	err = lpt.meta.addPartitions(collectionID, partitionIDs)
+	if err != nil {
+		log.Error("loadPartitionTask: add partition to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
+		lpt.setResultInfo(err)
+		return err
+	}
+
 	var loadSegmentReqs []*querypb.LoadSegmentsRequest
 	var watchDmChannelReqs []*querypb.WatchDmChannelsRequest
 	var deltaChannelInfos []*datapb.VchannelInfo
@@ -757,7 +773,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	}
 	mergedDeltaChannels := mergeWatchDeltaChannelInfo(deltaChannelInfos)
 	// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
-	err := lpt.meta.setDeltaChannel(collectionID, mergedDeltaChannels)
+	err = lpt.meta.setDeltaChannel(collectionID, mergedDeltaChannels)
 	if err != nil {
 		log.Error("loadPartitionTask: set delta channel info failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
 		lpt.setResultInfo(err)
@@ -791,20 +807,6 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	}
 	metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 	log.Debug("loadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID))
-
-	err = lpt.meta.addCollection(collectionID, querypb.LoadType_LoadPartition, lpt.Schema)
-	if err != nil {
-		log.Error("loadPartitionTask: add collection to meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
-		lpt.setResultInfo(err)
-		return err
-	}
-
-	err = lpt.meta.addPartitions(collectionID, partitionIDs)
-	if err != nil {
-		log.Error("loadPartitionTask: add partition to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
-		lpt.setResultInfo(err)
-		return err
-	}
 
 	log.Debug("loadPartitionTask Execute done",
 		zap.Int64("msgID", lpt.getTaskID()),
