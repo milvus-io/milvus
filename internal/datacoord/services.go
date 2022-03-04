@@ -48,7 +48,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Value: Params.MsgChannelCfg.DataCoordTimeTick,
+		Value: Params.CommonCfg.DataCoordTimeTick,
 	}, nil
 }
 
@@ -271,7 +271,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Value: Params.MsgChannelCfg.DataCoordSegmentInfo,
+		Value: Params.CommonCfg.DataCoordSegmentInfo,
 	}, nil
 }
 

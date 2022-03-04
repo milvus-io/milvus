@@ -137,9 +137,33 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
+// Load2 loads an object with multiple @keys, return the first successful value.
+// If all keys not exist, return error.
+// This is to be compatible with old configuration file.
+func (gp *BaseTable) Load2(keys []string) (string, error) {
+	for _, key := range keys {
+		if str, err := gp.params.Load(strings.ToLower(key)); err == nil {
+			return str, nil
+		}
+	}
+	return "", fmt.Errorf("invalid keys: %v", keys)
+}
+
 // LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
 func (gp *BaseTable) LoadWithDefault(key, defaultValue string) string {
 	return gp.params.LoadWithDefault(strings.ToLower(key), defaultValue)
+}
+
+// LoadWithDefault2 loads an object with multiple @keys, return the first successful value.
+// If all keys not exist, return @defaultValue.
+// This is to be compatible with old configuration file.
+func (gp *BaseTable) LoadWithDefault2(keys []string, defaultValue string) string {
+	for _, key := range keys {
+		if str, err := gp.params.Load(strings.ToLower(key)); err == nil {
+			return str
+		}
+	}
+	return defaultValue
 }
 
 // LoadRange loads objects with range @startKey to @endKey with @limit number of objects.

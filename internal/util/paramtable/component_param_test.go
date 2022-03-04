@@ -40,17 +40,9 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("default index name = %s", Params.DefaultIndexName)
 
 		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
-	})
-
-	t.Run("test knowhereConfig", func(t *testing.T) {
-		Params := CParams.KnowhereCfg
 
 		assert.NotEqual(t, Params.SimdType, "")
 		t.Logf("knowhere simd type = %s", Params.SimdType)
-	})
-
-	t.Run("test msgChannelConfig", func(t *testing.T) {
-		Params := CParams.MsgChannelCfg
 
 		// -- proxy --
 		assert.Equal(t, Params.ProxySubName, "by-dev-proxy")

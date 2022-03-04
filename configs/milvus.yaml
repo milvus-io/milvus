@@ -215,7 +215,7 @@ log:
     maxBackups: 20
   format: text # text/json
 
-msgChannel:
+common:
   # Channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
     cluster: "by-dev"
@@ -241,12 +241,10 @@ msgChannel:
     dataNodeSubNamePrefix: "dataNode"
     dataCoordSubNamePrefix: "dataCoord"
 
-common:
   defaultPartitionName: "_default"  # default partition name for a collection
   defaultIndexName: "_default_idx"  # default index name
   retentionDuration: 432000 # 5 days in seconds
 
-knowhere:
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.

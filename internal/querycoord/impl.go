@@ -72,7 +72,7 @@ func (qc *QueryCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.MsgChannelCfg.QueryCoordTimeTick,
+		Value: Params.CommonCfg.QueryCoordTimeTick,
 	}, nil
 }
 
@@ -84,7 +84,7 @@ func (qc *QueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.MsgChannelCfg.QueryNodeStats,
+		Value: Params.CommonCfg.QueryNodeStats,
 	}, nil
 }
 

@@ -289,7 +289,7 @@ func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
 
 // buildSubName generates a subscription name by concatenating DataNodeSubName, node ID and collection ID.
 func buildSubName(collectionID int64, nodeID int64) string {
-	return fmt.Sprintf("%s-%d-%d", Params.MsgChannelCfg.DataNodeSubName, nodeID, collectionID)
+	return fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName, nodeID, collectionID)
 }
 
 func (c *ChannelManager) unsubscribe(subName string, channel string) error {

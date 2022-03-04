@@ -149,7 +149,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		chanNames[i] = ToPhysicalChannel(vchanNames[i])
 
 		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
-		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
+		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
 		if err1 != nil || deltaChanName != deltaChanNames[i] {
 			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
 		}
@@ -363,7 +363,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// remove delta channels
 		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
 		for i, chanName := range collMeta.PhysicalChannelNames {
-			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta); err != nil {
+			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta); err != nil {
 				return err
 			}
 		}

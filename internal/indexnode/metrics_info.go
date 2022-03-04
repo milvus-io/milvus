@@ -52,7 +52,7 @@ func getSystemInfoMetrics(
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
 			MinioBucketName: Params.MinioCfg.BucketName,
-			SimdType:        Params.KnowhereCfg.SimdType,
+			SimdType:        Params.CommonCfg.SimdType,
 		},
 	}
 
