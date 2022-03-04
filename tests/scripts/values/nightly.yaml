@@ -1,8 +1,6 @@
 metrics:
   serviceMonitor:
     enabled: true
-    interval: "5s"
-    scrapeTimeout: "5s"
 pulsar:
   bookkeeper:
     volumes:
