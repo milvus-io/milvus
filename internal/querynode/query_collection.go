@@ -470,6 +470,10 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 		//	zap.Any("collectionID", collectionID),
 		//	zap.Int64("msgID", msg.ID()),
 		//)
+		log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "QueryNode-Receive"),
+			zap.Int64(log.BenchmarkCollectionID, collectionID),
+			zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, time.Now().UnixNano()))
+
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
 		return err
@@ -996,6 +1000,9 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (q *queryCollection) search(msg queryMsg) error {
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "UnresolvedQueue"),
+		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, msg.ElapseSpan().Milliseconds()))
 	q.streaming.replica.queryRLock()
 	q.historical.replica.queryRLock()
 	defer q.historical.replica.queryRUnlock()
@@ -1085,8 +1092,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 		return err
 	}
 	searchResults = append(searchResults, hisSearchResults...)
+
 	log.Debug("historical search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("searched partitionIDs", sealedPartitionSearched), zap.Int64s("searched segmentIDs", sealedSegmentSearched))
-	tr.Record(fmt.Sprintf("historical search done, msgID = %d", searchMsg.ID()))
+	hisSearchDur := tr.Record(fmt.Sprintf("historical search done, msgID = %d", searchMsg.ID()))
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "HistoricalSearch"),
+		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, hisSearchDur.Milliseconds()))
 
 	log.Debug("streaming search start", zap.Int64("msgID", searchMsg.ID()))
 	for _, channel := range collection.getVChannels() {
@@ -1097,7 +1108,10 @@ func (q *queryCollection) search(msg queryMsg) error {
 		searchResults = append(searchResults, strSearchResults...)
 		log.Debug("streaming search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.String("searched dmChannel", channel), zap.Int64s("searched partitionIDs", growingPartitionSearched), zap.Int64s("searched segmentIDs", growingSegmentSearched))
 	}
-	tr.Record(fmt.Sprintf("streaming search done, msgID = %d", searchMsg.ID()))
+	streamingSearchDuration := tr.Record(fmt.Sprintf("streaming search done, msgID = %d", searchMsg.ID()))
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "StreamingSearch"),
+		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, streamingSearchDuration.Milliseconds()))
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {
@@ -1167,7 +1181,11 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	metrics.QueryNodeReduceLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.RecordSpan().Milliseconds()))
+	reduceTime := tr.RecordSpan().Milliseconds()
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "QNReduceSearchResults"),
+		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, reduceTime))
+	metrics.QueryNodeReduceLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(reduceTime))
 
 	var offset int64
 	for index := range searchRequests {
@@ -1252,7 +1270,10 @@ func (q *queryCollection) search(msg queryMsg) error {
 		metrics.QueryNodeSQCount.WithLabelValues(metrics.SuccessLabel,
 			metrics.SearchLabel,
 			fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
-		tr.Record(fmt.Sprintf("publish search result, msgID = %d", searchMsg.ID()))
+		publishResultDuration := tr.Record(fmt.Sprintf("publish search result, msgID = %d", searchMsg.ID()))
+		log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "PublishSearchResult"),
+			zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
+			zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, publishResultDuration.Milliseconds()))
 	}
 	sp.LogFields(oplog.String("statistical time", "stats done"))
 	tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))

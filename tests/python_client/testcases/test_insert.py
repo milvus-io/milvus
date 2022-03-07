@@ -161,7 +161,7 @@ class TestInsertParams(TestcaseBase):
         assert collection_w.is_empty
         assert collection_w.num_entities == 0
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_numpy_data(self):
         """
         target: test insert numpy.ndarray data
@@ -171,8 +171,7 @@ class TestInsertParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_numpy_data(nb=10)
-        error = {ct.err_code: 0, ct.err_msg: "Data type not support numpy.ndarray"}
-        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data=data)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_binary_dataframe(self):

@@ -18,6 +18,15 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+const (
+	BenchmarkRoot         = "benchmark-search"
+	BenchmarkRole         = "Role"
+	BenchmarkStep         = "Step"
+	BenchmarkMsgID        = "MsgID"
+	BenchmarkCollectionID = "CollectionID"
+	BenchmarkDuration     = "Duration"
+)
+
 // Debug logs a message at DebugLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
 func Debug(msg string, fields ...zap.Field) {

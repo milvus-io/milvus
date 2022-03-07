@@ -18,6 +18,7 @@ default_dim = ct.default_dim
 default_nb = ct.default_nb
 num_loaded_entities = "num_loaded_entities"
 num_total_entities = "num_total_entities"
+loading_progress = "loading_progress"
 
 
 class TestUtilityParams(TestcaseBase):
@@ -868,7 +869,7 @@ class TestUtilityBase(TestcaseBase):
         assert res[num_total_entities] == half
         assert res[num_loaded_entities] == half
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_wait_loading_collection_empty(self):
         """
         target: test wait_for_loading
@@ -880,7 +881,7 @@ class TestUtilityBase(TestcaseBase):
         cw.load()
         self.utility_wrap.wait_for_loading_complete(cw.name)
         res, _ = self.utility_wrap.loading_progress(cw.name)
-        exp_res = {num_total_entities: 0, num_loaded_entities: 0}
+        exp_res = {loading_progress: "100%"}
         assert res == exp_res
 
     @pytest.mark.tag(CaseLabel.L1)

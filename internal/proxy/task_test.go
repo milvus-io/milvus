@@ -812,6 +812,7 @@ func TestSearchTask(t *testing.T) {
 		chMgr:     nil,
 		qc:        nil,
 		tr:        timerecord.NewTimeRecorder("search"),
+		perfTR:    timerecord.NewTimeRecorder("benchmark-search"),
 	}
 
 	// no result
@@ -843,6 +844,7 @@ func TestSearchTask(t *testing.T) {
 		chMgr:     nil,
 		qc:        nil,
 		tr:        timerecord.NewTimeRecorder("search"),
+		perfTR:    timerecord.NewTimeRecorder("benchmark-search"),
 	}
 
 	// no result
@@ -879,6 +881,7 @@ func TestSearchTask(t *testing.T) {
 		chMgr:     nil,
 		qc:        nil,
 		tr:        timerecord.NewTimeRecorder("search"),
+		perfTR:    timerecord.NewTimeRecorder("benchmark-search"),
 	}
 
 	// no result
@@ -1832,6 +1835,7 @@ func TestSearchTask_all(t *testing.T) {
 		chMgr:     chMgr,
 		qc:        qc,
 		tr:        timerecord.NewTimeRecorder("search"),
+		perfTR:    timerecord.NewTimeRecorder("benchmark-search"),
 	}
 
 	// simple mock for query node
@@ -2179,6 +2183,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 		chMgr:     chMgr,
 		qc:        qc,
 		tr:        timerecord.NewTimeRecorder("search"),
+		perfTR:    timerecord.NewTimeRecorder("benchmark-search"),
 	}
 
 	// simple mock for query node
@@ -2520,6 +2525,7 @@ func TestSearchTask_7803_reduce(t *testing.T) {
 		chMgr:     chMgr,
 		qc:        qc,
 		tr:        timerecord.NewTimeRecorder("search"),
+		perfTR:    timerecord.NewTimeRecorder("benchmark-search"),
 	}
 
 	// simple mock for query node
@@ -2657,7 +2663,8 @@ func TestSearchTask_Type(t *testing.T) {
 		SearchRequest: &internalpb.SearchRequest{
 			Base: nil,
 		},
-		tr: timerecord.NewTimeRecorder("search"),
+		tr:     timerecord.NewTimeRecorder("search"),
+		perfTR: timerecord.NewTimeRecorder("benchmark-search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 	assert.Equal(t, commonpb.MsgType_Search, task.Type())
@@ -2670,7 +2677,8 @@ func TestSearchTask_Ts(t *testing.T) {
 		SearchRequest: &internalpb.SearchRequest{
 			Base: nil,
 		},
-		tr: timerecord.NewTimeRecorder("search"),
+		tr:     timerecord.NewTimeRecorder("search"),
+		perfTR: timerecord.NewTimeRecorder("benchmark-search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 
@@ -2714,8 +2722,9 @@ func TestSearchTask_Channels(t *testing.T) {
 		query: &milvuspb.SearchRequest{
 			CollectionName: collectionName,
 		},
-		chMgr: chMgr,
-		tr:    timerecord.NewTimeRecorder("search"),
+		chMgr:  chMgr,
+		tr:     timerecord.NewTimeRecorder("search"),
+		perfTR: timerecord.NewTimeRecorder("benchmark-search"),
 	}
 
 	// collection not exist
@@ -2803,9 +2812,10 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		query: &milvuspb.SearchRequest{
 			CollectionName: collectionName,
 		},
-		chMgr: chMgr,
-		qc:    qc,
-		tr:    timerecord.NewTimeRecorder("search"),
+		chMgr:  chMgr,
+		qc:     qc,
+		tr:     timerecord.NewTimeRecorder("search"),
+		perfTR: timerecord.NewTimeRecorder("benchmark-search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 
@@ -3102,9 +3112,10 @@ func TestSearchTask_Execute(t *testing.T) {
 			Status:  &commonpb.Status{},
 			Results: nil,
 		},
-		chMgr: chMgr,
-		qc:    qc,
-		tr:    timerecord.NewTimeRecorder("search"),
+		chMgr:  chMgr,
+		qc:     qc,
+		tr:     timerecord.NewTimeRecorder("search"),
+		perfTR: timerecord.NewTimeRecorder("benchmark-search"),
 	}
 	assert.NoError(t, task.OnEnqueue())
 
