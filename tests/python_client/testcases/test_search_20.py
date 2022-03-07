@@ -285,7 +285,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 15409")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
