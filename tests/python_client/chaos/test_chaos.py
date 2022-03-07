@@ -45,8 +45,8 @@ def check_cluster_nodes(chaos_config):
     selector = findkeys(chaos_config, "selector")
     selector = list(selector)
     log.info(f"chaos target selector: {selector}")
-    assert len(selector) == 1
-    selector = selector[0]
+    # assert len(selector) == 1
+    selector = selector[0] # chaos yaml file must place the effected pod selector in the first position
     namespace = selector["namespaces"][0]
     labels_dict = selector["labelSelectors"]
     labels_list = []
@@ -59,10 +59,8 @@ def check_cluster_nodes(chaos_config):
 def record_results(checkers):
     res = ""
     for k in checkers.keys():
-        # expect succ if no expectations
-        succ_rate = checkers[k].succ_rate()
-        total = checkers[k].total()
-        res += f"{str(k):10} succ rate: {succ_rate:.2f}  total: {total:02d}\n"
+        check_result = checkers[k].check_result()
+        res += f"{str(k):10} {check_result}\n"
     return res
 
 
@@ -175,11 +173,14 @@ class TestChaos(TestChaosBase):
         # assert statistic:all ops 100% succ
         log.info("******1st assert before chaos: ")
         assert_statistic(self.health_checkers)
-        with open(file_name, "a+") as f:
-            ts = time.strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"{meta_name}-{ts}\n")
-            f.write("1st assert before chaos:\n")
-            f.write(record_results(self.health_checkers))
+        try:
+            with open(file_name, "a+") as f:
+                ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"{meta_name}-{ts}\n")
+                f.write("1st assert before chaos:\n")
+                f.write(record_results(self.health_checkers))
+        except Exception as e:
+            log.info(f"Fail to write to file: {e}")
         # apply chaos object
         chaos_res = CusResource(kind=chaos_config['kind'],
                                 group=constants.CHAOS_GROUP,
@@ -188,6 +189,8 @@ class TestChaos(TestChaosBase):
         chaos_res.create(chaos_config)
         log.info("chaos injected")
         log.info(f"chaos information: {chaos_res.get(meta_name)}")
+        res = chaos_res.get(meta_name)
+        log.info(f"chaos crd list: {res}")
         sleep(constants.WAIT_PER_OP * 2)
         # reset counting
         cc.reset_counting(self.health_checkers)
@@ -207,12 +210,19 @@ class TestChaos(TestChaosBase):
                                        Op.search: self.expect_search,
                                        Op.query: self.expect_query
                                        })
-        with open(file_name, "a+") as f:
-            f.write("2nd assert after chaos injected:\n")
-            f.write(record_results(self.health_checkers))
+        try:
+            with open(file_name, "a+") as f:
+                f.write("2nd assert after chaos injected:\n")
+                f.write(record_results(self.health_checkers))
+        except Exception as e:
+            log.error(f"Fail to write the report: {e}")
         # delete chaos
         chaos_res.delete(meta_name)
+        # get chaos crd, expect it is deleted
+        res = chaos_res.get(meta_name)
+        log.info(f"chaos crd list: {res}")
         log.info("chaos deleted")
+                
         log.info(f'Alive threads: {threading.enumerate()}')
         sleep(2)
         # wait all pods ready
@@ -231,9 +241,12 @@ class TestChaos(TestChaosBase):
         # assert statistic: all ops success again
         log.info("******3rd assert after chaos deleted: ")
         assert_statistic(self.health_checkers)
-        with open(file_name, "a+") as f:
-            f.write("3rd assert after chaos deleted:\n")
-            f.write(record_results(self.health_checkers))
+        try:
+            with open(file_name, "a+") as f:
+                f.write("3rd assert after chaos deleted:\n")
+                f.write(record_results(self.health_checkers))
+        except Exception as e:
+            log.info(f"Fail to write the report: {e}")
         # assert all expectations
         assert_expectations()
 
