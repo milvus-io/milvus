@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache@v1
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
-          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('internal/core/**') }}
+          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('/internal/core/**') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
       - name: Cache Go Mod Volumes
         uses: actions/cache@v1
