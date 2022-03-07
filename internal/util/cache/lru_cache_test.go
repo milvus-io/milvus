@@ -14,10 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package cache
 
 import (
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -37,8 +39,8 @@ func TestNewLRU(t *testing.T) {
 }
 
 func TestLRU_Add(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(2, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(2, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 
 	testKey1 := "test_key_1"
@@ -77,12 +79,14 @@ func TestLRU_Add(t *testing.T) {
 	assert.False(t, ok)
 	assert.Nil(t, v)
 
-	assert.EqualValues(t, evicted, 1)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 1
+	}, 1*time.Second, 100*time.Millisecond)
 }
 
 func TestLRU_Contains(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(1, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(1, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 
 	testKey1 := "test_key_1"
@@ -101,12 +105,14 @@ func TestLRU_Contains(t *testing.T) {
 	ok = c.Contains(testKey1)
 	assert.False(t, ok)
 
-	assert.EqualValues(t, evicted, 1)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 1
+	}, 1*time.Second, 100*time.Millisecond)
 }
 
 func TestLRU_Get(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(1, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(1, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 
 	testKey1 := "test_key_1"
@@ -128,11 +134,14 @@ func TestLRU_Get(t *testing.T) {
 	assert.False(t, ok)
 	assert.Nil(t, v)
 
-	assert.EqualValues(t, evicted, 1)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 1
+	}, 1*time.Second, 100*time.Millisecond)
 }
+
 func TestLRU_GetOldest(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(2, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(2, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 
 	testKey1 := "test_key_1"
@@ -174,11 +183,14 @@ func TestLRU_GetOldest(t *testing.T) {
 	assert.EqualValues(t, testKey1, k)
 	assert.EqualValues(t, testValue1, v)
 
-	assert.EqualValues(t, evicted, 1)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 1
+	}, 1*time.Second, 100*time.Millisecond)
 }
+
 func TestLRU_Keys(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(2, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(2, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 
 	testKey1 := "test_key_1"
@@ -204,8 +216,11 @@ func TestLRU_Keys(t *testing.T) {
 	keys = c.Keys()
 	assert.ElementsMatch(t, []string{testKey3, testKey1}, keys)
 
-	assert.EqualValues(t, evicted, 1)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 1
+	}, 1*time.Second, 100*time.Millisecond)
 }
+
 func TestLRU_Len(t *testing.T) {
 	c, err := NewLRU(2, nil)
 	assert.Nil(t, err)
@@ -225,43 +240,31 @@ func TestLRU_Len(t *testing.T) {
 	c.Add(testKey3, testValue3)
 	assert.EqualValues(t, c.Len(), 2)
 }
-func TestLRU_Peek(t *testing.T) {
-	c, err := NewLRU(2, nil)
+
+func TestLRU_Capacity(t *testing.T) {
+	c, err := NewLRU(5, nil)
 	assert.Nil(t, err)
+	assert.EqualValues(t, c.Len(), 0)
 
 	testKey1 := "test_key_1"
 	testValue1 := "test_value_1"
 	testKey2 := "test_key_2"
 	testValue2 := "test_value_2"
-	testKeyNotExist := "not_exist"
+	testKey3 := "test_key_3"
+	testValue3 := "test_value_3"
 
 	c.Add(testKey1, testValue1)
-	v, ok := c.Peek(testKey1)
-	assert.True(t, ok)
-	assert.EqualValues(t, testValue1, v)
-
+	assert.EqualValues(t, c.Capacity(), 5)
 	c.Add(testKey2, testValue2)
-	k, v, ok := c.GetOldest()
-	assert.True(t, ok)
-	assert.EqualValues(t, testKey1, k)
-	assert.EqualValues(t, testValue1, v)
+	assert.EqualValues(t, c.Capacity(), 5)
 
-	v, ok = c.Peek(testKey1)
-	assert.True(t, ok)
-	assert.EqualValues(t, testValue1, v)
-
-	k, v, ok = c.GetOldest()
-	assert.True(t, ok)
-	assert.EqualValues(t, testKey1, k)
-	assert.EqualValues(t, testValue1, v)
-
-	v, ok = c.Peek(testKeyNotExist)
-	assert.False(t, ok)
-	assert.Nil(t, v)
+	c.Add(testKey3, testValue3)
+	assert.EqualValues(t, c.Capacity(), 5)
 }
+
 func TestLRU_Purge(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(2, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(2, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 	assert.EqualValues(t, c.Len(), 0)
 
@@ -281,11 +284,14 @@ func TestLRU_Purge(t *testing.T) {
 
 	c.Purge()
 	assert.EqualValues(t, c.Len(), 0)
-	assert.EqualValues(t, evicted, 3)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 3
+	}, 1*time.Second, 100*time.Millisecond)
 }
+
 func TestLRU_Remove(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(2, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(2, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 	assert.EqualValues(t, c.Len(), 0)
 
@@ -302,11 +308,14 @@ func TestLRU_Remove(t *testing.T) {
 	c.Remove(testKey2)
 
 	assert.EqualValues(t, c.Len(), 0)
-	assert.EqualValues(t, evicted, 2)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 2
+	}, 1*time.Second, 100*time.Millisecond)
 }
+
 func TestLRU_RemoveOldest(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(2, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(2, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 	assert.EqualValues(t, c.Len(), 0)
 
@@ -339,12 +348,15 @@ func TestLRU_RemoveOldest(t *testing.T) {
 	assert.Nil(t, v)
 
 	assert.EqualValues(t, c.Len(), 0)
-	assert.EqualValues(t, evicted, 2)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 2
+	}, 1*time.Second, 100*time.Millisecond)
 
 }
+
 func TestLRU_Resize(t *testing.T) {
-	evicted := 0
-	c, err := NewLRU(2, func(interface{}, interface{}) { evicted++ })
+	evicted := int32(0)
+	c, err := NewLRU(2, func(Key, Value) { atomic.AddInt32(&evicted, 1) })
 	assert.Nil(t, err)
 	assert.EqualValues(t, c.Len(), 0)
 
@@ -376,10 +388,14 @@ func TestLRU_Resize(t *testing.T) {
 	assert.EqualValues(t, v, testValue2)
 
 	assert.EqualValues(t, c.Len(), 1)
-	assert.EqualValues(t, evicted, 1)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 1
+	}, 1*time.Second, 100*time.Millisecond)
 
 	c.Resize(3)
 
 	assert.EqualValues(t, c.Len(), 1)
-	assert.EqualValues(t, evicted, 1)
+	assert.Eventually(t, func() bool {
+		return atomic.LoadInt32(&evicted) == 1
+	}, 1*time.Second, 100*time.Millisecond)
 }

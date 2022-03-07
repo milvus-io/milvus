@@ -27,6 +27,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
+	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
@@ -168,13 +169,9 @@ func (mcm *MinioChunkManager) MultiRead(keys []string) ([][]byte, error) {
 }
 
 func (mcm *MinioChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix})
-
-	var objectsKeys []string
-	var objectsValues [][]byte
-
-	for object := range objects {
-		objectsKeys = append(objectsKeys, object.Key)
+	objectsKeys, err := mcm.ListWithPrefix(prefix)
+	if err != nil {
+		return nil, nil, err
 	}
 	objectsValues, err := mcm.MultiRead(objectsKeys)
 	if err != nil {
@@ -185,8 +182,8 @@ func (mcm *MinioChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte,
 	return objectsKeys, objectsValues, nil
 }
 
-func (mcm *MinioChunkManager) Mmap(filePath string) (io.ReaderAt, error) {
-	panic("this method has not been implemented")
+func (mcm *MinioChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
+	return nil, errors.New("this method has not been implemented")
 }
 
 // ReadAt reads specific position data of minio storage if exists.
@@ -248,4 +245,15 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(prefix string) error {
 		}
 	}
 	return nil
+}
+
+func (mcm *MinioChunkManager) ListWithPrefix(prefix string) ([]string, error) {
+	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix})
+
+	var objectsKeys []string
+
+	for object := range objects {
+		objectsKeys = append(objectsKeys, object.Key)
+	}
+	return objectsKeys, nil
 }
