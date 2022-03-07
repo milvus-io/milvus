@@ -43,67 +43,83 @@ type dataSyncService struct {
 }
 
 // addFlowGraphsForDMLChannels add flowGraphs to dmlChannel2FlowGraph
-func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID UniqueID, dmlChannels []string) map[string]*queryNodeFlowGraph {
+func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID UniqueID, dmlChannels []string) (map[string]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
 	results := make(map[string]*queryNodeFlowGraph)
 	for _, channel := range dmlChannels {
-		if fg, ok := dsService.dmlChannel2FlowGraph[channel]; ok {
+		if _, ok := dsService.dmlChannel2FlowGraph[channel]; ok {
 			log.Warn("dml flow graph has been existed",
 				zap.Any("collectionID", collectionID),
 				zap.Any("channel", channel),
 			)
-			results[channel] = fg
 			continue
 		}
-		newFlowGraph := newQueryNodeFlowGraph(dsService.ctx,
+		newFlowGraph, err := newQueryNodeFlowGraph(dsService.ctx,
 			collectionID,
 			dsService.streamingReplica,
 			dsService.tSafeReplica,
 			channel,
 			dsService.msFactory)
-		dsService.dmlChannel2FlowGraph[channel] = newFlowGraph
+		if err != nil {
+			for _, fg := range results {
+				fg.flowGraph.Close()
+			}
+			return nil, err
+		}
+		results[channel] = newFlowGraph
+	}
+
+	for channel, fg := range results {
+		dsService.dmlChannel2FlowGraph[channel] = fg
 		log.Debug("add DML flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
-		results[channel] = newFlowGraph
 		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	}
 
-	return results
+	return results, nil
 }
 
 // addFlowGraphsForDeltaChannels add flowGraphs to deltaChannel2FlowGraph
-func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID UniqueID, deltaChannels []string) map[string]*queryNodeFlowGraph {
+func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID UniqueID, deltaChannels []string) (map[string]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
 	results := make(map[string]*queryNodeFlowGraph)
 	for _, channel := range deltaChannels {
-		if fg, ok := dsService.deltaChannel2FlowGraph[channel]; ok {
+		if _, ok := dsService.deltaChannel2FlowGraph[channel]; ok {
 			log.Warn("delta flow graph has been existed",
 				zap.Any("collectionID", collectionID),
 				zap.Any("channel", channel),
 			)
-			results[channel] = fg
 			continue
 		}
-		newFlowGraph := newQueryNodeDeltaFlowGraph(dsService.ctx,
+		newFlowGraph, err := newQueryNodeDeltaFlowGraph(dsService.ctx,
 			collectionID,
 			dsService.historicalReplica,
 			dsService.tSafeReplica,
 			channel,
 			dsService.msFactory)
-		dsService.deltaChannel2FlowGraph[channel] = newFlowGraph
+		if err != nil {
+			for _, fg := range results {
+				fg.flowGraph.Close()
+			}
+			return nil, err
+		}
+		results[channel] = newFlowGraph
+	}
+
+	for channel, fg := range results {
+		dsService.deltaChannel2FlowGraph[channel] = fg
 		log.Debug("add delta flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
-		results[channel] = newFlowGraph
 		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	}
 
-	return results
+	return results, nil
 }
 
 // getFlowGraphByDMLChannel returns the DML flowGraph by channel

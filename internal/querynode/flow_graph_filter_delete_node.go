@@ -44,14 +44,14 @@ func (fddNode *filterDeleteNode) Name() string {
 // Operate handles input messages, to filter invalid delete messages
 func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in filterDDNode", zap.Int("input length", len(in)))
-		// TODO: add error handling
+		log.Warn("Invalid operate message input in filterDDNode", zap.Int("input length", len(in)))
+		return []Msg{}
 	}
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg")
-		// TODO: add error handling
+		return []Msg{}
 	}
 
 	if msgStreamMsg == nil {

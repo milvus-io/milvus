@@ -738,7 +738,8 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			req:  genReleasePartitionsRequest(),
 			node: node,
 		}
-		task.node.dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = task.node.dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		assert.NoError(t, err)
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 	})
@@ -781,7 +782,8 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			req:  genReleasePartitionsRequest(),
 			node: node,
 		}
-		task.node.dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = task.node.dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		assert.NoError(t, err)
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 	})

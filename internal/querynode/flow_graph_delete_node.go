@@ -41,14 +41,14 @@ func (dNode *deleteNode) Name() string {
 // Operate handles input messages, do delete operations
 func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
-		// TODO: add error handling
+		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
+		return []Msg{}
 	}
 
 	dMsg, ok := in[0].(*deleteMsg)
 	if !ok {
 		log.Warn("type assertion failed for deleteMsg")
-		// TODO: add error handling
+		return []Msg{}
 	}
 
 	delData := &deleteData{

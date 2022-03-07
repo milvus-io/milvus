@@ -37,14 +37,15 @@ func TestQueryNodeFlowGraph_consumerFlowGraph(t *testing.T) {
 	fac, err := genFactory()
 	assert.NoError(t, err)
 
-	fg := newQueryNodeFlowGraph(ctx,
+	fg, err := newQueryNodeFlowGraph(ctx,
 		defaultCollectionID,
 		streamingReplica,
 		tSafe,
 		defaultDMLChannel,
 		fac)
+	assert.NoError(t, err)
 
-	err = fg.consumerFlowGraph(defaultDMLChannel, defaultSubName)
+	err = fg.consumeFlowGraph(defaultDMLChannel, defaultSubName)
 	assert.NoError(t, err)
 
 	fg.close()
@@ -62,12 +63,13 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 
 	tSafe := newTSafeReplica()
 
-	fg := newQueryNodeFlowGraph(ctx,
+	fg, err := newQueryNodeFlowGraph(ctx,
 		defaultCollectionID,
 		streamingReplica,
 		tSafe,
 		defaultDMLChannel,
 		fac)
+	assert.NoError(t, err)
 
 	position := &internalpb.MsgPosition{
 		ChannelName: defaultDMLChannel,
