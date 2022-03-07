@@ -22,6 +22,7 @@ import (
 	"path"
 	"time"
 
+	kvi "github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -567,7 +568,7 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key))
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation compare value and swap")
 	return nil
@@ -589,7 +590,7 @@ func (kv *EtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opt
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key))
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation compare value and swap")
 	return nil
@@ -611,8 +612,8 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string,
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s,"+
-			" source version: %d, target version: %s", key, source, target)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s,"+
+			" source version: %d, target version: %s", key, source, target))
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation compare version and swap")
 	return nil
@@ -634,8 +635,8 @@ func (kv *EtcdKV) CompareVersionAndSwapBytes(key string, source int64, target []
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s,"+
-			" source version: %d, target version: %s", key, source, target)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s,"+
+			" source version: %d, target version: %s", key, source, target))
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation compare version and swap")
 	return nil
