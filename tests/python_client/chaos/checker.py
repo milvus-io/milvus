@@ -37,6 +37,7 @@ class Checker:
     def __init__(self):
         self._succ = 0
         self._fail = 0
+        self.rsp_times = []
         self.average_time = 0
         self.c_wrap = ApiCollectionWrapper()
         self.c_wrap.init_collection(name=cf.gen_unique_str('Checker_'),
@@ -54,9 +55,20 @@ class Checker:
     def succ_rate(self):
         return self._succ / self.total() if self.total() != 0 else 0
 
+    def check_result(self):
+        succ_rate = self.succ_rate()
+        total = self.total()
+        rsp_times = self.rsp_times
+        average_time = 0 if len(rsp_times) == 0 else sum(rsp_times) / len(rsp_times)
+        max_time = 0 if len(rsp_times) == 0 else max(rsp_times)
+        min_time = 0 if len(rsp_times) == 0 else min(rsp_times)        
+        checkers_result = f"succ_rate: {succ_rate:.2f}, total: {total:03d}, average_time: {average_time:.4f}, max_time: {max_time:.4f}, min_time: {min_time:.4f}"
+        return checkers_result
+
     def reset(self):
         self._succ = 0
         self._fail = 0
+        self.rsp_times = []
         self.average_time = 0
 
 
@@ -81,6 +93,7 @@ class SearchChecker(Checker):
             )
             t1 = time.time()
             if result:
+                self.rsp_times.append(t1 - t0)
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
                 log.debug(f"search success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
@@ -108,6 +121,7 @@ class InsertFlushChecker(Checker):
             t1 = time.time()
             if not self._flush:
                 if insert_result:
+                    self.rsp_times.append(t1 - t0)
                     self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                     self._succ += 1
                     log.debug(f"insert success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
@@ -120,6 +134,7 @@ class InsertFlushChecker(Checker):
                 num_entities = self.c_wrap.num_entities
                 t1 = time.time()
                 if num_entities == (self.initial_entities + constants.DELTA_PER_INS):
+                    self.rsp_times.append(t1 - t0)
                     self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                     self._succ += 1
                     log.debug(f"flush success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
@@ -145,6 +160,7 @@ class CreateChecker(Checker):
                 check_task=CheckTasks.check_nothing)
             t1 = time.time()
             if result:
+                self.rsp_times.append(t1 - t0)
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
                 log.debug(f"create success, time: {t1 - t0:.4f}, average_time: {self.average_time:4f}")
@@ -175,6 +191,7 @@ class IndexChecker(Checker):
                                                  check_task=CheckTasks.check_nothing)
             t1 = time.time()
             if result:
+                self.rsp_times.append(t1 - t0)
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
                 log.debug(f"index success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
@@ -202,6 +219,7 @@ class QueryChecker(Checker):
                                           check_task=CheckTasks.check_nothing)
             t1 = time.time()
             if result:
+                self.rsp_times.append(t1 - t0)
                 self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
                 log.debug(f"query success, time: {t1 - t0:.4f}, average_time: {self.average_time:.4f}")
@@ -215,11 +233,13 @@ def assert_statistic(checkers, expectations={}):
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
         total = checkers[k].total()
+        checker_result = k.check_result()
+
         if expectations.get(k, '') == constants.FAIL:
-            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+            log.info(f"Expect Fail: {str(k)} {checker_result}")
             expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}")
+                   f"Expect Fail: {str(k)} {checker_result}")
         else:
-            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+            log.info(f"Expect Succ: {str(k)} {checker_result}")
             expect(succ_rate > 0.90 or total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}")
+                   f"Expect Succ: {str(k)} {checker_result}")
