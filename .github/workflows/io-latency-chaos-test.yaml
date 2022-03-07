@@ -2,8 +2,6 @@ name: IO Latency Chaos Test
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "30 18 * * *"
 jobs:
   
   test-io-latency-chaos:
@@ -106,6 +104,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client
         run: |
+          kubectl get iochaos -n chaos-testing
           kubectl get pod -n chaos-testing
           # wait all pod to be ready
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
@@ -116,7 +115,7 @@ jobs:
 
           sleep 20s
           nc -vz 127.0.0.1 19530
-
+ 
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
 
