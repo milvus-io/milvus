@@ -12,7 +12,7 @@ spec:
       app.kubernetes.io/instance: milvus-chaos
   mode: all
   action: latency
-  delay: 200ms
+  delay: 10ms
   methods:
     - read
     - write
