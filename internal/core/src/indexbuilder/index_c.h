@@ -16,13 +16,9 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include "segcore/collection_c.h"
 #include "common/type_c.h"
 #include "common/vector_index_c.h"
-
-typedef void* CIndex;
-typedef void* CIndexQueryResult;
-typedef void* CBinary;
+#include "indexbuilder/type_c.h"
 
 // TODO: how could we pass map between go and c++ more efficiently?
 // Solution: using Protobuf instead of JSON, this way significantly increase programming efficiency

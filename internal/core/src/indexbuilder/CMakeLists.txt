@@ -13,6 +13,7 @@
 set(INDEXBUILDER_FILES
         IndexWrapper.cpp
         index_c.cpp
+        scalar_index_c.cpp
         init_c.cpp
         )
 add_library(milvus_indexbuilder SHARED
@@ -27,8 +28,8 @@ endif ()
 
 # link order matters
 target_link_libraries(milvus_indexbuilder
-        knowhere
         milvus_common
+        knowhere
         ${TBB}
         ${PLATFORM_LIBS}
         pthread

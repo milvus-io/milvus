@@ -17,6 +17,7 @@
 
 #endif
 
+#include "exceptions/EasyAssert.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/IndexWrapper.h"
 #include "indexbuilder/index_c.h"
