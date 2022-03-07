@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	kvi "github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 )
 
@@ -549,7 +550,7 @@ func (kv *EmbedEtcdKV) CompareValueAndSwap(key, value, target string, opts ...cl
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareValueAndSwap error for compare is false for key: %s", key)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareValueAndSwap error for compare is false for key: %s", key))
 	}
 
 	return nil
@@ -570,7 +571,7 @@ func (kv *EmbedEtcdKV) CompareValueAndSwapBytes(key string, value, target []byte
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareValueAndSwapBytes error for compare is false for key: %s", key)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareValueAndSwapBytes error for compare is false for key: %s", key))
 	}
 
 	return nil
@@ -591,7 +592,7 @@ func (kv *EmbedEtcdKV) CompareVersionAndSwap(key string, version int64, target s
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key))
 	}
 
 	return nil
@@ -612,7 +613,7 @@ func (kv *EmbedEtcdKV) CompareVersionAndSwapBytes(key string, version int64, tar
 		return err
 	}
 	if !resp.Succeeded {
-		return fmt.Errorf("function CompareVersionAndSwapBytes error for compare is false for key: %s", key)
+		return kvi.NewCompareFailedError(fmt.Errorf("function CompareVersionAndSwapBytes error for compare is false for key: %s", key))
 	}
 
 	return nil

@@ -21,6 +21,21 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// CompareFailedError is a helper type for checking MetaKv CompareAndSwap series func error type
+type CompareFailedError struct {
+	internalError error
+}
+
+// Error implements error interface
+func (e *CompareFailedError) Error() string {
+	return e.internalError.Error()
+}
+
+// NewCompareFailedError wraps error into NewCompareFailedError
+func NewCompareFailedError(err error) error {
+	return &CompareFailedError{internalError: err}
+}
+
 // BaseKV contains base operations of kv. Include save, load and remove.
 type BaseKV interface {
 	Load(key string) (string, error)
