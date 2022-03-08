@@ -260,6 +260,34 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			assert.Equal(t, 1, len(idata))
 			assert.NotEmpty(t, idata[0].Data)
 		})
+		t.Run("Merge without expiration2", func(t *testing.T) {
+			Params.DataCoordCfg.CompactionEntityExpiration = math.MaxInt64
+			flushInsertBufferSize := Params.DataNodeCfg.FlushInsertBufferSize
+			defer func() {
+				Params.DataNodeCfg.FlushInsertBufferSize = flushInsertBufferSize
+			}()
+			Params.DataNodeCfg.FlushInsertBufferSize = 128
+			iData := genInsertDataWithExpiredTS()
+			meta := NewMetaFactory().GetCollectionMeta(1, "test")
+
+			iblobs, err := getInsertBlobs(100, iData, meta)
+			require.NoError(t, err)
+
+			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106)
+			require.NoError(t, err)
+
+			mitr := storage.NewMergeIterator([]iterator{iitr})
+
+			dm := map[UniqueID]Timestamp{}
+
+			ct := &compactionTask{}
+			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			assert.NoError(t, err)
+			assert.Equal(t, int64(2), numOfRow)
+			assert.Equal(t, 2, len(idata))
+			assert.NotEmpty(t, idata[0].Data)
+		})
+
 		t.Run("Merge with expiration", func(t *testing.T) {
 			Params.DataCoordCfg.CompactionEntityExpiration = 864000 // 10 days in seconds
 			iData := genInsertDataWithExpiredTS()
@@ -281,8 +309,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
 			assert.NoError(t, err)
 			assert.Equal(t, int64(0), numOfRow)
-			assert.Equal(t, 1, len(idata))
-			assert.Empty(t, idata[0].Data)
+			assert.Equal(t, 0, len(idata))
 		})
 	})
 
