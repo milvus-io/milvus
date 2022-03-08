@@ -19,6 +19,7 @@ package querynode
 import (
 	"context"
 	"math/rand"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -315,7 +316,7 @@ func TestSegmentLoader_checkSegmentSize(t *testing.T) {
 	loader := node.loader
 	assert.NotNil(t, loader)
 
-	err = loader.checkSegmentSize(defaultSegmentID, []*querypb.SegmentLoadInfo{{SegmentID: defaultSegmentID, SegmentSize: 1024}})
+	err = loader.checkSegmentSize(defaultSegmentID, []*querypb.SegmentLoadInfo{{SegmentID: defaultSegmentID, SegmentSize: 1024}}, runtime.GOMAXPROCS(0))
 	assert.NoError(t, err)
 
 	//totalMem, err := getTotalMemory()
