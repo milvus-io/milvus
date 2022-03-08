@@ -189,8 +189,6 @@ class TestChaos(TestChaosBase):
         chaos_res.create(chaos_config)
         log.info("chaos injected")
         log.info(f"chaos information: {chaos_res.get(meta_name)}")
-        res = chaos_res.get(meta_name)
-        log.info(f"chaos crd list: {res}")
         sleep(constants.WAIT_PER_OP * 2)
         # reset counting
         cc.reset_counting(self.health_checkers)
@@ -218,9 +216,6 @@ class TestChaos(TestChaosBase):
             log.error(f"Fail to write the report: {e}")
         # delete chaos
         chaos_res.delete(meta_name)
-        # get chaos crd, expect it is deleted
-        res = chaos_res.get(meta_name)
-        log.info(f"chaos crd list: {res}")
         log.info("chaos deleted")
                 
         log.info(f'Alive threads: {threading.enumerate()}')
