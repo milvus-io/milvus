@@ -66,21 +66,27 @@ func GetMemoryCount() uint64 {
 		log.Error(icErr.Error())
 		return 0
 	}
-	if ic {
-		// in container, calculate by `cgroups`
-		limit, err := getContainerMemLimit()
-		if err != nil {
-			log.Error(err.Error())
-			return 0
-		}
-		return limit
-	}
-	// not in container, calculate by `gopsutil`
+	// get host memory by `gopsutil`
 	stats, err := mem.VirtualMemory()
 	if err != nil {
 		log.Warn("failed to get memory count",
 			zap.Error(err))
 		return 0
+	}
+	// not in container, return host memory
+	if !ic {
+		return stats.Total
+	}
+
+	// get container memory by `cgroups`
+	limit, err := getContainerMemLimit()
+	if err != nil {
+		log.Error(err.Error())
+		return 0
+	}
+	// in container, return min(hostMem, containerMem)
+	if limit < stats.Total {
+		return limit
 	}
 	return stats.Total
 }
