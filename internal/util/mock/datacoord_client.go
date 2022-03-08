@@ -118,3 +118,15 @@ func (m *DataCoordClient) GetFlushState(ctx context.Context, req *milvuspb.GetFl
 func (m *DataCoordClient) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
 	return &datapb.DropVirtualChannelResponse{}, m.Err
 }
+
+func (m *DataCoordClient) Import(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
+	return &milvuspb.ImportResponse{}, m.Err
+}
+
+func (m *DataCoordClient) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest, opts ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error) {
+	return &milvuspb.GetImportStateResponse{}, m.Err
+}
+
+func (m *DataCoordClient) CompleteImport(ctx context.Context, req *datapb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

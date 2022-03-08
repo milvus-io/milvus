@@ -55,6 +55,8 @@ type MockDataCoord struct {
 	watchChannelsResp    *datapb.WatchChannelsResponse
 	getFlushStateResp    *milvuspb.GetFlushStateResponse
 	dropVChanResp        *datapb.DropVirtualChannelResponse
+	importResp           *milvuspb.ImportResponse
+	getImportStateResp   *milvuspb.GetImportStateResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -162,6 +164,18 @@ func (m *MockDataCoord) GetFlushState(ctx context.Context, req *milvuspb.GetFlus
 
 func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	return m.dropVChanResp, m.err
+}
+
+func (m *MockDataCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	return m.importResp, m.err
+}
+
+func (m *MockDataCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	return m.getImportStateResp, m.err
+}
+
+func (m *MockDataCoord) CompleteImport(ctx context.Context, req *datapb.ImportResult) (*commonpb.Status, error) {
+	return m.status, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

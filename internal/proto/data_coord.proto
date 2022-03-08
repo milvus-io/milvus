@@ -41,6 +41,11 @@ service DataCoord {
   rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
   rpc GetFlushState(milvus.GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
+  rpc Import(milvus.ImportRequest) returns (milvus.ImportResponse) {}
+  rpc GetImportState(milvus.GetImportStateRequest) returns (milvus.GetImportStateResponse) {}
+  rpc CompleteImport(ImportResult) returns (common.Status) {}
 }
 
 service DataNode {
@@ -53,6 +58,9 @@ service DataNode {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
   rpc Compaction(CompactionPlan) returns (common.Status) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
+  rpc Import(milvus.ImportRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -410,4 +418,10 @@ message DropVirtualChannelSegment {
 
 message DropVirtualChannelResponse {
   common.Status status = 1;
+}
+
+message ImportResult {
+  common.Status status = 1;
+  repeated int64 segments = 2;    // id array of new sealed segments
+  int64 row_count = 3; // how many rows are imported by this task
 }

@@ -630,3 +630,11 @@ func (s *Server) SendSearchResult(ctx context.Context, results *internalpb.Searc
 func (s *Server) SendRetrieveResult(ctx context.Context, results *internalpb.RetrieveResults) (*commonpb.Status, error) {
 	return s.proxy.SendRetrieveResult(ctx, results)
 }
+
+func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	return s.proxy.Import(ctx, req)
+}
+
+func (s *Server) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	return s.proxy.GetImportState(ctx, req)
+}

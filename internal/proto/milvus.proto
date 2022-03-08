@@ -56,6 +56,10 @@ service MilvusService {
   rpc GetCompactionState(GetCompactionStateRequest) returns (GetCompactionStateResponse) {}
   rpc ManualCompaction(ManualCompactionRequest) returns (ManualCompactionResponse) {}
   rpc GetCompactionStateWithPlans(GetCompactionPlansRequest) returns (GetCompactionPlansResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
+  rpc Import(ImportRequest) returns (ImportResponse) {}
+  rpc GetImportState(GetImportStateRequest) returns (GetImportStateResponse) {}
 }
 
 message CreateAliasRequest {
@@ -781,6 +785,29 @@ message GetFlushStateRequest {
 message GetFlushStateResponse {
   common.Status status = 1;
   bool flushed = 2;
+}
+
+message ImportRequest {
+  string collection_name = 1;  // target collection
+  string partition_name = 2;  // target partition
+  bool row_based = 3;  // the file is row-based or column-based
+  repeated string files = 4;  // file paths to be imported
+  repeated common.KeyValuePair options = 5;  // import options
+}
+ 
+message ImportResponse {
+  common.Status status = 1;
+  repeated int64 tasks = 2;  // id array of import tasks
+}
+ 
+message GetImportStateRequest {
+  int64 task = 1;  // id of an import task
+}
+ 
+message GetImportStateResponse {
+  common.Status status = 1;
+  common.ImportState state = 2;  // is this import task finished or not
+  int64 row_count = 3;  // if the task is finished, this value is how many rows are imported. if the task is not finished, this value is how many rows are parsed.
 }
 
 service ProxyService {

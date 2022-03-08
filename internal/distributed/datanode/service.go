@@ -353,3 +353,7 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 func (s *Server) Compaction(ctx context.Context, request *datapb.CompactionPlan) (*commonpb.Status, error) {
 	return s.datanode.Compaction(ctx, request)
 }
+
+func (s *Server) Import(ctx context.Context, request *milvuspb.ImportRequest) (*commonpb.Status, error) {
+	return s.datanode.Import(ctx, request)
+}

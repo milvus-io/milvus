@@ -367,6 +367,33 @@ inline bool ConsistencyLevel_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ConsistencyLevel>(
     ConsistencyLevel_descriptor(), name, value);
 }
+enum ImportState : int {
+  ImportPending = 0,
+  ImportExecuting = 1,
+  ImportCompleted = 2,
+  ImportFailed = 3,
+  ImportState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ImportState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool ImportState_IsValid(int value);
+constexpr ImportState ImportState_MIN = ImportPending;
+constexpr ImportState ImportState_MAX = ImportFailed;
+constexpr int ImportState_ARRAYSIZE = ImportState_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ImportState_descriptor();
+template<typename T>
+inline const std::string& ImportState_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ImportState>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function ImportState_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    ImportState_descriptor(), enum_t_value);
+}
+inline bool ImportState_Parse(
+    const std::string& name, ImportState* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ImportState>(
+    ImportState_descriptor(), name, value);
+}
 // ===================================================================
 
 class Status :
@@ -2218,6 +2245,11 @@ template <> struct is_proto_enum< ::milvus::proto::common::ConsistencyLevel> : :
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ConsistencyLevel>() {
   return ::milvus::proto::common::ConsistencyLevel_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::ImportState> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ImportState>() {
+  return ::milvus::proto::common::ImportState_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

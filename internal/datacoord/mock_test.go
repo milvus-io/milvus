@@ -196,6 +196,10 @@ func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.Compact
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "not implemented"}, nil
 }
 
+func (c *mockDataNodeClient) Import(ctx context.Context, in *milvuspb.ImportRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = internalpb.StateCode_Abnormal
 	return nil
