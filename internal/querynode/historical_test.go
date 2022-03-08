@@ -32,7 +32,7 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		_, _, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
@@ -44,7 +44,7 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = his.replica.removeCollection(defaultCollectionID)
@@ -59,7 +59,7 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = his.replica.removeCollection(defaultCollectionID)
@@ -74,7 +74,7 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		col, err := his.replica.getCollectionByID(defaultCollectionID)
@@ -93,7 +93,7 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = his.replica.removePartition(defaultPartitionID)
@@ -110,7 +110,7 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		col, err := his.replica.getCollectionByID(defaultCollectionID)

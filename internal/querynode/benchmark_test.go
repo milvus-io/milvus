@@ -78,7 +78,8 @@ func benchmarkQueryCollectionSearch(nq int, b *testing.B) {
 	assert.Equal(b, seg.getMemSize(), int64(expectSize))
 
 	// warming up
-	msgTmp, err := genSearchMsg(10)
+
+	msgTmp, err := genSearchMsg(10, IndexFaissIDMap)
 	assert.NoError(b, err)
 	for j := 0; j < 10000; j++ {
 		err = queryCollection.search(msgTmp)
@@ -87,7 +88,7 @@ func benchmarkQueryCollectionSearch(nq int, b *testing.B) {
 
 	msgs := make([]*msgstream2.SearchMsg, maxNQ/nq)
 	for i := 0; i < maxNQ/nq; i++ {
-		msg, err := genSearchMsg(nq)
+		msg, err := genSearchMsg(nq, IndexFaissIDMap)
 		assert.NoError(b, err)
 		msgs[i] = msg
 	}
@@ -154,7 +155,7 @@ func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B)
 	assert.Equal(b, seg.getMemSize(), int64(expectSize))
 
 	// warming up
-	msgTmp, err := genSearchMsg(10)
+	msgTmp, err := genSearchMsg(10, indexType)
 	assert.NoError(b, err)
 	for j := 0; j < 10000; j++ {
 		err = queryCollection.search(msgTmp)
@@ -163,7 +164,7 @@ func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B)
 
 	msgs := make([]*msgstream2.SearchMsg, maxNQ/nq)
 	for i := 0; i < maxNQ/nq; i++ {
-		msg, err := genSearchMsg(nq)
+		msg, err := genSearchMsg(nq, indexType)
 		assert.NoError(b, err)
 		msgs[i] = msg
 	}
@@ -187,15 +188,22 @@ func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B)
 	}
 }
 
-func BenchmarkSearch_NQ1(b *testing.B)     { benchmarkQueryCollectionSearch(1, b) }
-func BenchmarkSearch_NQ10(b *testing.B)    { benchmarkQueryCollectionSearch(10, b) }
-func BenchmarkSearch_NQ100(b *testing.B)   { benchmarkQueryCollectionSearch(100, b) }
-func BenchmarkSearch_NQ1000(b *testing.B)  { benchmarkQueryCollectionSearch(1000, b) }
-func BenchmarkSearch_NQ10000(b *testing.B) { benchmarkQueryCollectionSearch(10000, b) }
+func BenchmarkSearch_NQ1(b *testing.B) { benchmarkQueryCollectionSearch(1, b) }
+
+//func BenchmarkSearch_NQ10(b *testing.B)    { benchmarkQueryCollectionSearch(10, b) }
+//func BenchmarkSearch_NQ100(b *testing.B)   { benchmarkQueryCollectionSearch(100, b) }
+//func BenchmarkSearch_NQ1000(b *testing.B)  { benchmarkQueryCollectionSearch(1000, b) }
+//func BenchmarkSearch_NQ10000(b *testing.B) { benchmarkQueryCollectionSearch(10000, b) }
+
+func BenchmarkSearch_HNSW_NQ1(b *testing.B) {
+	benchmarkQueryCollectionSearchIndex(1, IndexHNSW, b)
+}
 
 func BenchmarkSearch_IVFFLAT_NQ1(b *testing.B) {
 	benchmarkQueryCollectionSearchIndex(1, IndexFaissIVFFlat, b)
 }
+
+/*
 func BenchmarkSearch_IVFFLAT_NQ10(b *testing.B) {
 	benchmarkQueryCollectionSearchIndex(10, IndexFaissIVFFlat, b)
 }
@@ -208,3 +216,4 @@ func BenchmarkSearch_IVFFLAT_NQ1000(b *testing.B) {
 func BenchmarkSearch_IVFFLAT_NQ10000(b *testing.B) {
 	benchmarkQueryCollectionSearchIndex(10000, IndexFaissIVFFlat, b)
 }
+*/

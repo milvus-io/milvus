@@ -63,6 +63,7 @@ const (
 	defaultRoundDecimal   = int64(6)
 	defaultDim            = 128
 	defaultNProb          = 10
+	defaultEf             = 10
 	defaultMetricType     = L2
 	defaultNQ             = 10
 
@@ -600,6 +601,7 @@ func genSimpleInsertDataSchema() *schemapb.CollectionSchema {
 	fieldTimestamp := genConstantField(timestampField)
 	fieldVec := genFloatVectorField(simpleVecField)
 	fieldInt := genConstantField(simpleConstField)
+	fieldPK := genPKField(simplePKField)
 
 	schema := schemapb.CollectionSchema{ // schema for insertData
 		Name:   defaultCollectionName,
@@ -607,6 +609,7 @@ func genSimpleInsertDataSchema() *schemapb.CollectionSchema {
 		Fields: []*schemapb.FieldSchema{
 			fieldUID,
 			fieldTimestamp,
+			fieldPK,
 			fieldVec,
 			fieldInt,
 		},
@@ -1244,7 +1247,7 @@ func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface)
 
 // ---------- unittest util functions ----------
 // functions of messages and requests
-func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int64, roundDecimal int64) (string, error) {
+func genIVFFlatDSL(schema *schemapb.CollectionSchema, nProb int, topK int64, roundDecimal int64) (string, error) {
 	var vecFieldName string
 	var metricType string
 	nProbStr := strconv.Itoa(nProb)
@@ -1272,9 +1275,74 @@ func genDSL(schema *schemapb.CollectionSchema, nProb int, topK int64, roundDecim
 		"\n } \n } \n } \n }", nil
 }
 
-func genSimpleDSL() (string, error) {
+func genHNSWDSL(schema *schemapb.CollectionSchema, ef int, topK int64, roundDecimal int64) (string, error) {
+	var vecFieldName string
+	var metricType string
+	efStr := strconv.Itoa(ef)
+	topKStr := strconv.FormatInt(topK, 10)
+	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
+	for _, f := range schema.Fields {
+		if f.DataType == schemapb.DataType_FloatVector {
+			vecFieldName = f.Name
+			for _, p := range f.IndexParams {
+				if p.Key == metricTypeKey {
+					metricType = p.Value
+				}
+			}
+		}
+	}
+	if vecFieldName == "" || metricType == "" {
+		err := errors.New("invalid vector field name or metric type")
+		return "", err
+	}
+	return "{\"bool\": { \n\"vector\": {\n \"" + vecFieldName +
+		"\": {\n \"metric_type\": \"" + metricType +
+		"\", \n \"params\": {\n \"ef\": " + efStr + " \n},\n \"query\": \"$0\",\n \"topk\": " + topKStr +
+		" \n,\"round_decimal\": " + roundDecimalStr +
+		"\n } \n } \n } \n }", nil
+}
+
+func genBruteForceDSL(schema *schemapb.CollectionSchema, topK int64, roundDecimal int64) (string, error) {
+	var vecFieldName string
+	var metricType string
+	topKStr := strconv.FormatInt(topK, 10)
+	nProbStr := strconv.Itoa(defaultNProb)
+	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
+	for _, f := range schema.Fields {
+		if f.DataType == schemapb.DataType_FloatVector {
+			vecFieldName = f.Name
+			for _, p := range f.IndexParams {
+				if p.Key == metricTypeKey {
+					metricType = p.Value
+				}
+			}
+		}
+	}
+	if vecFieldName == "" || metricType == "" {
+		err := errors.New("invalid vector field name or metric type")
+		return "", err
+	}
+	return "{\"bool\": { \n\"vector\": {\n \"" + vecFieldName +
+		"\": {\n \"metric_type\": \"" + metricType +
+		"\", \n \"params\": {\n \"nprobe\": " + nProbStr + " \n},\n \"query\": \"$0\",\n \"topk\": " + topKStr +
+		" \n,\"round_decimal\": " + roundDecimalStr +
+		"\n } \n } \n } \n }", nil
+}
+
+func genDSLByIndexType(indexType string) (string, error) {
 	schema := genSimpleSegCoreSchema()
-	return genDSL(schema, defaultNProb, defaultTopK, defaultRoundDecimal)
+	if indexType == IndexFaissIDMap { // float vector
+		return genBruteForceDSL(schema, defaultTopK, defaultRoundDecimal)
+	} else if indexType == IndexFaissBinIDMap {
+		return genBruteForceDSL(schema, defaultTopK, defaultRoundDecimal)
+	} else if indexType == IndexFaissIVFFlat {
+		return genIVFFlatDSL(schema, defaultNProb, defaultTopK, defaultRoundDecimal)
+	} else if indexType == IndexFaissBinIVFFlat { // binary vector
+		return genIVFFlatDSL(schema, defaultNProb, defaultTopK, defaultRoundDecimal)
+	} else if indexType == IndexHNSW {
+		return genHNSWDSL(schema, defaultEf, defaultTopK, defaultRoundDecimal)
+	}
+	return "", fmt.Errorf("Invalid indexType")
 }
 
 func genPlaceHolderGroup(nq int) ([]byte, error) {
@@ -1312,13 +1380,13 @@ func genSimplePlaceHolderGroup() ([]byte, error) {
 	return genPlaceHolderGroup(defaultNQ)
 }
 
-func genSimpleSearchPlanAndRequests() (*SearchPlan, []*searchRequest, error) {
+func genSimpleSearchPlanAndRequests(indexType string) (*SearchPlan, []*searchRequest, error) {
 	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
 
 	var plan *SearchPlan
 	var err error
-	sm, err := genSimpleSearchMsg()
+	sm, err := genSimpleSearchMsg(indexType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1402,12 +1470,12 @@ func genSimpleRetrievePlan() (*RetrievePlan, error) {
 	return plan, err
 }
 
-func genSearchRequest(nq int) (*internalpb.SearchRequest, error) {
+func genSearchRequest(nq int, indexType string) (*internalpb.SearchRequest, error) {
 	placeHolder, err := genPlaceHolderGroup(nq)
 	if err != nil {
 		return nil, err
 	}
-	simpleDSL, err := genSimpleDSL()
+	simpleDSL, err := genDSLByIndexType(indexType)
 	if err != nil {
 		return nil, err
 	}
@@ -1421,8 +1489,8 @@ func genSearchRequest(nq int) (*internalpb.SearchRequest, error) {
 	}, nil
 }
 
-func genSimpleSearchRequest() (*internalpb.SearchRequest, error) {
-	return genSearchRequest(defaultNQ)
+func genSimpleSearchRequest(indexType string) (*internalpb.SearchRequest, error) {
+	return genSearchRequest(defaultNQ, indexType)
 }
 
 func genSimpleRetrieveRequest() (*internalpb.RetrieveRequest, error) {
@@ -1444,8 +1512,8 @@ func genSimpleRetrieveRequest() (*internalpb.RetrieveRequest, error) {
 	}, nil
 }
 
-func genSearchMsg(nq int) (*msgstream.SearchMsg, error) {
-	req, err := genSearchRequest(nq)
+func genSearchMsg(nq int, indexType string) (*msgstream.SearchMsg, error) {
+	req, err := genSearchRequest(nq, indexType)
 	if err != nil {
 		return nil, err
 	}
@@ -1457,8 +1525,8 @@ func genSearchMsg(nq int) (*msgstream.SearchMsg, error) {
 	return msg, nil
 }
 
-func genSimpleSearchMsg() (*msgstream.SearchMsg, error) {
-	req, err := genSimpleSearchRequest()
+func genSimpleSearchMsg(indexType string) (*msgstream.SearchMsg, error) {
+	req, err := genSimpleSearchRequest(indexType)
 	if err != nil {
 		return nil, err
 	}
@@ -1501,7 +1569,7 @@ func produceSimpleSearchMsg(ctx context.Context, queryChannel Channel) error {
 	stream.AsProducer([]string{queryChannel})
 	stream.Start()
 	defer stream.Close()
-	msg, err := genSimpleSearchMsg()
+	msg, err := genSimpleSearchMsg(IndexFaissIDMap)
 	if err != nil {
 		return err
 	}
