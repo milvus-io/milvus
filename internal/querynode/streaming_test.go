@@ -45,7 +45,7 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		res, _, _, err := streaming.search(searchReqs,
@@ -64,7 +64,7 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		res, _, _, err := streaming.search(searchReqs,
@@ -83,7 +83,7 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		col, err := streaming.replica.getCollectionByID(defaultCollectionID)
@@ -109,7 +109,7 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		col, err := streaming.replica.getCollectionByID(defaultCollectionID)
@@ -134,7 +134,7 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = streaming.replica.removePartition(defaultPartitionID)
@@ -156,7 +156,7 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests()
+		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		seg, err := streaming.replica.getSegmentByID(defaultSegmentID)

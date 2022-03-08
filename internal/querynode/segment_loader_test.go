@@ -374,13 +374,6 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 	defer cancel()
 
 	schema := genSimpleInsertDataSchema()
-	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-		FieldID:      UniqueID(102),
-		Name:         "pk",
-		IsPrimaryKey: true,
-		DataType:     schemapb.DataType_Int64,
-	})
-
 	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 

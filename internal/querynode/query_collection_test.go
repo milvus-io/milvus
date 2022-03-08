@@ -252,7 +252,7 @@ func TestQueryCollection_unsolvedMsg(t *testing.T) {
 	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 	assert.NoError(t, err)
 
-	qm, err := genSimpleSearchMsg()
+	qm, err := genSimpleSearchMsg(IndexFaissIDMap)
 	assert.NoError(t, err)
 
 	queryCollection.addToUnsolvedMsg(qm)
@@ -298,7 +298,7 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 	}
 
 	t.Run("consume search", func(t *testing.T) {
-		msg, err := genSimpleSearchMsg()
+		msg, err := genSimpleSearchMsg(IndexFaissIDMap)
 		assert.NoError(t, err)
 		runConsumeQuery(msg)
 	})
@@ -598,7 +598,7 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 
 		go queryCollection.doUnsolvedQueryMsg()
 
-		msg, err := genSimpleSearchMsg()
+		msg, err := genSimpleSearchMsg(IndexFaissIDMap)
 		assert.NoError(t, err)
 		queryCollection.addToUnsolvedMsg(msg)
 
@@ -622,7 +622,7 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 
 		go queryCollection.doUnsolvedQueryMsg()
 
-		msg, err := genSimpleSearchMsg()
+		msg, err := genSimpleSearchMsg(IndexFaissIDMap)
 		assert.NoError(t, err)
 		msg.TimeoutTimestamp = tsoutil.GetCurrentTime() - Timestamp(time.Second<<18)
 		queryCollection.addToUnsolvedMsg(msg)
@@ -653,7 +653,7 @@ func TestQueryCollection_search(t *testing.T) {
 	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
 	assert.NoError(t, err)
 
-	msg, err := genSimpleSearchMsg()
+	msg, err := genSimpleSearchMsg(IndexFaissIDMap)
 	assert.NoError(t, err)
 
 	err = queryCollection.search(msg)
@@ -805,7 +805,7 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 		})
 		queryCollection.sessionManager = sessionManager
 
-		msg, err := genSimpleSearchMsg()
+		msg, err := genSimpleSearchMsg(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		// To prevent data race in search trackCtx
@@ -850,7 +850,7 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 		})
 		queryCollection.sessionManager = sessionManager
 
-		msg, err := genSimpleSearchMsg()
+		msg, err := genSimpleSearchMsg(IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		// To prevent data race in search trackCtx
