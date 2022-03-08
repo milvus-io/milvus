@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -97,7 +98,8 @@ type QueryCoord struct {
 
 	stateCode atomic.Value
 
-	msFactory msgstream.Factory
+	msFactory    msgstream.Factory
+	chunkManager storage.ChunkManager
 }
 
 // Register register query service at etcd
@@ -176,8 +178,21 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 
+		qc.chunkManager, initError = storage.NewMinioChunkManager(qc.loopCtx,
+			storage.Address(Params.MinioCfg.Address),
+			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+			storage.UseSSL(Params.MinioCfg.UseSSL),
+			storage.BucketName(Params.MinioCfg.BucketName),
+			storage.CreateBucket(true))
+
+		if initError != nil {
+			log.Error("query coordinator init cluster failed", zap.Error(initError))
+			return
+		}
+
 		//init globalMetaBroker
-		qc.broker, initError = newGlobalMetaBroker(qc.loopCtx, qc.rootCoordClient, qc.dataCoordClient, qc.indexCoordClient)
+		qc.broker, initError = newGlobalMetaBroker(qc.loopCtx, qc.rootCoordClient, qc.dataCoordClient, qc.indexCoordClient, qc.chunkManager)
 		if initError != nil {
 			log.Error("query coordinator init globalMetaBroker failed", zap.Error(initError))
 			return

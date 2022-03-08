@@ -23,10 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -37,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
+
+var insertNodeTestDir = "/tmp/milvus_test/insert_node"
 
 // CDFMsFactory count down fails msg factory
 type CDFMsFactory struct {
@@ -56,6 +58,8 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer cm.RemoveWithPrefix("")
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-create"
 
 	testPath := "/test/datanode/root/meta"
@@ -67,7 +71,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 
-	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
 	assert.Nil(t, err)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
@@ -81,9 +85,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	memkv := memkv.NewMemoryKV()
-
-	fm := NewRendezvousFlushManager(&allocator{}, memkv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 
@@ -148,6 +150,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
 
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer cm.RemoveWithPrefix("")
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
@@ -157,7 +161,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
 	mockRootCoord := &RootCoordFactory{}
 
-	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
 	assert.Nil(t, err)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
@@ -171,9 +175,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	memkv := memkv.NewMemoryKV()
-
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
@@ -379,10 +381,11 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	flushPacks := []*segmentFlushPack{}
 	fpMut := sync.Mutex{}
-	memkv := memkv.NewMemoryKV()
 	wg := sync.WaitGroup{}
 
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), memkv, colRep, func(pack *segmentFlushPack) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, colRep, func(pack *segmentFlushPack) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
 		fpMut.Unlock()
@@ -637,7 +640,9 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		compactTs: 100,
 	}
 
-	replica, err := newReplica(ctx, mockRootCoord, collMeta.ID)
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
 	assert.Nil(t, err)
 
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
@@ -651,9 +656,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	err = msFactory.SetParams(m)
 	assert.Nil(t, err)
 
-	memkv := memkv.NewMemoryKV()
-
-	fm := NewRendezvousFlushManager(&allocator{}, memkv, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
@@ -681,6 +684,8 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 }
 
 func TestInsertBufferNode_updateSegStatesInReplica(te *testing.T) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer cm.RemoveWithPrefix("")
 	invalideTests := []struct {
 		replicaCollID UniqueID
 
@@ -692,7 +697,7 @@ func TestInsertBufferNode_updateSegStatesInReplica(te *testing.T) {
 	}
 
 	for _, test := range invalideTests {
-		replica, err := newReplica(context.Background(), &RootCoordFactory{}, test.replicaCollID)
+		replica, err := newReplica(context.Background(), &RootCoordFactory{}, cm, test.replicaCollID)
 		assert.Nil(te, err)
 
 		ibNode := &insertBufferNode{

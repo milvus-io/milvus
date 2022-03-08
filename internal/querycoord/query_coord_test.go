@@ -41,6 +41,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var queryCoordTestDir = "/tmp/milvus_test/query_coord"
+
 func setup() {
 	Params.Init()
 }
@@ -85,7 +87,7 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
 
 	dataCoord := newDataCoordMock(ctx)
-	indexCoord, err := newIndexCoordMock(ctx)
+	indexCoord, err := newIndexCoordMock(queryCoordTestDir)
 	if err != nil {
 		return nil, err
 	}

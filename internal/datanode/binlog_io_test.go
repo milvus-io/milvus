@@ -24,8 +24,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
@@ -33,11 +31,14 @@ import (
 	"go.uber.org/zap"
 )
 
+var binlogTestDir = "/tmp/milvus_test/test_binlog_io"
+
 func TestBinlogIOInterfaceMethods(t *testing.T) {
 	alloc := NewAllocatorFactory()
-	kv := memkv.NewMemoryKV()
+	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
+	defer cm.RemoveWithPrefix("")
 
-	b := &binlogIO{kv, alloc}
+	b := &binlogIO{cm, alloc}
 	t.Run("Test upload", func(t *testing.T) {
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10001), "uploads")
@@ -105,8 +106,8 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		assert.Error(t, err)
 		assert.Empty(t, p)
 
-		mkv := &mockKv{errMultiSave: true}
-		bin := &binlogIO{mkv, alloc}
+		mkc := &mockCm{errMultiSave: true}
+		bin := &binlogIO{mkc, alloc}
 		iData = genInsertData()
 		dData = &DeleteData{
 			Pks:      []int64{1},
@@ -138,7 +139,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 				if test.isvalid {
 					inkeys := []string{}
 					for _, k := range test.ks {
-						blob, key, err := prepareBlob(kv, k)
+						blob, key, err := prepareBlob(cm, k)
 						require.NoError(t, err)
 						assert.NotEmpty(t, blob)
 						inkeys = append(inkeys, key)
@@ -163,8 +164,8 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 	})
 
 	t.Run("Test download twice", func(t *testing.T) {
-		mkv := &mockKv{errMultiLoad: true}
-		b := &binlogIO{mkv, alloc}
+		mkc := &mockCm{errMultiLoad: true}
+		b := &binlogIO{mkc, alloc}
 
 		ctx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*20)
 		blobs, err := b.download(ctx, []string{"a"})
@@ -174,11 +175,11 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 	})
 }
 
-func prepareBlob(kv kv.BaseKV, key string) ([]byte, string, error) {
+func prepareBlob(cm storage.ChunkManager, key string) ([]byte, string, error) {
 	k := path.Join("test_prepare_blob", key)
 	blob := []byte{1, 2, 3, 255, 188}
 
-	err := kv.Save(k, string(blob[:]))
+	err := cm.Write(k, blob[:])
 	if err != nil {
 		return nil, "", err
 	}
@@ -187,8 +188,10 @@ func prepareBlob(kv kv.BaseKV, key string) ([]byte, string, error) {
 
 func TestBinlogIOInnerMethods(t *testing.T) {
 	alloc := NewAllocatorFactory()
+	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
+	defer cm.RemoveWithPrefix("")
 	b := &binlogIO{
-		memkv.NewMemoryKV(),
+		cm,
 		alloc,
 	}
 
@@ -234,7 +237,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		errAlloc := NewAllocatorFactory()
 		errAlloc.isvalid = false
 
-		bin := binlogIO{memkv.NewMemoryKV(), errAlloc}
+		bin := binlogIO{cm, errAlloc}
 		k, v, err = bin.genDeltaBlobs(&DeleteData{Pks: []int64{1}, Tss: []uint64{1}}, 1, 1, 1)
 		assert.Error(t, err)
 		assert.Empty(t, k)
@@ -276,7 +279,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 		errAlloc := NewAllocatorFactory()
 		errAlloc.errAllocBatch = true
-		bin := &binlogIO{memkv.NewMemoryKV(), errAlloc}
+		bin := &binlogIO{cm, errAlloc}
 		kvs, pin, pstats, err = bin.genInsertBlobs(genInsertData(), 10, 1, meta)
 
 		assert.Error(t, err)
@@ -332,36 +335,45 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				}
 			})
 		}
-
-		b.close()
 	})
 
 }
 
-type mockKv struct {
+type mockCm struct {
+	storage.ChunkManager
 	errMultiLoad bool
 	errMultiSave bool
 }
 
-var _ kv.BaseKV = (*mockKv)(nil)
+var _ storage.ChunkManager = (*mockCm)(nil)
 
-func (mk *mockKv) Load(key string) (string, error) { return "", nil }
-func (mk *mockKv) MultiLoad(keys []string) ([]string, error) {
-	if mk.errMultiLoad {
-		return []string{}, errors.New("mockKv multiload error")
-	}
-	return []string{"a"}, nil
+func (mk *mockCm) Write(filePath string, content []byte) error {
+	return nil
 }
 
-func (mk *mockKv) LoadWithPrefix(key string) ([]string, []string, error) { return nil, nil, nil }
-func (mk *mockKv) Save(key, value string) error                          { return nil }
-func (mk *mockKv) MultiSave(kvs map[string]string) error {
+func (mk *mockCm) MultiWrite(contents map[string][]byte) error {
 	if mk.errMultiSave {
 		return errors.New("mockKv multisave error")
 	}
 	return nil
 }
-func (mk *mockKv) Remove(key string) error           { return nil }
-func (mk *mockKv) MultiRemove(keys []string) error   { return nil }
-func (mk *mockKv) RemoveWithPrefix(key string) error { return nil }
-func (mk *mockKv) Close()                            {}
+
+func (mk *mockCm) Read(filePath string) ([]byte, error) {
+	return nil, nil
+}
+
+func (mk *mockCm) MultiRead(filePaths []string) ([][]byte, error) {
+	if mk.errMultiLoad {
+		return nil, errors.New("mockKv multiload error")
+	}
+	return [][]byte{[]byte("a")}, nil
+}
+
+func (mk *mockCm) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
+	return nil, nil, nil
+}
+
+func (mk *mockCm) Remove(key string) error           { return nil }
+func (mk *mockCm) MultiRemove(keys []string) error   { return nil }
+func (mk *mockCm) RemoveWithPrefix(key string) error { return nil }
+func (mk *mockCm) Close()                            {}

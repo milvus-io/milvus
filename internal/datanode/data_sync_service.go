@@ -21,11 +21,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"go.uber.org/zap"
@@ -47,7 +47,7 @@ type dataSyncService struct {
 
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
 	flushManager     flushManager // flush manager handles flush process
-	blobKV           kv.BaseKV
+	chunkManager     storage.ChunkManager
 	compactor        *compactionExecutor // reference to compaction executor
 }
 
@@ -60,7 +60,7 @@ func newDataSyncService(ctx context.Context,
 	clearSignal chan<- string,
 	dataCoord types.DataCoord,
 	flushingSegCache *Cache,
-	blobKV kv.BaseKV,
+	chunkManager storage.ChunkManager,
 	compactor *compactionExecutor,
 ) (*dataSyncService, error) {
 
@@ -83,7 +83,7 @@ func newDataSyncService(ctx context.Context,
 		dataCoord:        dataCoord,
 		clearSignal:      clearSignal,
 		flushingSegCache: flushingSegCache,
-		blobKV:           blobKV,
+		chunkManager:     chunkManager,
 		compactor:        compactor,
 	}
 
@@ -142,7 +142,7 @@ func (dsService *dataSyncService) close() {
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 	// initialize flush manager for DataSync Service
-	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.blobKV, dsService.replica,
+	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.replica,
 		flushNotifyFunc(dsService), dropVirtualChannelFunc(dsService))
 
 	// recover segment checkpoints

@@ -23,8 +23,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -32,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -383,27 +382,15 @@ func (data *dataCoordMock) GetSegmentStates(ctx context.Context, req *datapb.Get
 
 type indexCoordMock struct {
 	types.IndexCoord
-	dataKv          kv.DataKV
+	chunkManager    storage.ChunkManager
 	returnError     bool
 	returnGrpcError bool
 }
 
-func newIndexCoordMock(ctx context.Context) (*indexCoordMock, error) {
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
-	if err != nil {
-		return nil, err
-	}
+func newIndexCoordMock(path string) (*indexCoordMock, error) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(path))
 	return &indexCoordMock{
-		dataKv: kv,
+		chunkManager: cm,
 	}, nil
 }
 
@@ -421,7 +408,7 @@ func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.Get
 		}, nil
 	}
 
-	indexPathInfos, err := generateIndexFileInfo(req.IndexBuildIDs, c.dataKv)
+	indexPathInfos, err := generateIndexFileInfo(req.IndexBuildIDs, c.chunkManager)
 	if err != nil {
 		return &indexpb.GetIndexFilePathsResponse{
 			Status: &commonpb.Status{

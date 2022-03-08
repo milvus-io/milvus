@@ -29,24 +29,27 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
+var segmentReplicaNodeTestDir = "/tmp/milvus_test/segment_replica"
+
 func TestNewReplica(t *testing.T) {
 	rc := &RootCoordFactory{}
-	replica, err := newReplica(context.Background(), rc, 0)
+	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+	replica, err := newReplica(context.Background(), rc, cm, 0)
 	assert.Nil(t, err)
 	assert.NotNil(t, replica)
 }
 
-type mockMinioKV struct {
-	kv.BaseKV
+type mockDataCM struct {
+	storage.ChunkManager
 }
 
-func (kv *mockMinioKV) MultiLoad(keys []string) ([]string, error) {
+func (kv *mockDataCM) MultiRead(keys []string) ([][]byte, error) {
 	stats := &storage.Int64Stats{
 		FieldID: common.RowIDField,
 		Min:     0,
@@ -54,14 +57,14 @@ func (kv *mockMinioKV) MultiLoad(keys []string) ([]string, error) {
 		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 	}
 	buffer, _ := json.Marshal(stats)
-	return []string{string(buffer)}, nil
+	return [][]byte{buffer}, nil
 }
 
 type mockPkfilterMergeError struct {
-	kv.BaseKV
+	storage.ChunkManager
 }
 
-func (kv *mockPkfilterMergeError) MultiLoad(keys []string) ([]string, error) {
+func (kv *mockPkfilterMergeError) MultiRead(keys []string) ([][]byte, error) {
 	stats := &storage.Int64Stats{
 		FieldID: common.RowIDField,
 		Min:     0,
@@ -69,23 +72,23 @@ func (kv *mockPkfilterMergeError) MultiLoad(keys []string) ([]string, error) {
 		BF:      bloom.NewWithEstimates(1, 0.0001),
 	}
 	buffer, _ := json.Marshal(stats)
-	return []string{string(buffer)}, nil
+	return [][]byte{buffer}, nil
 }
 
-type mockMinioKVError struct {
-	kv.BaseKV
+type mockDataCMError struct {
+	storage.ChunkManager
 }
 
-func (kv *mockMinioKVError) MultiLoad(keys []string) ([]string, error) {
+func (kv *mockDataCMError) MultiRead(keys []string) ([][]byte, error) {
 	return nil, fmt.Errorf("mock error")
 }
 
-type mockMinioKVStatsError struct {
-	kv.BaseKV
+type mockDataCMStatsError struct {
+	storage.ChunkManager
 }
 
-func (kv *mockMinioKVStatsError) MultiLoad(keys []string) ([]string, error) {
-	return []string{"3123123,error,test"}, nil
+func (kv *mockDataCMStatsError) MultiRead(keys []string) ([][]byte, error) {
+	return [][]byte{[]byte("3123123,error,test")}, nil
 }
 
 func getSimpleFieldBinlog() *datapb.FieldBinlog {
@@ -169,9 +172,11 @@ func TestSegmentReplica_getCollectionAndPartitionID(te *testing.T) {
 func TestSegmentReplica(t *testing.T) {
 	rc := &RootCoordFactory{}
 	collID := UniqueID(1)
+	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
+	defer cm.RemoveWithPrefix("")
 
 	t.Run("Test coll mot match", func(t *testing.T) {
-		replica, err := newReplica(context.Background(), rc, collID)
+		replica, err := newReplica(context.Background(), rc, cm, collID)
 		assert.Nil(t, err)
 
 		err = replica.addNewSegment(1, collID+1, 0, "", nil, nil)
@@ -248,6 +253,8 @@ func TestSegmentReplica(t *testing.T) {
 
 func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	rc := &RootCoordFactory{}
+	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
+	defer cm.RemoveWithPrefix("")
 
 	t.Run("Test addFlushedSegmentWithPKs", func(t *testing.T) {
 		tests := []struct {
@@ -263,7 +270,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				replica, err := newReplica(context.TODO(), rc, test.replicaCollID)
+				replica, err := newReplica(context.TODO(), rc, cm, test.replicaCollID)
 				require.NoError(t, err)
 				if test.isvalid {
 					replica.addFlushedSegmentWithPKs(100, test.incollID, 10, "a", 1, []int64{9})
@@ -300,7 +307,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				sr, err := newReplica(context.Background(), rc, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, cm, test.replicaCollID)
 				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
 				err = sr.addNewSegment(test.inSegID,
@@ -336,8 +343,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				sr, err := newReplica(context.Background(), rc, test.replicaCollID)
-				sr.minIOKV = &mockMinioKV{}
+				sr, err := newReplica(context.Background(), rc, &mockDataCM{}, test.replicaCollID)
 				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
 				err = sr.addNormalSegment(test.inSegID, test.inCollID, 1, "", 0, []*datapb.FieldBinlog{getSimpleFieldBinlog()}, &segmentCheckPoint{}, 0)
@@ -355,9 +361,8 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addNormalSegmentWithNilDml", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, 1)
+		sr, err := newReplica(context.Background(), rc, &mockDataCM{}, 1)
 		require.NoError(t, err)
-		sr.minIOKV = &mockMinioKV{}
 		segID := int64(101)
 		require.False(t, sr.hasSegment(segID, true))
 		assert.NotPanics(t, func() {
@@ -548,7 +553,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				sr, err := newReplica(context.Background(), rc, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, cm, test.replicaCollID)
 				assert.Nil(t, err)
 
 				if test.metaServiceErr {
@@ -581,9 +586,9 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addSegmentMinIOLoadError", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1)
 		assert.Nil(t, err)
-		sr.minIOKV = &mockMinioKVError{}
+		sr.chunkManager = &mockDataCMError{}
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
@@ -594,9 +599,9 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addSegmentStatsError", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1)
 		assert.Nil(t, err)
-		sr.minIOKV = &mockMinioKVStatsError{}
+		sr.chunkManager = &mockDataCMStatsError{}
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
@@ -607,9 +612,9 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addSegmentPkfilterError", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1)
 		assert.Nil(t, err)
-		sr.minIOKV = &mockPkfilterMergeError{}
+		sr.chunkManager = &mockPkfilterMergeError{}
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
@@ -620,7 +625,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_mergeFlushedSegments", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1)
 		assert.Nil(t, err)
 
 		sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, []UniqueID{1})
@@ -645,9 +650,11 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 func TestInnerFunctionSegment(t *testing.T) {
 	rc := &RootCoordFactory{}
 	collID := UniqueID(1)
-	replica, err := newReplica(context.Background(), rc, collID)
+	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+	replica, err := newReplica(context.Background(), rc, cm, collID)
 	assert.Nil(t, err)
-	replica.minIOKV = &mockMinioKV{}
+	replica.chunkManager = &mockDataCM{}
 	assert.False(t, replica.hasSegment(0, true))
 	assert.False(t, replica.hasSegment(0, false))
 
@@ -770,9 +777,11 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 	cpPos := &internalpb.MsgPosition{ChannelName: chanName, Timestamp: Timestamp(10)}
 	cp := &segmentCheckPoint{int64(10), *cpPos}
 
-	replica, err := newReplica(context.Background(), rc, collID)
+	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+	replica, err := newReplica(context.Background(), rc, cm, collID)
 	assert.Nil(t, err)
-	replica.minIOKV = &mockMinioKV{}
+	replica.chunkManager = &mockDataCM{}
 
 	err = replica.addNewSegment(1, collID, partID, chanName, startPos, endPos)
 	assert.Nil(t, err)

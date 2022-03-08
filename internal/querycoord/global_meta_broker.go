@@ -8,8 +8,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -31,10 +29,10 @@ type globalMetaBroker struct {
 	dataCoord  types.DataCoord
 	indexCoord types.IndexCoord
 
-	dataKV kv.DataKV
+	cm storage.ChunkManager
 }
 
-func newGlobalMetaBroker(ctx context.Context, rootCoord types.RootCoord, dataCoord types.DataCoord, indexCoord types.IndexCoord) (*globalMetaBroker, error) {
+func newGlobalMetaBroker(ctx context.Context, rootCoord types.RootCoord, dataCoord types.DataCoord, indexCoord types.IndexCoord, cm storage.ChunkManager) (*globalMetaBroker, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	parser := &globalMetaBroker{
 		ctx:        childCtx,
@@ -42,21 +40,8 @@ func newGlobalMetaBroker(ctx context.Context, rootCoord types.RootCoord, dataCoo
 		rootCoord:  rootCoord,
 		dataCoord:  dataCoord,
 		indexCoord: indexCoord,
+		cm:         cm,
 	}
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		CreateBucket:      true,
-		BucketName:        Params.MinioCfg.BucketName,
-	}
-
-	dataKV, err := minioKV.NewMinIOKV(childCtx, option)
-	if err != nil {
-		return nil, err
-	}
-	parser.dataKV = dataKV
 	return parser, nil
 }
 
@@ -239,7 +224,7 @@ func (broker *globalMetaBroker) parseIndexInfo(ctx context.Context, segmentID Un
 	for _, indexFilePath := range fieldPathInfo.IndexFilePaths {
 		// get index params when detecting indexParamPrefix
 		if path.Base(indexFilePath) == storage.IndexParamsKey {
-			indexPiece, err := broker.dataKV.Load(indexFilePath)
+			indexPiece, err := broker.cm.Read(indexFilePath)
 			if err != nil {
 				log.Error("load index params file failed",
 					zap.Int64("segmentID", segmentID),
@@ -249,7 +234,7 @@ func (broker *globalMetaBroker) parseIndexInfo(ctx context.Context, segmentID Un
 					zap.Error(err))
 				return err
 			}
-			_, indexParams, indexName, indexID, err := indexCodec.Deserialize([]*storage.Blob{{Key: storage.IndexParamsKey, Value: []byte(indexPiece)}})
+			_, indexParams, indexName, indexID, err := indexCodec.Deserialize([]*storage.Blob{{Key: storage.IndexParamsKey, Value: indexPiece}})
 			if err != nil {
 				log.Error("deserialize index params file failed",
 					zap.Int64("segmentID", segmentID),

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -70,6 +69,8 @@ const (
 	defaultDMLChannel   = "query-node-unittest-DML-0"
 	defaultDeltaChannel = "query-node-unittest-delta-channel-0"
 	defaultSubName      = "query-node-unittest-sub-name-0"
+
+	defaultLocalStorage = "/tmp/milvus_test/querynode"
 )
 
 const (
@@ -357,19 +358,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 		return nil, err
 	}
 
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
-	if err != nil {
-		return nil, err
-	}
+	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
 
 	// save index to minio
 	binarySet, err := index.Serialize()
@@ -399,7 +388,7 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	for _, index := range serializedIndexBlobs {
 		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := kv.Save(p, string(index.Value))
+		err := cm.Write(p, index.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -436,19 +425,7 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 		return nil, err
 	}
 
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	kv, err := minioKV.NewMinIOKV(context.Background(), option)
-	if err != nil {
-		return nil, err
-	}
+	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
 
 	// save index to minio
 	binarySet, err := index.Serialize()
@@ -478,7 +455,7 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 	for _, index := range serializedIndexBlobs {
 		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := kv.Save(p, string(index.Value))
+		err := cm.Write(p, index.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -633,19 +610,6 @@ func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
 
 // ---------- unittest util functions ----------
 // functions of third-party
-func genMinioKV(ctx context.Context) (*minioKV.MinIOKV, error) {
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-	kv, err := minioKV.NewMinIOKV(ctx, option)
-	return kv, err
-}
-
 func genEtcdKV() (*etcdkv.EtcdKV, error) {
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
@@ -955,7 +919,7 @@ func saveBinLog(ctx context.Context,
 	}
 
 	log.Debug(".. [query node unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
-	kvs := make(map[string]string, len(binLogs))
+	kvs := make(map[string][]byte, len(binLogs))
 
 	// write insert binlog
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
@@ -967,7 +931,7 @@ func saveBinLog(ctx context.Context,
 		}
 
 		key := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		kvs[key] = string(blob.Value[:])
+		kvs[key] = blob.Value[:]
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
 			Binlogs: []*datapb.Binlog{{LogPath: key}},
@@ -975,11 +939,8 @@ func saveBinLog(ctx context.Context,
 	}
 	log.Debug("[query node unittest] save binlog file to MinIO/S3")
 
-	kv, err := genMinioKV(ctx)
-	if err != nil {
-		return nil, err
-	}
-	err = kv.MultiSave(kvs)
+	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	err = cm.MultiWrite(kvs)
 	return fieldBinlog, err
 }
 
@@ -1219,7 +1180,8 @@ func genSimpleSegmentLoaderWithMqFactory(ctx context.Context, historicalReplica 
 	if err != nil {
 		return nil, err
 	}
-	return newSegmentLoader(ctx, historicalReplica, streamingReplica, kv, factory), nil
+	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	return newSegmentLoader(historicalReplica, streamingReplica, kv, cm, factory), nil
 }
 
 func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface) (*segmentLoader, error) {

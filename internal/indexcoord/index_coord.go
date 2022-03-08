@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/storage"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
@@ -35,9 +36,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -82,8 +81,8 @@ type IndexCoord struct {
 
 	idAllocator *allocator.GlobalIDAllocator
 
-	etcdCli *clientv3.Client
-	kv      kv.BaseKV
+	etcdCli      *clientv3.Client
+	chunkManager storage.ChunkManager
 
 	metaTable   *metaTable
 	nodeManager *NodeManager
@@ -219,24 +218,23 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 
-		option := &miniokv.Option{
-			Address:           Params.MinioCfg.Address,
-			AccessKeyID:       Params.MinioCfg.AccessKeyID,
-			SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-			UseSSL:            Params.MinioCfg.UseSSL,
-			BucketName:        Params.MinioCfg.BucketName,
-			CreateBucket:      true,
-		}
+		chunkManager, err := storage.NewMinioChunkManager(i.loopCtx,
+			storage.Address(Params.MinioCfg.Address),
+			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+			storage.UseSSL(Params.MinioCfg.UseSSL),
+			storage.BucketName(Params.MinioCfg.BucketName),
+			storage.CreateBucket(true))
 
-		i.kv, err = miniokv.NewMinIOKV(i.loopCtx, option)
 		if err != nil {
-			log.Error("IndexCoord new minio kv failed", zap.Error(err))
+			log.Error("IndexCoord new minio chunkManager failed", zap.Error(err))
 			initErr = err
 			return
 		}
-		log.Debug("IndexCoord new minio kv success")
+		log.Debug("IndexCoord new minio chunkManager success")
+		i.chunkManager = chunkManager
 
-		i.sched, err = NewTaskScheduler(i.loopCtx, i.idAllocator, i.kv, i.metaTable)
+		i.sched, err = NewTaskScheduler(i.loopCtx, i.idAllocator, i.chunkManager, i.metaTable)
 		if err != nil {
 			log.Error("IndexCoord new task scheduler failed", zap.Error(err))
 			initErr = err
@@ -719,7 +717,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 					unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID))
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
 						zap.Int64("Recycle the index files for deleted index with indexBuildID", meta.indexMeta.IndexBuildID))
-					if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
+					if err := i.chunkManager.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
 						log.Error("IndexCoord recycleUnusedIndexFiles Remove index files failed",
 							zap.Bool("MarkDeleted", true), zap.Error(err))
 					}
@@ -731,7 +729,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID))
 					for j := 1; j < int(meta.indexMeta.Version); j++ {
 						unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
-						if err := i.kv.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
+						if err := i.chunkManager.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
 							log.Error("IndexCoord recycleUnusedIndexFiles Remove index files failed",
 								zap.Bool("MarkDeleted", false), zap.Error(err))
 						}
