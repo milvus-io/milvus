@@ -1000,9 +1000,9 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (q *queryCollection) search(msg queryMsg) error {
-	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "UnresolvedQueue"),
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "start search"),
 		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
-		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, msg.ElapseSpan().Milliseconds()))
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, msg.ElapseSpan().Microseconds()))
 	q.streaming.replica.queryRLock()
 	q.historical.replica.queryRLock()
 	defer q.historical.replica.queryRUnlock()
@@ -1097,7 +1097,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	hisSearchDur := tr.Record(fmt.Sprintf("historical search done, msgID = %d", searchMsg.ID()))
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "HistoricalSearch"),
 		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
-		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, hisSearchDur.Milliseconds()))
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, hisSearchDur.Microseconds()))
 
 	log.Debug("streaming search start", zap.Int64("msgID", searchMsg.ID()))
 	for _, channel := range collection.getVChannels() {
@@ -1111,7 +1111,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	streamingSearchDuration := tr.Record(fmt.Sprintf("streaming search done, msgID = %d", searchMsg.ID()))
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "StreamingSearch"),
 		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
-		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, streamingSearchDuration.Milliseconds()))
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, streamingSearchDuration.Microseconds()))
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {
@@ -1181,11 +1181,11 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	reduceTime := tr.RecordSpan().Milliseconds()
+	reduceTime := tr.RecordSpan()
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "QNReduceSearchResults"),
 		zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
-		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, reduceTime))
-	metrics.QueryNodeReduceLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(reduceTime))
+		zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, reduceTime.Microseconds()))
+	metrics.QueryNodeReduceLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(reduceTime.Milliseconds()))
 
 	var offset int64
 	for index := range searchRequests {
@@ -1273,7 +1273,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 		publishResultDuration := tr.Record(fmt.Sprintf("publish search result, msgID = %d", searchMsg.ID()))
 		log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "PublishSearchResult"),
 			zap.Int64(log.BenchmarkCollectionID, msg.(*msgstream.SearchMsg).CollectionID),
-			zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, publishResultDuration.Milliseconds()))
+			zap.Int64(log.BenchmarkMsgID, msg.ID()), zap.Int64(log.BenchmarkDuration, publishResultDuration.Microseconds()))
 	}
 	sp.LogFields(oplog.String("statistical time", "stats done"))
 	tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))

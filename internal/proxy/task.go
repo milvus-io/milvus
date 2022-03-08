@@ -1430,7 +1430,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "PreExecute"),
 		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, st.perfTR.ElapseSpan().Milliseconds()))
+		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, st.perfTR.ElapseSpan().Microseconds()))
 
 	return nil
 }
@@ -1496,7 +1496,7 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	sendDur := st.tr.Record("send message done")
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "SendMsgToPulsar"),
 		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, sendDur.Milliseconds()))
+		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, sendDur.Microseconds()))
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "SendMsgToMessageStorage"),
 		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
 		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, time.Now().UnixNano()))
@@ -1511,7 +1511,7 @@ func (st *searchTask) Execute(ctx context.Context) error {
 
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "Execute"),
 		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, st.perfTR.RecordSpan().Milliseconds()))
+		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, st.perfTR.RecordSpan().Microseconds()))
 	return err
 }
 
@@ -1727,11 +1727,11 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 
 			log.Debug("Proxy Search PostExecute stage1",
 				zap.Any("len(filterSearchResults)", len(filterSearchResults)))
-			waitResultDur := st.tr.RecordSpan().Milliseconds()
-			metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SearchLabel).Observe(float64(waitResultDur))
+			waitResultDur := st.tr.RecordSpan()
+			metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SearchLabel).Observe(float64(waitResultDur.Milliseconds()))
 			log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "WaitSearchResult"),
 				zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, waitResultDur))
+				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, waitResultDur.Microseconds()))
 			tr.Record("Proxy Search PostExecute stage1 done")
 			if len(filterSearchResults) <= 0 || errNum > 0 {
 				st.result = &milvuspb.SearchResults{
@@ -1748,11 +1748,11 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			decodeResultDur := tr.RecordSpan().Milliseconds()
+			decodeResultDur := tr.RecordSpan()
 			log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "DecodeSearchResult"),
 				zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, decodeResultDur))
-			metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SearchLabel).Observe(float64(decodeResultDur))
+				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, decodeResultDur.Microseconds()))
+			metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SearchLabel).Observe(float64(decodeResultDur.Milliseconds()))
 			log.Debug("Proxy Search PostExecute stage2", zap.Any("len(validSearchResults)", len(validSearchResults)))
 			if len(validSearchResults) <= 0 {
 				filterReason += "empty search result\n"
@@ -1777,11 +1777,11 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			reduceResultDur := tr.RecordSpan().Milliseconds()
+			reduceResultDur := tr.RecordSpan()
 			log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "ReduceSearchResult"),
 				zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, reduceResultDur))
-			metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SuccessLabel).Observe(float64(reduceResultDur))
+				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, reduceResultDur.Microseconds()))
+			metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), st.collectionName, metrics.SuccessLabel).Observe(float64(reduceResultDur.Milliseconds()))
 			st.result.CollectionName = st.collectionName
 
 			schema, err := globalMetaCache.GetCollectionSchema(ctx, st.query.CollectionName)
@@ -1801,7 +1801,7 @@ func (st *searchTask) PostExecute(ctx context.Context) error {
 			}
 			log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "PostExecute"),
 				zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, st.perfTR.RecordSpan().Milliseconds()))
+				zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, st.perfTR.RecordSpan().Microseconds()))
 			return nil
 		}
 	}
