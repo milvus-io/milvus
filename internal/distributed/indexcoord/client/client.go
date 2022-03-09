@@ -98,7 +98,7 @@ func (c *Client) getIndexCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("IndexCoordClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of indexcoord is incorrect, %d", len(msess))
+		return "", fmt.Errorf("find no available indexcoord, check indexcoord state")
 	}
 	return ms.Address, nil
 }
