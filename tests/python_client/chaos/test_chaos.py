@@ -151,6 +151,7 @@ class TestChaos(TestChaosBase):
         release_name = constants.RELEASE_NAME
         log.info(f"release_name: {release_name}")
         chaos_config['metadata']['name'] = release_name
+        kind = chaos_config['kind']
         meta_name = chaos_config.get('metadata', None).get('name', None)
         chaos_config_str = json.dumps(chaos_config)
         chaos_config_str = chaos_config_str.replace("milvus-chaos", release_name)
@@ -188,7 +189,8 @@ class TestChaos(TestChaosBase):
                                 namespace=constants.CHAOS_NAMESPACE)
         chaos_res.create(chaos_config)
         log.info("chaos injected")
-        log.info(f"chaos information: {chaos_res.get(meta_name)}")
+        # verify the chaos is injected
+        log.info(os.system(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}"))
         sleep(constants.WAIT_PER_OP * 2)
         # reset counting
         cc.reset_counting(self.health_checkers)
@@ -217,7 +219,8 @@ class TestChaos(TestChaosBase):
         # delete chaos
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
-                
+        # verify the chaos is deleted
+        log.info(os.system(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}"))                
         log.info(f'Alive threads: {threading.enumerate()}')
         sleep(2)
         # wait all pods ready
