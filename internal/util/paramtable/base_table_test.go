@@ -22,6 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const defaultYaml = "milvus.yaml"
+
 var baseParams = BaseTable{}
 
 func TestMain(m *testing.M) {
@@ -150,10 +152,11 @@ func TestBaseTable_ConfDir(t *testing.T) {
 	// fake dir
 	baseParams.configDir = "./"
 
-	assert.Panics(t, func() { baseParams.loadFromMilvusYaml() })
+	assert.Panics(t, func() { baseParams.loadFromYaml(defaultYaml) })
 
 	baseParams.configDir = rightConfig
-	baseParams.loadFromMilvusYaml()
+	baseParams.loadFromYaml(defaultYaml)
+	baseParams.GlobalInitWithYaml(defaultYaml)
 }
 
 func TestBateTable_ConfPath(t *testing.T) {

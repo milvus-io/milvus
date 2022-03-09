@@ -17,8 +17,9 @@
 package etcd
 
 import (
-	"fmt"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -34,7 +35,7 @@ var EtcdServer *embed.Etcd
 func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
 	if etcdCfg.UseEmbedEtcd {
 		path := etcdCfg.ConfigPath
-		fmt.Println("path", path, "data", etcdCfg.DataDir)
+		log.Info("Setting Etcd config", zap.String("path", path), zap.String("data", etcdCfg.DataDir))
 		var cfg *embed.Config
 		if len(path) > 0 {
 			cfgFromFile, err := embed.ConfigFromFile(path)
@@ -46,6 +47,7 @@ func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
 			cfg = embed.NewConfig()
 		}
 		cfg.Dir = etcdCfg.DataDir
+		cfg.LogOutputs = []string{etcdCfg.EtcdLogPath}
 		cfg.LogLevel = etcdCfg.EtcdLogLevel
 		e, err := embed.StartEtcd(cfg)
 		if err != nil {

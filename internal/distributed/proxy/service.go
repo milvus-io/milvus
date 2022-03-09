@@ -97,6 +97,13 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 // startHTTPServer starts the http server, panic when failed
 func (s *Server) startHTTPServer(port int) {
 	defer s.wg.Done()
+	// (Embedded Milvus Only) Discard gin logs if logging is disabled.
+	// We might need to put these logs in some files in the further.
+	// But we don't care about these logs now, at least not in embedded Milvus.
+	if !proxy.Params.ProxyCfg.GinLogging {
+		gin.DefaultWriter = io.Discard
+		gin.DefaultErrorWriter = io.Discard
+	}
 	ginHandler := gin.Default()
 	apiv1 := ginHandler.Group("/api/v1")
 	httpserver.NewHandlers(s.proxy).RegisterRoutesTo(apiv1)
