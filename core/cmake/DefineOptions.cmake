@@ -91,6 +91,8 @@ define_option(MILVUS_WITH_FIU "Build with fiu" OFF)
 
 define_option(MILVUS_WITH_AWS "Build with aws" ON)
 
+define_option(MILVUS_WITH_OSS "Build with oss" ON)
+
 define_option(MILVUS_WITH_OATPP "Build with oatpp" ON)
 
 #----------------------------------------------------------------------

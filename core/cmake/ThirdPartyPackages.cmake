@@ -23,6 +23,7 @@ set(MILVUS_THIRDPARTY_DEPENDENCIES
         Opentracing
         fiu
         AWS
+        OSS
         oatpp
         armadillo
         apu)
@@ -63,6 +64,8 @@ macro(build_dependency DEPENDENCY_NAME)
         build_oatpp()
     elseif("${DEPENDENCY_NAME}" STREQUAL "AWS")
         build_aws()
+    elseif("${DEPENDENCY_NAME}" STREQUAL "OSS")
+        build_oss()
     elseif("${DEPENDENCY_NAME}" STREQUAL "armadillo")
         build_armadillo()
     elseif("${DEPENDENCY_NAME}" STREQUAL "apu")
@@ -334,6 +337,12 @@ if (DEFINED ENV{MILVUS_AWS_URL})
     set(AWS_SOURCE_URL "$ENV{MILVUS_AWS_URL}")
 else ()
     set(AWS_SOURCE_URL "https://github.com/aws/aws-sdk-cpp/archive/${AWS_VERSION}.tar.gz")
+endif ()
+
+if (DEFINED ENV{MILVUS_OSS_URL})
+    set(OSS_SOURCE_URL "$ENV{MILVUS_OSS_URL}")
+else ()
+    set(OSS_SOURCE_URL "https://github.com/aliyun/aliyun-oss-cpp-sdk/archive/${OSS_VERSION}.tar.gz")
 endif ()
 
 if (DEFINED ENV{MILVUS_ARMADILLO_URL})
@@ -1114,6 +1123,63 @@ if(MILVUS_WITH_AWS)
     include_directories(SYSTEM ${AWS_CPP_SDK_CORE_INCLUDE_DIR})
 
 endif()
+
+# ----------------------------------------------------------------------
+# OSS
+macro(build_oss)
+    message(STATUS "Building aliyun-oss-sdk-${OSS_VERSION} from source")
+    set(OSS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/oss_ep-prefix/src/oss_ep")
+
+    set(OSS_CMAKE_ARGS
+            ${EP_COMMON_TOOLCHAIN}
+            "-DCMAKE_INSTALL_PREFIX=${OSS_PREFIX}"
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_INSTALL_LIBDIR=lib)
+
+    set(OSS_CPP_SDK_STATIC_LIB
+            "${OSS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}alibabacloud-oss-cpp-sdk${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    set(OSS_INCLUDE_DIR "${OSS_PREFIX}/include")
+    set(OSS_CMAKE_ARGS
+            ${OSS_CMAKE_ARGS}
+            -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+            -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            -DCMAKE_C_FLAGS=${EP_C_FLAGS}
+            -DCMAKE_CXX_FLAGS=${EP_CXX_FLAGS})
+
+    externalproject_add(oss_ep
+            ${EP_LOG_OPTIONS}
+            CMAKE_ARGS
+            ${OSS_CMAKE_ARGS}
+            BUILD_COMMAND
+            ${MAKE}
+            ${MAKE_BUILD_ARGS}
+            INSTALL_DIR
+            ${OSS_PREFIX}
+            URL
+            ${OSS_SOURCE_URL}
+            BUILD_BYPRODUCTS
+            "${OSS_CPP_SDK_STATIC_LIB}")
+
+    file(MAKE_DIRECTORY "${OSS_INCLUDE_DIR}")
+    add_library(oss-cpp-sdk STATIC IMPORTED)
+
+    set_target_properties(oss-cpp-sdk
+            PROPERTIES
+            IMPORTED_LOCATION "${OSS_CPP_SDK_STATIC_LIB}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OSS_INCLUDE_DIR}"
+            )
+    add_dependencies(oss-cpp-sdk oss_ep)
+endmacro()
+
+if(MILVUS_WITH_OSS)
+    resolve_dependency(OSS)
+
+    link_directories(SYSTEM ${OSS_PREFIX}/lib)
+
+    get_target_property(OSS_CPP_SDK_INCLUDE_DIR oss-cpp-sdk INTERFACE_INCLUDE_DIRECTORIES)
+    include_directories(SYSTEM ${OSS_CPP_SDK_INCLUDE_DIR})
+endif()
+
 
 # ----------------------------------------------------------------------
 # armadillo

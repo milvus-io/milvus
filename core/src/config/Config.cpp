@@ -88,6 +88,8 @@ const char* CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT = "10";
 #ifdef MILVUS_WITH_AWS
 const char* CONFIG_STORAGE_S3_ENABLE = "s3_enabled";
 const char* CONFIG_STORAGE_S3_ENABLE_DEFAULT = "false";
+const char* CONFIG_STORAGE_S3_USE_HTTPS = "s3_use_https";
+const char* CONFIG_STORAGE_S3_USE_HTTPS_DEFAULT = "false";
 const char* CONFIG_STORAGE_S3_ADDRESS = "s3_address";
 const char* CONFIG_STORAGE_S3_ADDRESS_DEFAULT = "127.0.0.1";
 const char* CONFIG_STORAGE_S3_PORT = "s3_port";
@@ -100,6 +102,18 @@ const char* CONFIG_STORAGE_S3_BUCKET = "s3_bucket";
 const char* CONFIG_STORAGE_S3_BUCKET_DEFAULT = "";
 const char* CONFIG_STORAGE_S3_REGION = "s3_region";
 const char* CONFIG_STORAGE_S3_REGION_DEFAULT = "";
+#endif
+#ifdef MILVUS_WITH_OSS
+const char* CONFIG_STORAGE_OSS_ENABLE = "oss_enabled";
+const char* CONFIG_STORAGE_OSS_ENABLE_DEFAULT = "false";
+const char* CONFIG_STORAGE_OSS_ENDPOINT = "oss_endpoint";
+const char* CONFIG_STORAGE_OSS_ENDPOINT_DEFAULT = "https://oss-cn-hangzhou.aliyuncs.com";
+const char* CONFIG_STORAGE_OSS_ACCESS_KEY = "oss_access_key";
+const char* CONFIG_STORAGE_OSS_ACCESS_KEY_DEFAULT = "";
+const char* CONFIG_STORAGE_OSS_SECRET_KEY = "oss_secret_key";
+const char* CONFIG_STORAGE_OSS_SECRET_KEY_DEFAULT = "";
+const char* CONFIG_STORAGE_OSS_BUCKET = "oss_bucket";
+const char* CONFIG_STORAGE_OSS_BUCKET_DEFAULT = "";
 #endif
 
 const int64_t CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_MIN = 0;
@@ -367,6 +381,9 @@ Config::ValidateConfig() {
     STATUS_CHECK(GetStorageConfigS3Enable(storage_s3_enable));
     // std::cout << "S3 " << (storage_s3_enable ? "ENABLED !" : "DISABLED !") << std::endl;
 
+    bool storage_s3_use_https;
+    STATUS_CHECK(GetStorageConfigS3UseHttps(storage_s3_use_https));
+
     std::string storage_s3_address;
     STATUS_CHECK(GetStorageConfigS3Address(storage_s3_address));
 
@@ -384,6 +401,23 @@ Config::ValidateConfig() {
 
     std::string storage_s3_region;
     STATUS_CHECK(GetStorageConfigS3Region(storage_s3_region));
+#endif
+
+#ifdef MILVUS_WITH_OSS
+    bool storage_oss_enable;
+    STATUS_CHECK(GetStorageConfigOSSEnable(storage_oss_enable));
+
+    std::string storage_oss_endpoint;
+    STATUS_CHECK(GetStorageConfigOSSEndpoint(storage_oss_endpoint));
+
+    std::string storage_oss_access_key;
+    STATUS_CHECK(GetStorageConfigOSSAccessKey(storage_oss_access_key));
+
+    std::string storage_oss_secret_key;
+    STATUS_CHECK(GetStorageConfigOSSSecretKey(storage_oss_secret_key));
+
+    std::string storage_oss_bucket;
+    STATUS_CHECK(GetStorageConfigOSSBucket(storage_oss_bucket));
 #endif
 
     /* metric config */
@@ -532,11 +566,20 @@ Config::ResetDefaultConfig() {
     STATUS_CHECK(SetStorageConfigFileCleanupTimeout(CONFIG_STORAGE_FILE_CLEANUP_TIMEOUT_DEFAULT));
 #ifdef MILVUS_WITH_AWS
     STATUS_CHECK(SetStorageConfigS3Enable(CONFIG_STORAGE_S3_ENABLE_DEFAULT));
+    STATUS_CHECK(SetStorageConfigS3UseHttps(CONFIG_STORAGE_S3_USE_HTTPS_DEFAULT));
     STATUS_CHECK(SetStorageConfigS3Address(CONFIG_STORAGE_S3_ADDRESS_DEFAULT));
     STATUS_CHECK(SetStorageConfigS3Port(CONFIG_STORAGE_S3_PORT_DEFAULT));
     STATUS_CHECK(SetStorageConfigS3AccessKey(CONFIG_STORAGE_S3_ACCESS_KEY_DEFAULT));
     STATUS_CHECK(SetStorageConfigS3SecretKey(CONFIG_STORAGE_S3_SECRET_KEY_DEFAULT));
     STATUS_CHECK(SetStorageConfigS3Bucket(CONFIG_STORAGE_S3_BUCKET_DEFAULT));
+#endif
+
+#ifdef MILVUS_WITH_OSS
+    STATUS_CHECK(SetStorageConfigOSSEnable(CONFIG_STORAGE_OSS_ENABLE_DEFAULT));
+    STATUS_CHECK(SetStorageConfigOSSEndpoint(CONFIG_STORAGE_OSS_ENDPOINT_DEFAULT));
+    STATUS_CHECK(SetStorageConfigOSSAccessKey(CONFIG_STORAGE_OSS_ACCESS_KEY_DEFAULT));
+    STATUS_CHECK(SetStorageConfigOSSSecretKey(CONFIG_STORAGE_OSS_SECRET_KEY_DEFAULT));
+    STATUS_CHECK(SetStorageConfigOSSBucket(CONFIG_STORAGE_OSS_BUCKET_DEFAULT));
 #endif
 
     /* metric config */
@@ -1328,6 +1371,16 @@ Config::CheckStorageConfigS3Enable(const std::string& value) {
 }
 
 Status
+Config::CheckStorageConfigS3UseHttps(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid storage config: " + value + ". Possible reason: storage_config.s3_use_https is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
 Config::CheckStorageConfigS3Address(const std::string& value) {
     if (!ValidationUtil::ValidateHostname(value).ok()) {
         std::string msg = "Invalid s3 address: " + value + ". Possible reason: storage_config.s3_address is invalid.";
@@ -1385,6 +1438,52 @@ Status
 Config::CheckStorageConfigS3Region(const std::string& /* unused */) {
     return Status::OK();
 }
+#endif
+
+#ifdef MILVUS_WITH_OSS
+
+Status
+Config::CheckStorageConfigOSSEnable(const std::string& value) {
+    if (!ValidationUtil::ValidateStringIsBool(value).ok()) {
+        std::string msg =
+            "Invalid storage config: " + value + ". Possible reason: storage_config.oss_enable is not a boolean.";
+        return Status(SERVER_INVALID_ARGUMENT, msg);
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigOSSEndpoint(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.oss_endpoint is empty.");
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigOSSAccessKey(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.oss_access_key is empty.");
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigOSSSecretKey(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.oss_secret_key is empty.");
+    }
+    return Status::OK();
+}
+
+Status
+Config::CheckStorageConfigOSSBucket(const std::string& value) {
+    if (value.empty()) {
+        return Status(SERVER_INVALID_ARGUMENT, "storage_config.oss_bucket is empty.");
+    }
+    return Status::OK();
+}
+
 #endif
 
 /* metric config */
@@ -2412,6 +2511,14 @@ Config::GetStorageConfigS3Enable(bool& value) {
 }
 
 Status
+Config::GetStorageConfigS3UseHttps(bool& value) {
+    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_USE_HTTPS, CONFIG_STORAGE_S3_USE_HTTPS_DEFAULT);
+    STATUS_CHECK(CheckStorageConfigS3UseHttps(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
 Config::GetStorageConfigS3Address(std::string& value) {
     value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, CONFIG_STORAGE_S3_ADDRESS_DEFAULT);
     return CheckStorageConfigS3Address(value);
@@ -2446,6 +2553,41 @@ Config::GetStorageConfigS3Region(std::string& value) {
     value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_S3_REGION, CONFIG_STORAGE_S3_REGION_DEFAULT);
     return Status::OK();
 }
+#endif
+
+#ifdef MILVUS_WITH_OSS
+Status
+Config::GetStorageConfigOSSEnable(bool& value) {
+    std::string str = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_OSS_ENABLE, CONFIG_STORAGE_OSS_ENABLE_DEFAULT);
+    STATUS_CHECK(CheckStorageConfigOSSEnable(str));
+    STATUS_CHECK(StringHelpFunctions::ConvertToBoolean(str, value));
+    return Status::OK();
+}
+
+Status
+Config::GetStorageConfigOSSEndpoint(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_OSS_ENDPOINT, CONFIG_STORAGE_OSS_ENDPOINT_DEFAULT);
+    return CheckStorageConfigOSSEndpoint(value);
+}
+
+Status
+Config::GetStorageConfigOSSAccessKey(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_OSS_ACCESS_KEY, CONFIG_STORAGE_OSS_ACCESS_KEY_DEFAULT);
+    return Status::OK();
+}
+
+Status
+Config::GetStorageConfigOSSSecretKey(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_OSS_SECRET_KEY, CONFIG_STORAGE_OSS_SECRET_KEY_DEFAULT);
+    return Status::OK();
+}
+
+Status
+Config::GetStorageConfigOSSBucket(std::string& value) {
+    value = GetConfigStr(CONFIG_STORAGE, CONFIG_STORAGE_OSS_BUCKET, CONFIG_STORAGE_OSS_BUCKET_DEFAULT);
+    return Status::OK();
+}
+
 #endif
 
 /* metric config */
@@ -2951,6 +3093,12 @@ Config::SetStorageConfigS3Enable(const std::string& value) {
 }
 
 Status
+Config::SetStorageConfigS3UseHttps(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigS3UseHttps(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_USE_HTTPS, value);
+}
+
+Status
 Config::SetStorageConfigS3Address(const std::string& value) {
     STATUS_CHECK(CheckStorageConfigS3Address(value));
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_ADDRESS, value);
@@ -2985,6 +3133,39 @@ Config::SetStorageConfigS3Region(const std::string& value) {
     STATUS_CHECK(CheckStorageConfigS3Region(value));
     return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_S3_REGION, value);
 }
+#endif
+
+#ifdef MILVUS_WITH_OSS
+Status
+Config::SetStorageConfigOSSEnable(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigOSSEnable(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_OSS_ENABLE, value);
+}
+
+Status
+Config::SetStorageConfigOSSEndpoint(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigOSSEndpoint(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_OSS_ENDPOINT, value);
+}
+
+Status
+Config::SetStorageConfigOSSAccessKey(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigOSSAccessKey(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_OSS_ACCESS_KEY, value);
+}
+
+Status
+Config::SetStorageConfigOSSSecretKey(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigOSSSecretKey(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_OSS_SECRET_KEY, value);
+}
+
+Status
+Config::SetStorageConfigOSSBucket(const std::string& value) {
+    STATUS_CHECK(CheckStorageConfigOSSBucket(value));
+    return SetConfigValueInMem(CONFIG_STORAGE, CONFIG_STORAGE_OSS_BUCKET, value);
+}
+
 #endif
 
 /* metric config */

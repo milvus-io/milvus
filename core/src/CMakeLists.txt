@@ -121,11 +121,15 @@ aux_source_directory(${MILVUS_ENGINE_SRC}/storage/disk storage_disk_files)
 if(MILVUS_WITH_AWS)
 aux_source_directory(${MILVUS_ENGINE_SRC}/storage/s3 storage_s3_files)
 endif()
+if(MILVUS_WITH_OSS)
+aux_source_directory(${MILVUS_ENGINE_SRC}/storage/oss storage_oss_files)
+endif()
 
 set(storage_files
         ${storage_main_files}
         ${storage_disk_files}
         ${storage_s3_files}
+        ${storage_oss_files}
         )
 
 aux_source_directory(${MILVUS_ENGINE_SRC}/utils utils_files)
@@ -189,6 +193,10 @@ set(s3_client_lib
         aws-cpp-sdk-core
         )
 
+set(oss_sdk_lib
+        alibabacloud-oss-cpp-sdk
+)
+
 set(third_party_libs
         sqlite
         ${grpc_lib}
@@ -240,6 +248,15 @@ if (MILVUS_WITH_AWS)
     add_compile_definitions(MILVUS_WITH_AWS)
     set(third_party_libs ${third_party_libs}
             ${s3_client_lib}
+            curl
+            crypto
+            )
+endif ()
+
+if (MILVUS_WITH_OSS)
+    add_compile_definitions(MILVUS_WITH_OSS)
+    set(third_party_libs ${third_party_libs}
+            ${oss_sdk_lib}
             curl
             crypto
             )

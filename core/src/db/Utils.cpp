@@ -24,6 +24,9 @@
 #ifdef MILVUS_WITH_AWS
 #include "storage/s3/S3ClientWrapper.h"
 #endif
+#ifdef MILVUS_WITH_OSS
+#include "storage/oss/OSSClientWrapper.h"
+#endif
 #include <map>
 
 #include "utils/CommonUtil.h"
@@ -124,15 +127,30 @@ DeleteCollectionPath(const DBMetaOptions& options, const std::string& collection
         }
     }
 
+#if defined(MILVUS_WITH_AWS) || defined(MILVUS_WITH_OSS)
+    server::Config& config = server::Config::GetInstance();
+#endif
+
 #ifdef MILVUS_WITH_AWS
     bool s3_enable = false;
-    server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
 
     if (s3_enable) {
         std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
 
         auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+        return storage_inst.DeleteObjects(table_path);
+    }
+#endif
+
+#ifdef MILVUS_WITH_OSS
+    bool oss_enable = false;
+    config.GetStorageConfigOSSEnable(oss_enable);
+
+    if (oss_enable) {
+        std::string table_path = options.path_ + TABLES_FOLDER + collection_id;
+
+        auto& storage_inst = milvus::storage::OSSClientWrapper::GetInstance();
         return storage_inst.DeleteObjects(table_path);
     }
 #endif
@@ -167,9 +185,13 @@ Status
 DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     utils::GetCollectionFilePath(options, table_file);
     boost::filesystem::remove(table_file.location_);
-#if 0
-    bool s3_enable = false;
+
+#if defined(MILVUS_WITH_AWS) || defined(MILVUS_WITH_OSS)
     server::Config& config = server::Config::GetInstance();
+#endif
+
+#if MILVUS_WITH_AWS
+    bool s3_enable = false;
     config.GetStorageConfigS3Enable(s3_enable);
 
     if (s3_enable) {
@@ -177,6 +199,17 @@ DeleteCollectionFilePath(const DBMetaOptions& options, meta::SegmentSchema& tabl
         return storage_inst.DeleteObjects(table_file.location_);
     }
 #endif
+
+#if MILVUS_WITH_OSS
+    bool oss_enable = false;
+    config.GetStorageConfigOSSEnable(s3_enable);
+
+    if (oss_enable) {
+        auto& storage_inst = milvus::storage::OSSClientWrapper::GetInstance();
+        return storage_inst.DeleteObjects(table_file.location_);
+    }
+#endif
+
     return Status::OK();
 }
 
@@ -186,13 +219,27 @@ DeleteSegment(const DBMetaOptions& options, meta::SegmentSchema& table_file) {
     std::string segment_dir;
     GetParentPath(table_file.location_, segment_dir);
     boost::filesystem::remove_all(segment_dir);
+
+#if defined(MILVUS_WITH_AWS) || defined(MILVUS_WITH_OSS)
+    server::Config& config = server::Config::GetInstance();
+#endif
+
 #ifdef MILVUS_WITH_AWS
     bool s3_enable = false;
-    server::Config& config = server::Config::GetInstance();
     config.GetStorageConfigS3Enable(s3_enable);
 
     if (s3_enable) {
         auto& storage_inst = milvus::storage::S3ClientWrapper::GetInstance();
+        return storage_inst.DeleteObjects(segment_dir);
+    }
+#endif
+
+#ifdef MILVUS_WITH_OSS
+    bool oss_enable = false;
+    config.GetStorageConfigOSSEnable(oss_enable);
+
+    if (oss_enable) {
+        auto& storage_inst = milvus::storage::OSSClientWrapper::GetInstance();
         return storage_inst.DeleteObjects(segment_dir);
     }
 #endif
