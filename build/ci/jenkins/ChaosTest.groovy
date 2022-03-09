@@ -17,10 +17,12 @@ pipeline {
         choice(
             description: 'Chaos Test Type',
             name: 'chaos_type',
-            choices: ['pod-kill', 'pod-failure']
+            choices: ['pod-kill', 'pod-failure', 'mem-stress', 'network-latency', 'network-partition', 'io-latency']
         )
         choice(
-            description: 'Chaos Test Target',
+            description: 'Chaos Test Target: \
+            mem-stress: datanode, etcd, indexnode, minio, proxy, pulsar, querynode, standalone \
+            io-fault & io-latency: minio, pulsar, etcd ',
             name: 'pod_name',
             choices: ["standalone", "datacoord", "datanode", "indexcoord", "indexnode", "proxy", "pulsar", "querycoord", "querynode", "rootcoord", "etcd", "minio"]
         )
@@ -32,7 +34,7 @@ pipeline {
         string(
             description: 'Image Repository',
             name: 'image_repository',
-            defaultValue: 'harbor.zilliz.cc/dockerhub/milvusdb/milvus-dev'
+            defaultValue: 'harbor.zilliz.cc/milvus/milvus'
         )
         string(
             description: 'Image Tag',
@@ -53,7 +55,7 @@ pipeline {
     
     environment {
         ARTIFACTS = "${env.WORKSPACE}/_artifacts"
-        RELEASE_NAME = "test-${params.pod_name}-${params.chaos_type}-${env.BUILD_ID}"
+        RELEASE_NAME = "${params.pod_name}-${params.chaos_type}-${env.BUILD_ID}"
         NAMESPACE = "chaos-testing"
     }
 
@@ -75,7 +77,6 @@ pipeline {
             }
             steps {
                 container('main') {
-                    
                     dir ('tests/python_client/chaos/scripts') {
                         script {
                             def image_tag_modified = ""
@@ -154,7 +155,7 @@ pipeline {
             }
             steps {
                 container('main') {
-                    dir ('tests/python_client/chaos') {                                     
+                    dir ('tests/python_client/chaos') {
                         script {
                         sh"""
                         POD_NAME="${params.pod_name}" \
@@ -181,6 +182,18 @@ pipeline {
             }
             
         }
+        stage ('result analysis') {
+            steps {
+                container('main') {
+                    dir ('tests/python_client/chaos/reports') {
+                        script {
+                            echo "result analysis"
+                            sh "cat ${env.RELEASE_NAME}.log || echo 'no log file'"
+                        }
+                    }
+                }
+            }
+        } 
 
         stage ('run e2e test after chaos') {
             options {
@@ -217,18 +230,6 @@ pipeline {
             }
             
         }
-        stage ('result analysis') {
-            steps {
-                container('main') {
-                    dir ('tests/python_client/chaos/reports') {
-                        script {
-                            echo "result analysis"
-                            sh "cat ${env.RELEASE_NAME}.log || echo 'no log file'"
-                        }
-                    }
-                }
-            }
-        } 
     }
     post {
         always {
@@ -237,7 +238,7 @@ pipeline {
                 dir ('tests/python_client/chaos') {
                     script {
                         echo "collecte logs"
-                        sh "bash ../../scripts/export_log_k8s.sh ${env.NAMESPACE} ${env.RELEASE_NAME} k8s_log/${env.RELEASE_NAME}"                        
+                        sh "bash ../../scripts/export_log_k8s.sh ${env.NAMESPACE} ${env.RELEASE_NAME} k8s_log/${env.RELEASE_NAME} || true"                        
                         sh "tar -zcvf artifacts-${env.RELEASE_NAME}-pytest-logs.tar.gz /tmp/ci_logs/ --remove-files || true"
                         sh "tar -zcvf artifacts-${env.RELEASE_NAME}-server-logs.tar.gz k8s_log/ --remove-files || true"
                         archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-pytest-logs.tar.gz", allowEmptyArchive: true
