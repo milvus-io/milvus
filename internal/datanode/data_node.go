@@ -293,11 +293,13 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
 		e = &event{
 			eventType: putEventType,
+			version:   evt.Kv.Version,
 		}
 
 	case clientv3.EventTypeDelete:
 		e = &event{
 			eventType: deleteEventType,
+			version:   evt.Kv.Version,
 		}
 	}
 	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
@@ -314,6 +316,11 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 			return
 		}
 
+		if isEndWatchState(watchInfo.State) {
+			log.Warn("DataNode received a PUT event with a end State", zap.String("state", watchInfo.State.String()))
+			return
+		}
+
 		e.info = watchInfo
 		e.vChanName = watchInfo.GetVchan().GetChannelName()
 
@@ -322,12 +329,9 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 		e.vChanName = parseDeleteEventKey(key)
 	}
 
-	actualManager, loaded := node.eventManagerMap.LoadOrStore(e.vChanName, &channelEventManager{
-		eventChan:         make(chan event, 10),
-		closeChan:         make(chan struct{}),
-		handlePutEvent:    node.handlePutEvent,
-		handleDeleteEvent: node.handleDeleteEvent,
-	})
+	actualManager, loaded := node.eventManagerMap.LoadOrStore(e.vChanName, newChannelEventManager(
+		node.handlePutEvent, node.handleDeleteEvent, retryWatchInterval,
+	))
 
 	if !loaded {
 		actualManager.(*channelEventManager).Run()
@@ -350,10 +354,6 @@ func parsePutEventData(data []byte) (*datapb.ChannelWatchInfo, error) {
 		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, err: %v", err)
 	}
 
-	if watchInfo.State == datapb.ChannelWatchState_Complete {
-		return nil, fmt.Errorf("invalid event: event state is already ChannelWatchState_Compele")
-	}
-
 	if watchInfo.Vchan == nil {
 		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo")
 	}
@@ -367,28 +367,51 @@ func parseDeleteEventKey(key string) string {
 	return vChanName
 }
 
-func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo) error {
+func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version int64) (err error) {
 	vChanName := watchInfo.GetVchan().GetChannelName()
 
-	if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
-		return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
-	}
-	log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+	switch watchInfo.State {
+	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
+		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
+			return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
+		}
+		log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+		defer func() {
+			if err != nil {
+				node.releaseFlowgraph(vChanName)
+			}
+		}()
+		watchInfo.State = datapb.ChannelWatchState_WatchSuccess
 
-	watchInfo.State = datapb.ChannelWatchState_Complete
+	case datapb.ChannelWatchState_ToRelease:
+		success := true
+		func() {
+			defer func() {
+				if x := recover(); x != nil {
+					log.Error("release flowgraph panic", zap.Any("recovered", x))
+					success = false
+				}
+			}()
+			node.releaseFlowgraph(vChanName)
+		}()
+		if !success {
+			watchInfo.State = datapb.ChannelWatchState_ReleaseFailure
+		} else {
+			watchInfo.State = datapb.ChannelWatchState_ReleaseSuccess
+		}
+	}
+
 	v, err := proto.Marshal(watchInfo)
 	if err != nil {
-		return fmt.Errorf("fail to marshal watchInfo with complete state, vChanName: %s, err: %v", vChanName, err)
+		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
 	}
 
 	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), vChanName)
-	log.Info("handle put event: try to save completed state", zap.String("key", k))
+	log.Info("handle put event: try to save result state", zap.String("key", k), zap.String("state", watchInfo.State.String()))
 
-	err = node.watchKv.Save(k, string(v))
-	// TODO DataNode unable to save into etcd, may need to panic
+	err = node.watchKv.CompareVersionAndSwap(k, version, string(v))
 	if err != nil {
-		node.releaseFlowgraph(vChanName)
-		return fmt.Errorf("fail to update completed state to etcd, vChanName: %s, err: %v", vChanName, err)
+		return fmt.Errorf("fail to update watch state to etcd, vChanName: %s, state: %s, err: %w", vChanName, watchInfo.State.String(), err)
 	}
 	return nil
 }

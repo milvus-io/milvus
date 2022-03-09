@@ -396,8 +396,9 @@ func TestWatchChannel(t *testing.T) {
 			UnflushedSegments: []*datapb.SegmentInfo{},
 		}
 		info := &datapb.ChannelWatchInfo{
-			State: datapb.ChannelWatchState_Uncomplete,
-			Vchan: vchan,
+			State:     datapb.ChannelWatchState_ToWatch,
+			Vchan:     vchan,
+			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
 		}
 		val, err := proto.Marshal(info)
 		assert.Nil(t, err)
@@ -416,6 +417,66 @@ func TestWatchChannel(t *testing.T) {
 
 		exist = node.flowgraphManager.exist(ch)
 		assert.False(t, exist)
+	})
+
+	t.Run("Test release channel", func(t *testing.T) {
+		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
+		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, oldInvalidCh)
+		err = kv.Save(path, string([]byte{23}))
+		assert.NoError(t, err)
+
+		ch := fmt.Sprintf("datanode-etcd-test-by-dev-rootcoord-dml-channel_%d", rand.Int31())
+		path = fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID, ch)
+		c := make(chan struct{})
+		go func() {
+			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID))
+			c <- struct{}{}
+			cnt := 0
+			for {
+				evt := <-ec
+				for _, event := range evt.Events {
+					if strings.Contains(string(event.Kv.Key), ch) {
+						cnt++
+					}
+				}
+				if cnt >= 2 {
+					break
+				}
+			}
+			c <- struct{}{}
+		}()
+		// wait for check goroutine start Watch
+		<-c
+
+		vchan := &datapb.VchannelInfo{
+			CollectionID:      1,
+			ChannelName:       ch,
+			UnflushedSegments: []*datapb.SegmentInfo{},
+		}
+		info := &datapb.ChannelWatchInfo{
+			State:     datapb.ChannelWatchState_ToRelease,
+			Vchan:     vchan,
+			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+		}
+		val, err := proto.Marshal(info)
+		assert.Nil(t, err)
+		err = kv.Save(path, string(val))
+		assert.Nil(t, err)
+
+		// wait for check goroutine received 2 events
+		<-c
+		exist := node.flowgraphManager.exist(ch)
+		assert.False(t, exist)
+
+		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, node.NodeID))
+		assert.Nil(t, err)
+		//TODO there is not way to sync Release done, use sleep for now
+		time.Sleep(100 * time.Millisecond)
+
+		exist = node.flowgraphManager.exist(ch)
+		assert.False(t, exist)
+
 	})
 
 	t.Run("handle watch info failed", func(t *testing.T) {
@@ -439,20 +500,81 @@ func TestWatchChannel(t *testing.T) {
 		exist = node.flowgraphManager.exist("test2")
 		assert.False(t, exist)
 
+		chPut := make(chan struct{}, 1)
+		chDel := make(chan struct{}, 1)
+
+		ch := fmt.Sprintf("datanode-etcd-test-by-dev-rootcoord-dml-channel_%d", rand.Int31())
+		m := newChannelEventManager(
+			func(info *datapb.ChannelWatchInfo, version int64) error {
+				r := node.handlePutEvent(info, version)
+				chPut <- struct{}{}
+				return r
+			},
+			func(vChan string) {
+				node.handleDeleteEvent(vChan)
+				chDel <- struct{}{}
+			}, time.Millisecond*100,
+		)
+		node.eventManagerMap.Store(ch, m)
+		m.Run()
+
 		info = datapb.ChannelWatchInfo{
-			Vchan: &datapb.VchannelInfo{},
-			State: datapb.ChannelWatchState_Uncomplete,
+			Vchan:     &datapb.VchannelInfo{ChannelName: ch},
+			State:     datapb.ChannelWatchState_Uncomplete,
+			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
 		}
 		bs, err = proto.Marshal(&info)
 		assert.NoError(t, err)
 
+		msFactory := node.msFactory
+		defer func() { node.msFactory = msFactory }()
+
 		node.msFactory = &FailMessageStreamFactory{
 			node.msFactory,
 		}
-		node.handleWatchInfo(e, "test3", bs)
-		exist = node.flowgraphManager.exist("test3")
+		node.handleWatchInfo(e, ch, bs)
+		<-chPut
+		exist = node.flowgraphManager.exist(ch)
 		assert.False(t, exist)
 	})
+
+	t.Run("handle watchinfo out of date", func(t *testing.T) {
+		chPut := make(chan struct{}, 1)
+		chDel := make(chan struct{}, 1)
+		// inject eventManager
+		ch := fmt.Sprintf("datanode-etcd-test-by-dev-rootcoord-dml-channel_%d", rand.Int31())
+		m := newChannelEventManager(
+			func(info *datapb.ChannelWatchInfo, version int64) error {
+				r := node.handlePutEvent(info, version)
+				chPut <- struct{}{}
+				return r
+			},
+			func(vChan string) {
+				node.handleDeleteEvent(vChan)
+				chDel <- struct{}{}
+			}, time.Millisecond*100,
+		)
+		node.eventManagerMap.Store(ch, m)
+		m.Run()
+		e := &event{
+			eventType: putEventType,
+			version:   10000,
+		}
+
+		info := datapb.ChannelWatchInfo{
+			Vchan:     &datapb.VchannelInfo{ChannelName: ch},
+			State:     datapb.ChannelWatchState_Uncomplete,
+			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+		}
+		bs, err := proto.Marshal(&info)
+		assert.NoError(t, err)
+
+		node.handleWatchInfo(e, ch, bs)
+		<-chPut
+		exist := node.flowgraphManager.exist("test3")
+		assert.False(t, exist)
+	})
+
 }
 
 func TestDataNode_GetComponentStates(t *testing.T) {

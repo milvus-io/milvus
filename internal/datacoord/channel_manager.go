@@ -337,9 +337,10 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 	for _, ch := range op.Channels {
 		vcInfo := c.h.GetVChanPositions(ch.Name, ch.CollectionID, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
-			Vchan:   vcInfo,
-			StartTs: time.Now().Unix(),
-			State:   datapb.ChannelWatchState_Uncomplete,
+			Vchan:     vcInfo,
+			StartTs:   time.Now().Unix(),
+			State:     datapb.ChannelWatchState_Uncomplete,
+			TimeoutTs: time.Now().Add(maxWatchDuration).UnixNano(),
 		}
 		op.ChannelWatchInfos = append(op.ChannelWatchInfos, info)
 	}
