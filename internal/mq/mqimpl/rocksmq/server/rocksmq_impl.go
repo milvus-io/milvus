@@ -319,7 +319,9 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	// Initialize topic id to its creating time, we don't really use it for now
 	nowTs := strconv.FormatInt(time.Now().Unix(), 10)
 	kvs[topicIDKey] = nowTs
-	rmq.kv.MultiSave(kvs)
+	if err = rmq.kv.MultiSave(kvs); err != nil {
+		return retry.Unrecoverable(err)
+	}
 
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
