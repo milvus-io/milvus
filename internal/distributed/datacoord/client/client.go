@@ -81,7 +81,7 @@ func (c *Client) getDataCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("DataCoordClient, not existed in msess ", zap.Any("key", key), zap.Any("len of msess", len(msess)))
-		return "", fmt.Errorf("number of datacoord is incorrect, %d", len(msess))
+		return "", fmt.Errorf("find no available datacoord, check datacoord state")
 	}
 	return ms.Address, nil
 }

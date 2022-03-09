@@ -81,7 +81,7 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Debug("QueryCoordClient msess key not existed", zap.Any("key", key))
-		return "", fmt.Errorf("number of querycoord is incorrect, %d", len(msess))
+		return "", fmt.Errorf("find no available querycoord, check querycoord state")
 	}
 	return ms.Address, nil
 }
