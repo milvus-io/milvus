@@ -195,11 +195,11 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 	mergeStart := time.Now()
 
 	var (
-		dim     int   // dimension of vector field
-		num     int   // numOfRows in each binlog
-		n       int   // binlog number
-		expired int64 // the number of expired entity
-		err     error
+		dim              int   // dimension of float/binary vector field
+		maxRowsPerBinlog int   // maximum rows populating one binlog
+		numBinlogs       int   // binlog number
+		expired          int64 // the number of expired entity
+		err              error
 
 		iDatas      = make([]*InsertData, 0)
 		fID2Type    = make(map[UniqueID]schemapb.DataType)
@@ -261,10 +261,13 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 
 	// calculate numRows from rowID field, fieldID 0
 	numRows := int64(len(fID2Content[0]))
-	num = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
-	n = int(numRows)/num + 1
+	maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
+	numBinlogs = int(numRows) / maxRowsPerBinlog
+	if int(numRows)%maxRowsPerBinlog != 0 {
+		numBinlogs++
+	}
 
-	for i := 0; i < n; i++ {
+	for i := 0; i < numBinlogs; i++ {
 		iDatas = append(iDatas, &InsertData{Data: make(map[storage.FieldID]storage.FieldData)})
 	}
 
@@ -275,13 +278,13 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[UniqueID]Timestamp, 
 			return nil, 0, errors.New("Unexpected error")
 		}
 
-		for i := 0; i < n; i++ {
+		for i := 0; i < numBinlogs; i++ {
 			var c []interface{}
 
-			if i == n-1 {
-				c = content[i*num:]
+			if i == numBinlogs-1 {
+				c = content[i*maxRowsPerBinlog:]
 			} else {
-				c = content[i*num : i*num+num]
+				c = content[i*maxRowsPerBinlog : i*maxRowsPerBinlog+maxRowsPerBinlog]
 			}
 
 			fData, err := interface2FieldData(tp, c, int64(len(c)))
