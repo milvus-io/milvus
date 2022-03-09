@@ -91,7 +91,7 @@ func (c *Client) getRootCoordAddr() (string, error) {
 	ms, ok := msess[key]
 	if !ok {
 		log.Warn("RootCoordClient mess key not exist", zap.Any("key", key))
-		return "", fmt.Errorf("number of RootCoord is incorrect, %d", len(msess))
+		return "", fmt.Errorf("find no available rootcoord, check rootcoord state")
 	}
 	log.Debug("RootCoordClient GetSessions success", zap.String("address", ms.Address))
 	return ms.Address, nil
