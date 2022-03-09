@@ -380,15 +380,18 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	)
 
 	// add flow graph
-	channel2FlowGraph := w.node.dataSyncService.addFlowGraphsForDMLChannels(collectionID, vChannels)
+	channel2FlowGraph, err := w.node.dataSyncService.addFlowGraphsForDMLChannels(collectionID, vChannels)
+	if err != nil {
+		log.Warn("watchDMChannel, add flowGraph for dmChannels failed", zap.Int64("collectionID", collectionID), zap.Strings("vChannels", vChannels), zap.Error(err))
+		return err
+	}
 	log.Debug("Query node add DML flow graphs", zap.Int64("collectionID", collectionID), zap.Any("channels", vChannels))
 
 	// channels as consumer
-	for _, channel := range vChannels {
-		fg := channel2FlowGraph[channel]
+	for channel, fg := range channel2FlowGraph {
 		if _, ok := channel2AsConsumerPosition[channel]; ok {
 			// use pChannel to consume
-			err = fg.consumerFlowGraph(VPChannels[channel], consumeSubName)
+			err = fg.consumeFlowGraph(VPChannels[channel], consumeSubName)
 			if err != nil {
 				log.Error("msgStream as consumer failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
 				break
@@ -412,7 +415,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		for _, fg := range channel2FlowGraph {
 			fg.flowGraph.Close()
 		}
-		w.node.dataSyncService.removeFlowGraphsByDMLChannels(vChannels)
+		gcChannels := make([]Channel, 0)
+		for channel := range channel2FlowGraph {
+			gcChannels = append(gcChannels, channel)
+		}
+		w.node.dataSyncService.removeFlowGraphsByDMLChannels(gcChannels)
 		return err
 	}
 
@@ -531,13 +538,16 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	channel2FlowGraph := w.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels)
+	channel2FlowGraph, err := w.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels)
+	if err != nil {
+		log.Warn("watchDeltaChannel, add flowGraph for deltaChannel failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels), zap.Error(err))
+		return err
+	}
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 	// channels as consumer
-	for _, channel := range vDeltaChannels {
-		fg := channel2FlowGraph[channel]
+	for channel, fg := range channel2FlowGraph {
 		// use pChannel to consume
-		err = fg.consumerFlowGraphLatest(VPDeltaChannels[channel], consumeSubName)
+		err = fg.consumeFlowGraphFromLatest(VPDeltaChannels[channel], consumeSubName)
 		if err != nil {
 			log.Error("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
 			break
@@ -553,7 +563,11 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		for _, fg := range channel2FlowGraph {
 			fg.flowGraph.Close()
 		}
-		w.node.dataSyncService.removeFlowGraphsByDeltaChannels(vDeltaChannels)
+		gcChannels := make([]Channel, 0)
+		for channel := range channel2FlowGraph {
+			gcChannels = append(gcChannels, channel)
+		}
+		w.node.dataSyncService.removeFlowGraphsByDeltaChannels(gcChannels)
 		return err
 	}
 

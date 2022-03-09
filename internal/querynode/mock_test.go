@@ -671,6 +671,21 @@ func genFactory() (msgstream.Factory, error) {
 	return msFactory, nil
 }
 
+func genInvalidFactory() (msgstream.Factory, error) {
+	const receiveBufSize = 1024
+
+	msFactory := msgstream.NewPmsFactory()
+	m := map[string]interface{}{
+		"receiveBufSize": receiveBufSize,
+		"pulsarAddress":  "",
+		"pulsarBufSize":  1024}
+	err := msFactory.SetParams(m)
+	if err != nil {
+		return nil, err
+	}
+	return msFactory, nil
+}
+
 func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	fac, err := genFactory()
 	if err != nil {

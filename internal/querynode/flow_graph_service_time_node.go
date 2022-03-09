@@ -17,7 +17,6 @@
 package querynode
 
 import (
-	"context"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -39,23 +38,19 @@ func (stNode *serviceTimeNode) Name() string {
 	return fmt.Sprintf("stNode-%d-%s", stNode.collectionID, stNode.vChannel)
 }
 
-// Close would close serviceTimeNode
-func (stNode *serviceTimeNode) Close() {
-}
-
 // Operate handles input messages, to execute insert operations
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do serviceTimeNode operation")
 
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in serviceTimeNode, input length = ", zap.Int("input node", len(in)))
-		// TODO: add error handling
+		log.Warn("Invalid operate message input in serviceTimeNode, input length = ", zap.Int("input node", len(in)))
+		return []Msg{}
 	}
 
 	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
 	if !ok {
 		log.Warn("type assertion failed for serviceTimeMsg")
-		// TODO: add error handling
+		return []Msg{}
 	}
 
 	if serviceTimeMsg == nil {
@@ -83,8 +78,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // newServiceTimeNode returns a new serviceTimeNode
-func newServiceTimeNode(ctx context.Context,
-	tSafeReplica TSafeReplicaInterface,
+func newServiceTimeNode(tSafeReplica TSafeReplicaInterface,
 	collectionID UniqueID,
 	channel Channel) *serviceTimeNode {
 

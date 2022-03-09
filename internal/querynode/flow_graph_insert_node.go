@@ -71,14 +71,14 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do insertNode operation")
 
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in insertNode", zap.Int("input length", len(in)))
-		// TODO: add error handling
+		log.Warn("Invalid operate message input in insertNode", zap.Int("input length", len(in)))
+		return []Msg{}
 	}
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
 		log.Warn("type assertion failed for insertMsg")
-		// TODO: add error handling
+		return []Msg{}
 	}
 
 	iData := insertData{

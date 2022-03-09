@@ -40,10 +40,12 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 	dataSyncService := newDataSyncService(ctx, streamingReplica, historicalReplica, tSafe, fac)
 	assert.NotNil(t, dataSyncService)
 
-	dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	assert.NoError(t, err)
 	assert.Len(t, dataSyncService.dmlChannel2FlowGraph, 1)
 
-	dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	assert.NoError(t, err)
 	assert.Len(t, dataSyncService.dmlChannel2FlowGraph, 1)
 
 	fg, err := dataSyncService.getFlowGraphByDMLChannel(defaultCollectionID, defaultDMLChannel)
@@ -67,7 +69,8 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 	assert.Nil(t, fg)
 	assert.Error(t, err)
 
-	dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	assert.NoError(t, err)
 	assert.Len(t, dataSyncService.dmlChannel2FlowGraph, 1)
 
 	dataSyncService.close()
@@ -91,10 +94,12 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	dataSyncService := newDataSyncService(ctx, streamingReplica, historicalReplica, tSafe, fac)
 	assert.NotNil(t, dataSyncService)
 
-	dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel})
+	_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel})
+	assert.NoError(t, err)
 	assert.Len(t, dataSyncService.deltaChannel2FlowGraph, 1)
 
-	dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel})
+	_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel})
+	assert.NoError(t, err)
 	assert.Len(t, dataSyncService.deltaChannel2FlowGraph, 1)
 
 	fg, err := dataSyncService.getFlowGraphByDeltaChannel(defaultCollectionID, defaultDeltaChannel)
@@ -118,7 +123,8 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	assert.Nil(t, fg)
 	assert.Error(t, err)
 
-	dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+	assert.NoError(t, err)
 	assert.Len(t, dataSyncService.deltaChannel2FlowGraph, 1)
 
 	dataSyncService.close()

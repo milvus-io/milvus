@@ -17,22 +17,17 @@
 package querynode
 
 import (
-	"context"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
 func TestServiceTimeNode_Operate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	genServiceTimeNode := func() *serviceTimeNode {
 		tSafe := newTSafeReplica()
 		tSafe.addTSafe(defaultDMLChannel)
 
-		node := newServiceTimeNode(ctx,
-			tSafe,
+		node := newServiceTimeNode(tSafe,
 			defaultCollectionID,
 			defaultDMLChannel)
 		return node

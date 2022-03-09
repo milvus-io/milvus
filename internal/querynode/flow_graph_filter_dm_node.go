@@ -46,14 +46,14 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	//log.Debug("Do filterDmNode operation")
 
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in filterDmNode", zap.Int("input length", len(in)))
-		// TODO: add error handling
+		log.Warn("Invalid operate message input in filterDmNode", zap.Int("input length", len(in)))
+		return []Msg{}
 	}
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg")
-		// TODO: add error handling
+		return []Msg{}
 	}
 
 	if msgStreamMsg == nil {
