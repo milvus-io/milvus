@@ -3939,3 +3939,27 @@ func unhealthyStatus() *commonpb.Status {
 		Reason:    "proxy not healthy",
 	}
 }
+
+// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	log.Info("received Import request")
+	resp := &milvuspb.ImportResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	return resp, nil
+}
+
+// Check import task state from datanode
+func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	log.Info("received GetImportState request", zap.Int64("taskID", req.GetTask()))
+	resp := &milvuspb.GetImportStateResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	return resp, nil
+}

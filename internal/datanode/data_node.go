@@ -777,3 +777,11 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
+
+// Compaction handles compaction request from DataCoord
+// returns status as long as compaction task enqueued or invalid
+func (node *DataNode) Import(ctx context.Context, req *milvuspb.ImportRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}, nil
+}

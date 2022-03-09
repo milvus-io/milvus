@@ -27,7 +27,7 @@ echo "mode: atomic" > ${FILE_COVERAGE_INFO}
 echo "Running unittest under ./internal"
 if [[ "$(uname -s)" == "Darwin" ]]; then
   export MallocNanoZone=0
-  for d in $(go list ./internal... | grep -v -e vendor -e internal/querycoord -e /metricsinfo -e internal/proxy -e internal/querynode); do
+  for d in $(go list ./internal/... | grep -v -e vendor -e internal/querycoord -e /metricsinfo -e internal/proxy -e internal/querynode); do
       go test -race -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
       if [ -f profile.out ]; then
           sed '1d' profile.out >> ${FILE_COVERAGE_INFO}
@@ -35,7 +35,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
       fi
   done
 else
-  for d in $(go list ./internal... | grep -v vendor); do
+  for d in $(go list ./internal/... | grep -v vendor); do
       go test -race -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
       if [ -f profile.out ]; then
           sed '1d' profile.out >> ${FILE_COVERAGE_INFO}

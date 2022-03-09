@@ -54,3 +54,7 @@ func (m *DataNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetrics
 func (m *DataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *DataNodeClient) Import(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

@@ -192,3 +192,10 @@ enum ConsistencyLevel {
     Eventually = 3;
     Customized = 4; // Users pass their own `guarantee_timestamp`.
 }
+
+enum ImportState {
+    ImportPending = 0;
+    ImportExecuting = 1;
+    ImportCompleted = 2;
+    ImportFailed = 3;
+}
