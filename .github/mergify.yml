@@ -27,7 +27,9 @@ pull_request_rules:
 
   - name: Test passed for code changed
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base~=^2(\.\d+){2}$
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=Code Checker MacOS 11"
