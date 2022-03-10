@@ -140,8 +140,7 @@ pipeline {
                                                     --set indexNode.replicas=2 \
                                                     --set dataNode.replicas=2 \
                                                     --version ${chart_version} \
-                                                    -f values/nightly.yaml \
-                                                    --set metrics.serviceMonitor.enabled=true"
+                                                    -f values/nightly.yaml "
                                                     """
                                                 }
                                             } else {
