@@ -475,22 +475,6 @@ func (ms *mqMsgStream) BroadcastMark(msgPack *MsgPack) (map[string][]MessageID, 
 	return ids, nil
 }
 
-func (ms *mqMsgStream) Consume() *MsgPack {
-	for {
-		select {
-		case <-ms.ctx.Done():
-			//log.Debug("context closed")
-			return nil
-		case cm, ok := <-ms.receiveBuf:
-			if !ok {
-				log.Debug("buf chan closed")
-				return nil
-			}
-			return cm
-		}
-	}
-}
-
 func (ms *mqMsgStream) getTsMsgFromConsumerMsg(msg mqwrapper.Message) (TsMsg, error) {
 	header := commonpb.MsgHeader{}
 	if msg.Payload() == nil {

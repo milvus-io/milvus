@@ -364,18 +364,15 @@ func (q *queryCollection) consumeQuery() {
 		case <-q.releaseCtx.Done():
 			log.Debug("stop queryCollection's receiveQueryMsg", zap.Int64("collectionID", q.collectionID))
 			return
-		default:
-			msgPack := q.queryMsgStream.Consume()
-			if msgPack == nil || len(msgPack.Msgs) <= 0 {
-				//msgPackNil := msgPack == nil
-				//msgPackEmpty := true
-				//if msgPack != nil {
-				//	msgPackEmpty = len(msgPack.Msgs) <= 0
-				//}
-				//log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
-				//	zap.Any("msgPackEmpty", msgPackEmpty))
+		case msgPack, ok := <-q.queryMsgStream.Chan():
+			if !ok {
+				log.Warn("Receive Query Msg from chan failed", zap.Int64("collectionID", q.collectionID))
+				return
+			}
+			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
 				continue
 			}
+
 			for _, msg := range msgPack.Msgs {
 				switch sm := msg.(type) {
 				case *msgstream.SearchMsg:

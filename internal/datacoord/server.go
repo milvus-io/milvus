@@ -483,29 +483,29 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 		case <-ctx.Done():
 			log.Info("DataNode timetick loop shutdown")
 			return
-		default:
-		}
-		msgPack := ttMsgStream.Consume()
-		if msgPack == nil {
-			log.Info("receive nil timetick msg and shutdown timetick channel")
-			return
-		}
-		for _, msg := range msgPack.Msgs {
-			ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
-			if !ok {
-				log.Warn("receive unexpected msg type from tt channel")
-				continue
-			}
-			if enableTtChecker {
-				checker.Check()
+		case msgPack, ok := <-ttMsgStream.Chan():
+			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
+				log.Info("receive nil timetick msg and shutdown timetick channel")
+				return
 			}
 
-			if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
-				log.Error("failed to handle timetick message", zap.Error(err))
-				continue
+			for _, msg := range msgPack.Msgs {
+				ttMsg, ok := msg.(*msgstream.DataNodeTtMsg)
+				if !ok {
+					log.Warn("receive unexpected msg type from tt channel")
+					continue
+				}
+				if enableTtChecker {
+					checker.Check()
+				}
+
+				if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
+					log.Error("failed to handle timetick message", zap.Error(err))
+					continue
+				}
 			}
+			s.helper.eventAfterHandleDataNodeTt()
 		}
-		s.helper.eventAfterHandleDataNodeTt()
 	}
 }
 

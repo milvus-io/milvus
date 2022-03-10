@@ -1851,7 +1851,12 @@ func TestSearchTask_all(t *testing.T) {
 			select {
 			case <-consumeCtx.Done():
 				return
-			case pack := <-stream.Chan():
+			case pack, ok := <-stream.Chan():
+				assert.True(t, ok)
+				if pack == nil {
+					continue
+				}
+
 				for _, msg := range pack.Msgs {
 					_, ok := msg.(*msgstream.SearchMsg)
 					assert.True(t, ok)
@@ -2198,7 +2203,12 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 			select {
 			case <-consumeCtx.Done():
 				return
-			case pack := <-stream.Chan():
+			case pack, ok := <-stream.Chan():
+				assert.True(t, ok)
+				if pack == nil {
+					continue
+				}
+
 				for _, msg := range pack.Msgs {
 					_, ok := msg.(*msgstream.SearchMsg)
 					assert.True(t, ok)
@@ -2539,7 +2549,12 @@ func TestSearchTask_7803_reduce(t *testing.T) {
 			select {
 			case <-consumeCtx.Done():
 				return
-			case pack := <-stream.Chan():
+			case pack, ok := <-stream.Chan():
+				assert.True(t, ok)
+				if pack == nil {
+					continue
+				}
+
 				for _, msg := range pack.Msgs {
 					_, ok := msg.(*msgstream.SearchMsg)
 					assert.True(t, ok)
@@ -3347,7 +3362,13 @@ func TestQueryTask_all(t *testing.T) {
 			select {
 			case <-consumeCtx.Done():
 				return
-			case pack := <-stream.Chan():
+			case pack, ok := <-stream.Chan():
+				assert.True(t, ok)
+
+				if pack == nil {
+					continue
+				}
+
 				for _, msg := range pack.Msgs {
 					_, ok := msg.(*msgstream.RetrieveMsg)
 					assert.True(t, ok)

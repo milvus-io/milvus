@@ -269,6 +269,13 @@ func (ms *simpleMockMsgStream) Close() {
 }
 
 func (ms *simpleMockMsgStream) Chan() <-chan *msgstream.MsgPack {
+	if ms.getMsgCount() <= 0 {
+		ms.msgChan <- nil
+		return ms.msgChan
+	}
+
+	defer ms.decreaseMsgCount(1)
+
 	return ms.msgChan
 }
 
@@ -361,16 +368,6 @@ func (ms *simpleMockMsgStream) BroadcastMark(pack *msgstream.MsgPack) (map[strin
 
 func (ms *simpleMockMsgStream) GetProduceChannels() []string {
 	return nil
-}
-
-func (ms *simpleMockMsgStream) Consume() *msgstream.MsgPack {
-	if ms.getMsgCount() <= 0 {
-		return nil
-	}
-
-	defer ms.decreaseMsgCount(1)
-
-	return <-ms.msgChan
 }
 
 func (ms *simpleMockMsgStream) Seek(offset []*msgstream.MsgPosition) error {
