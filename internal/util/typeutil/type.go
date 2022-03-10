@@ -26,6 +26,8 @@ type IntPrimaryKey = int64
 type UniqueID = int64
 
 const (
+	// EmbeddedRole is for embedded Milvus.
+	EmbeddedRole = "embedded"
 	// StandaloneRole is a constant represent Standalone
 	StandaloneRole = "standalone"
 	// RootCoordRole is a constant represent RootCoord

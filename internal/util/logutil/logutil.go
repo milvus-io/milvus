@@ -108,7 +108,7 @@ var once sync.Once
 // SetupLogger is used to initialize the log with config.
 func SetupLogger(cfg *log.Config) {
 	once.Do(func() {
-		// initialize logger
+		// Initialize logger.
 		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel))
 		if err == nil {
 			log.ReplaceGlobals(logger, p)
@@ -119,6 +119,9 @@ func SetupLogger(cfg *log.Config) {
 		// initialize grpc and etcd logger
 		wrapper := &zapWrapper{logger}
 		grpclog.SetLoggerV2(wrapper)
+
+		log.Info("Log directory", zap.String("configDir", cfg.File.RootPath))
+		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
 	})
 }
 

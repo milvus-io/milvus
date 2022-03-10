@@ -29,6 +29,7 @@ const (
 	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
 	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
 	defaultEtcdLogLevel         = "info"
+	defaultEtcdLogPath          = "stdout"
 )
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
@@ -60,6 +61,7 @@ type EtcdConfig struct {
 	MetaRootPath string
 	KvRootPath   string
 	EtcdLogLevel string
+	EtcdLogPath  string
 
 	// --- Embed ETCD ---
 	UseEmbedEtcd bool
@@ -83,6 +85,7 @@ func (p *EtcdConfig) LoadCfgToMemory() {
 	p.initMetaRootPath()
 	p.initKvRootPath()
 	p.initEtcdLogLevel()
+	p.initEtcdLogPath()
 }
 
 func (p *EtcdConfig) initUseEmbedEtcd() {
@@ -136,6 +139,10 @@ func (p *EtcdConfig) initKvRootPath() {
 
 func (p *EtcdConfig) initEtcdLogLevel() {
 	p.EtcdLogLevel = p.Base.LoadWithDefault("etcd.log.level", defaultEtcdLogLevel)
+}
+
+func (p *EtcdConfig) initEtcdLogPath() {
+	p.EtcdLogPath = p.Base.LoadWithDefault("etcd.log.path", defaultEtcdLogPath)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

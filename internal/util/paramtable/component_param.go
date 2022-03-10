@@ -373,6 +373,7 @@ type proxyConfig struct {
 	MaxDimension             int64
 	BufFlagExpireTime        time.Duration
 	BufFlagCleanupInterval   time.Duration
+	GinLogging               bool
 
 	// required from QueryCoord
 	SearchResultChannelNames   []string
@@ -398,6 +399,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initMaxTaskNum()
 	p.initBufFlagExpireTime()
 	p.initBufFlagCleanupInterval()
+	p.initGinLogging()
 }
 
 // InitAlias initialize Alias member.
@@ -462,6 +464,11 @@ func (p *proxyConfig) initBufFlagExpireTime() {
 func (p *proxyConfig) initBufFlagCleanupInterval() {
 	interval := p.Base.ParseInt64WithDefault("proxy.bufFlagCleanupInterval", 600)
 	p.BufFlagCleanupInterval = time.Duration(interval) * time.Second
+}
+
+func (p *proxyConfig) initGinLogging() {
+	// Gin logging is on by default.
+	p.GinLogging = p.Base.ParseBool("proxy.ginLogging", true)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

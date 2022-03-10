@@ -27,10 +27,10 @@ etcd:
     #  - "stderr" as os.Stderr,
     #  - "stdout" as os.Stdout,
     #  - file path to append server logs to.
-    path: stdout
+    path: /tmp/milvus/logs/etcd.log
     level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   use:
-    embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
+    embed: true # Whether to enable embedded Etcd (an in-process EtcdServer).
 
 # Related configuration of minio, which is responsible for data persistence for Milvus.
 minio:
@@ -96,7 +96,7 @@ proxy:
   maxTaskNum: 1024 # max task number of proxy task queue
   bufFlagExpireTime: 3600 # second, the time to expire bufFlag from cache in collectResultLoop
   bufFlagCleanupInterval: 600 # second, the interval to clean bufFlag cache in collectResultLoop
-  ginLogging: true # Whether to produce gin logs.
+  ginLogging: false # Whether to produce gin logs.
 
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
@@ -216,7 +216,7 @@ localStorage:
 log:
   level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   file:
-    rootPath: "" # default to stdout, stderr
+    rootPath: /tmp/milvus/logs # default to stdout, stderr
     maxSize: 300 # MB
     maxAge: 10 # Maximum time for log retention in day.
     maxBackups: 20

@@ -20,8 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -30,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -897,6 +897,14 @@ func Test_NewServer(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	err = server.Stop()
+	assert.Nil(t, err)
+
+	// Update config and start server again to test with different config set.
+	// This works as config will be initialized only once
+	proxy.Params.ProxyCfg.GinLogging = false
+	err = server.Run()
+	assert.Nil(t, err)
 	err = server.Stop()
 	assert.Nil(t, err)
 }

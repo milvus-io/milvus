@@ -18,9 +18,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
-
-	"go.uber.org/zap"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
@@ -49,6 +48,8 @@ const (
 	DefaultEnvPrefix            = "milvus"
 )
 
+var DefaultYaml = "milvus.yaml"
+
 // Base abstracts BaseTable
 // TODO: it's never used, consider to substitute BaseTable or to remove it
 type Base interface {
@@ -62,6 +63,7 @@ type Base interface {
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
+	once      sync.Once
 	params    *memkv.MemoryKV
 	configDir string
 
@@ -70,17 +72,23 @@ type BaseTable struct {
 	LogCfgFunc func(log.Config)
 }
 
-// Init initializes the paramtable
+// GlobalInitWithYaml initializes the param table with the given yaml.
+// We will update the global DefaultYaml variable directly, once and for all.
+// GlobalInitWithYaml shall be called at the very beginning before initiating the base table.
+// GlobalInitWithYaml should be called only in standalone and embedded Milvus.
+func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
+	gp.once.Do(func() {
+		DefaultYaml = yaml
+		gp.Init()
+	})
+}
+
+// Init initializes the param table.
 func (gp *BaseTable) Init() {
 	gp.params = memkv.NewMemoryKV()
-
 	gp.configDir = gp.initConfPath()
-	log.Debug("config directory", zap.String("configDir", gp.configDir))
-
-	gp.loadFromMilvusYaml()
-
+	gp.loadFromYaml(DefaultYaml)
 	gp.tryLoadFromEnv()
-
 	gp.InitLogCfg()
 }
 
@@ -118,8 +126,8 @@ func (gp *BaseTable) initConfPath() string {
 	return configDir
 }
 
-func (gp *BaseTable) loadFromMilvusYaml() {
-	if err := gp.LoadYaml("milvus.yaml"); err != nil {
+func (gp *BaseTable) loadFromYaml(file string) {
+	if err := gp.LoadYaml(file); err != nil {
 		panic(err)
 	}
 }
@@ -378,7 +386,6 @@ func (gp *BaseTable) InitLogCfg() {
 // SetLogConfig set log config of the base table
 func (gp *BaseTable) SetLogConfig() {
 	gp.LogCfgFunc = func(cfg log.Config) {
-		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
 		logutil.SetupLogger(&cfg)
 		defer log.Sync()
 	}
@@ -391,7 +398,6 @@ func (gp *BaseTable) SetLogger(id UniqueID) {
 		panic(err)
 	}
 	if rootPath != "" {
-		log.Debug("Set logger ", zap.Int64("id", id), zap.String("role", gp.RoleName))
 		if id < 0 {
 			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+".log")
 		} else {

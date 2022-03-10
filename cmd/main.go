@@ -21,13 +21,16 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	syslog "log"
 	"os"
 	"path"
 	"strings"
 	"syscall"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/automaxprocs/maxprocs"
+
 	// use auto max procs to set container CPU quota
-	_ "go.uber.org/automaxprocs"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/roles"
@@ -48,19 +51,19 @@ var (
 	GoVersion = "unknown"
 )
 
-func printBanner() {
-	fmt.Println()
-	fmt.Println("    __  _________ _   ____  ______    ")
-	fmt.Println("   /  |/  /  _/ /| | / / / / / __/    ")
-	fmt.Println("  / /|_/ // // /_| |/ / /_/ /\\ \\    ")
-	fmt.Println(" /_/  /_/___/____/___/\\____/___/     ")
-	fmt.Println()
-	fmt.Println("Welcome to use Milvus!")
-	fmt.Println("Version:   " + BuildTags)
-	fmt.Println("Built:     " + BuildTime)
-	fmt.Println("GitCommit: " + GitCommit)
-	fmt.Println("GoVersion: " + GoVersion)
-	fmt.Println()
+func printBanner(w io.Writer) {
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "    __  _________ _   ____  ______    ")
+	fmt.Fprintln(w, "   /  |/  /  _/ /| | / / / / / __/    ")
+	fmt.Fprintln(w, "  / /|_/ // // /_| |/ / /_/ /\\ \\    ")
+	fmt.Fprintln(w, " /_/  /_/___/____/___/\\____/___/     ")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Welcome to use Milvus!")
+	fmt.Fprintln(w, "Version:   "+BuildTags)
+	fmt.Fprintln(w, "Built:     "+BuildTime)
+	fmt.Fprintln(w, "GitCommit: "+GitCommit)
+	fmt.Fprintln(w, "GoVersion: "+GoVersion)
+	fmt.Fprintln(w)
 }
 
 func injectVariablesToEnv() {
@@ -103,20 +106,20 @@ func getPidFileName(serverType string, alias string) string {
 	return filename
 }
 
-func createPidFile(filename string, runtimeDir string) (*os.File, error) {
+func createPidFile(w io.Writer, filename string, runtimeDir string) (*os.File, error) {
 	fileFullName := path.Join(runtimeDir, filename)
 
 	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}
-	fmt.Println("open pid file:", fileFullName)
+	fmt.Fprintln(w, "open pid file:", fileFullName)
 
 	err = syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
 		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
 	}
-	fmt.Println("lock pid file:", fileFullName)
+	fmt.Fprintln(w, "lock pid file:", fileFullName)
 
 	fd.Truncate(0)
 	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
@@ -213,6 +216,15 @@ func main() {
 	flags.BoolVar(&enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
 	flags.BoolVar(&enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
 
+	// Discard Milvus welcome logs, init logs and maxprocs logs in embedded Milvus.
+	if serverType == typeutil.EmbeddedRole {
+		flags.SetOutput(io.Discard)
+		// Initialize maxprocs while discarding log.
+		maxprocs.Set(maxprocs.Logger(nil))
+	} else {
+		// Initialize maxprocs.
+		maxprocs.Set(maxprocs.Logger(syslog.Printf))
+	}
 	flags.Usage = func() {
 		fmt.Fprintf(flags.Output(), "Usage of %s:\n", os.Args[0])
 		switch {
@@ -253,7 +265,7 @@ func main() {
 		role.EnableIndexCoord = true
 	case typeutil.IndexNodeRole:
 		role.EnableIndexNode = true
-	case typeutil.StandaloneRole:
+	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
 		role.EnableRootCoord = true
 		role.EnableProxy = true
 		role.EnableQueryCoord = true
@@ -273,6 +285,20 @@ func main() {
 		os.Exit(-1)
 	}
 
+	// Setup logger in advance for standalone and embedded Milvus.
+	// Any log from this point on is under control.
+	if serverType == typeutil.StandaloneRole || serverType == typeutil.EmbeddedRole {
+		var params paramtable.BaseTable
+		if serverType == typeutil.EmbeddedRole {
+			params.GlobalInitWithYaml("embedded-milvus.yaml")
+		} else {
+			params.Init()
+		}
+		params.SetLogConfig()
+		params.RoleName = serverType
+		params.SetLogger(0)
+	}
+
 	runtimeDir := "/run/milvus"
 	if err := makeRuntimeDir(runtimeDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
@@ -286,9 +312,9 @@ func main() {
 	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":
-		printBanner()
+		printBanner(flags.Output())
 		injectVariablesToEnv()
-		fd, err := createPidFile(filename, runtimeDir)
+		fd, err := createPidFile(flags.Output(), filename, runtimeDir)
 		if err != nil {
 			panic(err)
 		}
