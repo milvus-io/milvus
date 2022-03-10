@@ -52,10 +52,12 @@ class TestProxyScale:
         }
         mic = MilvusOperator()
         mic.install(data_config)
-        healthy = mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200)
-        log.info(f"milvus healthy: {healthy}")
-        host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
-        # host = "10.98.0.7"
+        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200):
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+        else:
+            # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
+            # mic.uninstall(release_name, namespace=constants.NAMESPACE)
+            raise BaseException(f'Milvus healthy timeout 1200s')
 
         try:
             c_name = cf.gen_unique_str(prefix)
@@ -64,6 +66,7 @@ class TestProxyScale:
 
             # expand proxy replicas from 1 to 5
             mic.upgrade(release_name, {'spec.components.proxy.replicas': 5}, constants.NAMESPACE)
+            mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             self.e2e_milvus_parallel(5, host, c_name)
@@ -71,6 +74,7 @@ class TestProxyScale:
 
             # expand proxy replicas from 5 to 2
             mic.upgrade(release_name, {'spec.components.proxy.replicas': 2}, constants.NAMESPACE)
+            mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             self.e2e_milvus_parallel(2, host, c_name)

@@ -51,10 +51,12 @@ class TestQueryNodeScale:
         }
         mic = MilvusOperator()
         mic.install(query_config)
-        healthy = mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200)
-        log.info(f"milvus healthy: {healthy}")
-        host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
-        # host = "10.98.0.8"
+        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200):
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+        else:
+            # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
+            # mic.uninstall(release_name, namespace=constants.NAMESPACE)
+            raise BaseException(f'Milvus healthy timeout 1200s')
 
         try:
             # connect
@@ -98,10 +100,8 @@ class TestQueryNodeScale:
             t_search.start()
 
             # wait new QN running, continuously insert
-            # time.sleep(10)
-            healthy = mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200)
-            log.info(f"milvus healthy after scale up: {healthy}")
-            # wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
+            mic.wait_for_healthy(release_name, constants.NAMESPACE)
+            wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             def do_insert():
                 while True:
@@ -116,7 +116,7 @@ class TestQueryNodeScale:
             log.debug("Expand querynode test finished")
 
             mic.upgrade(release_name, {'spec.components.queryNode.replicas': 3}, constants.NAMESPACE)
-            time.sleep(60)
+            mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             log.debug(collection_w.num_entities)
