@@ -51,10 +51,12 @@ class TestDataNodeScale:
         }
         mic = MilvusOperator()
         mic.install(data_config)
-        healthy = mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200)
-        log.info(f"milvus healthy: {healthy}")
-        host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
-        # host = '10.98.0.4'
+        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200):
+            host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
+        else:
+            # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
+            # mic.uninstall(release_name, namespace=constants.NAMESPACE)
+            raise BaseException(f'Milvus healthy timeout 1200s')
 
         try:
             # connect
@@ -80,7 +82,8 @@ class TestDataNodeScale:
 
             # scale dataNode to 5
             mic.upgrade(release_name, {'spec.components.dataNode.replicas': 5}, constants.NAMESPACE)
-            time.sleep(300)
+            mic.wait_for_healthy(release_name, constants.NAMESPACE)
+            wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
             log.debug("Expand dataNode test finished")
 
             # create new collection and insert
@@ -99,6 +102,7 @@ class TestDataNodeScale:
 
             # scale dataNode to 3
             mic.upgrade(release_name, {'spec.components.dataNode.replicas': 3}, constants.NAMESPACE)
+            mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             log.debug(collection_w.num_entities)
