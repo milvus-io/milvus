@@ -71,14 +71,14 @@ Check the requirements first.
 
 Linux systems (Ubuntu 18.04 or later recommended):
 ```bash
-go: >= 1.15
+go: >= 1.16
 cmake: >= 3.18
 gcc: 7.5
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
-go: >= 1.15
+go: >= 1.16
 cmake: >= 3.18
 llvm: >= 12
 ```
