@@ -63,8 +63,7 @@ The Docker images will be stored under **images** directory.
 Enter the following command to load the Docker images:
 
 ```shell
-$ cd images/
-$ for image in $(find . -type f -name "*.tar.gz") ; do gunzip -c $image | docker load; done
+for image in $(find . -type f -wholename "./images/*.tar.gz") ; do gunzip -c $image | docker load; done;
 ```
 
 ## Install Milvus
