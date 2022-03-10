@@ -190,14 +190,14 @@ class TestChaos(TestChaosBase):
         chaos_res.create(chaos_config)
         log.info("chaos injected")
         # verify the chaos is injected
-        log.info(os.system(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}"))
+        log.info(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}")
+        os.system(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}")
         sleep(constants.WAIT_PER_OP * 2)
         # reset counting
         cc.reset_counting(self.health_checkers)
 
         # wait 120s
         sleep(constants.CHAOS_DURATION)
-
         log.info(f'Alive threads: {threading.enumerate()}')
 
         # assert statistic
@@ -220,7 +220,8 @@ class TestChaos(TestChaosBase):
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
         # verify the chaos is deleted
-        log.info(os.system(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}"))                
+        log.info(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}")
+        os.system(f"kubectl get {kind} {meta_name} -n {constants.CHAOS_NAMESPACE}")
         log.info(f'Alive threads: {threading.enumerate()}')
         sleep(2)
         # wait all pods ready
