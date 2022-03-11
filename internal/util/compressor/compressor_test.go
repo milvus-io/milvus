@@ -30,13 +30,24 @@ func TestZstdCompress(t *testing.T) {
 	enc.ResetWriter(compressed)
 
 	testCompress(t, data+": reuse", enc, compressed, origin)
+
+	// Test type
+	dec, err := NewZstdDecompressor(nil)
+	assert.NoError(t, err)
+	assert.Equal(t, enc.GetType(), CompressTypeZstd)
+	assert.Equal(t, dec.GetType(), CompressTypeZstd)
 }
 
 func testCompress(t *testing.T, data string, enc Compressor, compressed, origin *bytes.Buffer) {
+	compressedBytes := make([]byte, 0)
+	originBytes := make([]byte, 0)
+
 	err := enc.Compress(strings.NewReader(data))
 	assert.NoError(t, err)
 	err = enc.Close()
 	assert.NoError(t, err)
+	compressedBytes = enc.CompressBytes([]byte(data), compressedBytes)
+	assert.Equal(t, compressed.Bytes(), compressedBytes)
 
 	// Close() method should satisfy idempotence
 	err = enc.Close()
@@ -46,6 +57,9 @@ func testCompress(t *testing.T, data string, enc Compressor, compressed, origin 
 	assert.NoError(t, err)
 	err = dec.Decompress(origin)
 	assert.NoError(t, err)
+	originBytes, err = dec.DecompressBytes(compressedBytes, originBytes)
+	assert.NoError(t, err)
+	assert.Equal(t, origin.Bytes(), originBytes)
 
 	assert.Equal(t, data, origin.String())
 
@@ -70,13 +84,22 @@ func testCompress(t *testing.T, data string, enc Compressor, compressed, origin 
 func TestGlobalMethods(t *testing.T) {
 	data := "hello zstd algorithm!"
 	compressed := new(bytes.Buffer)
+	compressedBytes := make([]byte, 0)
 	origin := new(bytes.Buffer)
+	originBytes := make([]byte, 0)
 
 	err := ZstdCompress(strings.NewReader(data), compressed)
 	assert.NoError(t, err)
 
+	compressedBytes = ZstdCompressBytes([]byte(data), compressedBytes)
+	assert.Equal(t, compressed.Bytes(), compressedBytes)
+
 	err = ZstdDecompress(compressed, origin)
 	assert.NoError(t, err)
+
+	originBytes, err = ZstdDecompressBytes(compressedBytes, originBytes)
+	assert.NoError(t, err)
+	assert.Equal(t, origin.Bytes(), originBytes)
 
 	assert.Equal(t, data, origin.String())
 
@@ -84,7 +107,7 @@ func TestGlobalMethods(t *testing.T) {
 	errReader := &mock.ErrReader{Err: io.ErrUnexpectedEOF}
 	errWriter := &mock.ErrWriter{Err: io.ErrShortWrite}
 
-	compressedBytes := compressed.Bytes()
+	compressedBytes = compressed.Bytes()
 	compressed = bytes.NewBuffer(compressedBytes) // The old compressed buffer is closed
 	err = ZstdCompress(errReader, compressed)
 	assert.ErrorIs(t, err, errReader.Err)
@@ -116,16 +139,23 @@ func TestCurrencyGlobalMethods(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 
-			buf := new(bytes.Buffer)
+			compressed := new(bytes.Buffer)
+			compressedBytes := make([]byte, 0)
 			origin := new(bytes.Buffer)
+			originBytes := make([]byte, 0)
 
 			data := prefix + fmt.Sprintf(": %d-th goroutine", idx)
 
-			err := ZstdCompress(strings.NewReader(data), buf, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(idx)))
+			err := ZstdCompress(strings.NewReader(data), compressed, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(idx)))
 			assert.NoError(t, err)
+			compressedBytes = ZstdCompressBytes([]byte(data), compressedBytes)
+			assert.Equal(t, compressed.Bytes(), compressedBytes)
 
-			err = ZstdDecompress(buf, origin)
+			err = ZstdDecompress(compressed, origin)
 			assert.NoError(t, err)
+			originBytes, err = ZstdDecompressBytes(compressedBytes, originBytes)
+			assert.NoError(t, err)
+			assert.Equal(t, origin.Bytes(), originBytes)
 
 			assert.Equal(t, data, origin.String())
 		}(i)

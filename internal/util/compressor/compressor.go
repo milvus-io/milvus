@@ -6,25 +6,29 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-type CompressType int16
+type CompressType string
 
 const (
-	Zstd CompressType = iota + 1
+	CompressTypeZstd CompressType = "zstd"
 
-	DefaultCompressAlgorithm CompressType = Zstd
+	DefaultCompressAlgorithm CompressType = CompressTypeZstd
 )
 
 type Compressor interface {
 	Compress(in io.Reader) error
+	CompressBytes(src, dst []byte) []byte
 	ResetWriter(out io.Writer)
 	// Flush() error
 	Close() error
+	GetType() CompressType
 }
 
 type Decompressor interface {
 	Decompress(out io.Writer) error
+	DecompressBytes(src, dst []byte) ([]byte, error)
 	ResetReader(in io.Reader)
 	Close()
+	GetType() CompressType
 }
 
 var (
@@ -36,6 +40,7 @@ type ZstdCompressor struct {
 	encoder *zstd.Encoder
 }
 
+// For compressing small blocks, pass nil to the `out` parameter
 func NewZstdCompressor(out io.Writer, opts ...zstd.EOption) (*ZstdCompressor, error) {
 	encoder, err := zstd.NewWriter(out, opts...)
 	if err != nil {
@@ -45,6 +50,7 @@ func NewZstdCompressor(out io.Writer, opts ...zstd.EOption) (*ZstdCompressor, er
 	return &ZstdCompressor{encoder}, nil
 }
 
+// Use case: compress stream
 // Call Close() to make sure the data is flushed to the underlying writer
 // after the last Compress() call
 func (c *ZstdCompressor) Compress(in io.Reader) error {
@@ -57,6 +63,14 @@ func (c *ZstdCompressor) Compress(in io.Reader) error {
 	return nil
 }
 
+// Use case: compress small blocks
+// This compresses the src bytes and appends it to the dst bytes, then return the result
+// This can be called concurrently
+func (c *ZstdCompressor) CompressBytes(src []byte, dst []byte) []byte {
+	return c.encoder.EncodeAll(src, dst)
+}
+
+// Reset the writer to reuse the compressor
 func (c *ZstdCompressor) ResetWriter(out io.Writer) {
 	c.encoder.Reset(out)
 }
@@ -76,10 +90,15 @@ func (c *ZstdCompressor) Close() error {
 	return c.encoder.Close()
 }
 
+func (c *ZstdCompressor) GetType() CompressType {
+	return CompressTypeZstd
+}
+
 type ZstdDecompressor struct {
 	decoder *zstd.Decoder
 }
 
+// For compressing small blocks, pass nil to the `in` parameter
 func NewZstdDecompressor(in io.Reader, opts ...zstd.DOption) (*ZstdDecompressor, error) {
 	decoder, err := zstd.NewReader(in, opts...)
 	if err != nil {
@@ -89,6 +108,8 @@ func NewZstdDecompressor(in io.Reader, opts ...zstd.DOption) (*ZstdDecompressor,
 	return &ZstdDecompressor{decoder}, nil
 }
 
+// Usa case: decompress stream
+// Write the decompressed data into `out`
 func (dec *ZstdDecompressor) Decompress(out io.Writer) error {
 	_, err := io.Copy(out, dec.decoder)
 	if err != nil {
@@ -99,6 +120,14 @@ func (dec *ZstdDecompressor) Decompress(out io.Writer) error {
 	return nil
 }
 
+// Use case: decompress small blocks
+// This decompresses the src bytes and appends it to the dst bytes, then return the result
+// This can be called concurrently
+func (dec *ZstdDecompressor) DecompressBytes(src []byte, dst []byte) ([]byte, error) {
+	return dec.decoder.DecodeAll(src, dst)
+}
+
+// Reset the reader to reuse the decompressor
 func (dec *ZstdDecompressor) ResetReader(in io.Reader) {
 	dec.decoder.Reset(in)
 }
@@ -108,7 +137,15 @@ func (dec *ZstdDecompressor) Close() {
 	dec.decoder.Close()
 }
 
+func (dec *ZstdDecompressor) GetType() CompressType {
+	return CompressTypeZstd
+}
+
 // Global methods
+
+// Usa case: compress stream, large object only once
+// This can be called concurrently
+// Try ZstdCompressor for better efficiency if you need compress mutiple streams one by one
 func ZstdCompress(in io.Reader, out io.Writer, opts ...zstd.EOption) error {
 	enc, err := NewZstdCompressor(out, opts...)
 	if err != nil {
@@ -123,6 +160,9 @@ func ZstdCompress(in io.Reader, out io.Writer, opts ...zstd.EOption) error {
 	return enc.Close()
 }
 
+// Use case: decompress stream, large object only once
+// This can be called concurrently
+// Try ZstdDecompressor for better efficiency if you need decompress mutiple streams one by one
 func ZstdDecompress(in io.Reader, out io.Writer, opts ...zstd.DOption) error {
 	dec, err := NewZstdDecompressor(in, opts...)
 	if err != nil {
@@ -135,4 +175,21 @@ func ZstdDecompress(in io.Reader, out io.Writer, opts ...zstd.DOption) error {
 	}
 
 	return nil
+}
+
+var (
+	globalZstdCompressor, _   = zstd.NewWriter(nil)
+	globalZstdDecompressor, _ = zstd.NewReader(nil)
+)
+
+// Use case: compress small blocks
+// This can be called concurrently
+func ZstdCompressBytes(src, dst []byte) []byte {
+	return globalZstdCompressor.EncodeAll(src, dst)
+}
+
+// Use case: decompress small blocks
+// This can be called concurrently
+func ZstdDecompressBytes(src, dst []byte) ([]byte, error) {
+	return globalZstdDecompressor.DecodeAll(src, dst)
 }
