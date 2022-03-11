@@ -17,8 +17,6 @@
 package storage
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"io"
 
@@ -52,7 +50,7 @@ func NewVectorChunkManager(localChunkManager ChunkManager, remoteChunkManager Ch
 // For vector data, we will download vector file from storage. And we will
 // deserialize the file for it has binlog style. At last we store pure vector
 // data to local storage as cache.
-func (vcm *VectorChunkManager) downloadVectorFile(filePath string) ([]byte, error) {
+func (vcm *VectorChunkManager) downloadFile(filePath string) ([]byte, error) {
 	if vcm.localChunkManager.Exist(filePath) {
 		return vcm.localChunkManager.Read(filePath)
 	}
@@ -71,20 +69,12 @@ func (vcm *VectorChunkManager) downloadVectorFile(filePath string) ([]byte, erro
 		return nil, err
 	}
 
+	// Note: here we assume that only one field in the binlog.
 	var results []byte
 	for _, singleData := range data.Data {
-		binaryVector, ok := singleData.(*BinaryVectorFieldData)
-		if ok {
-			results = binaryVector.Data
-		}
-		floatVector, ok := singleData.(*FloatVectorFieldData)
-		if ok {
-			buf := new(bytes.Buffer)
-			err := binary.Write(buf, common.Endian, floatVector.Data)
-			if err != nil {
-				return nil, err
-			}
-			results = buf.Bytes()
+		bs, err := FieldDataToBytes(common.Endian, singleData)
+		if err == nil {
+			results = bs
 		}
 	}
 	return results, nil
@@ -133,7 +123,7 @@ func (vcm *VectorChunkManager) Read(filePath string) ([]byte, error) {
 		if vcm.localChunkManager.Exist(filePath) {
 			return vcm.localChunkManager.Read(filePath)
 		}
-		contents, err := vcm.downloadVectorFile(filePath)
+		contents, err := vcm.downloadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +133,7 @@ func (vcm *VectorChunkManager) Read(filePath string) ([]byte, error) {
 		}
 		return vcm.localChunkManager.Read(filePath)
 	}
-	return vcm.downloadVectorFile(filePath)
+	return vcm.downloadFile(filePath)
 }
 
 // MultiRead reads the pure vector data. If cached, it reads from local.
@@ -170,7 +160,7 @@ func (vcm *VectorChunkManager) ReadAt(filePath string, off int64, length int64) 
 		if vcm.localChunkManager.Exist(filePath) {
 			return vcm.localChunkManager.ReadAt(filePath, off, length)
 		}
-		results, err := vcm.downloadVectorFile(filePath)
+		results, err := vcm.downloadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +170,7 @@ func (vcm *VectorChunkManager) ReadAt(filePath string, off int64, length int64) 
 		}
 		return vcm.localChunkManager.ReadAt(filePath, off, length)
 	}
-	results, err := vcm.downloadVectorFile(filePath)
+	results, err := vcm.downloadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
