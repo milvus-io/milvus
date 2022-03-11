@@ -2257,7 +2257,13 @@ func TestIssue15659(t *testing.T) {
 		},
 	}
 	ms := &MockClosePanicMsgstream{}
-	ms.On("Consume").Return(&msgstream.MsgPack{})
+
+	msgChan := make(chan *msgstream.MsgPack)
+	go func() {
+		msgChan <- &msgstream.MsgPack{}
+	}()
+	ms.On("Chan").Return(msgChan)
+
 	ch := make(chan struct{})
 	go func() {
 		assert.NotPanics(t, func() {
@@ -2279,9 +2285,9 @@ func (ms *MockClosePanicMsgstream) Close() {
 	panic("mocked close panic")
 }
 
-func (ms *MockClosePanicMsgstream) Consume() *msgstream.MsgPack {
+func (ms *MockClosePanicMsgstream) Chan() <-chan *msgstream.MsgPack {
 	args := ms.Called()
-	return args.Get(0).(*msgstream.MsgPack)
+	return args.Get(0).(chan *msgstream.MsgPack)
 }
 
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {

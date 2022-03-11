@@ -1632,24 +1632,6 @@ func initConsumer(ctx context.Context, queryResultChannel Channel) (msgstream.Ms
 	return stream, nil
 }
 
-func consumeSimpleSearchResult(stream msgstream.MsgStream) (*msgstream.SearchResultMsg, error) {
-	res := stream.Consume()
-	if len(res.Msgs) != 1 {
-		err := errors.New("unexpected message length")
-		return nil, err
-	}
-	return res.Msgs[0].(*msgstream.SearchResultMsg), nil
-}
-
-func consumeSimpleRetrieveResult(stream msgstream.MsgStream) (*msgstream.RetrieveResultMsg, error) {
-	res := stream.Consume()
-	if len(res.Msgs) != 1 {
-		err := errors.New("unexpected message length")
-		return nil, err
-	}
-	return res.Msgs[0].(*msgstream.RetrieveResultMsg), nil
-}
-
 func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	changeInfo := &querypb.SegmentChangeInfo{
 		OnlineNodeID: Params.QueryNodeCfg.QueryNodeID,

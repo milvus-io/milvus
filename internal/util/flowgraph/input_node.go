@@ -62,7 +62,11 @@ func (inNode *InputNode) InStream() msgstream.MsgStream {
 
 // Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
-	msgPack := inNode.inStream.Consume()
+	msgPack, ok := <-inNode.inStream.Chan()
+	if !ok {
+		log.Warn("Receive Msg failed from upstream node", zap.Any("input node", inNode.Name()))
+		return []Msg{}
+	}
 
 	// TODO: add status
 	if msgPack == nil {

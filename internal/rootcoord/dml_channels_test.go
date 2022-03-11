@@ -159,7 +159,6 @@ func (ms *FailMsgStream) BroadcastMark(*msgstream.MsgPack) (map[string][]msgstre
 	}
 	return nil, nil
 }
-func (ms *FailMsgStream) Consume() *msgstream.MsgPack { return nil }
 func (ms *FailMsgStream) Next(ctx context.Context, channelName string) (msgstream.TsMsg, error) {
 	return nil, nil
 }

@@ -67,7 +67,6 @@ type MsgStream interface {
 	ProduceMark(*MsgPack) (map[string][]MessageID, error)
 	Broadcast(*MsgPack) error
 	BroadcastMark(*MsgPack) (map[string][]MessageID, error)
-	Consume() *MsgPack
 	Next(ctx context.Context, channelName string) (TsMsg, error)
 	HasNext(channelName string) bool
 	Seek(offset []*MsgPosition) error
