@@ -111,7 +111,7 @@ func (m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPla
 func (m *MockDataNode) SetEtcdClient(client *clientv3.Client) {
 }
 
-func (m *MockDataNode) Import(ctx context.Context, req *milvuspb.ImportRequest) (*commonpb.Status, error) {
+func (m *MockDataNode) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
 	return m.status, m.err
 }
 
@@ -237,6 +237,24 @@ func Test_NewServer(t *testing.T) {
 			metricResp: &milvuspb.GetMetricsResponse{},
 		}
 		resp, err := server.GetMetrics(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("Compaction", func(t *testing.T) {
+		server.datanode = &MockDataNode{
+			status: &commonpb.Status{},
+		}
+		resp, err := server.Compaction(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("Import", func(t *testing.T) {
+		server.datanode = &MockDataNode{
+			status: &commonpb.Status{},
+		}
+		resp, err := server.Import(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

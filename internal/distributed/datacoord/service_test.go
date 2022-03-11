@@ -55,8 +55,6 @@ type MockDataCoord struct {
 	watchChannelsResp    *datapb.WatchChannelsResponse
 	getFlushStateResp    *milvuspb.GetFlushStateResponse
 	dropVChanResp        *datapb.DropVirtualChannelResponse
-	importResp           *milvuspb.ImportResponse
-	getImportStateResp   *milvuspb.GetImportStateResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -166,15 +164,7 @@ func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.Drop
 	return m.dropVChanResp, m.err
 }
 
-func (m *MockDataCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	return m.importResp, m.err
-}
-
-func (m *MockDataCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	return m.getImportStateResp, m.err
-}
-
-func (m *MockDataCoord) CompleteImport(ctx context.Context, req *datapb.ImportResult) (*commonpb.Status, error) {
+func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
 	return m.status, m.err
 }
 
@@ -348,6 +338,51 @@ func Test_NewServer(t *testing.T) {
 			dropVChanResp: &datapb.DropVirtualChannelResponse{},
 		}
 		resp, err := server.DropVirtualChannel(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("CompleteCompaction", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			status: &commonpb.Status{},
+		}
+		resp, err := server.CompleteCompaction(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("ManualCompaction", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			manualCompactionResp: &milvuspb.ManualCompactionResponse{},
+		}
+		resp, err := server.ManualCompaction(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("GetCompactionState", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			compactionStateResp: &milvuspb.GetCompactionStateResponse{},
+		}
+		resp, err := server.GetCompactionState(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("GetCompactionStateWithPlans", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			compactionPlansResp: &milvuspb.GetCompactionPlansResponse{},
+		}
+		resp, err := server.GetCompactionStateWithPlans(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("Import", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			status: &commonpb.Status{},
+		}
+		resp, err := server.Import(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

@@ -76,7 +76,7 @@ type DataNode interface {
 	//
 	// Return status indicates if this operation is processed successfully or fail cause;
 	// error is always nil
-	Import(ctx context.Context, req *milvuspb.ImportRequest) (*commonpb.Status, error)
+	Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error)
 }
 
 // DataNodeComponent is used by grpc server of DataNode
@@ -274,26 +274,7 @@ type DataCoord interface {
 	// The `Status` in response struct `ImportResponse` indicates if this operation is processed successfully or fail cause;
 	// the `tasks` in `ImportResponse` return an id list of tasks.
 	// error is always nil
-	Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
-
-	// Check import task state from datanode
-	//
-	// ctx is the context to control request deadline and cancellation
-	// req contains the request params, including a task id
-	//
-	// The `Status` in response struct `GetImportStateResponse` indicates if this operation is processed successfully or fail cause;
-	// the `state` in `GetImportStateResponse` return the state of the import task.
-	// error is always nil
-	GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)
-
-	// Report impot task state to datacoord
-	//
-	// ctx is the context to control request deadline and cancellation
-	// req contains the import results, including imported row count and an id list of generated segments
-	//
-	// response status contains the status/error code and failing reason if any error is returned
-	// error is always nil
-	CompleteImport(ctx context.Context, req *datapb.ImportResult) (*commonpb.Status, error)
+	Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.
@@ -653,6 +634,34 @@ type RootCoordComponent interface {
 
 	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including file path and options
+	//
+	// Return status indicates if this operation is processed successfully or fail cause;
+	// error is always nil
+	Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
+
+	// Check import task state from datanode
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including a task id
+	//
+	// The `Status` in response struct `GetImportStateResponse` indicates if this operation is processed successfully or fail cause;
+	// the `state` in `GetImportStateResponse` return the state of the import task.
+	// error is always nil
+	GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)
+
+	// Report impot task state to rootcoord
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the import results, including imported row count and an id list of generated segments
+	//
+	// response status contains the status/error code and failing reason if any error is returned
+	// error is always nil
+	ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error)
 }
 
 // Proxy is the interface `proxy` package implements
