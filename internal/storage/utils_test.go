@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -1422,4 +1424,117 @@ func TestGetPkFromInsertData(t *testing.T) {
 	d, err := GetPkFromInsertData(pfSchema, realInt64Data)
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{1, 2, 3}, d)
+}
+
+func Test_boolFieldDataToBytes(t *testing.T) {
+	field := &BoolFieldData{Data: []bool{true, false}}
+	bs, err := boolFieldDataToPbBytes(field)
+	assert.NoError(t, err)
+	var arr schemapb.BoolArray
+	err = proto.Unmarshal(bs, &arr)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, field.Data, arr.Data)
+}
+
+func Test_stringFieldDataToBytes(t *testing.T) {
+	field := &StringFieldData{Data: []string{"true", "false"}}
+	bs, err := stringFieldDataToPbBytes(field)
+	assert.NoError(t, err)
+	var arr schemapb.StringArray
+	err = proto.Unmarshal(bs, &arr)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, field.Data, arr.Data)
+}
+
+func binaryRead(endian binary.ByteOrder, bs []byte, receiver interface{}) error {
+	reader := bytes.NewReader(bs)
+	return binary.Read(reader, endian, receiver)
+}
+
+func TestFieldDataToBytes(t *testing.T) {
+	// TODO: test big endian.
+	endian := common.Endian
+
+	var bs []byte
+	var err error
+	var receiver interface{}
+
+	f1 := &BoolFieldData{Data: []bool{true, false}}
+	bs, err = FieldDataToBytes(endian, f1)
+	assert.NoError(t, err)
+	var barr schemapb.BoolArray
+	err = proto.Unmarshal(bs, &barr)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f1.Data, barr.Data)
+
+	f2 := &StringFieldData{Data: []string{"true", "false"}}
+	bs, err = FieldDataToBytes(endian, f2)
+	assert.NoError(t, err)
+	var sarr schemapb.StringArray
+	err = proto.Unmarshal(bs, &sarr)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f2.Data, sarr.Data)
+
+	f3 := &Int8FieldData{Data: []int8{0, 1}}
+	bs, err = FieldDataToBytes(endian, f3)
+	assert.NoError(t, err)
+	receiver = make([]int8, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f3.Data, receiver)
+
+	f4 := &Int16FieldData{Data: []int16{0, 1}}
+	bs, err = FieldDataToBytes(endian, f4)
+	assert.NoError(t, err)
+	receiver = make([]int16, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f4.Data, receiver)
+
+	f5 := &Int32FieldData{Data: []int32{0, 1}}
+	bs, err = FieldDataToBytes(endian, f5)
+	assert.NoError(t, err)
+	receiver = make([]int32, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f5.Data, receiver)
+
+	f6 := &Int64FieldData{Data: []int64{0, 1}}
+	bs, err = FieldDataToBytes(endian, f6)
+	assert.NoError(t, err)
+	receiver = make([]int64, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f6.Data, receiver)
+
+	// in fact, hard to compare float point value.
+
+	f7 := &FloatFieldData{Data: []float32{0, 1}}
+	bs, err = FieldDataToBytes(endian, f7)
+	assert.NoError(t, err)
+	receiver = make([]float32, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f7.Data, receiver)
+
+	f8 := &DoubleFieldData{Data: []float64{0, 1}}
+	bs, err = FieldDataToBytes(endian, f8)
+	assert.NoError(t, err)
+	receiver = make([]float64, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f8.Data, receiver)
+
+	f9 := &BinaryVectorFieldData{Data: []byte{0, 1, 0}}
+	bs, err = FieldDataToBytes(endian, f9)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f9.Data, bs)
+
+	f10 := &FloatVectorFieldData{Data: []float32{0, 1}}
+	bs, err = FieldDataToBytes(endian, f10)
+	assert.NoError(t, err)
+	receiver = make([]float32, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f10.Data, receiver)
 }
