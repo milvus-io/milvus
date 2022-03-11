@@ -27,27 +27,7 @@ const (
 	SubscriptionPositionEarliest
 )
 
-// SubscriptionType is the type of subsription position
-type SubscriptionType int
-
-const (
-	// Exclusive there can be only 1 consumer on the same topic with the same subscription name
-	Exclusive SubscriptionType = iota
-
-	// Shared subscription mode, multiple consumer will be able to use the same subscription name
-	// and the messages will be dispatched according to
-	// a round-robin rotation between the connected consumers
-	Shared
-
-	// Failover subscription mode, multiple consumer will be able to use the same subscription name
-	// but only 1 consumer will receive the messages.
-	// If that consumer disconnects, one of the other connected consumers will start receiving messages.
-	Failover
-
-	// KeyShared subscription mode, multiple consumer will be able to use the same
-	// subscription and all messages with the same key will be dispatched to only one consumer
-	KeyShared
-)
+const DefaultPartitionIdx = 0
 
 // UniqueID is the type of message id
 type UniqueID = int64
@@ -66,10 +46,6 @@ type ConsumerOptions struct {
 
 	// Set receive channel size
 	BufSize int64
-
-	// Select the subscription type to be used when subscribing to the topic.
-	// Default is `Exclusive`
-	Type SubscriptionType
 }
 
 // Consumer is the interface that provides operations of a consumer
@@ -88,4 +64,6 @@ type Consumer interface {
 
 	// Close consumer
 	Close()
+
+	GetLatestMsgID() (MessageID, error)
 }

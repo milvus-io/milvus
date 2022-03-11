@@ -32,11 +32,44 @@ func TestPulsarID_Serialize(t *testing.T) {
 	binary := pid.Serialize()
 	assert.NotNil(t, binary)
 	assert.NotZero(t, len(binary))
+}
 
-	pid.LedgerID()
-	pid.EntryID()
-	pid.BatchIdx()
-	pid.PartitionIdx()
+func Test_AtEarliestPosition(t *testing.T) {
+	mid := pulsar.EarliestMessageID()
+	pid := &pulsarID{
+		messageID: mid,
+	}
+	assert.True(t, pid.AtEarliestPosition())
+
+	mid = pulsar.LatestMessageID()
+	pid = &pulsarID{
+		messageID: mid,
+	}
+	assert.False(t, pid.AtEarliestPosition())
+}
+
+func TestLessOrEqualThan(t *testing.T) {
+	msg1 := pulsar.EarliestMessageID()
+	pid1 := &pulsarID{
+		messageID: msg1,
+	}
+
+	msg2 := pulsar.LatestMessageID()
+	pid2 := &pulsarID{
+		messageID: msg2,
+	}
+
+	ret, err := pid1.LessOrEqualThan(pid2.Serialize())
+	assert.Nil(t, err)
+	assert.True(t, ret)
+
+	ret, err = pid2.LessOrEqualThan(pid1.Serialize())
+	assert.Nil(t, err)
+	assert.False(t, ret)
+
+	ret, err = pid2.LessOrEqualThan([]byte{1})
+	assert.NotNil(t, err)
+	assert.False(t, ret)
 }
 
 func Test_SerializePulsarMsgID(t *testing.T) {

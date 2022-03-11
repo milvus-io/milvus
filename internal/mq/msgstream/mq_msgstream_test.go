@@ -770,6 +770,83 @@ func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
 	assert.Equal(t, o3.BeginTs, p3.BeginTs)
 }
 
+func TestStream_PulsarMsgStream_SeekToLast(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	c := funcutil.RandomString(8)
+	producerChannels := []string{c}
+	consumerChannels := []string{c}
+	consumerSubName := funcutil.RandomString(8)
+
+	msgPack := &MsgPack{}
+	ctx := context.Background()
+	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
+	defer inputStream.Close()
+
+	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
+	for i := 0; i < 10; i++ {
+		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+	}
+
+	// produce test data
+	err := inputStream.Produce(msgPack)
+	assert.Nil(t, err)
+
+	// pick a seekPosition
+	var seekPosition *internalpb.MsgPosition
+	for i := 0; i < 10; i++ {
+		result := consumer(ctx, outputStream)
+		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+		if i == 5 {
+			seekPosition = result.EndPositions[0]
+		}
+	}
+	outputStream.Close()
+
+	// create a consumer can consume data from seek position to last msg
+	factory := ProtoUDFactory{}
+	pulsarClient, _ := pulsarwrapper.NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	outputStream2, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream2.AsConsumer(consumerChannels, consumerSubName)
+	lastMsgID, err := outputStream2.GetLatestMsgID(c)
+	defer outputStream2.Close()
+	assert.Nil(t, err)
+
+	err = outputStream2.Seek([]*internalpb.MsgPosition{seekPosition})
+	assert.Nil(t, err)
+	outputStream2.Start()
+
+	cnt := 0
+	var value int64 = 6
+	hasMore := true
+	for hasMore {
+		select {
+		case <-ctx.Done():
+			hasMore = false
+		case msgPack, ok := <-outputStream2.Chan():
+			if !ok {
+				assert.Fail(t, "Should not reach here")
+			}
+
+			assert.Equal(t, 1, len(msgPack.Msgs))
+			for _, tsMsg := range msgPack.Msgs {
+				assert.Equal(t, value, tsMsg.ID())
+				value++
+				cnt++
+
+				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
+				assert.Nil(t, err)
+				if ret {
+					hasMore = false
+					break
+				}
+			}
+		}
+	}
+
+	assert.Equal(t, 4, cnt)
+}
+
 func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	c1 := funcutil.RandomString(8)
@@ -1309,70 +1386,6 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 
 	inputStream.Close()
 	outputStream2.Close()
-}
-
-func TestStream_MqMsgStream_Reader(t *testing.T) {
-	ctx := context.Background()
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
-	c := funcutil.RandomString(8)
-	producerChannels := []string{c}
-	readerChannels := []string{c}
-
-	msgPack := &MsgPack{}
-	inputStream := getPulsarInputStream(context.Background(), pulsarAddress, producerChannels)
-	defer inputStream.Close()
-
-	n := 10
-	p := 5
-
-	for i := 0; i < n; i++ {
-		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
-		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
-	}
-
-	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
-
-	readStream := getPulsarReader(pulsarAddress, readerChannels)
-	defer readStream.Close()
-	var seekPosition *internalpb.MsgPosition
-	for i := 0; i < n; i++ {
-		hasNext := readStream.HasNext(c)
-		assert.True(t, hasNext)
-		result, err := readStream.Next(ctx, c)
-		assert.Nil(t, err)
-		assert.Equal(t, result.ID(), int64(i))
-		if i == p {
-			seekPosition = result.Position()
-		}
-	}
-	hasNext := readStream.HasNext(c)
-	assert.False(t, hasNext)
-	timeoutCtx1, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	result, err := readStream.Next(timeoutCtx1, c)
-	assert.NotNil(t, err)
-	assert.Nil(t, result)
-
-	readStream2 := getPulsarReader(pulsarAddress, readerChannels)
-	defer readStream2.Close()
-	readStream2.SeekReaders([]*internalpb.MsgPosition{seekPosition})
-
-	for i := p; i < 10; i++ {
-		hasNext := readStream2.HasNext(c)
-		assert.True(t, hasNext)
-		result, err := readStream2.Next(ctx, c)
-		assert.Nil(t, err)
-		assert.Equal(t, result.ID(), int64(i))
-	}
-	hasNext = readStream2.HasNext(c)
-	assert.False(t, hasNext)
-	timeoutCtx2, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	result2, err := readStream2.Next(timeoutCtx2, c)
-	assert.NotNil(t, err)
-	assert.Nil(t, result2)
-
 }
 
 /****************************************Rmq test******************************************/
@@ -1987,14 +2000,6 @@ func getPulsarOutputStream(ctx context.Context, pulsarAddress string, consumerCh
 	outputStream, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 	outputStream.Start()
-	return outputStream
-}
-
-func getPulsarReader(pulsarAddress string, consumerChannels []string) MsgStream {
-	factory := ProtoUDFactory{}
-	pulsarClient, _ := pulsarwrapper.NewClient(pulsar.ClientOptions{URL: pulsarAddress})
-	outputStream, _ := NewMqMsgStream(context.Background(), 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	outputStream.AsReader(consumerChannels, "pulsar-reader-prefix-")
 	return outputStream
 }
 

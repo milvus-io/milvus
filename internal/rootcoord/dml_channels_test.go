@@ -159,9 +159,9 @@ func (ms *FailMsgStream) BroadcastMark(*msgstream.MsgPack) (map[string][]msgstre
 	}
 	return nil, nil
 }
-func (ms *FailMsgStream) Next(ctx context.Context, channelName string) (msgstream.TsMsg, error) {
+func (ms *FailMsgStream) Consume() *msgstream.MsgPack                { return nil }
+func (ms *FailMsgStream) Seek(offset []*msgstream.MsgPosition) error { return nil }
+
+func (ms *FailMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID, error) {
 	return nil, nil
 }
-func (ms *FailMsgStream) HasNext(channelName string) bool                         { return true }
-func (ms *FailMsgStream) Seek(offset []*msgstream.MsgPosition) error              { return nil }
-func (ms *FailMsgStream) SeekReaders(msgPositions []*msgstream.MsgPosition) error { return nil }

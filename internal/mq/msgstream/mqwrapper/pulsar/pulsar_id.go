@@ -28,28 +28,36 @@ type pulsarID struct {
 	messageID pulsar.MessageID
 }
 
-// Check if pulsarID implements pulsar.MessageID and MessageID interface
-var _ pulsar.MessageID = &pulsarID{}
+// Check if pulsarID implements and MessageID interface
 var _ mqwrapper.MessageID = &pulsarID{}
 
 func (pid *pulsarID) Serialize() []byte {
 	return pid.messageID.Serialize()
 }
 
-func (pid *pulsarID) LedgerID() int64 {
-	return pid.messageID.LedgerID()
+func (pid *pulsarID) AtEarliestPosition() bool {
+	if pid.messageID.PartitionIdx() <= 0 &&
+		pid.messageID.LedgerID() <= 0 &&
+		pid.messageID.EntryID() <= 0 &&
+		pid.messageID.BatchIdx() <= 0 {
+		return true
+	}
+	return false
 }
 
-func (pid *pulsarID) EntryID() int64 {
-	return pid.messageID.EntryID()
-}
+func (pid *pulsarID) LessOrEqualThan(msgID []byte) (bool, error) {
+	pMsgID, err := pulsar.DeserializeMessageID(msgID)
+	if err != nil {
+		return false, err
+	}
 
-func (pid *pulsarID) BatchIdx() int32 {
-	return pid.messageID.BatchIdx()
-}
+	if pid.messageID.LedgerID() <= pMsgID.LedgerID() &&
+		pid.messageID.EntryID() <= pMsgID.EntryID() &&
+		pid.messageID.BatchIdx() <= pMsgID.BatchIdx() {
+		return true, nil
+	}
 
-func (pid *pulsarID) PartitionIdx() int32 {
-	return pid.messageID.PartitionIdx()
+	return false, nil
 }
 
 // SerializePulsarMsgID returns the serialized message ID

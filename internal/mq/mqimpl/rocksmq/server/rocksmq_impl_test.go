@@ -848,6 +848,80 @@ func TestReader_CornerCase(t *testing.T) {
 	assert.Equal(t, string(msg.Payload), "extra_message")
 }
 
+func TestRocksmq_GetLatestMsg(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	assert.Nil(t, err)
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_data"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	rmq, err := NewRocksMQ(name, idAllocator)
+	assert.Nil(t, err)
+
+	channelName := newChanName()
+	err = rmq.CreateTopic(channelName)
+	assert.Nil(t, err)
+
+	// Consume loopNum message once
+	groupName := "last_msg_test"
+	_ = rmq.DestroyConsumerGroup(channelName, groupName)
+	err = rmq.CreateConsumerGroup(channelName, groupName)
+	assert.Nil(t, err)
+
+	msgID, err := rmq.GetLatestMsg(channelName)
+	assert.Equal(t, msgID, int64(DefaultMessageID))
+	assert.Nil(t, err)
+
+	loopNum := 10
+	pMsgs1 := make([]ProducerMessage, loopNum)
+	pMsgs2 := make([]ProducerMessage, loopNum)
+	for i := 0; i < loopNum; i++ {
+		msg := "message_" + strconv.Itoa(i)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs1[i] = pMsg
+
+		msg = "2message_" + strconv.Itoa(i)
+		pMsg = ProducerMessage{Payload: []byte(msg)}
+		pMsgs2[i] = pMsg
+	}
+
+	ids, err := rmq.Produce(channelName, pMsgs1)
+	assert.Nil(t, err)
+	assert.Equal(t, len(ids), loopNum)
+
+	// test latest msg when one topic is created
+	msgID, err = rmq.GetLatestMsg(channelName)
+	assert.Nil(t, err)
+	assert.Equal(t, msgID, ids[loopNum-1])
+
+	// test latest msg when two topics are created
+	channelName2 := newChanName()
+	err = rmq.CreateTopic(channelName2)
+	assert.Nil(t, err)
+	ids, err = rmq.Produce(channelName2, pMsgs2)
+	assert.Nil(t, err)
+
+	msgID, err = rmq.GetLatestMsg(channelName2)
+	assert.Nil(t, err)
+	assert.Equal(t, msgID, ids[loopNum-1])
+
+	// test close rmq
+	rmq.DestroyTopic(channelName)
+	rmq.Close()
+	msgID, err = rmq.GetLatestMsg(channelName)
+	assert.Equal(t, msgID, int64(DefaultMessageID))
+	assert.NotNil(t, err)
+}
+
 func TestRocksmq_Close(t *testing.T) {
 	ep := etcdEndpoints()
 	etcdCli, err := etcd.GetRemoteEtcdClient(ep)

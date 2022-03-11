@@ -36,7 +36,6 @@ func TestPulsarConsumer_Subscription(t *testing.T) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       "Topic",
 		SubscriptionName:            "SubName",
-		Type:                        pulsar.SubscriptionType(mqwrapper.Exclusive),
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})
@@ -67,7 +66,6 @@ func TestPulsarConsumer_Close(t *testing.T) {
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       "Topic-1",
 		SubscriptionName:            "SubName-1",
-		Type:                        pulsar.SubscriptionType(mqwrapper.Exclusive),
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
 		MessageChannel:              receiveChannel,
 	})

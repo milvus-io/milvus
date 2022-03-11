@@ -1059,6 +1059,37 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 	}, nil
 }
 
+func genDeleteMsg(reqID UniqueID, collectionID int64) msgstream.TsMsg {
+	hashValue := uint32(reqID)
+	baseMsg := msgstream.BaseMsg{
+		BeginTimestamp: 0,
+		EndTimestamp:   0,
+		HashValues:     []uint32{hashValue},
+		MsgPosition: &internalpb.MsgPosition{
+			ChannelName: "",
+			MsgID:       []byte{},
+			MsgGroup:    "",
+			Timestamp:   10,
+		},
+	}
+
+	return &msgstream.DeleteMsg{
+		BaseMsg: baseMsg,
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_Delete,
+				MsgID:   reqID,
+			},
+			CollectionName: defaultCollectionName,
+			PartitionName:  defaultPartitionName,
+			CollectionID:   collectionID,
+			PartitionID:    defaultPartitionID,
+			PrimaryKeys:    genSimpleDeleteID(),
+			Timestamps:     genSimpleTimestampDeletedPK(),
+		},
+	}
+}
+
 func genSimpleDeleteMsg() (*msgstream.DeleteMsg, error) {
 	return &msgstream.DeleteMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
@@ -1183,12 +1214,16 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	return r, err
 }
 
-func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface) (*segmentLoader, error) {
+func genSimpleSegmentLoaderWithMqFactory(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
 	}
-	return newSegmentLoader(ctx, historicalReplica, streamingReplica, kv, msgstream.NewPmsFactory()), nil
+	return newSegmentLoader(ctx, historicalReplica, streamingReplica, kv, factory), nil
+}
+
+func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface) (*segmentLoader, error) {
+	return genSimpleSegmentLoaderWithMqFactory(ctx, historicalReplica, streamingReplica, msgstream.NewPmsFactory())
 }
 
 func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
@@ -1661,12 +1696,7 @@ func saveChangeInfo(key string, value string) error {
 	return kv.Save(key, value)
 }
 
-// node
-func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
-	fac, err := genFactory()
-	if err != nil {
-		return nil, err
-	}
+func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac msgstream.Factory) (*QueryNode, error) {
 	node := NewQueryNode(ctx, fac)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
@@ -1694,7 +1724,7 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	node.streaming = streaming
 	node.historical = historical
 
-	loader, err := genSimpleSegmentLoader(node.queryNodeLoopCtx, historical.replica, streaming.replica)
+	loader, err := genSimpleSegmentLoaderWithMqFactory(node.queryNodeLoopCtx, historical.replica, streaming.replica, fac)
 	if err != nil {
 		return nil, err
 	}
@@ -1710,6 +1740,15 @@ func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 
 	return node, nil
+}
+
+// node
+func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
+	fac, err := genFactory()
+	if err != nil {
+		return nil, err
+	}
+	return genSimpleQueryNodeWithMQFactory(ctx, fac)
 }
 
 func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, fieldValue interface{}, dim int64) *schemapb.FieldData {
@@ -1825,4 +1864,26 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 	}
 
 	return fieldData
+}
+
+type mockMsgStreamFactory struct {
+	mockMqStream msgstream.MsgStream
+}
+
+var _ msgstream.Factory = &mockMsgStreamFactory{}
+
+func (mm *mockMsgStreamFactory) SetParams(params map[string]interface{}) error {
+	return nil
+}
+
+func (mm *mockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return mm.mockMqStream, nil
+}
+
+func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, nil
+}
+
+func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, nil
 }

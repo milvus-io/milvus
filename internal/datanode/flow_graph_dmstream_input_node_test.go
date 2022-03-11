@@ -67,7 +67,6 @@ func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 }
 
 func (mtm *mockTtMsgStream) AsProducer(channels []string)                 {}
-func (mtm *mockTtMsgStream) AsReader(channels []string, subName string)   {}
 func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string) {}
 func (mtm *mockTtMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
@@ -94,15 +93,9 @@ func (mtm *mockTtMsgStream) BroadcastMark(*msgstream.MsgPack) (map[string][]msgs
 func (mtm *mockTtMsgStream) Seek(offset []*internalpb.MsgPosition) error {
 	return nil
 }
-func (mtm *mockTtMsgStream) SeekReaders(msgPositions []*internalpb.MsgPosition) error {
-	return nil
-}
 
-func (mtm *mockTtMsgStream) Next(ctx context.Context, channelName string) (msgstream.TsMsg, error) {
+func (mtm *mockTtMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID, error) {
 	return nil, nil
-}
-func (mtm *mockTtMsgStream) HasNext(channelName string) bool {
-	return true
 }
 
 func TestNewDmInputNode(t *testing.T) {

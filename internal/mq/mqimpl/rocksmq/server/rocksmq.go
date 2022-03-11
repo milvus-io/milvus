@@ -42,6 +42,7 @@ type RocksMQ interface {
 	Close()
 
 	RegisterConsumer(consumer *Consumer) error
+	GetLatestMsg(topicName string) (int64, error)
 
 	Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error)
 	Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error)

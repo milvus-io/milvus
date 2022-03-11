@@ -82,32 +82,13 @@ func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwra
 	return producer, nil
 }
 
-// CreateReader creates a pulsar reader instance
-func (pc *pulsarClient) CreateReader(options mqwrapper.ReaderOptions) (mqwrapper.Reader, error) {
-	opts := pulsar.ReaderOptions{
-		Topic:                   options.Topic,
-		StartMessageID:          options.StartMessageID.(*pulsarID).messageID,
-		StartMessageIDInclusive: options.StartMessageIDInclusive,
-		SubscriptionRolePrefix:  options.SubscriptionRolePrefix,
-	}
-	pr, err := pc.client.CreateReader(opts)
-	if err != nil {
-		return nil, err
-	}
-	if pr == nil {
-		return nil, errors.New("pulsar is not ready, producer is nil")
-	}
-	reader := &pulsarReader{r: pr}
-	return reader, nil
-}
-
 // Subscribe creates a pulsar consumer instance and subscribe a topic
 func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	receiveChannel := make(chan pulsar.ConsumerMessage, options.BufSize)
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
 		Topic:                       options.Topic,
 		SubscriptionName:            options.SubscriptionName,
-		Type:                        pulsar.SubscriptionType(options.Type),
+		Type:                        pulsar.Exclusive,
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
 		MessageChannel:              receiveChannel,
 	})

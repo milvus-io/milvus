@@ -17,7 +17,6 @@
 package rmq
 
 import (
-	"errors"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
@@ -60,25 +59,6 @@ func (rc *rmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrappe
 	return &rp, nil
 }
 
-// CreateReader creates a rocksmq reader from reader options
-func (rc *rmqClient) CreateReader(options mqwrapper.ReaderOptions) (mqwrapper.Reader, error) {
-	opts := client.ReaderOptions{
-		Topic:                   options.Topic,
-		StartMessageID:          options.StartMessageID.(*rmqID).messageID,
-		StartMessageIDInclusive: options.StartMessageIDInclusive,
-		SubscriptionRolePrefix:  options.SubscriptionRolePrefix,
-	}
-	pr, err := rc.client.CreateReader(opts)
-	if err != nil {
-		return nil, err
-	}
-	if pr == nil {
-		return nil, errors.New("pulsar is not ready, producer is nil")
-	}
-	reader := &rmqReader{r: pr}
-	return reader, nil
-}
-
 // Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	receiveChannel := make(chan client.Message, options.BufSize)
@@ -115,10 +95,7 @@ func (rc *rmqClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 
 // BytesToMsgID converts a byte array to messageID
 func (rc *rmqClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
-	rID, err := DeserializeRmqID(id)
-	if err != nil {
-		return nil, err
-	}
+	rID := DeserializeRmqID(id)
 	return &rmqID{messageID: rID}, nil
 }
 

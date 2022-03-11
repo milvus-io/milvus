@@ -91,3 +91,8 @@ func (rc *Consumer) Close() {
 	close(rc.closeCh)
 	rc.wg.Wait()
 }
+
+func (rc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
+	msgID, err := rc.c.GetLatestMsgID()
+	return &rmqID{messageID: msgID}, err
+}
