@@ -272,6 +272,8 @@ class Config {
     Status
     CheckStorageConfigS3Enable(const std::string& value);
     Status
+    CheckStorageConfigS3UseHttps(const std::string& value);
+    Status
     CheckStorageConfigS3Address(const std::string& value);
     Status
     CheckStorageConfigS3Port(const std::string& value);
@@ -283,6 +285,19 @@ class Config {
     CheckStorageConfigS3Bucket(const std::string& value);
     Status
     CheckStorageConfigS3Region(const std::string& value);
+#endif
+
+#ifdef MILVUS_WITH_OSS
+    Status
+    CheckStorageConfigOSSEnable(const std::string& value);
+    Status
+    CheckStorageConfigOSSEndpoint(const std::string& value);
+    Status
+    CheckStorageConfigOSSAccessKey(const std::string& value);
+    Status
+    CheckStorageConfigOSSSecretKey(const std::string& value);
+    Status
+    CheckStorageConfigOSSBucket(const std::string& value);
 #endif
 
     /* metric config */
@@ -435,6 +450,9 @@ class Config {
     GetStorageConfigS3Enable(bool& value);
 
     Status
+    GetStorageConfigS3UseHttps(bool& value);
+
+    Status
     GetStorageConfigS3Address(std::string& value);
 
     Status
@@ -451,6 +469,23 @@ class Config {
 
     Status
     GetStorageConfigS3Region(std::string& value);
+#endif
+
+#ifdef MILVUS_WITH_OSS
+    Status
+    GetStorageConfigOSSEnable(bool& value);
+
+    Status
+    GetStorageConfigOSSEndpoint(std::string& value);
+
+    Status
+    GetStorageConfigOSSAccessKey(std::string& value);
+
+    Status
+    GetStorageConfigOSSSecretKey(std::string& value);
+
+    Status
+    GetStorageConfigOSSBucket(std::string& value);
 #endif
 
     /* metric config */
@@ -595,6 +630,8 @@ class Config {
     Status
     SetStorageConfigS3Enable(const std::string& value);
     Status
+    SetStorageConfigS3UseHttps(const std::string& value);
+    Status
     SetStorageConfigS3Address(const std::string& value);
     Status
     SetStorageConfigS3Port(const std::string& value);
@@ -606,6 +643,19 @@ class Config {
     SetStorageConfigS3Bucket(const std::string& value);
     Status
     SetStorageConfigS3Region(const std::string& value);
+#endif
+
+#ifdef MILVUS_WITH_OSS
+    Status
+    SetStorageConfigOSSEnable(const std::string& value);
+    Status
+    SetStorageConfigOSSEndpoint(const std::string& value);
+    Status
+    SetStorageConfigOSSAccessKey(const std::string& value);
+    Status
+    SetStorageConfigOSSSecretKey(const std::string& value);
+    Status
+    SetStorageConfigOSSBucket(const std::string& value);
 #endif
 
     /* metric config */

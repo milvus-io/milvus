@@ -38,7 +38,9 @@ Status
 S3ClientWrapper::StartService() {
     server::Config& config = server::Config::GetInstance();
     bool s3_enable = false;
+    auto s3_use_https = false;
     config.GetStorageConfigS3Enable(s3_enable);
+    config.GetStorageConfigS3UseHttps(s3_use_https);
     fiu_do_on("S3ClientWrapper.StartService.s3_disable", s3_enable = false);
     if (!s3_enable) {
         LOG_STORAGE_INFO_ << "S3 not enabled!";
@@ -56,7 +58,11 @@ S3ClientWrapper::StartService() {
 
     Aws::Client::ClientConfiguration cfg;
     cfg.endpointOverride = s3_address_ + ":" + s3_port_;
-    cfg.scheme = Aws::Http::Scheme::HTTP;
+    if (s3_use_https) {
+        cfg.scheme = Aws::Http::Scheme::HTTPS;
+    } else {
+        cfg.scheme = Aws::Http::Scheme::HTTP;
+    }
     cfg.verifySSL = false;
     if (!s3_region_.empty()) {
         cfg.region = s3_region_.c_str();

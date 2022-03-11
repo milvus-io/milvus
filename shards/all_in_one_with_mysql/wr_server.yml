@@ -70,6 +70,8 @@ network:
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # s3_enabled           | If using s3 storage backend.                               | Boolean    | false           |
 #----------------------+------------------------------------------------------------+------------+-----------------+
+# s3_use_https         | If using s3 using https scheme.                            | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
 # s3_address           | The s3 server address, support domain/hostname/ipaddress   | String     | 127.0.0.1       |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 # s3_port              | The s3 server port.                                        | Integer    | 80              |
@@ -86,6 +88,19 @@ network:
 #                      | This parameter may not needed for some self-managed s3,    |            |                 |
 #                      | like ceph-radosgw, minio, when deploy on aws s3 service,   |            |                 |
 #                      | this should be set correctly, e.g "ap-east-1", "us-east-1" |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# oss_enabled          | If using oss storage backend.                              | Boolean    | false           |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# oss_endpoint         | The oss endpoint.                                          | String     | see description |
+#                      |   default: https://oss-cn-hangzhou.aliyuncs.com            |            |                 |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# oss_access_key       | The access key for accessing oss service.                  | String     | oss_access_key  |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# oss_secret_key       | The secrey key for accessing oss service.                  | String     | oss_secret_key  |
+#----------------------+------------------------------------------------------------+------------+-----------------+
+# oss_bucket           | The oss bucket name for store milvus's data.               | String     | oss_bucket      |
+#                      | Note: please using differnet bucket for different milvus   |            |                 |
+#                      |       cluster.                                             |            |                 |
 #----------------------+------------------------------------------------------------+------------+-----------------+
 storage:
   path: /var/lib/milvus
