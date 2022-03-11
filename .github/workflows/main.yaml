@@ -67,6 +67,14 @@ jobs:
           CHECK_BUILDER: "1"
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make codecov"
+      - name: Get the status & restart count for containers when ut failed
+        if: ${{ failure() }}
+        run: |  
+          echo "----show current status for each container---"
+          docker ps --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
+          for container in $(docker ps --format "table {{.Names}}" | grep -v "NAMES"); do
+              echo "restart count for ${container} is $(docker inspect ${container} --format '{{json .RestartCount}}')"
+          done
       - name: Get pulsar/minio/etcd logs when ut failed
         if: ${{ failure() }}
         run: |
