@@ -433,3 +433,18 @@ func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFl
 func (s *Server) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.rootCoord.GetMetrics(ctx, in)
 }
+
+// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+func (s *Server) Import(ctx context.Context, in *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	return s.rootCoord.Import(ctx, in)
+}
+
+// Check import task state from datanode
+func (s *Server) GetImportState(ctx context.Context, in *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	return s.rootCoord.GetImportState(ctx, in)
+}
+
+// Report impot task state to datacoord
+func (s *Server) ReportImport(ctx context.Context, in *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	return s.rootCoord.ReportImport(ctx, in)
+}

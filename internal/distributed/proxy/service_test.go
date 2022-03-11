@@ -419,15 +419,7 @@ func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.Drop
 	return &datapb.DropVirtualChannelResponse{}, nil
 }
 
-func (m *MockDataCoord) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	return nil, nil
-}
-
-func (m *MockDataCoord) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	return nil, nil
-}
-
-func (m *MockDataCoord) CompleteImport(ctx context.Context, req *datapb.ImportResult) (*commonpb.Status, error) {
+func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
 	return nil, nil
 }
 

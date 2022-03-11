@@ -13733,10 +13733,34 @@ class GetImportStateResponse :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kIdListFieldNumber = 4,
+    kInfosFieldNumber = 5,
     kStatusFieldNumber = 1,
     kRowCountFieldNumber = 3,
     kStateFieldNumber = 2,
   };
+  // repeated int64 id_list = 4;
+  int id_list_size() const;
+  void clear_id_list();
+  ::PROTOBUF_NAMESPACE_ID::int64 id_list(int index) const;
+  void set_id_list(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_id_list(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      id_list() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_id_list();
+
+  // repeated .milvus.proto.common.KeyValuePair infos = 5;
+  int infos_size() const;
+  void clear_infos();
+  ::milvus::proto::common::KeyValuePair* mutable_infos(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+      mutable_infos();
+  const ::milvus::proto::common::KeyValuePair& infos(int index) const;
+  ::milvus::proto::common::KeyValuePair* add_infos();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+      infos() const;
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -13760,6 +13784,9 @@ class GetImportStateResponse :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > id_list_;
+  mutable std::atomic<int> _id_list_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > infos_;
   ::milvus::proto::common::Status* status_;
   ::PROTOBUF_NAMESPACE_ID::int64 row_count_;
   int state_;
@@ -25594,6 +25621,63 @@ inline void GetImportStateResponse::set_row_count(::PROTOBUF_NAMESPACE_ID::int64
   
   row_count_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetImportStateResponse.row_count)
+}
+
+// repeated int64 id_list = 4;
+inline int GetImportStateResponse::id_list_size() const {
+  return id_list_.size();
+}
+inline void GetImportStateResponse::clear_id_list() {
+  id_list_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetImportStateResponse::id_list(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetImportStateResponse.id_list)
+  return id_list_.Get(index);
+}
+inline void GetImportStateResponse::set_id_list(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  id_list_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetImportStateResponse.id_list)
+}
+inline void GetImportStateResponse::add_id_list(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  id_list_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.GetImportStateResponse.id_list)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+GetImportStateResponse::id_list() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.GetImportStateResponse.id_list)
+  return id_list_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+GetImportStateResponse::mutable_id_list() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.GetImportStateResponse.id_list)
+  return &id_list_;
+}
+
+// repeated .milvus.proto.common.KeyValuePair infos = 5;
+inline int GetImportStateResponse::infos_size() const {
+  return infos_.size();
+}
+inline ::milvus::proto::common::KeyValuePair* GetImportStateResponse::mutable_infos(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetImportStateResponse.infos)
+  return infos_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >*
+GetImportStateResponse::mutable_infos() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.GetImportStateResponse.infos)
+  return &infos_;
+}
+inline const ::milvus::proto::common::KeyValuePair& GetImportStateResponse::infos(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetImportStateResponse.infos)
+  return infos_.Get(index);
+}
+inline ::milvus::proto::common::KeyValuePair* GetImportStateResponse::add_infos() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.GetImportStateResponse.infos)
+  return infos_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair >&
+GetImportStateResponse::infos() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.GetImportStateResponse.infos)
+  return infos_;
 }
 
 #ifdef __GNUC__

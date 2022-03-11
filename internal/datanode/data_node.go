@@ -778,10 +778,12 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	}, nil
 }
 
-// Compaction handles compaction request from DataCoord
-// returns status as long as compaction task enqueued or invalid
-func (node *DataNode) Import(ctx context.Context, req *milvuspb.ImportRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{
+// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+	log.Info("receive import request")
+	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}, nil
+	}
+
+	return resp, nil
 }

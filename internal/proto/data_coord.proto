@@ -43,9 +43,7 @@ service DataCoord {
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(milvus.ImportRequest) returns (milvus.ImportResponse) {}
-  rpc GetImportState(milvus.GetImportStateRequest) returns (milvus.GetImportStateResponse) {}
-  rpc CompleteImport(ImportResult) returns (common.Status) {}
+  rpc Import(ImportTask) returns (common.Status) {}
 }
 
 service DataNode {
@@ -60,7 +58,7 @@ service DataNode {
   rpc Compaction(CompactionPlan) returns (common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(milvus.ImportRequest) returns(common.Status) {}
+  rpc Import(ImportTask) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -420,8 +418,12 @@ message DropVirtualChannelResponse {
   common.Status status = 1;
 }
 
-message ImportResult {
+message ImportTask {
   common.Status status = 1;
-  repeated int64 segments = 2;    // id array of new sealed segments
-  int64 row_count = 3; // how many rows are imported by this task
+  string collection_name = 2;                // target collection
+  string partition_name = 3;                 // target partition
+  bool row_based = 4;                        // the file is row-based or column-based
+  int64 task_id = 5;                         // id of the task
+  repeated string files = 6;                 // file paths to be imported
+  repeated common.KeyValuePair infos = 7;    // more informations about the task, bucket, etc.
 }

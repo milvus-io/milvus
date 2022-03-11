@@ -136,6 +136,15 @@ func Test_NewClient(t *testing.T) {
 
 		r26, err := client.AlterAlias(ctx, nil)
 		retCheck(retNotNil, r26, err)
+
+		r27, err := client.Import(ctx, nil)
+		retCheck(retNotNil, r27, err)
+
+		r28, err := client.GetImportState(ctx, nil)
+		retCheck(retNotNil, r28, err)
+
+		r29, err := client.ReportImport(ctx, nil)
+		retCheck(retNotNil, r29, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{

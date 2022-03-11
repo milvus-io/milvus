@@ -369,15 +369,17 @@ inline bool ConsistencyLevel_Parse(
 }
 enum ImportState : int {
   ImportPending = 0,
-  ImportExecuting = 1,
-  ImportCompleted = 2,
-  ImportFailed = 3,
+  ImportFailed = 1,
+  ImportParsing = 2,
+  ImportPersisted = 3,
+  ImportIndexing = 4,
+  ImportCompleted = 5,
   ImportState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ImportState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ImportState_IsValid(int value);
 constexpr ImportState ImportState_MIN = ImportPending;
-constexpr ImportState ImportState_MAX = ImportFailed;
+constexpr ImportState ImportState_MAX = ImportCompleted;
 constexpr int ImportState_ARRAYSIZE = ImportState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ImportState_descriptor();
