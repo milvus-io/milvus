@@ -2095,3 +2095,38 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("AlterAlias", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return succStatus(), nil
 }
+
+// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	log.Info("receive import request")
+	resp := &milvuspb.ImportResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+
+	return resp, nil
+}
+
+// Check import task state from datanode
+func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	log.Info("receive get import state request")
+	resp := &milvuspb.GetImportStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+
+	return resp, nil
+}
+
+// Report impot task state to rootcoord
+func (c *Core) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	log.Info("receive complete import request")
+
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+
+	return resp, nil
+}

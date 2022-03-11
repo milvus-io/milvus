@@ -105,6 +105,11 @@ service RootCoord {
 
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
     rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+    // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
+    rpc Import(milvus.ImportRequest) returns (milvus.ImportResponse) {}
+    rpc GetImportState(milvus.GetImportStateRequest) returns (milvus.GetImportStateResponse) {}
+    rpc ReportImport(ImportResult) returns (common.Status) {}
 }
 
 message AllocTimestampRequest {
@@ -127,4 +132,11 @@ message AllocIDResponse {
   common.Status status = 1;
   int64 ID = 2;
   uint32 count = 3;
+}
+
+message ImportResult {
+  common.Status status = 1;
+  repeated int64 segments = 2;             // id array of new sealed segments
+  int64 row_count = 3;                     // how many rows are imported by this task
+  repeated common.KeyValuePair infos = 4;  // more informations about the task, file path, failed reason, etc.
 }

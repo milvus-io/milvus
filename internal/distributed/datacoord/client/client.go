@@ -488,40 +488,12 @@ func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (c *Client) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+func (c *Client) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
 		return client.(datapb.DataCoordClient).Import(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.ImportResponse), err
-}
-
-// Check import task state from datanode
-func (c *Client) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(datapb.DataCoordClient).GetImportState(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.GetImportStateResponse), err
-}
-
-// Report impot task state to datacoord
-func (c *Client) CompleteImport(ctx context.Context, req *datapb.ImportResult) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(datapb.DataCoordClient).CompleteImport(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

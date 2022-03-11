@@ -354,6 +354,6 @@ func (s *Server) Compaction(ctx context.Context, request *datapb.CompactionPlan)
 	return s.datanode.Compaction(ctx, request)
 }
 
-func (s *Server) Import(ctx context.Context, request *milvuspb.ImportRequest) (*commonpb.Status, error) {
+func (s *Server) Import(ctx context.Context, request *datapb.ImportTask) (*commonpb.Status, error) {
 	return s.datanode.Import(ctx, request)
 }
