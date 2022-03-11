@@ -183,7 +183,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 
 	if collectionInfo, err := qc.meta.getCollectionInfoByID(collectionID); err == nil {
 		// if collection has been loaded by load collection request, return success
-		if collectionInfo.LoadType == querypb.LoadType_loadCollection {
+		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
 			log.Debug("collection has already been loaded, return load success directly",
 				zap.String("role", typeutil.QueryCoordRole),
 				zap.Int64("collectionID", collectionID),
@@ -471,7 +471,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	if collectionInfo, err := qc.meta.getCollectionInfoByID(collectionID); err == nil {
 		// if the collection has been loaded into memory by load collection request, return error
 		// should release collection first, then load partitions again
-		if collectionInfo.LoadType == querypb.LoadType_loadCollection {
+		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			err = fmt.Errorf("collection %d has been loaded into QueryNode, please release collection firstly", collectionID)
 			status.Reason = err.Error()
@@ -611,7 +611,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	if collectionInfo, err := qc.meta.getCollectionInfoByID(collectionID); err == nil {
 		// if collection has been loaded into memory by load collection request, return error
 		// part of the partitions released after load collection is temporarily not supported, and will be supported soon
-		if collectionInfo.LoadType == querypb.LoadType_loadCollection {
+		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			err := errors.New("releasing some partitions after load collection is not supported")
 			status.Reason = err.Error()

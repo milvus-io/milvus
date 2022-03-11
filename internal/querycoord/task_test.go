@@ -142,6 +142,11 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 		PartitionIDs: []UniqueID{defaultPartitionID},
 		Schema:       schema,
 		Infos:        []*datapb.VchannelInfo{vChannelInfo},
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []int64{defaultPartitionID},
+		},
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	baseTask.taskID = 100
@@ -175,7 +180,7 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	parentTask.addChildTask(watchDmChannelTask)
 	watchDmChannelTask.setParentTask(parentTask)
 
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, schema)
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
 	return watchDmChannelTask
 }
 func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *loadSegmentTask {
@@ -194,6 +199,11 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 		Schema:       schema,
 		Infos:        []*querypb.SegmentLoadInfo{segmentInfo},
 		CollectionID: defaultCollectionID,
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []int64{defaultPartitionID},
+		},
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	baseTask.taskID = 100
@@ -227,7 +237,7 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 	parentTask.addChildTask(loadSegmentTask)
 	loadSegmentTask.setParentTask(parentTask)
 
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, schema)
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
 	return loadSegmentTask
 }
 
@@ -258,6 +268,11 @@ func genWatchDeltaChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeI
 		},
 		NodeID:       nodeID,
 		CollectionID: defaultCollectionID,
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []int64{defaultPartitionID},
+		},
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	baseTask.taskID = 300
@@ -1229,7 +1244,7 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
 	loadCollectionTask := loadSegmentTask.getParentTask()
@@ -1262,7 +1277,7 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 
 	watchDmChannel := genWatchDmChannelTask(ctx, queryCoord, node1.queryNodeID)
 	loadCollectionTask := watchDmChannel.getParentTask()

@@ -73,7 +73,7 @@ func TestReloadFromKV(t *testing.T) {
 
 	err = kv.Save(key, string(value))
 	assert.Nil(t, err)
-	meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
+	meta.setLoadType(defaultCollectionID, querypb.LoadType_LoadCollection)
 
 	t.Run("Test_CollectionExist", func(t *testing.T) {
 		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil)
@@ -135,7 +135,7 @@ func TestCheckIndexLoop(t *testing.T) {
 		childCancel()
 		indexChecker.wg.Wait()
 	})
-	meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
+	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 	t.Run("Test_GetIndexInfo", func(t *testing.T) {
 		childCtx, childCancel := context.WithCancel(context.Background())
 		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, broker)
@@ -176,7 +176,7 @@ func TestHandoffNotExistSegment(t *testing.T) {
 	broker, err := newGlobalMetaBroker(ctx, rootCoord, dataCoord, indexCoord)
 	assert.Nil(t, err)
 
-	meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, genDefaultCollectionSchema(false))
+	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 
 	segmentInfo := &querypb.SegmentInfo{
 		SegmentID:    defaultSegmentID,
