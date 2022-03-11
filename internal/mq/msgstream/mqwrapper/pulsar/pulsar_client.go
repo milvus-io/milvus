@@ -71,6 +71,10 @@ func NewClient(opts pulsar.ClientOptions) (*pulsarClient, error) {
 // CreateProducer create a pulsar producer from options
 func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
 	opts := pulsar.ProducerOptions{Topic: options.Topic}
+	if options.EnableCompression {
+		opts.CompressionType = pulsar.ZSTD
+	}
+
 	pp, err := pc.client.CreateProducer(opts)
 	if err != nil {
 		return nil, err
