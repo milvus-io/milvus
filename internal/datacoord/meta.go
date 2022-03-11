@@ -25,6 +25,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -68,16 +69,28 @@ func (m *meta) reloadFromKV() error {
 	if err != nil {
 		return err
 	}
-
+	metrics.DataCoordNumCollections.WithLabelValues().Set(0)
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.SealedSegmentLabel).Set(0)
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.GrowingSegmentLabel).Set(0)
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushedSegmentLabel).Set(0)
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.FlushingSegmentLabel).Set(0)
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Set(0)
+	metrics.DataCoordNumStoredRows.WithLabelValues().Set(0)
+	numStoredRows := int64(0)
 	for _, value := range values {
 		segmentInfo := &datapb.SegmentInfo{}
 		err = proto.Unmarshal([]byte(value), segmentInfo)
 		if err != nil {
 			return fmt.Errorf("DataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
 		}
+		state := segmentInfo.GetState()
 		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
+		metrics.DataCoordNumSegments.WithLabelValues(string(state)).Inc()
+		if state == commonpb.SegmentState_Flushed {
+			numStoredRows += segmentInfo.GetNumOfRows()
+		}
 	}
-
+	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
 	return nil
 }
 
@@ -87,6 +100,7 @@ func (m *meta) AddCollection(collection *datapb.CollectionInfo) {
 	m.Lock()
 	defer m.Unlock()
 	m.collections[collection.ID] = collection
+	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 }
 
 // GetCollection returns collection info with provided collection id from local cache
@@ -160,6 +174,7 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	if err := m.saveSegmentInfo(segment); err != nil {
 		return err
 	}
+	metrics.DataCoordNumSegments.WithLabelValues(string(segment.GetState())).Inc()
 	return nil
 }
 
@@ -174,6 +189,7 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 	if err := m.removeSegmentInfo(segment); err != nil {
 		return err
 	}
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Inc()
 	m.segments.DropSegment(segmentID)
 	return nil
 }
@@ -194,9 +210,25 @@ func (m *meta) GetSegment(segID UniqueID) *SegmentInfo {
 func (m *meta) SetState(segmentID UniqueID, state commonpb.SegmentState) error {
 	m.Lock()
 	defer m.Unlock()
+	curSegInfo := m.segments.GetSegment(segmentID)
+	if curSegInfo == nil {
+		return nil
+	}
+	oldState := curSegInfo.GetState()
 	m.segments.SetState(segmentID, state)
-	if segInfo := m.segments.GetSegment(segmentID); segInfo != nil && isSegmentHealthy(segInfo) {
-		return m.saveSegmentInfo(segInfo)
+	curSegInfo = m.segments.GetSegment(segmentID)
+	if curSegInfo != nil && isSegmentHealthy(curSegInfo) {
+		err := m.saveSegmentInfo(curSegInfo)
+		if err == nil {
+			metrics.DataCoordNumSegments.WithLabelValues(string(oldState)).Dec()
+			metrics.DataCoordNumSegments.WithLabelValues(string(state)).Inc()
+			if state == commonpb.SegmentState_Flushed {
+				metrics.DataCoordNumStoredRows.WithLabelValues().Add(float64(curSegInfo.GetNumOfRows()))
+			} else if oldState == commonpb.SegmentState_Flushed {
+				metrics.DataCoordNumStoredRows.WithLabelValues().Sub(float64(curSegInfo.GetNumOfRows()))
+			}
+		}
+		return err
 	}
 	return nil
 }
@@ -336,7 +368,15 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	if err := m.saveKvTxn(kv); err != nil {
 		return err
 	}
-
+	oldSegmentState := segment.GetState()
+	newSegmentState := clonedSegment.GetState()
+	metrics.DataCoordNumSegments.WithLabelValues(string(oldSegmentState)).Dec()
+	metrics.DataCoordNumSegments.WithLabelValues(string(newSegmentState)).Inc()
+	if newSegmentState == commonpb.SegmentState_Flushed {
+		metrics.DataCoordNumStoredRows.WithLabelValues().Add(float64(clonedSegment.GetNumOfRows()))
+	} else if oldSegmentState == commonpb.SegmentState_Flushed {
+		metrics.DataCoordNumStoredRows.WithLabelValues().Sub(float64(segment.GetNumOfRows()))
+	}
 	// update memory status
 	for id, s := range modSegments {
 		m.segments.SetSegment(id, s)
@@ -351,10 +391,12 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 	defer m.Unlock()
 
 	modSegments := make(map[UniqueID]*SegmentInfo)
+	originSegments := make(map[UniqueID]*SegmentInfo)
 
 	for _, seg2Drop := range segments {
 		segment := m.mergeDropSegment(seg2Drop)
 		if segment != nil {
+			originSegments[seg2Drop.GetID()] = seg2Drop
 			modSegments[seg2Drop.GetID()] = segment
 		}
 	}
@@ -369,10 +411,21 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 			clonedSeg := seg.Clone()
 			clonedSeg.State = commonpb.SegmentState_Dropped
 			modSegments[seg.ID] = clonedSeg
+			originSegments[seg.GetID()] = seg
 		}
 	}
-
-	return m.batchSaveDropSegments(channel, modSegments)
+	err := m.batchSaveDropSegments(channel, modSegments)
+	if err == nil {
+		for _, seg := range originSegments {
+			state := seg.GetState()
+			metrics.DataCoordNumSegments.WithLabelValues(
+				string(state)).Dec()
+			if state == commonpb.SegmentState_Flushed {
+				metrics.DataCoordNumStoredRows.WithLabelValues().Sub(float64(seg.GetNumOfRows()))
+			}
+		}
+	}
+	return err
 }
 
 // mergeDropSegment merges drop segment information with meta segments
@@ -495,6 +548,7 @@ func (m *meta) saveDropSegmentAndRemove(channel string, modSegments map[int64]*S
 	for _, s := range update {
 		m.segments.SetSegment(s.GetID(), s)
 	}
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Add(float64(len(update)))
 	return nil
 }
 

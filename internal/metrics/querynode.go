@@ -40,7 +40,6 @@ var (
 			Name:      "num_partitions",
 			Help:      "Number of partitions per collection in QueryNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -51,7 +50,6 @@ var (
 			Name:      "num_segments",
 			Help:      "Number of segments per collection in QueryNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -62,7 +60,6 @@ var (
 			Name:      "num_dml_channels",
 			Help:      "Number of dmlChannels per collection in QueryNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -73,7 +70,6 @@ var (
 			Name:      "num_delta_channels",
 			Help:      "Number of deltaChannels per collection in QueryNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -84,18 +80,6 @@ var (
 			Name:      "num_consumers",
 			Help:      "Number of consumers per collection in QueryNode.",
 		}, []string{
-			collectionIDLabelName,
-			nodeIDLabelName,
-		})
-
-	QueryNodeNumReaders = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_readers",
-			Help:      "Number of readers per collection in QueryNode.",
-		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -106,9 +90,9 @@ var (
 			Name:      "sq_count",
 			Help:      "Search and query requests statistic in QueryNode.",
 		}, []string{
-			statusLabelName,
-			queryTypeLabelName,
 			nodeIDLabelName,
+			queryTypeLabelName,
+			statusLabelName,
 		})
 
 	QueryNodeSQReqLatency = prometheus.NewHistogramVec(
@@ -119,8 +103,8 @@ var (
 			Help:      "Search and query requests latency in QueryNode.",
 			Buckets:   buckets,
 		}, []string{
-			queryTypeLabelName,
 			nodeIDLabelName,
+			queryTypeLabelName,
 		})
 
 	QueryNodeSQLatencyInQueue = prometheus.NewHistogramVec(
@@ -131,8 +115,8 @@ var (
 			Help:      "The search and query latency in queue(unsolved buffer) in QueryNode.",
 			Buckets:   buckets,
 		}, []string{
-			queryTypeLabelName,
 			nodeIDLabelName,
+			queryTypeLabelName,
 		})
 
 	QueryNodeSQSegmentLatency = prometheus.NewHistogramVec(
@@ -143,9 +127,9 @@ var (
 			Help:      "The search and query on segments(sealed/growing segments).",
 			Buckets:   buckets,
 		}, []string{
+			nodeIDLabelName,
 			queryTypeLabelName,
 			segmentTypeLabelName,
-			nodeIDLabelName,
 		})
 
 	QueryNodeSQSegmentLatencyInCore = prometheus.NewHistogramVec(
@@ -156,8 +140,8 @@ var (
 			Help:      "The search and query latency in core.",
 			Buckets:   buckets,
 		}, []string{
-			queryTypeLabelName,
 			nodeIDLabelName,
+			queryTypeLabelName,
 		})
 
 	QueryNodeTranslateHitsLatency = prometheus.NewHistogramVec(
@@ -179,8 +163,8 @@ var (
 			Help:      "The search and query latency in reduce(local reduce) in QueryNode.",
 			Buckets:   buckets,
 		}, []string{
-			segmentTypeLabelName,
 			nodeIDLabelName,
+			segmentTypeLabelName,
 		})
 
 	QueryNodeLoadSegmentLatency = prometheus.NewHistogramVec(
@@ -201,7 +185,6 @@ var (
 			Name:      "service_time",
 			Help:      "ServiceTimes of collections in QueryNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -224,7 +207,6 @@ func RegisterQueryNode() {
 	prometheus.MustRegister(QueryNodeNumDmlChannels)
 	prometheus.MustRegister(QueryNodeNumDeltaChannels)
 	prometheus.MustRegister(QueryNodeNumConsumers)
-	prometheus.MustRegister(QueryNodeNumReaders)
 	prometheus.MustRegister(QueryNodeSQCount)
 	prometheus.MustRegister(QueryNodeSQReqLatency)
 	prometheus.MustRegister(QueryNodeSQLatencyInQueue)

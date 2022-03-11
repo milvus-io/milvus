@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -162,7 +161,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
 
 	sc.queryMsgStream.AsConsumer(consumeChannels, consumeSubName)
-	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	if r.req.SeekPosition == nil || len(r.req.SeekPosition.MsgID) == 0 {
 		// as consumer
 		log.Debug("QueryNode AsConsumer", zap.Strings("channels", consumeChannels), zap.String("sub name", consumeSubName))
@@ -242,7 +241,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	VPChannels := make(map[string]string) // map[vChannel]pChannel
 	for _, info := range w.req.Infos {
 		v := info.ChannelName
-		p := rootcoord.ToPhysicalChannel(info.ChannelName)
+		p := funcutil.ToPhysicalChannel(info.ChannelName)
 		vChannels = append(vChannels, v)
 		pChannels = append(pChannels, p)
 		VPChannels[v] = p
@@ -511,7 +510,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	vChannel2SeekPosition := make(map[string]*internalpb.MsgPosition)
 	for _, info := range w.req.Infos {
 		v := info.ChannelName
-		p := rootcoord.ToPhysicalChannel(info.ChannelName)
+		p := funcutil.ToPhysicalChannel(info.ChannelName)
 		vDeltaChannels = append(vDeltaChannels, v)
 		pDeltaChannels = append(pDeltaChannels, p)
 		VPDeltaChannels[v] = p

@@ -19,10 +19,12 @@ package datacoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"go.uber.org/zap"
 )
 
 // Cluster provides interfaces to interact with datanode cluster
@@ -56,12 +58,20 @@ func (c *Cluster) Startup(nodes []*NodeInfo) error {
 // Register registers a new node in cluster
 func (c *Cluster) Register(node *NodeInfo) error {
 	c.sessionManager.AddSession(node)
-	return c.channelManager.AddNode(node.NodeID)
+	err := c.channelManager.AddNode(node.NodeID)
+	if err == nil {
+		metrics.DataCoordNumDataNodes.WithLabelValues().Inc()
+	}
+	return err
 }
 
 // UnRegister removes a node from cluster
 func (c *Cluster) UnRegister(node *NodeInfo) error {
 	c.sessionManager.DeleteSession(node)
+	err := c.channelManager.DeleteNode(node.NodeID)
+	if err == nil {
+		metrics.DataCoordNumDataNodes.WithLabelValues().Dec()
+	}
 	return c.channelManager.DeleteNode(node.NodeID)
 }
 

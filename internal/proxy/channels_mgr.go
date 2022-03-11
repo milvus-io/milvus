@@ -399,9 +399,9 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	mgr.addStream(id, stream)
 
 	mgr.updateCollection(collectionID, id)
-
-	metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(collectionID, 10), "PChan").Inc()
-
+	for _, pc := range pchans {
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), pc).Inc()
+	}
 	return nil
 }
 
@@ -423,16 +423,20 @@ func (mgr *singleTypeChannelsMgr) getStream(collectionID UniqueID) (msgstream.Ms
 }
 
 func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) error {
-	ids, err := mgr.getAllVIDs(collectionID)
+	channels, err := mgr.getChannels(collectionID)
 	if err != nil {
 		return err
+	}
+	ids, err2 := mgr.getAllVIDs(collectionID)
+	if err2 != nil {
+		return err2
 	}
 
 	mgr.deleteVChansByVIDs(ids)
 	mgr.deleteStreamByVIDs(ids)
-
-	metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(collectionID, 10), "PChan").Dec()
-
+	for _, pc := range channels {
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), pc).Dec()
+	}
 	return nil
 }
 
@@ -482,7 +486,7 @@ func (mgr *channelsMgrImpl) getVChannels(collectionID UniqueID) ([]vChan, error)
 }
 
 func (mgr *channelsMgrImpl) createDQLStream(collectionID UniqueID) error {
-	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), strconv.FormatInt(collectionID, 10), "query").Inc()
+	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "query").Inc()
 	return mgr.dqlChannelsMgr.createMsgStream(collectionID)
 }
 
@@ -491,7 +495,7 @@ func (mgr *channelsMgrImpl) getDQLStream(collectionID UniqueID) (msgstream.MsgSt
 }
 
 func (mgr *channelsMgrImpl) removeDQLStream(collectionID UniqueID) error {
-	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), strconv.FormatInt(collectionID, 10), "query").Dec()
+	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "query").Dec()
 	return mgr.dqlChannelsMgr.removeStream(collectionID)
 }
 

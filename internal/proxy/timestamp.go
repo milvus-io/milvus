@@ -19,10 +19,13 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 // timestampAllocator implements tsoAllocator.
@@ -43,6 +46,7 @@ func newTimestampAllocator(ctx context.Context, tso timestampAllocatorInterface,
 }
 
 func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
+	tr := timerecord.NewTimeRecorder("applyTimestamp")
 	ctx, cancel := context.WithTimeout(ta.ctx, 5*time.Second)
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
@@ -55,7 +59,10 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 	}
 
 	resp, err := ta.tso.AllocTimestamp(ctx, req)
-	defer cancel()
+	defer func() {
+		cancel()
+		metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}()
 
 	if err != nil {
 		return nil, fmt.Errorf("syncTimestamp Failed:%w", err)
