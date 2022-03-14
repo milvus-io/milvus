@@ -53,7 +53,7 @@ const debug = false
 var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
 
 func newIDLEDataNodeMock(ctx context.Context) *DataNode {
-	msFactory := msgstream.NewPmsFactory()
+	msFactory := msgstream.NewRmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
 	rc := &RootCoordFactory{
