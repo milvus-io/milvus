@@ -51,10 +51,15 @@ import (
 
 func TestMain(t *testing.M) {
 	rand.Seed(time.Now().Unix())
+	path := "/tmp/milvus_ut/rdb_data"
+	os.Setenv("ROCKSMQ_PATH", path)
+	defer os.RemoveAll(path)
+
 	Params.DataNodeCfg.InitAlias("datanode-alias-1")
 	Params.Init()
 	// change to specific channel for test
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+
 	code := t.Run()
 	os.Exit(code)
 }
