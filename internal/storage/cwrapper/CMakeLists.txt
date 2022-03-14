@@ -42,7 +42,8 @@ macro( build_arrow )
 
     set( ARROW_CMAKE_ARGS
         "-DARROW_WITH_LZ4=OFF"
-        "-DARROW_WITH_ZSTD=OFF"
+        "-DARROW_WITH_ZSTD=ON"
+        "-Dzstd_SOURCE=BUNDLED"
         "-DARROW_WITH_BROTLI=OFF"
         "-DARROW_WITH_SNAPPY=OFF"
         "-DARROW_WITH_ZLIB=OFF"
