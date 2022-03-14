@@ -68,8 +68,6 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 	fm.flowgraphs.Store(vchan.GetChannelName(), dataSyncService)
 
 	metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
-	metrics.DataNodeNumDmlChannels.WithLabelValues(fmt.Sprint(vchan.GetCollectionID()), fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
-	metrics.DataNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(vchan.GetCollectionID()), fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 	return nil
 }
 
@@ -77,11 +75,8 @@ func (fm *flowgraphManager) release(vchanName string) {
 	log.Info("release flowgraph resources begin", zap.String("vChannelName", vchanName))
 
 	if fg, loaded := fm.flowgraphs.LoadAndDelete(vchanName); loaded {
-		collectionID := fg.(*dataSyncService).collectionID
 		fg.(*dataSyncService).close()
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
-		metrics.DataNodeNumDmlChannels.WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
-		metrics.DataNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
 	}
 	log.Info("release flowgraph resources end", zap.String("Vchannel", vchanName))
 }

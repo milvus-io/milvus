@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/require"
@@ -338,7 +339,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	chanNames := make([]string, t.ShardsNum)
 	for i := int32(0); i < t.ShardsNum; i++ {
 		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.chanTimeTick.getDmlChannelName(), collID, i)
-		chanNames[i] = ToPhysicalChannel(vchanNames[i])
+		chanNames[i] = funcutil.ToPhysicalChannel(vchanNames[i])
 	}
 
 	collInfo := etcdpb.CollectionInfo{
@@ -746,7 +747,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, shardsNum, createMeta.ShardsNum)
 
 		vChanName := createMeta.VirtualChannelNames[0]
-		assert.Equal(t, createMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
+		assert.Equal(t, createMeta.PhysicalChannelNames[0], funcutil.ToPhysicalChannel(vChanName))
 
 		// get TimeTickMsg
 		//msgPack, ok = <-dmlStream.Chan()
@@ -1360,7 +1361,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 		vChanName := collMeta.VirtualChannelNames[0]
-		assert.Equal(t, collMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
+		assert.Equal(t, collMeta.PhysicalChannelNames[0], funcutil.ToPhysicalChannel(vChanName))
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))

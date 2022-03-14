@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -505,11 +504,16 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
-	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
+
+	defer func() {
+		metrics.QueryNodeNumReaders.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Dec()
+		stream.Close()
+	}()
+
+	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
 	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
-	metrics.QueryNodeNumReaders.WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+	metrics.QueryNodeNumReaders.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	err = stream.SeekReaders([]*internalpb.MsgPosition{position})
 	if err != nil {
 		return err

@@ -24,8 +24,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"go.uber.org/zap"
 )
 
@@ -43,9 +43,9 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 
 	// MsgStream needs a physical channel name, but the channel name in seek position from DataCoord
 	//  is virtual channel name, so we need to convert vchannel name into pchannel neme here.
-	pchannelName := rootcoord.ToPhysicalChannel(dmNodeConfig.vChannelName)
+	pchannelName := funcutil.ToPhysicalChannel(dmNodeConfig.vChannelName)
 	insertStream.AsConsumer([]string{pchannelName}, consumeSubName)
-	metrics.DataNodeNumConsumers.WithLabelValues(fmt.Sprint(dmNodeConfig.collectionID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
+	metrics.DataNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID)).Inc()
 	log.Info("datanode AsConsumer", zap.String("physical channel", pchannelName), zap.String("subName", consumeSubName), zap.Int64("collection ID", dmNodeConfig.collectionID))
 
 	if seekPos != nil {

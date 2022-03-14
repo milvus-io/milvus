@@ -29,7 +29,6 @@ package querynode
 */
 import "C"
 import (
-	"errors"
 	"fmt"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"math"
@@ -79,9 +78,10 @@ func (c *Collection) addPartitionID(partitionID UniqueID) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
 
-	log.Debug("queryNode collection add a partition", zap.Int64("collection", c.id), zap.Int64("partitionID", partitionID))
 	c.partitionIDs = append(c.partitionIDs, partitionID)
-	log.Debug("queryNode collection info after add a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
+	log.Info("queryNode collection info after add a partition",
+		zap.Int64("partitionID", partitionID), zap.Int64("collectionID", c.id),
+		zap.Int64s("partitions", c.partitionIDs))
 }
 
 // removePartitionID removes the partition id from partition id list of collection
@@ -117,7 +117,7 @@ OUTER:
 		c.vChannels = append(c.vChannels, dstChan)
 	}
 
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vChannels)))
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Add(float64(len(c.vChannels)))
 }
 
 // getVChannels get virtual channels of collection
@@ -145,7 +145,7 @@ func (c *Collection) removeVChannel(channel Channel) {
 		zap.Any("channel", channel),
 	)
 
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vChannels)))
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Sub(float64(len(c.vChannels)))
 }
 
 // addPChannels add physical channels to physical channels of collection
@@ -242,7 +242,7 @@ OUTER:
 		c.vDeltaChannels = append(c.vDeltaChannels, dstChan)
 	}
 
-	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vDeltaChannels)))
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Add(float64(len(c.vDeltaChannels)))
 }
 
 func (c *Collection) removeVDeltaChannel(channel Channel) {
@@ -260,7 +260,7 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 		zap.Any("channel", channel),
 	)
 
-	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(c.ID()), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(c.vDeltaChannels)))
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Sub(float64(len(c.vDeltaChannels)))
 }
 
 // setReleaseTime records when collection is released
@@ -275,48 +275,6 @@ func (c *Collection) getReleaseTime() Timestamp {
 	c.releaseMu.RLock()
 	defer c.releaseMu.RUnlock()
 	return c.releaseTime
-}
-
-// addReleasedPartition records the partition to indicate that this partition has been released
-func (c *Collection) addReleasedPartition(partitionID UniqueID) {
-	c.releaseMu.Lock()
-	defer c.releaseMu.Unlock()
-
-	log.Debug("queryNode collection release a partition", zap.Int64("collectionID", c.id), zap.Int64("partition", partitionID))
-	c.releasedPartitions[partitionID] = struct{}{}
-	partitions := make([]UniqueID, 0)
-	for _, id := range c.partitionIDs {
-		if id != partitionID {
-			partitions = append(partitions, id)
-		}
-	}
-	c.partitionIDs = partitions
-	log.Debug("queryNode collection info after release a partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
-}
-
-// deleteReleasedPartition remove the released partition record from collection
-func (c *Collection) deleteReleasedPartition(partitionID UniqueID) {
-	c.releaseMu.Lock()
-	defer c.releaseMu.Unlock()
-
-	log.Debug("queryNode collection reload a released partition", zap.Int64("collectionID", c.id), zap.Int64("partition", partitionID))
-	delete(c.releasedPartitions, partitionID)
-	log.Debug("queryNode collection info after reload a released partition", zap.Int64("collectionID", c.id), zap.Int64s("partitions", c.partitionIDs), zap.Any("releasePartitions", c.releasedPartitions))
-}
-
-// checkReleasedPartitions returns error if any partition has been released
-func (c *Collection) checkReleasedPartitions(partitionIDs []UniqueID) error {
-	c.releaseMu.RLock()
-	defer c.releaseMu.RUnlock()
-	for _, id := range partitionIDs {
-		if _, ok := c.releasedPartitions[id]; ok {
-			return errors.New("partition has been released" +
-				", collectionID = " + fmt.Sprintln(c.ID()) +
-				", partitionID = " + fmt.Sprintln(id))
-		}
-	}
-
-	return nil
 }
 
 // setLoadType set the loading type of collection, which is loadTypeCollection or loadTypePartition

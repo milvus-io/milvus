@@ -146,6 +146,10 @@ test-proxy:
 	@echo "Running go unittests..."
 	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/proxy -v
 
+test-datacoord:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/datacoord -v
+
 test-datanode:
 	@echo "Running go unittests..."
 	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/datanode -v
@@ -153,6 +157,10 @@ test-datanode:
 test-querycoord:
 	@echo "Running go unittests..."
 	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querycoord	-v
+
+test-querynode:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querynode	-v
 
 
 test-go: build-cpp-with-unittest

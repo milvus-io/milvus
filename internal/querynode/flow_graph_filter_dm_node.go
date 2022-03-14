@@ -129,19 +129,6 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 		}
 	}
 
-	// check if partition has been released
-	if col.getLoadType() == loadTypeCollection {
-		col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
-		if err != nil {
-			log.Warn(err.Error())
-			return nil
-		}
-		if err = col.checkReleasedPartitions([]UniqueID{msg.PartitionID}); err != nil {
-			log.Warn(err.Error())
-			return nil
-		}
-	}
-
 	if len(msg.PrimaryKeys) != len(msg.Timestamps) {
 		log.Warn("Error, misaligned messages detected")
 		return nil
@@ -183,14 +170,6 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 			log.Debug("filter invalid insert message, partition does not exist",
 				zap.Any("collectionID", msg.CollectionID),
 				zap.Any("partitionID", msg.PartitionID))
-			return nil
-		}
-	}
-
-	// check if partition has been released
-	if col.getLoadType() == loadTypeCollection {
-		if err = col.checkReleasedPartitions([]UniqueID{msg.PartitionID}); err != nil {
-			log.Warn(err.Error())
 			return nil
 		}
 	}
