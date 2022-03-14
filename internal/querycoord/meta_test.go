@@ -70,7 +70,7 @@ func TestReplica_Release(t *testing.T) {
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta, err := newMeta(context.Background(), etcdKV, nil, nil)
 	assert.Nil(t, err)
-	err = meta.addCollection(1, querypb.LoadType_loadCollection, nil)
+	err = meta.addCollection(1, querypb.LoadType_LoadCollection, nil)
 	require.NoError(t, err)
 
 	collections := meta.showCollections()
@@ -164,18 +164,18 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test SetLoadTypeFail", func(t *testing.T) {
-		err := meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
+		err := meta.setLoadType(defaultCollectionID, querypb.LoadType_LoadCollection)
 		assert.NotNil(t, err)
 	})
 
 	t.Run("Test SetLoadPercentageFail", func(t *testing.T) {
-		err := meta.setLoadPercentage(defaultCollectionID, defaultPartitionID, 100, querypb.LoadType_loadCollection)
+		err := meta.setLoadPercentage(defaultCollectionID, defaultPartitionID, 100, querypb.LoadType_LoadCollection)
 		assert.NotNil(t, err)
 	})
 
 	t.Run("Test AddCollection", func(t *testing.T) {
 		schema := genDefaultCollectionSchema(false)
-		err := meta.addCollection(defaultCollectionID, querypb.LoadType_loadCollection, schema)
+		err := meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
 		assert.Nil(t, err)
 	})
 
@@ -260,7 +260,7 @@ func TestMetaFunc(t *testing.T) {
 	})
 
 	t.Run("Test SetLoadType", func(t *testing.T) {
-		err := meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
+		err := meta.setLoadType(defaultCollectionID, querypb.LoadType_LoadCollection)
 		assert.Nil(t, err)
 	})
 
@@ -270,7 +270,7 @@ func TestMetaFunc(t *testing.T) {
 		state, err := meta.getPartitionStatesByID(defaultCollectionID, defaultPartitionID)
 		assert.Nil(t, err)
 		assert.Equal(t, int64(100), state.InMemoryPercentage)
-		err = meta.setLoadPercentage(defaultCollectionID, defaultPartitionID, 100, querypb.LoadType_loadCollection)
+		err = meta.setLoadPercentage(defaultCollectionID, defaultPartitionID, 100, querypb.LoadType_LoadCollection)
 		assert.Nil(t, err)
 		info, err := meta.getCollectionInfoByID(defaultCollectionID)
 		assert.Nil(t, err)

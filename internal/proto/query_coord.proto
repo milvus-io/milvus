@@ -161,6 +161,12 @@ message RemoveQueryChannelRequest {
   string query_result_channel = 5;
 }
 
+message LoadMetaInfo {
+  LoadType load_type = 1;
+  int64 collectionID = 2;
+  repeated int64 partitionIDs = 3;  
+}
+
 message WatchDmChannelsRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
@@ -169,6 +175,7 @@ message WatchDmChannelsRequest {
   repeated data.VchannelInfo infos = 5;
   schema.CollectionSchema schema = 6;
   repeated data.SegmentInfo exclude_infos = 7;
+  LoadMetaInfo load_meta = 8;
 }
 
 message WatchDeltaChannelsRequest {
@@ -176,6 +183,7 @@ message WatchDeltaChannelsRequest {
   int64 nodeID = 2;
   int64 collectionID = 3;
   repeated data.VchannelInfo infos = 4;
+  LoadMetaInfo load_meta = 9;
 }
 
 message SegmentLoadInfo {
@@ -211,6 +219,7 @@ message LoadSegmentsRequest {
   schema.CollectionSchema schema = 4;
   int64 source_nodeID = 5;
   int64 collectionID = 6;
+  LoadMetaInfo load_meta = 7;
 }
 
 message ReleaseSegmentsRequest {
@@ -257,9 +266,9 @@ enum TriggerCondition {
 }
 
 enum LoadType {
-  UnKnowType = 0;
+  UnKnownType = 0;
   LoadPartition = 1;
-  loadCollection = 2;
+  LoadCollection = 2;
 }
 
 message DmChannelWatchInfo {
