@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -49,9 +50,9 @@ type TimeRange struct {
 }
 
 // loadType is load collection or load partition
-type loadType = int32
+type loadType = querypb.LoadType
 
 const (
-	loadTypeCollection loadType = 0
-	loadTypePartition  loadType = 1
+	loadTypeCollection = querypb.LoadType_LoadCollection
+	loadTypePartition  = querypb.LoadType_LoadPartition
 )

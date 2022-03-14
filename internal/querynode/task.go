@@ -226,19 +226,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	collectionID := w.req.CollectionID
 	partitionIDs := w.req.GetPartitionIDs()
 
-	var lType loadType
-
-	switch w.req.GetLoadMeta().GetLoadType() {
-	case queryPb.LoadType_LoadCollection:
-		lType = loadTypeCollection
-	case queryPb.LoadType_LoadPartition:
-		lType = loadTypePartition
-	default:
+	lType := w.req.GetLoadMeta().GetLoadType()
+	if lType == queryPb.LoadType_UnKnownType {
 		// if no partitionID is specified, load type is load collection
 		if len(partitionIDs) != 0 {
-			lType = loadTypePartition
+			lType = queryPb.LoadType_LoadPartition
 		} else {
-			lType = loadTypeCollection
+			lType = queryPb.LoadType_LoadCollection
 		}
 	}
 
@@ -261,6 +255,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	log.Debug("Starting WatchDmChannels ...",
 		zap.String("collectionName", w.req.Schema.Name),
 		zap.Int64("collectionID", collectionID),
+		zap.Any("load type", lType),
 		zap.Strings("vChannels", vChannels),
 		zap.Strings("pChannels", pChannels),
 	)
@@ -299,6 +294,17 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		Schema:       w.req.GetSchema(),
 		LoadMeta:     w.req.GetLoadMeta(),
 	}
+
+	// update partition info from unFlushedSegments and loadMeta
+	for _, info := range req.Infos {
+		w.node.streaming.replica.addPartition(collectionID, info.PartitionID)
+		w.node.historical.replica.addPartition(collectionID, info.PartitionID)
+	}
+	for _, partitionID := range req.GetLoadMeta().GetPartitionIDs() {
+		w.node.historical.replica.addPartition(collectionID, partitionID)
+		w.node.streaming.replica.addPartition(collectionID, partitionID)
+	}
+
 	log.Debug("loading growing segments in WatchDmChannels...",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("unFlushedSegmentIDs", unFlushedSegmentIDs),
@@ -441,12 +447,6 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	hCol.addVChannels(vChannels)
 	hCol.addPChannels(pChannels)
 	hCol.setLoadType(lType)
-	for _, partitionID := range w.req.GetLoadMeta().GetPartitionIDs() {
-		sCol.deleteReleasedPartition(partitionID)
-		hCol.deleteReleasedPartition(partitionID)
-		w.node.streaming.replica.addPartition(collectionID, partitionID)
-		w.node.historical.replica.addPartition(collectionID, partitionID)
-	}
 	log.Debug("watchDMChannel, init replica done", zap.Int64("collectionID", collectionID), zap.Strings("vChannels", vChannels))
 
 	// create tSafe
@@ -665,21 +665,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	for _, info := range l.req.Infos {
-		collectionID := info.CollectionID
-		partitionID := info.PartitionID
-		sCol, err := l.node.streaming.replica.getCollectionByID(collectionID)
-		if err != nil {
-			return err
-		}
-		sCol.deleteReleasedPartition(partitionID)
-		hCol, err := l.node.historical.replica.getCollectionByID(collectionID)
-		if err != nil {
-			return err
-		}
-		hCol.deleteReleasedPartition(partitionID)
-	}
-
 	log.Debug("LoadSegments done", zap.String("SegmentLoadInfos", fmt.Sprintln(l.req.Infos)))
 	return nil
 }
@@ -825,11 +810,11 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	time.Sleep(gracefulReleaseTime * time.Second)
 
 	// get collection from streaming and historical
-	hCol, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+	_, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		return fmt.Errorf("release partitions failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
-	sCol, err := r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
+	_, err = r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		return fmt.Errorf("release partitions failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
@@ -853,9 +838,6 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 				log.Warn(err.Error())
 			}
 		}
-
-		hCol.addReleasedPartition(id)
-		sCol.addReleasedPartition(id)
 	}
 
 	log.Debug("Release partition task done",
