@@ -339,7 +339,7 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 
 	}
 	if allDone {
-		err := lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_loadCollection)
+		err := lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_LoadCollection)
 		if err != nil {
 			log.Error("loadCollectionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID))
 			lct.setResultInfo(err)
@@ -387,8 +387,8 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			return err
 		}
 
-		for _, segmentBingLog := range binlogs {
-			segmentLoadInfo := lct.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, lct.Schema)
+		for _, segmentBinlog := range binlogs {
+			segmentLoadInfo := lct.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBinlog, true, lct.Schema)
 			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_LoadSegments
 			loadSegmentReq := &querypb.LoadSegmentsRequest{
@@ -396,6 +396,11 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
 				Schema:       lct.Schema,
 				CollectionID: collectionID,
+				LoadMeta: &querypb.LoadMetaInfo{
+					LoadType:     querypb.LoadType_LoadCollection,
+					CollectionID: collectionID,
+					PartitionIDs: toLoadPartitionIDs,
+				},
 			}
 
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
@@ -433,6 +438,11 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			//PartitionIDs: toLoadPartitionIDs,
 			Infos:  []*datapb.VchannelInfo{info},
 			Schema: lct.Schema,
+			LoadMeta: &querypb.LoadMetaInfo{
+				LoadType:     querypb.LoadType_LoadCollection,
+				CollectionID: collectionID,
+				PartitionIDs: toLoadPartitionIDs,
+			},
 		}
 
 		watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
@@ -451,7 +461,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 	log.Debug("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
 
-	err = lct.meta.addCollection(collectionID, querypb.LoadType_loadCollection, lct.Schema)
+	err = lct.meta.addCollection(collectionID, querypb.LoadType_LoadCollection, lct.Schema)
 	if err != nil {
 		log.Error("loadCollectionTask: add collection to meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
 		lct.setResultInfo(err)
@@ -741,6 +751,11 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
 				Schema:       lpt.Schema,
 				CollectionID: collectionID,
+				LoadMeta: &querypb.LoadMetaInfo{
+					LoadType:     querypb.LoadType_LoadPartition,
+					CollectionID: collectionID,
+					PartitionIDs: partitionIDs,
+				},
 			}
 			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 		}
@@ -775,6 +790,11 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			PartitionIDs: partitionIDs,
 			Infos:        []*datapb.VchannelInfo{info},
 			Schema:       lpt.Schema,
+			LoadMeta: &querypb.LoadMetaInfo{
+				LoadType:     querypb.LoadType_LoadPartition,
+				CollectionID: collectionID,
+				PartitionIDs: partitionIDs,
+			},
 		}
 
 		watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
@@ -1468,7 +1488,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			continue
 		}
 
-		if collectionInfo.LoadType == querypb.LoadType_loadCollection && ht.meta.hasReleasePartition(collectionID, partitionID) {
+		if collectionInfo.LoadType == querypb.LoadType_LoadCollection && ht.meta.hasReleasePartition(collectionID, partitionID) {
 			log.Debug("handoffTask: partition has not been released", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
 			continue
 		}
@@ -1480,7 +1500,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			}
 		}
 
-		if collectionInfo.LoadType != querypb.LoadType_loadCollection && !partitionLoaded {
+		if collectionInfo.LoadType != querypb.LoadType_LoadCollection && !partitionLoaded {
 			log.Debug("handoffTask: partition has not been loaded into memory", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Int64("segmentID", segmentID))
 			continue
 		}
@@ -1661,7 +1681,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 			var dmChannelInfos []*datapb.VchannelInfo
 
 			var toRecoverPartitionIDs []UniqueID
-			if collectionInfo.LoadType == querypb.LoadType_loadCollection {
+			if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
 				toRecoverPartitionIDs, err = lbt.broker.showPartitionIDs(ctx, collectionID)
 				if err != nil {
 					log.Error("loadBalanceTask: show collection's partitionIDs failed", zap.Int64("collectionID", collectionID), zap.Error(err))

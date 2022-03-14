@@ -353,7 +353,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
-	queryCoord.meta.setLoadType(defaultCollectionID, querypb.LoadType_loadCollection)
+	queryCoord.meta.setLoadType(defaultCollectionID, querypb.LoadType_LoadCollection)
 
 	t.Run("Test handoffGrowingSegment", func(t *testing.T) {
 		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
