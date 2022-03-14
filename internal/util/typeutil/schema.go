@@ -26,6 +26,34 @@ import (
 	"go.uber.org/zap"
 )
 
+func GetMaxLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error) {
+	maxLength := 0
+	var err error
+
+	paramsMap := make(map[string]string)
+	for _, p := range fieldSchema.TypeParams {
+		paramsMap[p.Key] = p.Value
+	}
+
+	maxLengthPerRowKey := "max_length_per_row"
+
+	switch fieldSchema.DataType {
+	case schemapb.DataType_VarChar:
+		maxLengthPerRowValue, ok := paramsMap[maxLengthPerRowKey]
+		if !ok {
+			return 0, fmt.Errorf("the max_length_per_row was not specified, field type is %s", fieldSchema.DataType.String())
+		}
+		maxLength, err = strconv.Atoi(maxLengthPerRowValue)
+		if err != nil {
+			return 0, err
+		}
+	default:
+		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
+	}
+
+	return maxLength, nil
+}
+
 // EstimateSizePerRecord returns the estimate size of a record in a collection
 func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	res := 0
@@ -39,8 +67,12 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 			res += 4
 		case schemapb.DataType_Int64, schemapb.DataType_Double:
 			res += 8
-		case schemapb.DataType_String:
-			res += 125 // todo find a better way to estimate string type
+		case schemapb.DataType_VarChar:
+			maxLengthPerRow, err := GetMaxLengthOfVarLengthField(fs)
+			if err != nil {
+				return 0, err
+			}
+			res += maxLengthPerRow
 		case schemapb.DataType_BinaryVector:
 			for _, kv := range fs.TypeParams {
 				if kv.Key == "dim" {

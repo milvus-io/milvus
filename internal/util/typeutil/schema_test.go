@@ -81,7 +81,13 @@ func TestSchema(t *testing.T) {
 				Name:         "field_string",
 				IsPrimaryKey: false,
 				Description:  "",
-				DataType:     20,
+				DataType:     21,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "max_length_per_row",
+						Value: "125",
+					},
+				},
 			},
 			{
 				FieldID:      107,

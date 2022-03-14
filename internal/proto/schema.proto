@@ -20,6 +20,7 @@ enum DataType {
   Double = 11;
 
   String = 20;
+  VarChar = 21; // variable-length strings with a specified maximum length
 
   BinaryVector = 100;
   FloatVector = 101;
