@@ -154,9 +154,6 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 	}
 
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
-		if err = col.checkReleasedPartitions(partIDs); err != nil {
-			return searchResults, searchSegmentIDs, searchPartIDs, err
-		}
 		return searchResults, searchSegmentIDs, searchPartIDs, nil
 	}
 

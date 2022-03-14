@@ -258,6 +258,11 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			req:  genWatchDMChannelsRequest(),
 			node: node,
 		}
+		task.req.LoadMeta = &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadPartition,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		}
 		task.req.Infos = []*datapb.VchannelInfo{
 			{
 				CollectionID: defaultCollectionID,
@@ -376,6 +381,39 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		}
 		err = task.Execute(ctx)
 		assert.Error(t, err)
+	})
+
+	t.Run("test load growing segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDmChannelsTask{
+			req:  genWatchDMChannelsRequest(),
+			node: node,
+		}
+
+		fieldBinlog, err := saveSimpleBinLog(ctx)
+		assert.NoError(t, err)
+
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultDMLChannel,
+				UnflushedSegments: []*datapb.SegmentInfo{
+					{
+						CollectionID: defaultCollectionID,
+						PartitionID:  defaultPartitionID + 1, // load a new partition
+						DmlPosition: &internalpb.MsgPosition{
+							ChannelName: defaultDMLChannel,
+							Timestamp:   typeutil.MaxTimestamp,
+						},
+						Binlogs: fieldBinlog,
+					},
+				},
+			},
+		}
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
 	})
 }
 
@@ -762,7 +800,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("test execute, remove deltaVChannel", func(t *testing.T) {
+	t.Run("test execute remove deltaVChannel", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 

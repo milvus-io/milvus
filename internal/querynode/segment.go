@@ -505,7 +505,6 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	var cTimestampsPtr = (*C.uint64_t)(&(*timestamps)[0])
 	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
-	log.Debug("QueryNode::Segment::InsertBegin", zap.Any("cNumOfRows", cNumOfRows))
 	status := C.Insert(s.segmentPtr,
 		cOffset,
 		cNumOfRows,
