@@ -24,10 +24,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // enableMultipleVectorFields indicates whether to enable multiple vector fields.
 const enableMultipleVectorFields = false
+
+// maximum length of variable-length strings
+const maxVarCharLength = int64(65535)
 
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
@@ -187,9 +191,8 @@ func validateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		switch field.GetDataType() {
-		//TODO remove String check after supported in 2.1
 		case schemapb.DataType_String:
-			return errors.New("string data type not supported yet")
+			return errors.New("string data type not supported yet, please use VarChar type instead")
 		case schemapb.DataType_None:
 			return errors.New("data type None is not valid")
 		}
@@ -221,9 +224,33 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 			if idx != -1 {
 				return fmt.Errorf("there are more than one primary key, field name = %s, %s", coll.Fields[idx].Name, field.Name)
 			}
-			if field.DataType != schemapb.DataType_Int64 {
-				return errors.New("the data type of primary key should be int64")
+
+			// The type of the primary key field can only be int64 and varchar
+			if field.DataType != schemapb.DataType_Int64 && field.DataType != schemapb.DataType_VarChar {
+				return errors.New("the data type of primary key should be Int64 or VarChar")
 			}
+
+			// varchar field do not support autoID
+			// If autoID is required, it is recommended to use int64 field as the primary key
+			if field.DataType == schemapb.DataType_VarChar {
+				if field.AutoID {
+					return fmt.Errorf("autoID is not supported when the VarChar field is the primary key")
+				}
+				typeParams := funcutil.KeyValuePair2Map(field.TypeParams)
+				maxLengthPerRowKey := "max_length_per_row"
+				maxLengthPerRowValue, ok := typeParams[maxLengthPerRowKey]
+				if !ok {
+					return fmt.Errorf("the max_length_per_row was not specified when the VarChar field is the primary key")
+				}
+				maxLengthPerRow, err := strconv.ParseInt(maxLengthPerRowValue, 10, 64)
+				if err != nil {
+					return err
+				}
+				if maxLengthPerRow > maxVarCharLength || maxLengthPerRow <= 0 {
+					return fmt.Errorf("the maximum length specified for a VarChar shoule be in (0, 65535]")
+				}
+			}
+
 			idx = i
 		}
 	}

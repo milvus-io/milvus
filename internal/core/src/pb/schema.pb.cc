@@ -513,12 +513,13 @@ const char descriptor_table_protodef_schema_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "queries\030\001 \001(\003\022\r\n\005top_k\030\002 \001(\003\0223\n\013fields_d"
   "ata\030\003 \003(\0132\036.milvus.proto.schema.FieldDat"
   "a\022\016\n\006scores\030\004 \003(\002\022%\n\003ids\030\005 \001(\0132\030.milvus."
-  "proto.schema.IDs\022\r\n\005topks\030\006 \003(\003*\217\001\n\010Data"
+  "proto.schema.IDs\022\r\n\005topks\030\006 \003(\003*\234\001\n\010Data"
   "Type\022\010\n\004None\020\000\022\010\n\004Bool\020\001\022\010\n\004Int8\020\002\022\t\n\005In"
   "t16\020\003\022\t\n\005Int32\020\004\022\t\n\005Int64\020\005\022\t\n\005Float\020\n\022\n"
-  "\n\006Double\020\013\022\n\n\006String\020\024\022\020\n\014BinaryVector\020d"
-  "\022\017\n\013FloatVector\020eB5Z3github.com/milvus-i"
-  "o/milvus/internal/proto/schemapbb\006proto3"
+  "\n\006Double\020\013\022\n\n\006String\020\024\022\013\n\007VarChar\020\025\022\020\n\014B"
+  "inaryVector\020d\022\017\n\013FloatVector\020eB5Z3github"
+  ".com/milvus-io/milvus/internal/proto/sch"
+  "emapbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_schema_2eproto_deps[1] = {
   &::descriptor_table_common_2eproto,
@@ -542,7 +543,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_sch
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_schema_2eproto_once;
 static bool descriptor_table_schema_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_schema_2eproto = {
-  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 1880,
+  &descriptor_table_schema_2eproto_initialized, descriptor_table_protodef_schema_2eproto, "schema.proto", 1893,
   &descriptor_table_schema_2eproto_once, descriptor_table_schema_2eproto_sccs, descriptor_table_schema_2eproto_deps, 14, 1,
   schemas, file_default_instances, TableStruct_schema_2eproto::offsets,
   file_level_metadata_schema_2eproto, 14, file_level_enum_descriptors_schema_2eproto, file_level_service_descriptors_schema_2eproto,
@@ -568,6 +569,7 @@ bool DataType_IsValid(int value) {
     case 10:
     case 11:
     case 20:
+    case 21:
     case 100:
     case 101:
       return true;

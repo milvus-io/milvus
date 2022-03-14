@@ -134,6 +134,7 @@ enum DataType : int {
   Float = 10,
   Double = 11,
   String = 20,
+  VarChar = 21,
   BinaryVector = 100,
   FloatVector = 101,
   DataType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),

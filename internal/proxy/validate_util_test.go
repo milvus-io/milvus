@@ -151,49 +151,72 @@ func TestValidateDuplicatedFieldName(t *testing.T) {
 }
 
 func TestValidatePrimaryKey(t *testing.T) {
-	coll := schemapb.CollectionSchema{
+	boolField := &schemapb.FieldSchema{
+		Name:         "boolField",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Bool,
+	}
+
+	int64Field := &schemapb.FieldSchema{
+		Name:         "int64Field",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_Int64,
+	}
+
+	VarCharField := &schemapb.FieldSchema{
+		Name:         "VarCharField",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_VarChar,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "max_length_per_row",
+				Value: "100",
+			},
+		},
+	}
+
+	// test collection without pk field
+	assert.Error(t, validatePrimaryKey(&schemapb.CollectionSchema{
 		Name:        "coll1",
 		Description: "",
 		AutoID:      true,
-		Fields:      nil,
-	}
-	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
-		Name:         "f1",
-		FieldID:      100,
-		IsPrimaryKey: false,
-		Description:  "",
-		DataType:     1,
-		TypeParams:   nil,
-		IndexParams:  nil,
-	})
-	assert.Nil(t, validateSchema(&coll))
-	pf := &schemapb.FieldSchema{
-		Name:         "f2",
-		FieldID:      101,
-		IsPrimaryKey: true,
-		Description:  "",
-		DataType:     1,
-		TypeParams:   nil,
-		IndexParams:  nil,
-	}
-	coll.Fields = append(coll.Fields, pf)
-	assert.NotNil(t, validateSchema(&coll))
-	coll.AutoID = false
-	assert.NotNil(t, validateSchema(&coll))
-	pf.DataType = schemapb.DataType_Bool
-	assert.NotNil(t, validateSchema(&coll))
-	pf.DataType = schemapb.DataType_Int64
-	assert.Nil(t, validateSchema(&coll))
-	coll.Fields = append(coll.Fields, &schemapb.FieldSchema{
-		Name:         "",
-		FieldID:      102,
-		IsPrimaryKey: true,
-		Description:  "",
-		DataType:     1,
-		TypeParams:   nil,
-		IndexParams:  nil,
-	})
-	assert.NotNil(t, validateSchema(&coll))
+		Fields:      []*schemapb.FieldSchema{boolField},
+	}))
+
+	// test collection with int64 field ad pk
+	int64Field.IsPrimaryKey = true
+	assert.Nil(t, validatePrimaryKey(&schemapb.CollectionSchema{
+		Name:        "coll1",
+		Description: "",
+		AutoID:      true,
+		Fields:      []*schemapb.FieldSchema{boolField, int64Field},
+	}))
+
+	// test collection with varChar field as pk
+	VarCharField.IsPrimaryKey = true
+	assert.Nil(t, validatePrimaryKey(&schemapb.CollectionSchema{
+		Name:        "coll1",
+		Description: "",
+		AutoID:      true,
+		Fields:      []*schemapb.FieldSchema{boolField, VarCharField},
+	}))
+
+	// test collection with multi pk field
+	assert.Error(t, validatePrimaryKey(&schemapb.CollectionSchema{
+		Name:        "coll1",
+		Description: "",
+		AutoID:      true,
+		Fields:      []*schemapb.FieldSchema{boolField, int64Field, VarCharField},
+	}))
+
+	// test collection with varChar field as primary and autoID = true
+	VarCharField.AutoID = true
+	assert.Error(t, validatePrimaryKey(&schemapb.CollectionSchema{
+		Name:        "coll1",
+		Description: "",
+		AutoID:      true,
+		Fields:      []*schemapb.FieldSchema{boolField, VarCharField},
+	}))
 }
 
 func TestValidateFieldType(t *testing.T) {
@@ -243,8 +266,8 @@ func TestValidateFieldType(t *testing.T) {
 			validate: false,
 		},
 		{
-			dt:       schemapb.DataType_String,
-			validate: false,
+			dt:       schemapb.DataType_VarChar,
+			validate: true,
 		},
 	}
 
