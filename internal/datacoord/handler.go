@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"go.uber.org/zap"
 )
 
@@ -108,7 +108,7 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 
 func getCollectionStartPosition(channel string, collectionInfo *datapb.CollectionInfo) *internalpb.MsgPosition {
 	for _, sp := range collectionInfo.GetStartPositions() {
-		if sp.GetKey() != rootcoord.ToPhysicalChannel(channel) {
+		if sp.GetKey() != funcutil.ToPhysicalChannel(channel) {
 			continue
 		}
 		return &internalpb.MsgPosition{

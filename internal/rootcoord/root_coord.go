@@ -1337,7 +1337,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordCreateCollectionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreateCollection", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Inc()
 	return succStatus(), nil
 }
@@ -1368,7 +1368,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDropCollectionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropCollection", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Dec()
 	return succStatus(), nil
 }
@@ -1407,8 +1407,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordHasCollectionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("HasCollection",
-		in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.BoolResponse{
 		Status: succStatus(),
 		Value:  t.HasCollection,
@@ -1447,8 +1446,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDescribeCollectionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("DescribeCollection",
-		strconv.FormatInt(in.CollectionID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	t.Rsp.Status = succStatus()
 	return t.Rsp, nil
 }
@@ -1487,7 +1485,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 
 	metrics.RootCoordShowCollectionsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
 	t.Rsp.Status = succStatus()
-	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("ShowCollections", "ALL").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.Rsp, nil
 }
 
@@ -1520,7 +1518,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordCreatePartitionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreatePartition", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfPartitions.WithLabelValues(in.CollectionName).Inc()
 	return succStatus(), nil
 }
@@ -1554,7 +1552,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 		zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDropPartitionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropPartition", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfPartitions.WithLabelValues(in.CollectionName).Dec()
 	return succStatus(), nil
 }
@@ -1596,7 +1594,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 		zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordHasPartitionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("HasPartition", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.BoolResponse{
 		Status: succStatus(),
 		Value:  t.HasPartition,
@@ -1637,7 +1635,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 
 	metrics.RootCoordShowPartitionsCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	t.Rsp.Status = succStatus()
-	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("ShowPartitions", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.Rsp, nil
 }
 
@@ -1670,7 +1668,7 @@ func (c *Core) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest)
 		zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordCreateIndexCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreateIndex", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreateIndex").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return succStatus(), nil
 }
 
@@ -1717,7 +1715,7 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	} else {
 		t.Rsp.Status = succStatus()
 	}
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DescribeIndex", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DescribeIndex").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.Rsp, nil
 }
 
@@ -1750,7 +1748,7 @@ func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*c
 		zap.String("index name", in.IndexName), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDropIndexCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropIndex", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropIndex").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return succStatus(), nil
 }
 
@@ -1788,8 +1786,7 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 		zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDescribeSegmentCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("DescribeSegment",
-		strconv.FormatInt(in.CollectionID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("DescribeSegment").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	t.Rsp.Status = succStatus()
 	return t.Rsp, nil
 }
@@ -1830,7 +1827,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 		zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordShowSegmentsCounter.WithLabelValues(metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("ShowSegments", strconv.FormatInt(in.CollectionID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("ShowSegments").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	t.Rsp.Status = succStatus()
 	return t.Rsp, nil
 }
@@ -2066,7 +2063,7 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 		zap.Int64("msgID", in.Base.MsgID))
 
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreateAlias", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreateAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return succStatus(), nil
 }
 
@@ -2094,7 +2091,7 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 	log.Debug("DropAlias success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.Alias), zap.Int64("msgID", in.Base.MsgID))
 
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropAlias", in.Alias).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return succStatus(), nil
 }
 
@@ -2125,7 +2122,7 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
 		zap.Int64("msgID", in.Base.MsgID))
 
-	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("AlterAlias", in.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("AlterAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return succStatus(), nil
 }
 

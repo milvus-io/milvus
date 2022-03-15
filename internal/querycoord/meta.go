@@ -37,8 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 const (
@@ -954,7 +954,7 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 	// get dmChannel/search channel the node has watched
 	for _, channelInfo := range dmChannelInfos {
 		collectionID := channelInfo.CollectionID
-		dmChannel := rootcoord.ToPhysicalChannel(channelInfo.DmChannel)
+		dmChannel := funcutil.ToPhysicalChannel(channelInfo.DmChannel)
 		if _, ok := colID2DmChannels[collectionID]; !ok {
 			colID2DmChannels[collectionID] = []string{}
 		}
@@ -977,7 +977,7 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 			}
 			deltaChannels := make([]string, len(deltaChanelInfos))
 			for offset, channelInfo := range deltaChanelInfos {
-				deltaChannels[offset] = rootcoord.ToPhysicalChannel(channelInfo.ChannelName)
+				deltaChannels[offset] = funcutil.ToPhysicalChannel(channelInfo.ChannelName)
 			}
 			colID2DeltaChannels[collectionID] = deltaChannels
 		}
