@@ -756,20 +756,21 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	exist := false
+
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
 	if err != nil {
 		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
-		exist = true
-	} else {
-		for _, id := range segIDs {
-			if id == t.Req.SegmentID {
-				exist = true
-				break
-			}
-		}
+		return err
 	}
 
+	// check if segment id exists
+	exist := false
+	for _, id := range segIDs {
+		if id == t.Req.SegmentID {
+			exist = true
+			break
+		}
+	}
 	if !exist {
 		return fmt.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
 	}
