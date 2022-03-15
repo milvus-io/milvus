@@ -17,6 +17,7 @@
 package rmq
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,11 +31,35 @@ func TestRmqID_Serialize(t *testing.T) {
 	bin := rid.Serialize()
 	assert.NotNil(t, bin)
 	assert.NotZero(t, len(bin))
+}
 
-	rid.LedgerID()
-	rid.EntryID()
-	rid.BatchIdx()
-	rid.PartitionIdx()
+func Test_AtEarliestPosition(t *testing.T) {
+	rid := &rmqID{
+		messageID: 0,
+	}
+	assert.True(t, rid.AtEarliestPosition())
+
+	rid = &rmqID{
+		messageID: math.MaxInt64,
+	}
+	assert.False(t, rid.AtEarliestPosition())
+}
+
+func TestLessOrEqualThan(t *testing.T) {
+	rid1 := &rmqID{
+		messageID: 0,
+	}
+	rid2 := &rmqID{
+		messageID: math.MaxInt64,
+	}
+
+	ret, err := rid1.LessOrEqualThan(rid2.Serialize())
+	assert.Nil(t, err)
+	assert.True(t, ret)
+
+	ret, err = rid2.LessOrEqualThan(rid1.Serialize())
+	assert.Nil(t, err)
+	assert.False(t, ret)
 }
 
 func Test_SerializeRmqID(t *testing.T) {
@@ -45,7 +70,6 @@ func Test_SerializeRmqID(t *testing.T) {
 
 func Test_DeserializeRmqID(t *testing.T) {
 	bin := SerializeRmqID(5)
-	id, err := DeserializeRmqID(bin)
-	assert.Nil(t, err)
+	id := DeserializeRmqID(bin)
 	assert.Equal(t, id, int64(5))
 }

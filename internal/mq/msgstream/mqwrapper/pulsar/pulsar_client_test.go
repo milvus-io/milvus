@@ -99,7 +99,6 @@ func Consume1(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		Type:                        mqwrapper.KeyShared,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.Nil(t, err)
@@ -137,7 +136,6 @@ func Consume2(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		Type:                        mqwrapper.KeyShared,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.Nil(t, err)
@@ -172,7 +170,6 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 		Topic:                       topic,
 		SubscriptionName:            subName,
 		BufSize:                     1024,
-		Type:                        mqwrapper.KeyShared,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.Nil(t, err)
@@ -276,7 +273,7 @@ func Consume21(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 			//log.Debug("total", zap.Int("val", *total))
 		}
 	}
-	c <- msg.ID()
+	c <- &pulsarID{messageID: msg.ID()}
 
 	log.Info("Consume1 randomly RECV", zap.Any("number", cnt))
 	log.Info("Consume1 done")
@@ -294,7 +291,7 @@ func Consume22(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 	assert.NotNil(t, consumer)
 	defer consumer.Close()
 
-	err = consumer.Seek(msgID)
+	err = consumer.Seek(msgID.(*pulsarID).messageID)
 	assert.Nil(t, err)
 
 	// skip the last received message
@@ -546,7 +543,7 @@ func TestPulsarClient_StringToMsgID(t *testing.T) {
 	client, _ := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	defer client.Close()
 
-	mid := client.EarliestMessageID()
+	mid := pulsar.EarliestMessageID()
 	str := msgIDToString(mid)
 
 	res, err := client.StringToMsgID(str)

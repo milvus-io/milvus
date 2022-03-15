@@ -458,6 +458,18 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 	return nil
 }
 
+func (rmq *rocksmq) GetLatestMsg(topicName string) (int64, error) {
+	if rmq.isClosed() {
+		return DefaultMessageID, errors.New(RmqNotServingErrMsg)
+	}
+	msgID, err := rmq.getLatestMsg(topicName)
+	if err != nil {
+		return DefaultMessageID, err
+	}
+
+	return msgID, nil
+}
+
 // DestroyConsumerGroup removes a consumer group from rocksdb_kv
 func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
 	if rmq.isClosed() {
@@ -809,6 +821,19 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
+	msgID, err := rmq.getLatestMsg(topicName)
+	if err != nil {
+		return err
+	}
+
+	// current msgID should not be included
+	rmq.moveConsumePos(topicName, groupName, msgID+1)
+	log.Debug("successfully seek to latest", zap.String("topic", topicName),
+		zap.String("group", groupName), zap.Uint64("latest", uint64(msgID+1)))
+	return nil
+}
+
+func (rmq *rocksmq) getLatestMsg(topicName string) (int64, error) {
 	readOpts := gorocksdb.NewDefaultReadOptions()
 	defer readOpts.Destroy()
 	iter := rocksdbkv.NewRocksIterator(rmq.store, readOpts)
@@ -820,12 +845,12 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 
 	// if iterate fail
 	if err := iter.Err(); err != nil {
-		return err
+		return DefaultMessageID, err
 	}
 	// should find the last key we written into, start with fixTopicName/
 	// if not find, start from 0
 	if !iter.Valid() {
-		return nil
+		return DefaultMessageID, nil
 	}
 
 	iKey := iter.Key()
@@ -833,20 +858,18 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	if iKey != nil {
 		iKey.Free()
 	}
+
 	// if find message is not belong to current channel, start from 0
 	if !strings.Contains(seekMsgID, prefix) {
-		return nil
+		return DefaultMessageID, nil
 	}
 
 	msgID, err := strconv.ParseInt(seekMsgID[len(topicName)+1:], 10, 64)
 	if err != nil {
-		return err
+		return DefaultMessageID, err
 	}
-	// current msgID should not be included
-	rmq.moveConsumePos(topicName, groupName, msgID+1)
-	log.Debug("successfully seek to latest", zap.String("topic", topicName),
-		zap.String("group", groupName), zap.Uint64("latest", uint64(msgID+1)))
-	return nil
+
+	return msgID, nil
 }
 
 // Notify sends a mutex in MsgMutex channel to tell consumers to consume

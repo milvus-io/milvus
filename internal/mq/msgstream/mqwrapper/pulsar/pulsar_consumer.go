@@ -32,8 +32,7 @@ import (
 
 // Consumer consumes from pulsar
 type Consumer struct {
-	c pulsar.Consumer
-	pulsar.Reader
+	c          pulsar.Consumer
 	msgChannel chan mqwrapper.Message
 	hasSeek    bool
 	AtLatest   bool
@@ -66,6 +65,7 @@ func (pc *Consumer) Chan() <-chan mqwrapper.Message {
 				patchEarliestMessageID(&mid)
 				pc.c.Seek(mid)
 			}
+
 			go func() {
 				for { //nolint:gosimple
 					select {
@@ -124,6 +124,11 @@ func (pc *Consumer) Close() {
 		}
 		close(pc.closeCh)
 	})
+}
+
+func (pc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
+	msgID, err := pc.c.GetLastMessageID(pc.c.Name(), mqwrapper.DefaultPartitionIdx)
+	return &pulsarID{messageID: msgID}, err
 }
 
 // patchEarliestMessageID unsafe patch logic to change messageID partitionIdx to 0

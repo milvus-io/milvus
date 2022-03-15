@@ -55,22 +55,22 @@ type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, erro
 type MsgStream interface {
 	Start()
 	Close()
-	Chan() <-chan *MsgPack
+
 	AsProducer(channels []string)
-	AsConsumer(channels []string, subName string)
-	AsReader(channels []string, subName string)
-	AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition)
+	Produce(*MsgPack) error
 	SetRepackFunc(repackFunc RepackFunc)
 	ComputeProduceChannelIndexes(tsMsgs []TsMsg) [][]int32
 	GetProduceChannels() []string
-	Produce(*MsgPack) error
 	ProduceMark(*MsgPack) (map[string][]MessageID, error)
 	Broadcast(*MsgPack) error
 	BroadcastMark(*MsgPack) (map[string][]MessageID, error)
-	Next(ctx context.Context, channelName string) (TsMsg, error)
-	HasNext(channelName string) bool
+
+	AsConsumer(channels []string, subName string)
+	AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition)
+	Chan() <-chan *MsgPack
 	Seek(offset []*MsgPosition) error
-	SeekReaders(msgPositions []*internalpb.MsgPosition) error
+
+	GetLatestMsgID(channel string) (MessageID, error)
 }
 
 // Factory is an interface that can be used to generate a new msgstream object

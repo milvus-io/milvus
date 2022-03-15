@@ -517,48 +517,79 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	defer stream.Close()
 	pChannelName := rootcoord.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
-	stream.AsReader([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
-	metrics.QueryNodeNumReaders.WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
-	err = stream.SeekReaders([]*internalpb.MsgPosition{position})
+
+	stream.AsConsumer([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
+	lastMsgID, err := stream.GetLatestMsgID(pChannelName)
 	if err != nil {
 		return err
 	}
+
+	if lastMsgID.AtEarliestPosition() {
+		log.Debug("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+		return nil
+	}
+
+	metrics.QueryNodeNumReaders.WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+	err = stream.Seek([]*internalpb.MsgPosition{position})
+	if err != nil {
+		return err
+	}
+	stream.Start()
 
 	delData := &deleteData{
 		deleteIDs:        make(map[UniqueID][]int64),
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 		deleteOffset:     make(map[UniqueID]int64),
 	}
-	log.Debug("start read msg from stream reader", zap.Any("msg id", position.GetMsgID()))
-	for stream.HasNext(pChannelName) {
-		ctx, cancel := context.WithTimeout(ctx, timeoutForEachRead)
-		tsMsg, err := stream.Next(ctx, pChannelName)
-		if err != nil {
-			log.Warn("fail to load delete", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
-			cancel()
-			return err
-		}
-		if tsMsg == nil {
-			cancel()
-			continue
-		}
 
-		if tsMsg.Type() == commonpb.MsgType_Delete {
-			dmsg := tsMsg.(*msgstream.DeleteMsg)
-			if dmsg.CollectionID != collectionID {
-				cancel()
+	log.Debug("start read delta msg from seek position to last position",
+		zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+	hasMore := true
+	for hasMore {
+		select {
+		case <-ctx.Done():
+			break
+		case msgPack, ok := <-stream.Chan():
+			if !ok {
+				log.Warn("fail to read delta msg", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
+				return err
+			}
+
+			if msgPack == nil {
 				continue
 			}
-			log.Debug("delete pk",
-				zap.Any("pk", dmsg.PrimaryKeys),
-				zap.String("vChannelName", position.GetChannelName()),
-				zap.Any("msg id", position.GetMsgID()),
-			)
-			processDeleteMessages(loader.historicalReplica, dmsg, delData)
+
+			for _, tsMsg := range msgPack.Msgs {
+				if tsMsg.Type() == commonpb.MsgType_Delete {
+					dmsg := tsMsg.(*msgstream.DeleteMsg)
+					if dmsg.CollectionID != collectionID {
+						continue
+					}
+					log.Debug("delete pk",
+						zap.Any("pk", dmsg.PrimaryKeys),
+						zap.String("vChannelName", position.GetChannelName()),
+						zap.Any("msg id", position.GetMsgID()),
+					)
+					processDeleteMessages(loader.historicalReplica, dmsg, delData)
+				}
+
+				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
+				if err != nil {
+					log.Warn("check whether current MsgID less than last MsgID failed",
+						zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName), zap.Error(err))
+					return err
+				}
+
+				if ret {
+					hasMore = false
+					break
+				}
+			}
 		}
-		cancel()
 	}
-	log.Debug("All data has been read, there is no more data", zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
+
+	log.Debug("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
+		zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
 		if err != nil {

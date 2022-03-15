@@ -133,3 +133,12 @@ func (c *consumer) Close() {
 		log.Debug("Consumer close failed", zap.Any("topicName", c.topic), zap.Any("groupName", c.consumerName), zap.Any("error", err))
 	}
 }
+
+func (c *consumer) GetLatestMsgID() (int64, error) {
+	msgID, err := c.client.server.GetLatestMsg(c.topic)
+	if err != nil {
+		return msgID, err
+	}
+
+	return msgID, nil
+}

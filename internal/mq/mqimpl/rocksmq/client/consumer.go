@@ -76,4 +76,7 @@ type Consumer interface {
 
 	// Close consumer
 	Close()
+
+	// GetLatestMsgID get the latest msgID
+	GetLatestMsgID() (int64, error)
 }

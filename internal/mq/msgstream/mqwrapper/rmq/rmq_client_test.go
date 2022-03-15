@@ -18,7 +18,6 @@ package rmq
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -64,7 +63,6 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 	topic := "TestRmqClient_CreateProducer"
 	proOpts := mqwrapper.ProducerOptions{Topic: topic}
 	producer, err := client.CreateProducer(proOpts)
-	fmt.Println("===========producer:", producer, err)
 
 	defer producer.Close()
 	assert.Nil(t, err)
@@ -85,6 +83,57 @@ func TestRmqClient_CreateProducer(t *testing.T) {
 	producer, e := client.CreateProducer(invalidOpts)
 	assert.Nil(t, producer)
 	assert.Error(t, e)
+}
+
+func TestRmqClient_GetLatestMsg(t *testing.T) {
+	client, err := createRmqClient()
+	assert.Nil(t, err)
+	defer client.Close()
+
+	topic := "t2GetLatestMsg"
+	proOpts := mqwrapper.ProducerOptions{Topic: topic}
+	producer, err := client.CreateProducer(proOpts)
+	assert.Nil(t, err)
+	defer producer.Close()
+
+	for i := 0; i < 10; i++ {
+		msg := &mqwrapper.ProducerMessage{
+			Payload:    []byte{byte(i)},
+			Properties: nil,
+		}
+		_, err = producer.Send(context.TODO(), msg)
+		assert.Nil(t, err)
+	}
+
+	subName := "subName"
+	consumerOpts := mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+		BufSize:                     1024,
+	}
+
+	consumer, err := client.Subscribe(consumerOpts)
+	assert.Nil(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+
+	expectLastMsg, err := consumer.GetLatestMsgID()
+	assert.Nil(t, err)
+	var actualLastMsg mqwrapper.Message
+
+	for {
+		select {
+		case <-ctx.Done():
+			ret, err := actualLastMsg.ID().LessOrEqualThan(expectLastMsg.Serialize())
+			assert.Nil(t, err)
+			assert.False(t, ret)
+			return
+		case msg := <-consumer.Chan():
+			consumer.Ack(msg)
+			actualLastMsg = msg
+		}
+	}
 }
 
 func TestRmqClient_Subscribe(t *testing.T) {

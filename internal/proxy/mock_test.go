@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -285,20 +284,6 @@ func (ms *simpleMockMsgStream) AsProducer(channels []string) {
 func (ms *simpleMockMsgStream) AsConsumer(channels []string, subName string) {
 }
 
-func (ms *simpleMockMsgStream) AsReader(channels []string, subName string) {
-}
-
-func (ms *simpleMockMsgStream) SeekReaders(msgPositions []*internalpb.MsgPosition) error {
-	return nil
-}
-func (ms *simpleMockMsgStream) Next(ctx context.Context, channelName string) (msgstream.TsMsg, error) {
-	return nil, nil
-}
-
-func (ms *simpleMockMsgStream) HasNext(channelName string) bool {
-	return true
-}
-
 func (ms *simpleMockMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
 
@@ -372,6 +357,10 @@ func (ms *simpleMockMsgStream) GetProduceChannels() []string {
 
 func (ms *simpleMockMsgStream) Seek(offset []*msgstream.MsgPosition) error {
 	return nil
+}
+
+func (ms *simpleMockMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID, error) {
+	return nil, nil
 }
 
 func newSimpleMockMsgStream() *simpleMockMsgStream {

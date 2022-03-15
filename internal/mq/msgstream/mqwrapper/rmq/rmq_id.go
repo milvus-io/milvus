@@ -35,24 +35,13 @@ func (rid *rmqID) Serialize() []byte {
 	return SerializeRmqID(rid.messageID)
 }
 
-func (rid *rmqID) LedgerID() int64 {
-	// TODO
-	return 0
+func (rid *rmqID) AtEarliestPosition() bool {
+	return rid.messageID <= 0
 }
 
-func (rid *rmqID) EntryID() int64 {
-	// TODO
-	return 0
-}
-
-func (rid *rmqID) BatchIdx() int32 {
-	// TODO
-	return 0
-}
-
-func (rid *rmqID) PartitionIdx() int32 {
-	// TODO
-	return 0
+func (rid *rmqID) LessOrEqualThan(msgID []byte) (bool, error) {
+	rMsgID := DeserializeRmqID(msgID)
+	return rid.messageID < rMsgID, nil
 }
 
 // SerializeRmqID is used to serialize a message ID to byte array
@@ -63,6 +52,6 @@ func SerializeRmqID(messageID int64) []byte {
 }
 
 // DeserializeRmqID is used to deserialize a message ID from byte array
-func DeserializeRmqID(messageID []byte) (int64, error) {
-	return int64(common.Endian.Uint64(messageID)), nil
+func DeserializeRmqID(messageID []byte) int64 {
+	return int64(common.Endian.Uint64(messageID))
 }
