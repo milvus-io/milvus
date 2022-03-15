@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/BurntSushi/toml v1.0.0
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
+	github.com/Jeffail/tunny v0.1.4 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
@@ -64,4 +65,3 @@ replace (
 	github.com/keybase/go-keychain => github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4
 	google.golang.org/grpc => google.golang.org/grpc v1.38.0
 )
-

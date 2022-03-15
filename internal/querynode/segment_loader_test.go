@@ -188,7 +188,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		binlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadFiledBinlogData(segment, binlog)
+		err = loader.loadSealedFields(segment, binlog)
 		assert.NoError(t, err)
 	}
 
