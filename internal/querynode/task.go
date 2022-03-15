@@ -227,11 +227,19 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	partitionIDs := w.req.GetPartitionIDs()
 
 	var lType loadType
-	// if no partitionID is specified, load type is load collection
-	if len(partitionIDs) != 0 {
-		lType = loadTypePartition
-	} else {
+
+	switch w.req.GetLoadMeta().GetLoadType() {
+	case queryPb.LoadType_LoadCollection:
 		lType = loadTypeCollection
+	case queryPb.LoadType_LoadPartition:
+		lType = loadTypePartition
+	default:
+		// if no partitionID is specified, load type is load collection
+		if len(partitionIDs) != 0 {
+			lType = loadTypePartition
+		} else {
+			lType = loadTypeCollection
+		}
 	}
 
 	// get all vChannels
@@ -288,7 +296,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		},
 		Infos:        unFlushedSegments,
 		CollectionID: collectionID,
-		Schema:       w.req.Schema,
+		Schema:       w.req.GetSchema(),
+		LoadMeta:     w.req.GetLoadMeta(),
 	}
 	log.Debug("loading growing segments in WatchDmChannels...",
 		zap.Int64("collectionID", collectionID),
@@ -425,13 +434,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	hCol.addVChannels(vChannels)
 	hCol.addPChannels(pChannels)
 	hCol.setLoadType(lType)
-	if lType == loadTypePartition {
-		for _, partitionID := range partitionIDs {
-			sCol.deleteReleasedPartition(partitionID)
-			hCol.deleteReleasedPartition(partitionID)
-			w.node.streaming.replica.addPartition(collectionID, partitionID)
-			w.node.historical.replica.addPartition(collectionID, partitionID)
-		}
+	for _, partitionID := range w.req.GetLoadMeta().GetPartitionIDs() {
+		sCol.deleteReleasedPartition(partitionID)
+		hCol.deleteReleasedPartition(partitionID)
+		w.node.streaming.replica.addPartition(collectionID, partitionID)
+		w.node.historical.replica.addPartition(collectionID, partitionID)
 	}
 	log.Debug("watchDMChannel, init replica done", zap.Int64("collectionID", collectionID), zap.Strings("vChannels", vChannels))
 
@@ -624,15 +631,14 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	var err error
 
 	// init meta
-	for _, info := range l.req.Infos {
-		collectionID := info.CollectionID
-		partitionID := info.PartitionID
-		l.node.historical.replica.addCollection(collectionID, l.req.Schema)
+	collectionID := l.req.GetLoadMeta().GetCollectionID()
+	l.node.historical.replica.addCollection(collectionID, l.req.GetSchema())
+	l.node.streaming.replica.addCollection(collectionID, l.req.GetSchema())
+	for _, partitionID := range l.req.GetLoadMeta().GetPartitionIDs() {
 		err = l.node.historical.replica.addPartition(collectionID, partitionID)
 		if err != nil {
 			return err
 		}
-		l.node.streaming.replica.addCollection(collectionID, l.req.Schema)
 		err = l.node.streaming.replica.addPartition(collectionID, partitionID)
 		if err != nil {
 			return err

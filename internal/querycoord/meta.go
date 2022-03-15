@@ -903,7 +903,7 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 	}
 
 	info := proto.Clone(m.collectionInfos[collectionID]).(*querypb.CollectionInfo)
-	if loadType == querypb.LoadType_loadCollection {
+	if loadType == querypb.LoadType_LoadCollection {
 		info.InMemoryPercentage = percentage
 		for _, partitionState := range info.PartitionStates {
 			if percentage >= 100 {
