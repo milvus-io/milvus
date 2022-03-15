@@ -32,6 +32,10 @@ func GetFunctionName(i interface{}) string {
 }
 
 // ProcessFuncParallel process function in parallel.
+//
+// ProcessFuncParallel waits for all goroutines done if no errors occur.
+// If some goroutines return error, ProcessFuncParallel cancels other goroutines as soon as possible and wait
+// for all other goroutines done, and returns the first error occurs.
 // Reference: https://stackoverflow.com/questions/40809504/idiomatic-goroutine-termination-and-error-handling
 func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname string) error {
 	if maxParallel <= 0 {
