@@ -1711,6 +1711,11 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 							Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
 							Schema:       schema,
 							CollectionID: collectionID,
+							LoadMeta: &querypb.LoadMetaInfo{
+								LoadType:     collectionInfo.LoadType,
+								CollectionID: collectionID,
+								PartitionIDs: toRecoverPartitionIDs,
+							},
 						}
 
 						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
@@ -1748,6 +1753,11 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						CollectionID: collectionID,
 						Infos:        []*datapb.VchannelInfo{vChannelInfo},
 						Schema:       schema,
+						LoadMeta: &querypb.LoadMetaInfo{
+							LoadType:     collectionInfo.LoadType,
+							CollectionID: collectionID,
+							PartitionIDs: toRecoverPartitionIDs,
+						},
 					}
 
 					if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
