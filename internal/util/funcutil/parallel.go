@@ -31,13 +31,17 @@ func GetFunctionName(i interface{}) string {
 	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
 
-// ProcessFuncParallel process function in parallel.
+type TaskFunc func() error
+type ProcessFunc func(idx int) error
+type DataProcessFunc func(data interface{}) error
+
+// ProcessFuncParallel processes function in parallel.
 //
 // ProcessFuncParallel waits for all goroutines done if no errors occur.
 // If some goroutines return error, ProcessFuncParallel cancels other goroutines as soon as possible and wait
 // for all other goroutines done, and returns the first error occurs.
 // Reference: https://stackoverflow.com/questions/40809504/idiomatic-goroutine-termination-and-error-handling
-func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname string) error {
+func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) error {
 	if maxParallel <= 0 {
 		maxParallel = 1
 	}
@@ -64,7 +68,6 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 	var wg sync.WaitGroup
 	for begin := 0; begin < total; begin = begin + nPerBatch {
 		j := begin
-
 		wg.Add(1)
 		go func(begin int) {
 			defer wg.Done()
@@ -81,7 +84,7 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 			for idx := begin; idx < end; idx++ {
 				err = f(idx)
 				if err != nil {
-					log.Debug(fname, zap.Error(err), zap.Any("idx", idx))
+					log.Error(fname, zap.Error(err), zap.Any("idx", idx))
 					break
 				}
 			}
@@ -98,6 +101,114 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 				return
 			}
 		}(j)
+
+		routineNum++
+	}
+
+	log.Debug(fname, zap.Any("NumOfGoRoutines", routineNum))
+
+	if routineNum <= 0 {
+		return nil
+	}
+
+	count := 0
+	for {
+		select {
+		case err := <-errc:
+			close(quit)
+			wg.Wait()
+			return err
+		case <-done:
+			count++
+			if count == routineNum {
+				wg.Wait()
+				return nil
+			}
+		}
+	}
+}
+
+// ProcessTaskParallel processes tasks in parallel.
+// Similar to ProcessFuncParallel
+func ProcessTaskParallel(maxParallel int, fname string, tasks ...TaskFunc) error {
+	// option := parallelProcessOption{}
+	// for _, opt := range opts {
+	// 	opt(&option)
+	// }
+
+	if maxParallel <= 0 {
+		maxParallel = 1
+	}
+
+	t := time.Now()
+	defer func() {
+		log.Debug(fname, zap.Any("time cost", time.Since(t)))
+	}()
+
+	total := len(tasks)
+	nPerBatch := (total + maxParallel - 1) / maxParallel
+	log.Debug(fname, zap.Any("total", total))
+	log.Debug(fname, zap.Any("nPerBatch", nPerBatch))
+
+	quit := make(chan bool)
+	errc := make(chan error)
+	done := make(chan error)
+	getMin := func(a, b int) int {
+		if a < b {
+			return a
+		}
+		return b
+	}
+	routineNum := 0
+	var wg sync.WaitGroup
+	for begin := 0; begin < total; begin = begin + nPerBatch {
+		j := begin
+
+		// if option.preExecute != nil {
+		// 	err := option.preExecute()
+		// 	if err != nil {
+		// 		close(quit)
+		// 		wg.Wait()
+		// 		return err
+		// 	}
+		// }
+
+		wg.Add(1)
+		go func(begin int) {
+			defer wg.Done()
+
+			select {
+			case <-quit:
+				return
+			default:
+			}
+
+			err := error(nil)
+
+			end := getMin(total, begin+nPerBatch)
+			for idx := begin; idx < end; idx++ {
+				err = tasks[idx]()
+				if err != nil {
+					log.Error(fname, zap.Error(err), zap.Any("idx", idx))
+					break
+				}
+			}
+
+			ch := done // send to done channel
+			if err != nil {
+				ch = errc // send to error channel
+			}
+
+			select {
+			case ch <- err:
+				return
+			case <-quit:
+				return
+			}
+		}(j)
+		// if option.postExecute != nil {
+		// 	option.postExecute()
+		// }
 
 		routineNum++
 	}

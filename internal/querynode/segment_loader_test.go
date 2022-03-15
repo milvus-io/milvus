@@ -188,7 +188,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		binlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadFiledBinlogData(segment, binlog)
+		err = loader.loadSealedFields(segment, binlog)
 		assert.NoError(t, err)
 	}
 
@@ -307,6 +307,31 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			},
 		}
 		err = loader.loadSegment(req, segmentTypeSealed)
+		assert.Error(t, err)
+	})
+
+	t.Run("Test Invalid SegmentType", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+		loader := node.loader
+		assert.NotNil(t, loader)
+
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			DstNodeID: 0,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    defaultSegmentID,
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+				},
+			},
+		}
+
+		err = loader.loadSegment(req, commonpb.SegmentState_Dropped)
 		assert.Error(t, err)
 	})
 }

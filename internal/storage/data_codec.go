@@ -451,8 +451,9 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 	var cID UniqueID
 	var pID UniqueID
 	var sID UniqueID
-	resultData := &InsertData{}
-	resultData.Data = make(map[FieldID]FieldData)
+	resultData := &InsertData{
+		Data: make(map[FieldID]FieldData),
+	}
 	for _, blob := range blobList {
 		binlogReader, err := NewBinlogReader(blob.Value)
 		if err != nil {
