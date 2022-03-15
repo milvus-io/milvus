@@ -686,10 +686,10 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}
 		rsp, err := s.GetFlushedSegments(ctx, req)
 		if err != nil {
-			return retSegIDs, err
+			return nil, err
 		}
 		if rsp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return retSegIDs, fmt.Errorf("get flushed segments from data coord failed, reason = %s", rsp.Status.Reason)
+			return nil, fmt.Errorf("get flushed segments from data coord failed, reason = %s", rsp.Status.Reason)
 		}
 		return rsp.Segments, nil
 	}
