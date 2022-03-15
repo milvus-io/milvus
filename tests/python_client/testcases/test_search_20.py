@@ -549,6 +549,35 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "ids": insert_res.primary_keys,
                                          "limit": default_limit})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_with_empty_collection_with_partition(self):
+        """
+        target: test search with empty collection
+        method: 1. collection an empty collection with partitions
+                2. load
+                3. search
+        expected: return 0 result
+        """
+        # 1. initialize without data
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        par = collection_w.partitions
+        # 2. search collection without data after load
+        collection_w.load()
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
+        # 2. search a partition without data after load
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            [par[1].name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_partition_deleted(self):
         """
