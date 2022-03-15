@@ -313,11 +313,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					DefaultTimestamp: maxTs,
 				}
 
-				for idx, channel := range channels {
-					ts := tss[idx]
-					metrics.ProxyDmlChannelTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), channel).Set(float64(ts))
-				}
-				metrics.ProxyDmlChannelTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "DefaultTimestamp").Set(float64(maxTs))
+				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "DefaultTimestamp").Set(float64(maxTs))
 
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {

@@ -37,9 +37,7 @@ var (
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "num_entities",
 			Help:      "Number of entities in collection.",
-		}, []string{
-			collectionIDLabelName,
-		})
+		}, []string{})
 
 	QueryCoordLoadCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

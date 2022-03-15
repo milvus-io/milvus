@@ -37,7 +37,7 @@ var (
 			Name:      "load_segment_latency",
 			Help:      "The latency of loading the segment",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, segmentIDLabelName})
+		}, []string{nodeIDLabelName})
 
 	IndexNodeDecodeBinlogLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -46,7 +46,7 @@ var (
 			Name:      "decode_binlog_latency",
 			Help:      "The latency of decode the binlog",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, segmentIDLabelName})
+		}, []string{nodeIDLabelName})
 
 	IndexNodeKnowhereBuildIndexLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -55,7 +55,7 @@ var (
 			Name:      "knowhere_build_index_latency",
 			Help:      "The latency of knowhere building the index",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, segmentIDLabelName})
+		}, []string{nodeIDLabelName})
 
 	IndexNodeEncodeIndexFileLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -64,7 +64,7 @@ var (
 			Name:      "encode_index_file_latency",
 			Help:      "The latency of encoding the index file",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, segmentIDLabelName})
+		}, []string{nodeIDLabelName})
 
 	IndexNodeSaveIndexFileLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -73,7 +73,7 @@ var (
 			Name:      "save_index_file_latency",
 			Help:      "The latency of saving the index file",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, segmentIDLabelName})
+		}, []string{nodeIDLabelName})
 )
 
 //RegisterIndexNode registers IndexNode metrics

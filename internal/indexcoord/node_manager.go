@@ -76,7 +76,7 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 	delete(nm.nodeClients, nodeID)
 	nm.lock.Unlock()
 	nm.pq.Remove(nodeID)
-	metrics.IndexCoordIndexNodeNum.WithLabelValues("index_node_num").Dec()
+	metrics.IndexCoordIndexNodeNum.WithLabelValues().Dec()
 }
 
 // AddNode adds the client of IndexNode.
@@ -97,7 +97,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
 	}
-	metrics.IndexCoordIndexNodeNum.WithLabelValues("index_node_num").Inc()
+	metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
 	return nm.setClient(nodeID, nodeClient)
 }
 

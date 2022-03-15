@@ -97,14 +97,6 @@ func Test_GetFieldSchemaByIndexID(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func Test_ToPhysicalChannel(t *testing.T) {
-	assert.Equal(t, "abc", ToPhysicalChannel("abc_"))
-	assert.Equal(t, "abc", ToPhysicalChannel("abc_123"))
-	assert.Equal(t, "abc", ToPhysicalChannel("abc_defgsg"))
-	assert.Equal(t, "abc__", ToPhysicalChannel("abc___defgsg"))
-	assert.Equal(t, "abcdef", ToPhysicalChannel("abcdef"))
-}
-
 func Test_EncodeMsgPositions(t *testing.T) {
 	mp := &msgstream.MsgPosition{
 		ChannelName: "test",
@@ -139,20 +131,4 @@ func Test_DecodeMsgPositions(t *testing.T) {
 
 	err = DecodeMsgPositions("null", &mpOut)
 	assert.Nil(t, err)
-}
-
-func Test_ConvertChannelName(t *testing.T) {
-	const (
-		chanName      = "by-dev_rootcoord-dml_123v0"
-		deltaChanName = "by-dev_rootcoord-delta_123v0"
-		tFrom         = "rootcoord-dml"
-		tTo           = "rootcoord-delta"
-	)
-	_, err := ConvertChannelName("by-dev", tFrom, tTo)
-	assert.NotNil(t, err)
-	_, err = ConvertChannelName("by-dev_rootcoord-delta_123v0", tFrom, tTo)
-	assert.NotNil(t, err)
-	str, err := ConvertChannelName(chanName, tFrom, tTo)
-	assert.Nil(t, err)
-	assert.Equal(t, deltaChanName, str)
 }
