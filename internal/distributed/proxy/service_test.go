@@ -18,6 +18,7 @@ package grpcproxy
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -30,16 +31,42 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockBase struct {
+	mock.Mock
+	isMockGetComponentStatesOn bool
+}
+
+func (m *MockBase) On(methodName string, arguments ...interface{}) *mock.Call {
+	if methodName == "GetComponentStates" {
+		m.isMockGetComponentStatesOn = true
+	}
+	return m.Mock.On(methodName, arguments...)
 }
 
 func (m *MockBase) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	if m.isMockGetComponentStatesOn {
+		ret1 := &internalpb.ComponentStates{}
+		var ret2 error
+		args := m.Called(ctx)
+		arg1 := args.Get(0)
+		arg2 := args.Get(1)
+		if arg1 != nil {
+			ret1 = arg1.(*internalpb.ComponentStates)
+		}
+		if arg2 != nil {
+			ret2 = arg2.(error)
+		}
+		return ret1, ret2
+	}
 	return &internalpb.ComponentStates{
 		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -431,6 +458,7 @@ type MockProxy struct {
 	startErr error
 	stopErr  error
 	regErr   error
+	isMockOn bool
 }
 
 func (m *MockProxy) Init() error {
@@ -899,6 +927,128 @@ func Test_NewServer(t *testing.T) {
 	assert.Nil(t, err)
 	err = server.Stop()
 	assert.Nil(t, err)
+}
+
+func TestServer_Check(t *testing.T) {
+	ctx := context.Background()
+	server, err := NewServer(ctx, nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
+
+	mockProxy := &MockProxy{}
+	server.proxy = mockProxy
+	server.rootCoordClient = &MockRootCoord{}
+	server.indexCoordClient = &MockIndexCoord{}
+	server.queryCoordClient = &MockQueryCoord{}
+	server.dataCoordClient = &MockDataCoord{}
+
+	req := &grpc_health_v1.HealthCheckRequest{Service: ""}
+	ret, err := server.Check(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
+
+	mockProxy.On("GetComponentStates", ctx).Return(nil, fmt.Errorf("mock grpc unexpected error")).Once()
+
+	ret, err = server.Check(ctx, req)
+	assert.NotNil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	componentInfo := &internalpb.ComponentInfo{
+		NodeID:    0,
+		Role:      "proxy",
+		StateCode: internalpb.StateCode_Abnormal,
+	}
+	status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
+	componentState := &internalpb.ComponentStates{
+		State:  componentInfo,
+		Status: status,
+	}
+	mockProxy.On("GetComponentStates", ctx).Return(componentState, nil)
+
+	ret, err = server.Check(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	status.ErrorCode = commonpb.ErrorCode_Success
+	ret, err = server.Check(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	componentInfo.StateCode = internalpb.StateCode_Initializing
+	ret, err = server.Check(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	componentInfo.StateCode = internalpb.StateCode_Healthy
+	ret, err = server.Check(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
+}
+
+func TestServer_Watch(t *testing.T) {
+	ctx := context.Background()
+	server, err := NewServer(ctx, nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
+
+	mockProxy := &MockProxy{}
+	server.proxy = mockProxy
+	server.rootCoordClient = &MockRootCoord{}
+	server.indexCoordClient = &MockIndexCoord{}
+	server.queryCoordClient = &MockQueryCoord{}
+	server.dataCoordClient = &MockDataCoord{}
+
+	watchServer := milvusmock.NewGrpcHealthWatchServer()
+	resultChan := watchServer.Chan()
+	req := &grpc_health_v1.HealthCheckRequest{Service: ""}
+	//var ret *grpc_health_v1.HealthCheckResponse
+	err = server.Watch(req, watchServer)
+	ret := <-resultChan
+
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
+
+	mockProxy.On("GetComponentStates", ctx).Return(nil, fmt.Errorf("mock grpc unexpected error")).Once()
+
+	err = server.Watch(req, watchServer)
+	ret = <-resultChan
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	componentInfo := &internalpb.ComponentInfo{
+		NodeID:    0,
+		Role:      "proxy",
+		StateCode: internalpb.StateCode_Abnormal,
+	}
+	status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
+	componentState := &internalpb.ComponentStates{
+		State:  componentInfo,
+		Status: status,
+	}
+	mockProxy.On("GetComponentStates", ctx).Return(componentState, nil)
+
+	err = server.Watch(req, watchServer)
+	ret = <-resultChan
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	status.ErrorCode = commonpb.ErrorCode_Success
+	err = server.Watch(req, watchServer)
+	ret = <-resultChan
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	componentInfo.StateCode = internalpb.StateCode_Initializing
+	err = server.Watch(req, watchServer)
+	ret = <-resultChan
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
+
+	componentInfo.StateCode = internalpb.StateCode_Healthy
+	err = server.Watch(req, watchServer)
+	ret = <-resultChan
+	assert.Nil(t, err)
+	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
 }
 
 func Test_NewServer_HTTPServerDisabled(t *testing.T) {

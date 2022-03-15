@@ -50,6 +50,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -157,7 +158,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
 	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
-
+	grpc_health_v1.RegisterHealthServer(s.grpcServer, s)
 	log.Debug("create Proxy grpc server",
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
@@ -644,4 +645,42 @@ func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milv
 
 func (s *Server) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	return s.proxy.GetImportState(ctx, req)
+}
+
+// Check is required by gRPC healthy checking
+func (s *Server) Check(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
+	ret := &grpc_health_v1.HealthCheckResponse{
+		Status: grpc_health_v1.HealthCheckResponse_NOT_SERVING,
+	}
+	state, err := s.proxy.GetComponentStates(ctx)
+	if err != nil {
+		return ret, err
+	}
+	if state.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return ret, nil
+	}
+	if state.State.StateCode != internalpb.StateCode_Healthy {
+		return ret, nil
+	}
+	ret.Status = grpc_health_v1.HealthCheckResponse_SERVING
+	return ret, nil
+}
+
+// Watch is required by gRPC healthy checking
+func (s *Server) Watch(req *grpc_health_v1.HealthCheckRequest, server grpc_health_v1.Health_WatchServer) error {
+	ret := &grpc_health_v1.HealthCheckResponse{
+		Status: grpc_health_v1.HealthCheckResponse_NOT_SERVING,
+	}
+	state, err := s.proxy.GetComponentStates(s.ctx)
+	if err != nil {
+		return server.Send(ret)
+	}
+	if state.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return server.Send(ret)
+	}
+	if state.State.StateCode != internalpb.StateCode_Healthy {
+		return server.Send(ret)
+	}
+	ret.Status = grpc_health_v1.HealthCheckResponse_SERVING
+	return server.Send(ret)
 }
