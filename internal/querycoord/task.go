@@ -1089,6 +1089,11 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 			Schema:       lst.Schema,
 			SourceNodeID: lst.SourceNodeID,
 			CollectionID: lst.CollectionID,
+			LoadMeta: &querypb.LoadMetaInfo{
+				LoadType:     lst.GetLoadMeta().GetLoadType(),
+				CollectionID: lst.GetCollectionID(),
+				PartitionIDs: lst.GetLoadMeta().GetPartitionIDs(),
+			},
 		}
 		loadSegmentReqs = append(loadSegmentReqs, req)
 	}
@@ -1263,6 +1268,11 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 			Infos:        []*datapb.VchannelInfo{info},
 			Schema:       wdt.Schema,
 			ExcludeInfos: wdt.ExcludeInfos,
+			LoadMeta: &querypb.LoadMetaInfo{
+				LoadType:     wdt.GetLoadMeta().GetLoadType(),
+				CollectionID: collectionID,
+				PartitionIDs: wdt.GetLoadMeta().GetPartitionIDs(),
+			},
 		}
 		watchDmChannelReqs = append(watchDmChannelReqs, req)
 	}
