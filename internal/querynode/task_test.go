@@ -634,10 +634,16 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 				PartitionID:  defaultPartitionID,
 				CollectionID: defaultCollectionID,
 				NumOfRows:    totalRAM / int64(sizePerRecord),
+				SegmentSize:  totalRAM,
 			},
+		}
+		// Reach the segment size that would cause OOM
+		for node.loader.checkSegmentSize(defaultCollectionID, task.req.Infos, 1) == nil {
+			task.req.Infos[0].SegmentSize *= 2
 		}
 		err = task.Execute(ctx)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "OOM")
 	})
 }
 
