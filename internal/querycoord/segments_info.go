@@ -52,14 +52,17 @@ func (s *segmentsInfo) loadSegments() error {
 		if err != nil {
 			return
 		}
+		numRowsCnt := float64(0)
 		for _, v := range values {
 			segment := &querypb.SegmentInfo{}
 			if err = proto.Unmarshal([]byte(v), segment); err != nil {
 				return
 			}
 			s.segmentIDMap[segment.GetSegmentID()] = segment
-			metrics.QueryCoordNumEntities.WithLabelValues(fmt.Sprint(segment.CollectionID)).Add(float64(segment.NumRows))
+			numRowsCnt += float64(segment.NumRows)
 		}
+		metrics.QueryCoordNumEntities.WithLabelValues().Add(numRowsCnt)
+
 	})
 	return err
 }
@@ -77,7 +80,7 @@ func (s *segmentsInfo) saveSegment(segment *querypb.SegmentInfo) error {
 		return err
 	}
 	s.segmentIDMap[segment.GetSegmentID()] = segment
-	metrics.QueryCoordNumEntities.WithLabelValues(fmt.Sprint(segment.CollectionID)).Add(float64(segment.NumRows))
+	metrics.QueryCoordNumEntities.WithLabelValues().Add(float64(segment.NumRows))
 	return nil
 }
 
@@ -89,7 +92,7 @@ func (s *segmentsInfo) removeSegment(segment *querypb.SegmentInfo) error {
 		return err
 	}
 	delete(s.segmentIDMap, segment.GetSegmentID())
-	metrics.QueryCoordNumEntities.WithLabelValues(fmt.Sprint(segment.CollectionID)).Sub(float64(segment.NumRows))
+	metrics.QueryCoordNumEntities.WithLabelValues().Sub(float64(segment.NumRows))
 	return nil
 }
 

@@ -22,11 +22,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metrics"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 // ticker can update ts only when the minTs are greater than the ts of ticker, we can use maxTs to update current later
@@ -93,17 +93,17 @@ func (ticker *channelsTimeTickerImpl) initCurrents(current Timestamp) {
 }
 
 func (ticker *channelsTimeTickerImpl) tick() error {
-	applyStart := time.Now()
+	tr := timerecord.NewTimeRecorder("applyTimestamp")
 	now, err := ticker.tso.AllocOne()
 	if err != nil {
 		log.Warn("Proxy channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
 		return err
 	}
-	metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(time.Since(applyStart).Milliseconds()))
+	metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	stats, err := ticker.getStatisticsFunc()
-	if err != nil {
-		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err))
+	stats, err2 := ticker.getStatisticsFunc()
+	if err2 != nil {
+		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err2))
 		return nil
 	}
 

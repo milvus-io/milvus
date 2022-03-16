@@ -21,16 +21,16 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/metrics"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -146,10 +146,10 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	deltaChanNames := make([]string, t.Req.ShardsNum)
 	for i := int32(0); i < t.Req.ShardsNum; i++ {
 		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.chanTimeTick.getDmlChannelName(), collID, i)
-		chanNames[i] = ToPhysicalChannel(vchanNames[i])
+		chanNames[i] = funcutil.ToPhysicalChannel(vchanNames[i])
 
 		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
-		deltaChanName, err1 := ConvertChannelName(chanNames[i], Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
+		deltaChanName, err1 := funcutil.ConvertChannelName(chanNames[i], Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
 		if err1 != nil || deltaChanName != deltaChanNames[i] {
 			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
 		}
@@ -363,7 +363,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// remove delta channels
 		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
 		for i, chanName := range collMeta.PhysicalChannelNames {
-			if deltaChanNames[i], err = ConvertChannelName(chanName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta); err != nil {
+			if deltaChanNames[i], err = funcutil.ConvertChannelName(chanName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta); err != nil {
 				return err
 			}
 		}
@@ -756,20 +756,21 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	exist := false
+
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
 	if err != nil {
 		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
-		exist = true
-	} else {
-		for _, id := range segIDs {
-			if id == t.Req.SegmentID {
-				exist = true
-				break
-			}
-		}
+		return err
 	}
 
+	// check if segment id exists
+	exist := false
+	for _, id := range segIDs {
+		if id == t.Req.SegmentID {
+			exist = true
+			break
+		}
+	}
 	if !exist {
 		return fmt.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
 	}

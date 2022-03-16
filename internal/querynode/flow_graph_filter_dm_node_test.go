@@ -95,18 +95,6 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 		assert.Nil(t, res)
 	})
 
-	t.Run("test released partition", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
-		assert.NoError(t, err)
-		fg, err := getFilterDMNode(ctx)
-		assert.NoError(t, err)
-		col, err := fg.replica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		col.addReleasedPartition(defaultPartitionID)
-		res := fg.filterInvalidInsertMessage(msg)
-		assert.Nil(t, res)
-	})
-
 	t.Run("test no exclude segment", func(t *testing.T) {
 		msg, err := genSimpleInsertMsg()
 		assert.NoError(t, err)
@@ -203,18 +191,6 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
-		res := fg.filterInvalidDeleteMessage(msg)
-		assert.Nil(t, res)
-	})
-
-	t.Run("test delete released partition", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
-		assert.NoError(t, err)
-		fg, err := getFilterDMNode(ctx)
-		assert.NoError(t, err)
-		col, err := fg.replica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		col.addReleasedPartition(defaultPartitionID)
 		res := fg.filterInvalidDeleteMessage(msg)
 		assert.Nil(t, res)
 	})

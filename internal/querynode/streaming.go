@@ -154,9 +154,6 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 	}
 
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
-		if err = col.checkReleasedPartitions(partIDs); err != nil {
-			return searchResults, searchSegmentIDs, searchPartIDs, err
-		}
 		return searchResults, searchSegmentIDs, searchPartIDs, nil
 	}
 
@@ -214,9 +211,9 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 					err2 = err
 					return
 				}
-				metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.SearchLabel,
-					metrics.GrowingSegmentLabel,
-					fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+				metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID),
+					metrics.SearchLabel,
+					metrics.GrowingSegmentLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 				segmentLock.Lock()
 				searchResults = append(searchResults, searchResult)
 				searchSegmentIDs = append(searchSegmentIDs, seg.segmentID)

@@ -163,7 +163,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "ddl_read_type_latency",
 			Help:      "The latency for read type of DDL operations",
-		}, []string{functionLabelName, collectionIDLabelName})
+		}, []string{functionLabelName})
 
 	// RootCoordDDLWriteTypeLatency records the latency for write type of DDL operations.
 	RootCoordDDLWriteTypeLatency = prometheus.NewHistogramVec(
@@ -172,7 +172,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "ddl_write_type_latency",
 			Help:      "The latency for write type of DDL operations",
-		}, []string{functionLabelName, collectionIDLabelName})
+		}, []string{functionLabelName})
 
 	// RootCoordSyncTimeTickLatency records the latency of sync time tick.
 	RootCoordSyncTimeTickLatency = prometheus.NewHistogram(

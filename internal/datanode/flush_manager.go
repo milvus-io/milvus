@@ -413,7 +413,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		data:   kvs,
 	}, field2Insert, field2Stats, flushed, dropped, pos)
 
-	metrics.DataNodeFlushSegmentLatency.WithLabelValues(fmt.Sprint(collID), fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeFlushSegmentLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return nil
 }
 
@@ -555,11 +555,11 @@ type flushBufferInsertTask struct {
 func (t *flushBufferInsertTask) flushInsertData() error {
 	if t.BaseKV != nil && len(t.data) > 0 {
 		for _, d := range t.data {
-			metrics.DataNodeFlushedSize.WithLabelValues(metrics.InsertLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(d)))
+			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.InsertLabel).Add(float64(len(d)))
 		}
 		tr := timerecord.NewTimeRecorder("insertData")
 		err := t.MultiSave(t.data)
-		metrics.DataNodeSave2StorageLatency.WithLabelValues(metrics.InsertLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return err
 	}
 	return nil
@@ -574,11 +574,11 @@ type flushBufferDeleteTask struct {
 func (t *flushBufferDeleteTask) flushDeleteData() error {
 	if len(t.data) > 0 && t.BaseKV != nil {
 		for _, d := range t.data {
-			metrics.DataNodeFlushedSize.WithLabelValues(metrics.DeleteLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(len(d)))
+			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.DeleteLabel).Add(float64(len(d)))
 		}
 		tr := timerecord.NewTimeRecorder("deleteData")
 		err := t.MultiSave(t.data)
-		metrics.DataNodeSave2StorageLatency.WithLabelValues(metrics.DeleteLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return err
 	}
 	return nil

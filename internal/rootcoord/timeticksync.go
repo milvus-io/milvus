@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -99,7 +100,7 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 		var err error
 		deltaChanNames := make([]string, len(chanNames))
 		for i, chanName := range chanNames {
-			deltaChanNames[i], err = ConvertChannelName(chanName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
+			deltaChanNames[i], err = funcutil.ConvertChannelName(chanName, Params.MsgChannelCfg.RootCoordDml, Params.MsgChannelCfg.RootCoordDelta)
 			if err != nil {
 				log.Error("failed to convert dml channel name to delta channel name", zap.String("chanName", chanName))
 				panic("invalid dml channel name " + chanName)

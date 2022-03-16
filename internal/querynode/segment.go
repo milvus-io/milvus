@@ -313,7 +313,7 @@ func (s *Segment) search(plan *SearchPlan,
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
 	tr := timerecord.NewTimeRecorder("cgoSearch")
 	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult, C.int64_t(s.segmentID))
-	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}
@@ -343,8 +343,8 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	ts := C.uint64_t(plan.Timestamp)
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
 	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
-	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(metrics.QueryLabel,
-		fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID),
+		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
 		return nil, err
 	}
@@ -505,7 +505,6 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	var cTimestampsPtr = (*C.uint64_t)(&(*timestamps)[0])
 	var cSizeofPerRow = C.int(sizeofPerRow)
 	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
-	log.Debug("QueryNode::Segment::InsertBegin", zap.Any("cNumOfRows", cNumOfRows))
 	status := C.Insert(s.segmentPtr,
 		cOffset,
 		cNumOfRows,

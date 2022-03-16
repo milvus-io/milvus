@@ -39,8 +39,8 @@ var (
 			Name:      "message_rows_count",
 			Help:      "Messages rows size count consumed from msgStream in DataNode.",
 		}, []string{
-			msgTypeLabelName,
 			nodeIDLabelName,
+			msgTypeLabelName,
 		})
 
 	DataNodeFlushedSize = prometheus.NewCounterVec(
@@ -50,31 +50,31 @@ var (
 			Name:      "flushed_size",
 			Help:      "Data size flushed to storage in DataNode.",
 		}, []string{
+			nodeIDLabelName,
 			msgTypeLabelName,
-			nodeIDLabelName,
 		})
 
-	DataNodeNumDmlChannels = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "num_dml_channels",
-			Help:      "Number of dmlChannels per collection in DataNode.",
-		}, []string{
-			collectionIDLabelName,
-			nodeIDLabelName,
-		})
-
-	DataNodeNumDeltaChannels = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "num_delta_channels",
-			Help:      "Number of deltaChannels per collection in DataNode.",
-		}, []string{
-			collectionIDLabelName,
-			nodeIDLabelName,
-		})
+	//DataNodeNumDmlChannels = prometheus.NewGaugeVec(
+	//	prometheus.GaugeOpts{
+	//		Namespace: milvusNamespace,
+	//		Subsystem: typeutil.DataNodeRole,
+	//		Name:      "num_dml_channels",
+	//		Help:      "Number of dmlChannels per collection in DataNode.",
+	//	}, []string{
+	//		collectionIDLabelName,
+	//		nodeIDLabelName,
+	//	})
+	//
+	//DataNodeNumDeltaChannels = prometheus.NewGaugeVec(
+	//	prometheus.GaugeOpts{
+	//		Namespace: milvusNamespace,
+	//		Subsystem: typeutil.DataNodeRole,
+	//		Name:      "num_delta_channels",
+	//		Help:      "Number of deltaChannels per collection in DataNode.",
+	//	}, []string{
+	//		collectionIDLabelName,
+	//		nodeIDLabelName,
+	//	})
 
 	DataNodeNumConsumers = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -83,7 +83,6 @@ var (
 			Name:      "num_consumers",
 			Help:      "Number of consumers per collection in DataNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -94,7 +93,6 @@ var (
 			Name:      "num_producers",
 			Help:      "Number of producers per collection in DataNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -105,8 +103,8 @@ var (
 			Name:      "time_sync",
 			Help:      "Synchronized timestamps per channel in DataNode.",
 		}, []string{
-			channelNameLabelName,
 			nodeIDLabelName,
+			channelNameLabelName,
 		})
 
 	DataNodeSegmentRowsCount = prometheus.NewCounterVec(
@@ -116,7 +114,6 @@ var (
 			Name:      "seg_rows_count",
 			Help:      "Rows count of segments which sent to DataCoord from DataNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -127,7 +124,6 @@ var (
 			Name:      "num_unflushed_segments",
 			Help:      "Number of unflushed segments in DataNode.",
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -139,7 +135,6 @@ var (
 			Help:      "The flush segment latency in DataNode.",
 			Buckets:   buckets,
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
 		})
 
@@ -151,8 +146,8 @@ var (
 			Help:      "The latency saving flush data to storage in DataNode.",
 			Buckets:   []float64{0, 10, 100, 200, 400, 1000, 10000},
 		}, []string{
-			msgTypeLabelName,
 			nodeIDLabelName,
+			msgTypeLabelName,
 		})
 
 	DataNodeFlushSegmentCount = prometheus.NewCounterVec( // TODO: arguably
@@ -162,8 +157,8 @@ var (
 			Name:      "flush_segment_count",
 			Help:      "Flush segment statistics in DataNode.",
 		}, []string{
-			statusLabelName,
 			nodeIDLabelName,
+			statusLabelName,
 		})
 
 	DataNodeAutoFlushSegmentCount = prometheus.NewCounterVec( // TODO: arguably
@@ -173,7 +168,6 @@ var (
 			Name:      "auto_flush_segment_count",
 			Help:      "Auto flush segment statistics in DataNode.",
 		}, []string{
-			channelNameLabelName,
 			nodeIDLabelName,
 		})
 
@@ -185,8 +179,19 @@ var (
 			Help:      "Compaction latency in DataNode.",
 			Buckets:   buckets,
 		}, []string{
-			collectionIDLabelName,
 			nodeIDLabelName,
+		})
+
+	// DataNodeFlushSegmentsReqCounter counts the num of calls of FlushSegments
+	DataNodeFlushSegmentsReqCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "flush_segments_total",
+			Help:      "Counter of flush segments",
+		}, []string{
+			nodeIDLabelName,
+			statusLabelName,
 		})
 )
 
@@ -195,8 +200,8 @@ func RegisterDataNode() {
 	prometheus.MustRegister(DataNodeNumFlowGraphs)
 	prometheus.MustRegister(DataNodeConsumeMsgRowsCount)
 	prometheus.MustRegister(DataNodeFlushedSize)
-	prometheus.MustRegister(DataNodeNumDmlChannels)
-	prometheus.MustRegister(DataNodeNumDeltaChannels)
+	//prometheus.MustRegister(DataNodeNumDmlChannels)
+	//prometheus.MustRegister(DataNodeNumDeltaChannels)
 	prometheus.MustRegister(DataNodeNumConsumers)
 	prometheus.MustRegister(DataNodeNumProducers)
 	prometheus.MustRegister(DataNodeTimeSync)
@@ -207,4 +212,5 @@ func RegisterDataNode() {
 	prometheus.MustRegister(DataNodeFlushSegmentCount)
 	prometheus.MustRegister(DataNodeAutoFlushSegmentCount)
 	prometheus.MustRegister(DataNodeCompactionLatency)
+	prometheus.MustRegister(DataNodeFlushSegmentsReqCounter)
 }

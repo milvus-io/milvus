@@ -325,6 +325,7 @@ func genSimpleInsertDataSchema() *schemapb.CollectionSchema {
 	fieldTimestamp := genConstantField(timestampField)
 	fieldVec := genFloatVectorField(simpleVecField)
 	fieldInt := genConstantField(simpleConstField)
+	fieldPK := genPKField(simplePKField)
 
 	schema := schemapb.CollectionSchema{ // schema for insertData
 		Name:   defaultCollectionName,
@@ -334,6 +335,7 @@ func genSimpleInsertDataSchema() *schemapb.CollectionSchema {
 			fieldTimestamp,
 			fieldVec,
 			fieldInt,
+			fieldPK,
 		},
 	}
 	return &schema
