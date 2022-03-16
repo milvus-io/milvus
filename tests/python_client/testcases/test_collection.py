@@ -1076,6 +1076,22 @@ class TestCollectionOperation(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_string_field(self):
+        """
+        target: test create with string field
+        method: create collection with string field
+        expected: Raise exception
+        """
+        self._connect()
+        string_field = self.field_schema_wrap.init_field_schema(name="string", dtype=DataType.STRING)[0]
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema(fields=[int_field, string_field, vec_field])
+        error = {ct.err_code: 0, ct.err_msg: "string data type not supported yet"}
+        self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
+                                             check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_load_partition(self):
         """
