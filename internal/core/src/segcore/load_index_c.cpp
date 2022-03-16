@@ -80,20 +80,19 @@ CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     try {
         auto load_index_info = (LoadIndexInfo*)c_load_index_info;
-        auto binary_set = (milvus::knowhere::BinarySet*)c_binary_set;
+        auto binary_set = (knowhere::BinarySet*)c_binary_set;
         auto& index_params = load_index_info->index_params;
         bool find_index_type = index_params.count("index_type") > 0 ? true : false;
         bool find_index_mode = index_params.count("index_mode") > 0 ? true : false;
         AssertInfo(find_index_type == true, "Can't find index type in index_params");
-        milvus::knowhere::IndexMode mode;
+        knowhere::IndexMode mode;
         if (find_index_mode) {
-            mode = index_params["index_mode"] == "CPU" ? milvus::knowhere::IndexMode::MODE_CPU
-                                                       : milvus::knowhere::IndexMode::MODE_GPU;
+            mode = index_params["index_mode"] == "CPU" ? knowhere::IndexMode::MODE_CPU : knowhere::IndexMode::MODE_GPU;
         } else {
-            mode = milvus::knowhere::IndexMode::MODE_CPU;
+            mode = knowhere::IndexMode::MODE_CPU;
         }
         load_index_info->index =
-            milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
+            knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
         load_index_info->index->Load(*binary_set);
         auto status = CStatus();
         status.error_code = Success;

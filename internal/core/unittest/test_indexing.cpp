@@ -111,14 +111,14 @@ TEST(Indexing, Naive) {
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
                                                                          knowhere::IndexMode::MODE_CPU);
 
-    auto conf = milvus::knowhere::Config{
+    auto conf = knowhere::Config{
         {knowhere::meta::DIM, DIM},
         {knowhere::meta::TOPK, TOPK},
         {knowhere::IndexParams::nlist, 100},
         {knowhere::IndexParams::nprobe, 4},
         {knowhere::IndexParams::m, 4},
         {knowhere::IndexParams::nbits, 8},
-        {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+        {knowhere::Metric::TYPE, knowhere::Metric::L2},
         {knowhere::meta::DEVICEID, 0},
     };
 
@@ -193,7 +193,7 @@ TEST(Indexing, IVFFlat) {
                                  {knowhere::meta::TOPK, TOPK},
                                  {knowhere::IndexParams::nlist, NLIST},
                                  {knowhere::IndexParams::nprobe, NPROBE},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
 
     auto database = knowhere::GenDataset(N, DIM, raw_data.data());
@@ -210,8 +210,8 @@ TEST(Indexing, IVFFlat) {
     auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
     for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
         std::cout << ids[i] << "->" << dis[i] << std::endl;
     }
@@ -233,7 +233,7 @@ TEST(Indexing, IVFFlatNM) {
                                  {knowhere::meta::TOPK, TOPK},
                                  {knowhere::IndexParams::nlist, NLIST},
                                  {knowhere::IndexParams::nprobe, NPROBE},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
 
     auto database = knowhere::GenDataset(N, DIM, raw_data.data());
@@ -244,9 +244,9 @@ TEST(Indexing, IVFFlatNM) {
     std::cout << "insert ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
     indexing->SetIndexSize(NQ * DIM * sizeof(float));
-    milvus::knowhere::BinarySet bs = indexing->Serialize(conf);
+    knowhere::BinarySet bs = indexing->Serialize(conf);
 
-    milvus::knowhere::BinaryPtr bptr = std::make_shared<milvus::knowhere::Binary>();
+    knowhere::BinaryPtr bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data.data(), [&](uint8_t*) {});
     bptr->size = DIM * N * sizeof(float);
     bs.Append(RAW_DATA, bptr);
@@ -259,8 +259,8 @@ TEST(Indexing, IVFFlatNM) {
     auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
     for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
         std::cout << ids[i] << "->" << dis[i] << std::endl;
     }

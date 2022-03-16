@@ -38,17 +38,17 @@ class IndexWrapper {
     std::unique_ptr<Binary>
     Serialize();
 
-    std::unique_ptr<milvus::knowhere::BinarySet>
+    std::unique_ptr<knowhere::BinarySet>
     SerializeBinarySet();
 
     void
-    LoadFromBinarySet(milvus::knowhere::BinarySet&);
+    LoadFromBinarySet(knowhere::BinarySet&);
 
     void
     Load(const char* serialized_sliced_blob_buffer, int32_t size);
 
     struct QueryResult {
-        std::vector<milvus::knowhere::IDType> ids;
+        std::vector<knowhere::IDType> ids;
         std::vector<float> distances;
         int64_t nq;
         int64_t topk;
@@ -108,8 +108,8 @@ class IndexWrapper {
     knowhere::VecIndexPtr index_ = nullptr;
     std::string type_params_;
     std::string index_params_;
-    milvus::json type_config_;
-    milvus::json index_config_;
+    knowhere::Config type_config_;
+    knowhere::Config index_config_;
     knowhere::Config config_;
     std::vector<uint8_t> raw_data_;
     std::once_flag raw_data_loaded_;

@@ -65,50 +65,50 @@ IndexWrapper::parse_impl(const std::string& serialized_params_str, knowhere::Con
     };
 
     /***************************** meta *******************************/
-    check_parameter<int>(conf, milvus::knowhere::meta::DIM, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::meta::TOPK, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::meta::DIM, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::meta::TOPK, stoi_closure, std::nullopt);
 
     /***************************** IVF Params *******************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::nprobe, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::nlist, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::m, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::nbits, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::nprobe, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::nlist, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::m, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::nbits, stoi_closure, std::nullopt);
 
     /************************** NSG Parameter **************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::knng, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::search_length, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::out_degree, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::candidate, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::knng, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::search_length, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::out_degree, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::candidate, stoi_closure, std::nullopt);
 
     /************************** HNSW Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::efConstruction, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::M, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::ef, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::efConstruction, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::M, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::ef, stoi_closure, std::nullopt);
 
     /************************** Annoy Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::n_trees, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::search_k, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::n_trees, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::search_k, stoi_closure, std::nullopt);
 
     /************************** PQ Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::PQM, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::PQM, stoi_closure, std::nullopt);
 
     /************************** NGT Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::edge_size, stoi_closure, std::nullopt);
 
     /************************** NGT Search Params *****************************/
-    check_parameter<float>(conf, milvus::knowhere::IndexParams::epsilon, stof_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::max_search_edges, stoi_closure, std::nullopt);
+    check_parameter<float>(conf, knowhere::IndexParams::epsilon, stof_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::max_search_edges, stoi_closure, std::nullopt);
 
     /************************** NGT_PANNG Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::forcedly_pruned_edge_size, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::selectively_pruned_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::forcedly_pruned_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::selectively_pruned_edge_size, stoi_closure, std::nullopt);
 
     /************************** NGT_ONNG Params *****************************/
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::outgoing_edge_size, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, milvus::knowhere::IndexParams::incoming_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::outgoing_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::IndexParams::incoming_edge_size, stoi_closure, std::nullopt);
 
     /************************** Serialize Params *******************************/
-    check_parameter<int>(conf, milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, stoi_closure, std::optional{4});
+    check_parameter<int>(conf, knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, stoi_closure, std::optional{4});
 }
 
 void
@@ -149,7 +149,7 @@ IndexWrapper::get_config_by_name(std::string name) {
 
 int64_t
 IndexWrapper::dim() {
-    auto dimension = get_config_by_name<int64_t>(milvus::knowhere::meta::DIM);
+    auto dimension = get_config_by_name<int64_t>(knowhere::meta::DIM);
     AssertInfo(dimension.has_value(), "[IndexWrapper]Dimension doesn't have value");
     return (dimension.value());
 }
@@ -190,7 +190,7 @@ IndexWrapper::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
 
 void
 IndexWrapper::BuildWithIds(const knowhere::DatasetPtr& dataset) {
-    AssertInfo(dataset->data().find(milvus::knowhere::meta::IDS) != dataset->data().end(),
+    AssertInfo(dataset->data().find(knowhere::meta::IDS) != dataset->data().end(),
                "[IndexWrapper]Can't find ids field in dataset");
     auto index_type = get_index_type();
     auto index_mode = get_index_mode();
@@ -215,9 +215,9 @@ void
 IndexWrapper::StoreRawData(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
     if (is_in_nm_list(index_type)) {
-        auto tensor = dataset->Get<const void*>(milvus::knowhere::meta::TENSOR);
-        auto row_num = dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
-        auto dim = dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+        auto tensor = dataset->Get<const void*>(knowhere::meta::TENSOR);
+        auto row_num = dataset->Get<int64_t>(knowhere::meta::ROWS);
+        auto dim = dataset->Get<int64_t>(knowhere::meta::DIM);
         int64_t data_size;
         if (is_in_bin_list(index_type)) {
             data_size = dim / 8 * row_num;
@@ -229,9 +229,9 @@ IndexWrapper::StoreRawData(const knowhere::DatasetPtr& dataset) {
     }
 }
 
-std::unique_ptr<milvus::knowhere::BinarySet>
+std::unique_ptr<knowhere::BinarySet>
 IndexWrapper::SerializeBinarySet() {
-    auto ret = std::make_unique<milvus::knowhere::BinarySet>(index_->Serialize(config_));
+    auto ret = std::make_unique<knowhere::BinarySet>(index_->Serialize(config_));
     auto index_type = get_index_type();
 
     if (is_in_nm_list(index_type)) {
@@ -286,7 +286,7 @@ IndexWrapper::Serialize() {
 }
 
 void
-IndexWrapper::LoadFromBinarySet(milvus::knowhere::BinarySet& binary_set) {
+IndexWrapper::LoadFromBinarySet(knowhere::BinarySet& binary_set) {
     auto& map_ = binary_set.binary_map_;
     for (auto it = map_.begin(); it != map_.end(); ++it) {
         if (it->first == RAW_DATA) {
@@ -309,11 +309,11 @@ IndexWrapper::Load(const char* serialized_sliced_blob_buffer, int32_t size) {
     auto ok = blob_buffer.ParseFromString(data);
     AssertInfo(ok, "[IndexWrapper]Can't parse data from string to blob_buffer");
 
-    milvus::knowhere::BinarySet binarySet;
+    knowhere::BinarySet binarySet;
     for (auto i = 0; i < blob_buffer.datas_size(); i++) {
         const auto& binary = blob_buffer.datas(i);
         auto deleter = [&](uint8_t*) {};  // avoid repeated destruction
-        auto bptr = std::make_shared<milvus::knowhere::Binary>();
+        auto bptr = std::make_shared<knowhere::Binary>();
         bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)binary.value().c_str(), deleter);
         bptr->size = binary.value().length();
         binarySet.Append(binary.key(), bptr);
@@ -372,7 +372,7 @@ IndexWrapper::Query(const knowhere::DatasetPtr& dataset) {
 std::unique_ptr<IndexWrapper::QueryResult>
 IndexWrapper::QueryWithParam(const knowhere::DatasetPtr& dataset, const char* serialized_search_params) {
     namespace indexcgo = milvus::proto::indexcgo;
-    milvus::knowhere::Config search_conf;
+    knowhere::Config search_conf;
     parse_impl<indexcgo::MapParams>(std::string(serialized_search_params), search_conf);
 
     return std::move(QueryImpl(dataset, search_conf));
@@ -387,10 +387,10 @@ IndexWrapper::QueryImpl(const knowhere::DatasetPtr& dataset, const knowhere::Con
     }
 
     auto res = index_->Query(dataset, conf, nullptr);
-    auto ids = res->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto distances = res->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    auto nq = dataset->Get<int64_t>(milvus::knowhere::meta::ROWS);
-    auto k = config_[milvus::knowhere::meta::TOPK].get<int64_t>();
+    auto ids = res->Get<int64_t*>(knowhere::meta::IDS);
+    auto distances = res->Get<float*>(knowhere::meta::DISTANCE);
+    auto nq = dataset->Get<int64_t>(knowhere::meta::ROWS);
+    auto k = config_[knowhere::meta::TOPK].get<int64_t>();
 
     auto query_res = std::make_unique<IndexWrapper::QueryResult>();
     query_res->nq = nq;
@@ -408,7 +408,7 @@ IndexWrapper::LoadRawData() {
     auto index_type = get_index_type();
     if (is_in_nm_list(index_type)) {
         auto bs = index_->Serialize(config_);
-        auto bptr = std::make_shared<milvus::knowhere::Binary>();
+        auto bptr = std::make_shared<knowhere::Binary>();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         bptr->data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
         bptr->size = raw_data_.size();
