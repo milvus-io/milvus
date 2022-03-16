@@ -99,7 +99,7 @@ while getopts "p:d:t:s:f:ulrcghzmeb" arg; do
     CUDA_ARCH=$OPTARG
     ;;
   b)
-    EMBEDDED_MILVUS=$OPTARG
+    EMBEDDED_MILVUS="ON"
     ;;
   h) # help
     echo "

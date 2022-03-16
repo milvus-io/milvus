@@ -14,14 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package milvus
 
-import (
-	"os"
+import "testing"
 
-	"github.com/milvus-io/milvus/cmd/milvus"
-)
-
-func main() {
-	milvus.RunMilvus(os.Args)
+func TestMilvus(t *testing.T) {
+	RunMilvus([]string{"", "dry-run", "embedded"})
 }
