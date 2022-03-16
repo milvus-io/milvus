@@ -1,4 +1,5 @@
 import multiprocessing
+import numbers
 
 import pytest
 from time import sleep
@@ -285,7 +286,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "metric type not found"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 15409")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
@@ -548,6 +548,35 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"nq": default_nq,
                                          "ids": insert_res.primary_keys,
                                          "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_with_empty_collection_with_partition(self):
+        """
+        target: test search with empty collection
+        method: 1. collection an empty collection with partitions
+                2. load
+                3. search
+        expected: return 0 result
+        """
+        # 1. initialize without data
+        collection_w = self.init_collection_general(prefix, partition_num=1)[0]
+        par = collection_w.partitions
+        # 2. search collection without data after load
+        collection_w.load()
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
+        # 2. search a partition without data after load
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp,
+                            [par[1].name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_partition_deleted(self):
@@ -2062,6 +2091,73 @@ class TestCollectionSearch(TestcaseBase):
             # log.debug(f'actual: {dis_actual}, expect: {dis_expect}')
             # abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
             assert math.isclose(dis_actual, dis_expect, rel_tol=0, abs_tol=abs_tol)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_expression_large(self, dim):
+        """
+        target: test search with large expression
+        method: test search with large expression
+        expected: searched successfully 
+        """
+        # 1. initialize with data
+        nb = 10000
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      nb, dim=dim,
+                                                                      is_index=True)[0:4]
+
+        
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. search with expression
+        expression = f"0 < {default_float_field_name} < 5001"
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+
+        nums = 5000
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
+        search_res, _ = collection_w.search(vectors, default_search_field,
+                                            default_search_params, default_limit, expression,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={
+                                             "nq": nums,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                            })
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_expression_large_two(self, dim):
+        """
+        target: test search with large expression
+        method: test one of the collection ids to another collection search for it, with the large expression
+        expected: searched successfully 
+        """
+        # 1. initialize with data
+        nb = 10000
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                               nb, dim=dim,
+                                                                               is_index=True)[0:4]                                                                 
+
+        
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+ 
+        nums = 5000
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
+        vectors_id = [random.randint(0,nums)for _ in range(nums)]
+        expression = f"{default_float_field_name} in {vectors_id}"
+        search_res, _ = collection_w.search(vectors, default_search_field,
+                                            default_search_params, default_limit, expression,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={
+                                             "nq": nums,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                            })
 
 
 class TestSearchBase(TestcaseBase):

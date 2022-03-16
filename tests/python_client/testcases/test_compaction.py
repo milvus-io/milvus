@@ -448,7 +448,7 @@ class TestCompactionOperation(TestcaseBase):
         c_plans = collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact)[0]
 
         # waiting for handoff completed and search
-        cost = 1
+        cost = 30
         start = time()
         while True:
             sleep(5)
