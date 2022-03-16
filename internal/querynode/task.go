@@ -631,7 +631,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	var err error
 
 	// init meta
-	collectionID := l.req.GetLoadMeta().GetCollectionID()
+	collectionID := l.req.GetCollectionID()
 	l.node.historical.replica.addCollection(collectionID, l.req.GetSchema())
 	l.node.streaming.replica.addCollection(collectionID, l.req.GetSchema())
 	for _, partitionID := range l.req.GetLoadMeta().GetPartitionIDs() {
