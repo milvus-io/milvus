@@ -12,7 +12,7 @@
 option( EMBEDDED_MILVUS "Enable embedded Milvus" OFF )
 
 if ( EMBEDDED_MILVUS )
-    add_compile_definitions( "-DEMBEDDED_MILVUS" )
+    add_compile_definitions( EMBEDDED_MILVUS )
 endif()
 
 set(SEGCORE_FILES

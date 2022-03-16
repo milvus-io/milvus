@@ -17,11 +17,17 @@
 package main
 
 import (
+	"C"
 	"os"
 
 	"github.com/milvus-io/milvus/cmd/milvus"
 )
 
+//export startEmbedded
+func startEmbedded() {
+	os.Setenv("MILVUSCONF", "/tmp/milvus/configs/")
+	milvus.RunMilvus([]string{"", "run", "embedded"})
+}
+
 func main() {
-	milvus.RunMilvus(os.Args)
 }
