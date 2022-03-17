@@ -306,7 +306,7 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	return service, nil
 }
 
-// SetRootCoord sets root coordinator's client
+// SetEtcdClient sets etcd's client
 func (qc *QueryCoord) SetEtcdClient(etcdClient *clientv3.Client) {
 	qc.etcdCli = etcdClient
 }
@@ -331,6 +331,7 @@ func (qc *QueryCoord) SetDataCoord(dataCoord types.DataCoord) error {
 	return nil
 }
 
+// SetIndexCoord sets index coordinator's client
 func (qc *QueryCoord) SetIndexCoord(indexCoord types.IndexCoord) error {
 	if indexCoord == nil {
 		return errors.New("null IndexCoord interface")
