@@ -2793,3 +2793,51 @@ func TestProxy_GetComponentStates_state_code(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 }
+
+func TestProxy__Import(t *testing.T) {
+	req := &milvuspb.ImportRequest{
+		CollectionName: "dummy",
+	}
+	rootCoord := &RootCoordMock{}
+	rootCoord.state.Store(internalpb.StateCode_Healthy)
+	t.Run("test import", func(t *testing.T) {
+
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+
+		resp, err := proxy.Import(context.TODO(), req)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Nil(t, err)
+	})
+	t.Run("test import with unhealthy", func(t *testing.T) {
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.Import(context.TODO(), req)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}
+
+func TestProxy__GetImportState(t *testing.T) {
+	req := &milvuspb.GetImportStateRequest{
+		Task: 1,
+	}
+	rootCoord := &RootCoordMock{}
+	rootCoord.state.Store(internalpb.StateCode_Healthy)
+	t.Run("test get import state", func(t *testing.T) {
+
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+
+		resp, err := proxy.GetImportState(context.TODO(), req)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Nil(t, err)
+	})
+	t.Run("test get import state with unhealthy", func(t *testing.T) {
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.GetImportState(context.TODO(), req)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}

@@ -136,7 +136,10 @@ message AllocIDResponse {
 
 message ImportResult {
   common.Status status = 1;
-  repeated int64 segments = 2;             // id array of new sealed segments
-  int64 row_count = 3;                     // how many rows are imported by this task
-  repeated common.KeyValuePair infos = 4;  // more informations about the task, file path, failed reason, etc.
+  int64 task_id = 2;                       // id of the task
+  common.ImportState state = 3;            // state of the task
+  repeated int64 segments = 4;             // id array of new sealed segments
+  repeated int64 auto_ids = 5;             // auto-generated ids for auto-id primary key
+  int64 row_count = 6;                     // how many rows are imported by this task
+  repeated common.KeyValuePair infos = 7;  // more informations about the task, file path, failed reason, etc.
 }
