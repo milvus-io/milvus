@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -134,7 +135,9 @@ func (i *IndexCoord) Register() error {
 		}
 		// manually send signal to starter goroutine
 		if i.session.TriggerKill {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				p.Signal(syscall.SIGINT)
+			}
 		}
 	})
 	return nil
@@ -770,7 +773,9 @@ func (i *IndexCoord) watchNodeLoop() {
 				log.Error("Session Watcher channel closed", zap.Int64("server id", i.session.ServerID))
 				go i.Stop()
 				if i.session.TriggerKill {
-					syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+					if p, err := os.FindProcess(os.Getpid()); err == nil {
+						p.Signal(syscall.SIGINT)
+					}
 				}
 				return
 			}

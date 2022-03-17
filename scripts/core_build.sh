@@ -136,6 +136,26 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
 fi
 
+CMAKE_GENERATOR="Unix Makefiles"
+
+# MSYS system
+if [ "$MSYSTEM" == "MINGW64" ] ; then
+  BUILD_COVERAGE=OFF
+  PROFILING=OFF
+  GPU_VERSION=OFF
+  WITH_PROMETHEUS=OFF
+  CUDA_ARCH=OFF
+
+  # extra default cmake args for msys
+  CMAKE_GENERATOR="MSYS Makefiles"
+
+  # clang tools path
+  export CLANG_TOOLS_PATH=/mingw64/bin
+
+  # using system blas
+  export OpenBLAS_HOME="$(cygpath -w /mingw64)"
+fi
+
 pushd ${BUILD_OUTPUT_DIR}
 
 # Remove make cache since build.sh -l use default variables
@@ -164,6 +184,7 @@ esac
 
 
 CMAKE_CMD="cmake \
+${CMAKE_EXTRA_ARGS} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -178,8 +199,9 @@ CMAKE_CMD="cmake \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
 -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 ${CPP_SRC_DIR}"
+
 echo ${CMAKE_CMD}
-${CMAKE_CMD}
+${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then

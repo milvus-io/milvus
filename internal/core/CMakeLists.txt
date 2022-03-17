@@ -54,6 +54,8 @@ if ( APPLE )
 elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     message(STATUS "==============Linux Environment===============")
     set(LINUX TRUE)
+elseif ( MSYS )
+    message( STATUS "==============MSYS Environment===============" )
 else ()
     message(FATAL_ERROR "Unsupported platform!" )
 endif ()
@@ -114,7 +116,7 @@ include( ThirdPartyPackages )
 # **************************** Compiler arguments ****************************
 message( STATUS "Building Milvus CPU version" )
 
-if (LINUX)
+if (LINUX OR MSYS)
 append_flags( CMAKE_CXX_FLAGS
               FLAGS
               "-fPIC"

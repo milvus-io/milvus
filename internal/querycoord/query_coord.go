@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -110,7 +111,9 @@ func (qc *QueryCoord) Register() error {
 		}
 		// manually send signal to starter goroutine
 		if qc.session.TriggerKill {
-			syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				p.Signal(syscall.SIGINT)
+			}
 		}
 	})
 	return nil
@@ -383,7 +386,9 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 				log.Error("Session Watcher channel closed", zap.Int64("server id", qc.session.ServerID))
 				go qc.Stop()
 				if qc.session.TriggerKill {
-					syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+					if p, err := os.FindProcess(os.Getpid()); err == nil {
+						p.Signal(syscall.SIGINT)
+					}
 				}
 				return
 			}

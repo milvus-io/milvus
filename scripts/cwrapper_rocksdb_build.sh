@@ -70,9 +70,6 @@ CMAKE_CMD="cmake \
 -DCMAKE_INSTALL_PREFIX=${OUTPUT_LIB} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} ${SRC_DIR}"
 
-${CMAKE_CMD}
-echo ${CMAKE_CMD}
-
 unameOut="$(uname -s)"
 if [[ ! ${jobs+1} ]]; then
   case "${unameOut}" in
@@ -82,7 +79,14 @@ if [[ ! ${jobs+1} ]]; then
   esac
 fi
 
-make -j ${jobs}
+
+if [ "$MSYSTEM" == "MINGW64" ] ; then
+  echo Using system rocksdb
+else
+  echo ${CMAKE_CMD}
+  ${CMAKE_CMD}
+  make -j ${jobs}
+fi
 
 go env -w CGO_CFLAGS="-I${OUTPUT_LIB}/include"
 ldflags=""
@@ -100,9 +104,15 @@ else
       esac
 fi
 
+if [ "$MSYSTEM" == "MINGW64" ] ; then
+  ldflags="-L${OUTPUT_LIB}/lib -lrocksdb -lstdc++ -lm -lz -lshlwapi -lrpcrt4"
+fi
+
+
 if [[ $(arch) == 'arm64' ]]; then
   go env -w GOARCH=arm64
 fi
 
 go env -w CGO_LDFLAGS="$ldflags" && GO111MODULE=on
+
 go get github.com/tecbot/gorocksdb
