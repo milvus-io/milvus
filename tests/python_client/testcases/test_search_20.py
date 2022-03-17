@@ -11,6 +11,7 @@ from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
 from common.constants import *
+from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 
 prefix = "search_collection"
 search_num = 10
@@ -2159,6 +2160,122 @@ class TestCollectionSearch(TestcaseBase):
                                              "limit": default_limit,
                                             })
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_consistency_bounded(self, dim):
+        """
+        target: test search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. search with consistency_level is "bounded"
+        expected: searched successfully 
+        """
+        nb = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                               nb, dim=dim,
+                                                                               is_index=True)[0:4]  
+        
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_BOUNDED)
+        kwargs.update({"consistency_level": consistency_level})
+
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp,
+                            **kwargs,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         })
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_consistency_strong(self, dim):
+        """
+        target: test search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. search with consistency_level is "Strong"
+        expected: searched successfully 
+        """
+        nb = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                               nb, dim=dim,
+                                                                               is_index=True)[0:4]  
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_STRONG)
+        kwargs.update({"consistency_level": consistency_level})
+
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, 
+                            **kwargs,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         })
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_consistency_eventually(self, dim):
+        """
+        target: test search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. search with consistency_level is "eventually"
+        expected: searched successfully 
+        """
+        nb = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                               nb, dim=dim,
+                                                                               is_index=True)[0:4]
+        collection_w.load()  
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_EVENTUALLY)
+        kwargs.update({"consistency_level": consistency_level})
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, 
+                            **kwargs,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         })   
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_consistency_session(self, dim):
+        """
+        target: test search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. search with consistency_level is "session"
+        expected: searched successfully 
+        """
+        nb = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                               nb, dim=dim,
+                                                                               is_index=True)[0:4]  
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_SESSION)
+        kwargs.update({"consistency_level": consistency_level})
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, 
+                            **kwargs,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         })
 
 class TestSearchBase(TestcaseBase):
     @pytest.fixture(
