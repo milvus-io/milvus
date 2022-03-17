@@ -1,7 +1,4 @@
 --extra-index-url https://test.pypi.org/simple/
-grpcio==1.37.1
-grpcio-tools==1.37.1
-numpy==1.19.5
 pytest-cov==2.8.1
 sklearn==0.0
 pytest==6.2.2
@@ -18,7 +15,6 @@ git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
 pyopenssl
 pyasn1
-pandas
 pytest-html==3.1.1
 delayed-assert
 kubernetes==17.17.0
