@@ -29,9 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -55,8 +53,8 @@ type segmentLoader struct {
 
 	dataCoord types.DataCoord
 
-	minioKV kv.DataKV // minio minioKV
-	etcdKV  *etcdkv.EtcdKV
+	cm     storage.ChunkManager // minio cm
+	etcdKV *etcdkv.EtcdKV
 
 	factory msgstream.Factory
 }
@@ -263,13 +261,13 @@ func (loader *segmentLoader) loadFiledBinlogData(segment *Segment, fieldBinlogs 
 	blobs := make([]*storage.Blob, 0)
 	for _, fieldBinlog := range fieldBinlogs {
 		for _, path := range fieldBinlog.Binlogs {
-			binLog, err := loader.minioKV.Load(path.GetLogPath())
+			binLog, err := loader.cm.Read(path.GetLogPath())
 			if err != nil {
 				return err
 			}
 			blob := &storage.Blob{
 				Key:   path.GetLogPath(),
-				Value: []byte(binLog),
+				Value: binLog,
 			}
 			blobs = append(blobs, blob)
 		}
@@ -324,13 +322,13 @@ func (loader *segmentLoader) loadVecFieldIndexData(segment *Segment, indexInfo *
 	indexCodec := storage.NewIndexFileBinlogCodec()
 	for _, p := range indexInfo.IndexFilePaths {
 		log.Debug("load index file", zap.String("path", p))
-		indexPiece, err := loader.minioKV.Load(p)
+		indexPiece, err := loader.cm.Read(p)
 		if err != nil {
 			return err
 		}
 
 		if path.Base(p) != storage.IndexParamsKey {
-			data, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: path.Base(p), Value: []byte(indexPiece)}})
+			data, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: path.Base(p), Value: indexPiece}})
 			if err != nil {
 				return err
 			}
@@ -449,13 +447,13 @@ func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPath
 		return nil
 	}
 
-	values, err := loader.minioKV.MultiLoad(binlogPaths)
+	values, err := loader.cm.MultiRead(binlogPaths)
 	if err != nil {
 		return err
 	}
 	blobs := make([]*storage.Blob, 0)
 	for i := 0; i < len(values); i++ {
-		blobs = append(blobs, &storage.Blob{Value: []byte(values[i])})
+		blobs = append(blobs, &storage.Blob{Value: values[i]})
 	}
 
 	stats, err := storage.DeserializeStats(blobs)
@@ -480,13 +478,13 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
 		for _, log := range deltaLog.GetBinlogs() {
-			value, err := loader.minioKV.Load(log.GetLogPath())
+			value, err := loader.cm.Read(log.GetLogPath())
 			if err != nil {
 				return err
 			}
 			blob := &storage.Blob{
 				Key:   log.GetLogPath(),
-				Value: []byte(value),
+				Value: value,
 			}
 			blobs = append(blobs, blob)
 		}
@@ -678,31 +676,19 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context,
+func newSegmentLoader(
 	historicalReplica ReplicaInterface,
 	streamingReplica ReplicaInterface,
 	etcdKV *etcdkv.EtcdKV,
+	cm storage.ChunkManager,
 	factory msgstream.Factory) *segmentLoader {
-	option := &minioKV.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	client, err := minioKV.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
 
 	return &segmentLoader{
 		historicalReplica: historicalReplica,
 		streamingReplica:  streamingReplica,
 
-		minioKV: client,
-		etcdKV:  etcdKV,
+		cm:     cm,
+		etcdKV: etcdKV,
 
 		factory: factory,
 	}

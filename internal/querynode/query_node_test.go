@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -208,7 +209,8 @@ func newQueryNodeMock() *QueryNode {
 	svr.streaming = newStreaming(ctx, streamingReplica, msFactory, etcdKV, tsReplica)
 	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, msFactory)
 	svr.statsService = newStatsService(ctx, svr.historical.replica, msFactory)
-	svr.loader = newSegmentLoader(ctx, svr.historical.replica, svr.streaming.replica, etcdKV, msgstream.NewPmsFactory())
+	svr.chunkManager = storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
+	svr.loader = newSegmentLoader(svr.historical.replica, svr.streaming.replica, etcdKV, svr.chunkManager, msgstream.NewPmsFactory())
 	svr.etcdKV = etcdKV
 
 	return svr

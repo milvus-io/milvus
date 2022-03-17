@@ -32,10 +32,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var compactTestDir = "/tmp/milvus_test/compact"
+
 func TestCompactionTaskInnerMethods(t *testing.T) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
+	defer cm.RemoveWithPrefix("")
 	t.Run("Test getSegmentMeta", func(t *testing.T) {
 		rc := &RootCoordFactory{}
-		replica, err := newReplica(context.TODO(), rc, 1)
+		replica, err := newReplica(context.TODO(), rc, cm, 1)
 		require.NoError(t, err)
 
 		task := &compactionTask{
@@ -394,6 +398,8 @@ func getInsertBlobs(segID UniqueID, iData *InsertData, meta *etcdpb.CollectionMe
 }
 
 func TestCompactorInterfaceMethods(t *testing.T) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
+	defer cm.RemoveWithPrefix("")
 	notEmptySegmentBinlogs := []*datapb.CompactionSegmentBinlogs{{
 		SegmentID:           100,
 		FieldBinlogs:        nil,
@@ -445,9 +451,8 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		rc := &RootCoordFactory{}
 		dc := &DataCoordFactory{}
 		mockfm := &mockFlushManager{}
-		mockKv := memkv.NewMemoryKV()
-		mockbIO := &binlogIO{mockKv, alloc}
-		replica, err := newReplica(context.TODO(), rc, collID)
+		mockbIO := &binlogIO{cm, alloc}
+		replica, err := newReplica(context.TODO(), rc, cm, collID)
 		require.NoError(t, err)
 		replica.addFlushedSegmentWithPKs(segID, collID, partID, "channelname", 2, []UniqueID{1, 2})
 
@@ -507,7 +512,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			RowCount: 2,
 		}
 
-		err = mockKv.RemoveWithPrefix("/")
+		err = cm.RemoveWithPrefix("/")
 		require.NoError(t, err)
 		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, deleteAllData, meta)
 		require.NoError(t, err)
@@ -522,7 +527,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		replica.addFlushedSegmentWithPKs(segID, collID, partID, "channelname", 2, []UniqueID{1, 2})
 
 		// Compact empty segment
-		err = mockKv.RemoveWithPrefix("/")
+		err = cm.RemoveWithPrefix("/")
 		require.NoError(t, err)
 		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
 		require.NoError(t, err)
@@ -539,7 +544,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		plan.SegmentBinlogs = segBinlogs
 		// New test, remove all the binlogs in memkv
 		//  Deltas in timetravel range
-		err = mockKv.RemoveWithPrefix("/")
+		err = cm.RemoveWithPrefix("/")
 		require.NoError(t, err)
 		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
 		require.NoError(t, err)
@@ -555,7 +560,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		// New test, remove all the binlogs in memkv
 		//  Timeout
-		err = mockKv.RemoveWithPrefix("/")
+		err = cm.RemoveWithPrefix("/")
 		require.NoError(t, err)
 		cpaths, err = mockbIO.upload(context.TODO(), segID, partID, []*InsertData{iData}, dData, meta)
 		require.NoError(t, err)
@@ -574,8 +579,8 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		dc := &DataCoordFactory{}
 		mockfm := &mockFlushManager{}
 		mockKv := memkv.NewMemoryKV()
-		mockbIO := &binlogIO{mockKv, alloc}
-		replica, err := newReplica(context.TODO(), rc, collID)
+		mockbIO := &binlogIO{cm, alloc}
+		replica, err := newReplica(context.TODO(), rc, cm, collID)
 		require.NoError(t, err)
 
 		replica.addFlushedSegmentWithPKs(segID1, collID, partID, "channelname", 2, []UniqueID{1})
@@ -699,9 +704,8 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		rc := &RootCoordFactory{}
 		dc := &DataCoordFactory{}
 		mockfm := &mockFlushManager{}
-		mockKv := memkv.NewMemoryKV()
-		mockbIO := &binlogIO{mockKv, alloc}
-		replica, err := newReplica(context.TODO(), rc, collID)
+		mockbIO := &binlogIO{cm, alloc}
+		replica, err := newReplica(context.TODO(), rc, cm, collID)
 		require.NoError(t, err)
 
 		replica.addFlushedSegmentWithPKs(segID1, collID, partID, "channelname", 2, []UniqueID{1})

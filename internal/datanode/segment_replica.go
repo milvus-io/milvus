@@ -27,8 +27,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
-	miniokv "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -105,8 +103,8 @@ type SegmentReplica struct {
 	flushedSegments   map[UniqueID]*Segment
 	compactedSegments map[UniqueID]*Segment
 
-	metaService *metaService
-	minIOKV     kv.BaseKV
+	metaService  *metaService
+	chunkManager storage.ChunkManager
 }
 
 func (s *Segment) updatePKRange(pks []int64) {
@@ -130,22 +128,7 @@ func (s *Segment) updatePKRange(pks []int64) {
 
 var _ Replica = &SegmentReplica{}
 
-func newReplica(ctx context.Context, rc types.RootCoord, collID UniqueID) (*SegmentReplica, error) {
-	// MinIO
-	option := &miniokv.Option{
-		Address:           Params.MinioCfg.Address,
-		AccessKeyID:       Params.MinioCfg.AccessKeyID,
-		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey,
-		UseSSL:            Params.MinioCfg.UseSSL,
-		BucketName:        Params.MinioCfg.BucketName,
-		CreateBucket:      true,
-	}
-
-	minIOKV, err := miniokv.NewMinIOKV(ctx, option)
-	if err != nil {
-		return nil, err
-	}
-
+func newReplica(ctx context.Context, rc types.RootCoord, cm storage.ChunkManager, collID UniqueID) (*SegmentReplica, error) {
 	metaService := newMetaService(rc, collID)
 
 	replica := &SegmentReplica{
@@ -156,8 +139,8 @@ func newReplica(ctx context.Context, rc types.RootCoord, collID UniqueID) (*Segm
 		flushedSegments:   make(map[UniqueID]*Segment),
 		compactedSegments: make(map[UniqueID]*Segment),
 
-		metaService: metaService,
-		minIOKV:     minIOKV,
+		metaService:  metaService,
+		chunkManager: cm,
 	}
 
 	return replica, nil
@@ -441,14 +424,14 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 		}
 	}
 
-	values, err := replica.minIOKV.MultiLoad(bloomFilterFiles)
+	values, err := replica.chunkManager.MultiRead(bloomFilterFiles)
 	if err != nil {
 		log.Warn("failed to load bloom filter files", zap.Error(err))
 		return err
 	}
 	blobs := make([]*Blob, 0)
 	for i := 0; i < len(values); i++ {
-		blobs = append(blobs, &Blob{Value: []byte(values[i])})
+		blobs = append(blobs, &Blob{Value: values[i]})
 	}
 
 	stats, err := storage.DeserializeStats(blobs)

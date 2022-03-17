@@ -24,17 +24,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
+
+var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
 
 func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 	var ufs []*datapb.SegmentInfo
@@ -127,12 +129,14 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			0, 0, "", 0,
 			"replica nil"},
 	}
+	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	defer cm.RemoveWithPrefix("")
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
 			df := &DataCoordFactory{}
 
-			replica, err := newReplica(context.Background(), &RootCoordFactory{}, test.collID)
+			replica, err := newReplica(context.Background(), &RootCoordFactory{}, cm, test.collID)
 			assert.Nil(t, err)
 			if test.replicaNil {
 				replica = nil
@@ -147,7 +151,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				make(chan string),
 				df,
 				newCache(),
-				memkv.NewMemoryKV(),
+				cm,
 				newCompactionExecutor(),
 			)
 
@@ -185,7 +189,9 @@ func TestDataSyncService_Start(t *testing.T) {
 	collectionID := UniqueID(1)
 
 	flushChan := make(chan flushMsg, 100)
-	replica, err := newReplica(context.Background(), mockRootCoord, collectionID)
+	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	defer cm.RemoveWithPrefix("")
+	replica, err := newReplica(context.Background(), mockRootCoord, cm, collectionID)
 	assert.Nil(t, err)
 
 	allocFactory := NewAllocatorFactory(1)
@@ -225,7 +231,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan string, 100)
-	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), memkv.NewMemoryKV(), newCompactionExecutor())
+	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), cm, newCompactionExecutor())
 
 	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)

@@ -20,8 +20,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 )
+
+var globalMetaTestDir = "/tmp/milvus_test/global_meta"
 
 func TestGlobalMetaBroker_RootCoord(t *testing.T) {
 	refreshParams()
@@ -30,7 +33,9 @@ func TestGlobalMetaBroker_RootCoord(t *testing.T) {
 	rootCoord.createCollection(defaultCollectionID)
 	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
 
-	handler, err := newGlobalMetaBroker(ctx, rootCoord, nil, nil)
+	cm := storage.NewLocalChunkManager(storage.RootPath(globalMetaTestDir))
+	defer cm.RemoveWithPrefix("")
+	handler, err := newGlobalMetaBroker(ctx, rootCoord, nil, nil, cm)
 	assert.Nil(t, err)
 
 	t.Run("successCase", func(t *testing.T) {
@@ -73,7 +78,9 @@ func TestGlobalMetaBroker_DataCoord(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	dataCoord := newDataCoordMock(ctx)
 
-	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil)
+	cm := storage.NewLocalChunkManager(storage.RootPath(globalMetaTestDir))
+	defer cm.RemoveWithPrefix("")
+	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, cm)
 	assert.Nil(t, err)
 
 	t.Run("successCase", func(t *testing.T) {
@@ -111,10 +118,12 @@ func TestGlobalMetaBroker_IndexCoord(t *testing.T) {
 	rootCoord.enableIndex = true
 	rootCoord.createCollection(defaultCollectionID)
 	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
-	indexCoord, err := newIndexCoordMock(ctx)
+	indexCoord, err := newIndexCoordMock(globalMetaTestDir)
 	assert.Nil(t, err)
 
-	handler, err := newGlobalMetaBroker(ctx, rootCoord, nil, indexCoord)
+	cm := storage.NewLocalChunkManager(storage.RootPath(globalMetaTestDir))
+	defer cm.RemoveWithPrefix("")
+	handler, err := newGlobalMetaBroker(ctx, rootCoord, nil, indexCoord, cm)
 	assert.Nil(t, err)
 
 	t.Run("successCase", func(t *testing.T) {

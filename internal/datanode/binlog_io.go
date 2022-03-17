@@ -17,7 +17,6 @@
 package datanode
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"path"
@@ -25,7 +24,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -57,7 +55,7 @@ type uploader interface {
 }
 
 type binlogIO struct {
-	kv.BaseKV
+	storage.ChunkManager
 	allocatorInterface
 }
 
@@ -67,7 +65,7 @@ var _ uploader = (*binlogIO)(nil)
 func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error) {
 	var (
 		err = errStart
-		vs  = []string{}
+		vs  [][]byte
 	)
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -84,7 +82,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 					log.Warn("downloading failed, retry in 50ms", zap.Strings("paths", paths))
 					<-time.After(50 * time.Millisecond)
 				}
-				vs, err = b.MultiLoad(paths)
+				vs, err = b.MultiRead(paths)
 			}
 		}
 		return nil
@@ -96,7 +94,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 
 	rst := make([]*Blob, len(vs))
 	for i := range rst {
-		rst[i] = &Blob{Value: bytes.NewBufferString(vs[i]).Bytes()}
+		rst[i] = &Blob{Value: vs[i]}
 	}
 
 	return rst, nil
@@ -117,7 +115,7 @@ func (b *binlogIO) upload(
 
 	var (
 		p   = &segPaths{}             // The returns
-		kvs = make(map[string]string) // Key values to store in minIO
+		kvs = make(map[string][]byte) // Key values to store in minIO
 
 		insertField2Path = make(map[UniqueID]*datapb.FieldBinlog) // FieldID > its FieldBinlog
 		statsField2Path  = make(map[UniqueID]*datapb.FieldBinlog) // FieldID > its statsBinlog
@@ -186,7 +184,7 @@ func (b *binlogIO) upload(
 			return nil, err
 		}
 
-		kvs[k] = bytes.NewBuffer(v).String()
+		kvs[k] = v
 		p.deltaInfo = append(p.deltaInfo, &datapb.FieldBinlog{
 			FieldID: 0, // TODO: Not useful on deltalogs, FieldID shall be ID of primary key field
 			Binlogs: []*datapb.Binlog{{
@@ -213,7 +211,7 @@ func (b *binlogIO) upload(
 					zap.Int64("segmentID", segID))
 				<-time.After(50 * time.Millisecond)
 			}
-			err = b.MultiSave(kvs)
+			err = b.MultiWrite(kvs)
 		}
 	}
 	return p, nil
@@ -239,7 +237,7 @@ func (b *binlogIO) genDeltaBlobs(data *DeleteData, collID, partID, segID UniqueI
 }
 
 // genInsertBlobs returns kvs, insert-paths, stats-paths
-func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string]string, map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
+func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta *etcdpb.CollectionMeta) (map[string][]byte, map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
 	inCodec := storage.NewInsertCodec(meta)
 	inlogs, statslogs, err := inCodec.Serialize(partID, segID, data)
 	if err != nil {
@@ -247,7 +245,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 	}
 
 	var (
-		kvs        = make(map[string]string, len(inlogs)+len(statslogs))
+		kvs        = make(map[string][]byte, len(inlogs)+len(statslogs))
 		inpaths    = make(map[UniqueID]*datapb.FieldBinlog)
 		statspaths = make(map[UniqueID]*datapb.FieldBinlog)
 	)
@@ -266,7 +264,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		k := JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
 		key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
 
-		value := bytes.NewBuffer(blob.GetValue()).String()
+		value := blob.GetValue()
 		fileLen := len(value)
 
 		kvs[key] = value
@@ -283,7 +281,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		k := JoinIDPath(meta.GetID(), partID, segID, fID, <-generator)
 		key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
 
-		value := bytes.NewBuffer(blob.GetValue()).String()
+		value := blob.GetValue()
 		fileLen := len(value)
 
 		kvs[key] = value
@@ -317,8 +315,4 @@ func (b *binlogIO) idxGenerator(n int, done <-chan struct{}) (<-chan UniqueID, e
 	}(rt)
 
 	return rt, nil
-}
-
-func (b *binlogIO) close() {
-	b.Close()
 }
