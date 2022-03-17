@@ -30,7 +30,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -120,7 +119,7 @@ func (bt *BaseTask) Notify(err error) {
 type IndexBuildTask struct {
 	BaseTask
 	index          Index
-	kv             kv.BaseKV
+	cm             storage.ChunkManager
 	etcdKV         *etcdkv.EtcdKV
 	savePaths      []string
 	req            *indexpb.CreateIndexRequest
@@ -329,11 +328,11 @@ func (it *IndexBuildTask) prepareParams(ctx context.Context) error {
 
 func (it *IndexBuildTask) loadVector(ctx context.Context) (storage.FieldID, storage.FieldData, error) {
 	getValueByPath := func(path string) ([]byte, error) {
-		data, err := it.kv.Load(path)
+		data, err := it.cm.Read(path)
 		if err != nil {
 			return nil, err
 		}
-		return []byte(data), nil
+		return data, nil
 	}
 	getBlobByPath := func(path string) (*Blob, error) {
 		value, err := getValueByPath(path)
@@ -516,7 +515,7 @@ func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) 
 					zap.Any("indexMeta.Version", indexMeta.Version))
 				return errors.New("This task has been reassigned, check indexMeta.version and request ")
 			}
-			return it.kv.Save(savePath, string(blob.Value))
+			return it.cm.Write(savePath, blob.Value)
 		}
 		err := retry.Do(ctx, saveIndexFileFn, retry.Attempts(5))
 		if err != nil {

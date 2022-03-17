@@ -291,7 +291,7 @@ func genSimpleIndexParams() indexParam {
 	return indexParams
 }
 
-func generateIndex(indexBuildID UniqueID, dataKv kv.DataKV) ([]string, error) {
+func generateIndex(indexBuildID UniqueID, cm storage.ChunkManager) ([]string, error) {
 	indexParams := genSimpleIndexParams()
 
 	var indexParamsKV []*commonpb.KeyValuePair
@@ -338,7 +338,7 @@ func generateIndex(indexBuildID UniqueID, dataKv kv.DataKV) ([]string, error) {
 	for _, index := range serializedIndexBlobs {
 		p := strconv.Itoa(int(indexBuildID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := dataKv.Save(p, string(index.Value))
+		err := cm.Write(p, index.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -347,13 +347,13 @@ func generateIndex(indexBuildID UniqueID, dataKv kv.DataKV) ([]string, error) {
 	return indexPaths, nil
 }
 
-func generateIndexFileInfo(indexBuildIDs []int64, dataKV kv.DataKV) ([]*indexpb.IndexFilePathInfo, error) {
+func generateIndexFileInfo(indexBuildIDs []int64, cm storage.ChunkManager) ([]*indexpb.IndexFilePathInfo, error) {
 	schema := genDefaultCollectionSchema(false)
 	sizePerRecord, _ := typeutil.EstimateSizePerRecord(schema)
 
 	var indexInfos []*indexpb.IndexFilePathInfo
 	for _, buildID := range indexBuildIDs {
-		indexPaths, err := generateIndex(buildID, dataKV)
+		indexPaths, err := generateIndex(buildID, cm)
 		if err != nil {
 			return nil, err
 		}

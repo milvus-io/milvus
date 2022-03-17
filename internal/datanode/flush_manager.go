@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -253,7 +252,7 @@ type dropHandler struct {
 // rendezvousFlushManager makes sure insert & del buf all flushed
 type rendezvousFlushManager struct {
 	allocatorInterface
-	kv.BaseKV
+	storage.ChunkManager
 	Replica
 
 	// segment id => flush queue
@@ -356,7 +355,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	}
 
 	field2Insert := make(map[UniqueID]*datapb.Binlog, len(binLogs))
-	kvs := make(map[string]string, len(binLogs))
+	kvs := make(map[string][]byte, len(binLogs))
 	field2Logidx := make(map[UniqueID]UniqueID, len(binLogs))
 	for idx, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
@@ -371,7 +370,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
 		key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
-		kvs[key] = string(blob.Value[:])
+		kvs[key] = blob.Value[:]
 		field2Insert[fieldID] = &datapb.Binlog{
 			EntriesNum:    data.size,
 			TimestampFrom: 0, //TODO
@@ -397,7 +396,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
 		key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
-		kvs[key] = string(blob.Value)
+		kvs[key] = blob.Value
 		field2Stats[fieldID] = &datapb.Binlog{
 			EntriesNum:    0,
 			TimestampFrom: 0, //TODO
@@ -409,8 +408,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 	m.updateSegmentCheckPoint(segmentID)
 	m.handleInsertTask(segmentID, &flushBufferInsertTask{
-		BaseKV: m.BaseKV,
-		data:   kvs,
+		ChunkManager: m.ChunkManager,
+		data:         kvs,
 	}, field2Insert, field2Stats, flushed, dropped, pos)
 
 	metrics.DataNodeFlushSegmentLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -447,13 +446,13 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 
 	blobKey := JoinIDPath(collID, partID, segmentID, logID)
 	blobPath := path.Join(Params.DataNodeCfg.DeleteBinlogRootPath, blobKey)
-	kvs := map[string]string{blobPath: string(blob.Value[:])}
+	kvs := map[string][]byte{blobPath: blob.Value[:]}
 	data.LogSize = int64(len(blob.Value))
 	data.LogPath = blobPath
 	log.Info("delete blob path", zap.String("path", blobPath))
 	m.handleDeleteTask(segmentID, &flushBufferDeleteTask{
-		BaseKV: m.BaseKV,
-		data:   kvs,
+		ChunkManager: m.ChunkManager,
+		data:         kvs,
 	}, data, pos)
 	return nil
 }
@@ -547,18 +546,18 @@ func (m *rendezvousFlushManager) close() {
 }
 
 type flushBufferInsertTask struct {
-	kv.BaseKV
-	data map[string]string
+	storage.ChunkManager
+	data map[string][]byte
 }
 
 // flushInsertData implements flushInsertTask
 func (t *flushBufferInsertTask) flushInsertData() error {
-	if t.BaseKV != nil && len(t.data) > 0 {
+	if t.ChunkManager != nil && len(t.data) > 0 {
 		for _, d := range t.data {
 			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.InsertLabel).Add(float64(len(d)))
 		}
 		tr := timerecord.NewTimeRecorder("insertData")
-		err := t.MultiSave(t.data)
+		err := t.MultiWrite(t.data)
 		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return err
 	}
@@ -566,18 +565,18 @@ func (t *flushBufferInsertTask) flushInsertData() error {
 }
 
 type flushBufferDeleteTask struct {
-	kv.BaseKV
-	data map[string]string
+	storage.ChunkManager
+	data map[string][]byte
 }
 
 // flushDeleteData implements flushDeleteTask
 func (t *flushBufferDeleteTask) flushDeleteData() error {
-	if len(t.data) > 0 && t.BaseKV != nil {
+	if len(t.data) > 0 && t.ChunkManager != nil {
 		for _, d := range t.data {
 			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.DeleteLabel).Add(float64(len(d)))
 		}
 		tr := timerecord.NewTimeRecorder("deleteData")
-		err := t.MultiSave(t.data)
+		err := t.MultiWrite(t.data)
 		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return err
 	}
@@ -585,10 +584,10 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 }
 
 // NewRendezvousFlushManager create rendezvousFlushManager with provided allocator and kv
-func NewRendezvousFlushManager(allocator allocatorInterface, kv kv.BaseKV, replica Replica, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
+func NewRendezvousFlushManager(allocator allocatorInterface, cm storage.ChunkManager, replica Replica, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
 	fm := &rendezvousFlushManager{
 		allocatorInterface: allocator,
-		BaseKV:             kv,
+		ChunkManager:       cm,
 		notifyFunc:         f,
 		Replica:            replica,
 		dropHandler: dropHandler{

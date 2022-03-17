@@ -22,9 +22,9 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -192,7 +192,7 @@ type TaskScheduler struct {
 	IndexBuildQueue TaskQueue
 
 	buildParallel int
-	kv            kv.BaseKV
+	cm            storage.ChunkManager
 	wg            sync.WaitGroup
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -200,10 +200,10 @@ type TaskScheduler struct {
 
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context,
-	kv kv.BaseKV) (*TaskScheduler, error) {
+	cm storage.ChunkManager) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		kv:            kv,
+		cm:            cm,
 		ctx:           ctx1,
 		cancel:        cancel,
 		buildParallel: 1, // default value

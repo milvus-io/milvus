@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -31,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
+
+var indexCheckerTestDir = "/tmp/milvus_test/index_checker"
 
 func TestReloadFromKV(t *testing.T) {
 	refreshParams()
@@ -99,10 +102,12 @@ func TestCheckIndexLoop(t *testing.T) {
 	assert.Nil(t, err)
 
 	rootCoord := newRootCoordMock(ctx)
-	indexCoord, err := newIndexCoordMock(ctx)
+	indexCoord, err := newIndexCoordMock(indexCheckerTestDir)
 	assert.Nil(t, err)
 	rootCoord.enableIndex = true
-	broker, err := newGlobalMetaBroker(ctx, rootCoord, nil, indexCoord)
+	cm := storage.NewLocalChunkManager(storage.RootPath(indexCheckerTestDir))
+	defer cm.RemoveWithPrefix("")
+	broker, err := newGlobalMetaBroker(ctx, rootCoord, nil, indexCoord, cm)
 	assert.Nil(t, err)
 
 	segmentInfo := &querypb.SegmentInfo{
@@ -168,12 +173,14 @@ func TestHandoffNotExistSegment(t *testing.T) {
 
 	rootCoord := newRootCoordMock(ctx)
 	rootCoord.enableIndex = true
-	indexCoord, err := newIndexCoordMock(ctx)
+	indexCoord, err := newIndexCoordMock(indexCheckerTestDir)
 	assert.Nil(t, err)
 	indexCoord.returnError = true
 	dataCoord := newDataCoordMock(ctx)
 	dataCoord.segmentState = commonpb.SegmentState_NotExist
-	broker, err := newGlobalMetaBroker(ctx, rootCoord, dataCoord, indexCoord)
+	cm := storage.NewLocalChunkManager(storage.RootPath(indexCheckerTestDir))
+	defer cm.RemoveWithPrefix("")
+	broker, err := newGlobalMetaBroker(ctx, rootCoord, dataCoord, indexCoord, cm)
 	assert.Nil(t, err)
 
 	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
