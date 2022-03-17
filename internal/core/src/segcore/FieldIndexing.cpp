@@ -13,7 +13,7 @@
 #include <thread>
 
 #include "common/SystemProperty.h"
-#ifdef __linux__
+#if defined(__linux__) || defined(__MINGW64__)
 #include "knowhere/index/vector_index/IndexIVF.h"
 #endif
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -23,7 +23,7 @@ namespace milvus::segcore {
 
 void
 VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
-#ifdef __linux__
+#if defined(__linux__) || defined(__MINGW64__)
     AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT, "Data type of vector field is not VECTOR_FLOAT");
     auto dim = field_meta_.get_dim();
 

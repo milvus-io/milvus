@@ -111,3 +111,53 @@ jobs:
           fi
           brew install boost libomp ninja tbb ccache
           make check-proto-product && make verifiers
+  mingw64:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: Code Checker MinGW
+          os: windows-2019
+    steps:
+      - name: Set git to use LF
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Cache go
+        uses: actions/cache@v2
+        with:
+          path: |
+            %LocalAppData%\go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+      - name: Cache ccache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ${{ github.workspace }}/.ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('internal/core/**') }}
+          restore-keys: ${{ runner.os }}-ccache-
+      - name: Configure Toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+      - name: Install Deps
+        shell: msys2 {0}
+        run: |
+          sh scripts/install_deps_msys.sh
+      - name: Code Check
+        shell: msys2 {0}
+        env:
+          CCACHE_COMPILERCHECK: content
+          CCACHE_COMPRESS: 1
+          CCACHE_COMPRESSLEVEL: 5
+          CCACHE_MAXSIZE: 2G
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: |
+          mingw32-make verifiers build-go

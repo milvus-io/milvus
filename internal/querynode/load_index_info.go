@@ -20,6 +20,7 @@ package querynode
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
 #cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
 #cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo windows LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/load_index_c.h"
 #include "common/vector_index_c.h"

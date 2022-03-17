@@ -70,19 +70,28 @@ done
 echo "BUILD_TYPE: " $BUILD_TYPE
 echo "CUSTOM_THIRDPARTY_PATH: " $CUSTOM_THIRDPARTY_PATH
 
+
+# MSYS system
+CMAKE_GENERATOR="Unix Makefiles"
+if [ "$MSYSTEM" == "MINGW64" ] ; then
+  CMAKE_GENERATOR="MSYS Makefiles"
+fi
+
 pushd ${CMAKE_BUILD}
 CMAKE_CMD="cmake \
+${CMAKE_EXTRA_ARGS} \
 -DCMAKE_INSTALL_PREFIX=${OUTPUT_LIB} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} ${SRC_DIR}"
 
-${CMAKE_CMD}
+${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 echo ${CMAKE_CMD}
 
 if [[ ! ${jobs+1} ]]; then
   unameOut="$(uname -s)"
   case "${unameOut}" in
       Linux*)     jobs=$(nproc);;
+      MINGW64*)   jobs=$(nproc);;
       Darwin*)    jobs=$(sysctl -n hw.physicalcpu);;
       *)          echo "UNKNOWN:${unameOut}" ; exit 0;
   esac

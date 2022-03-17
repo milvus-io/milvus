@@ -8,9 +8,11 @@ import (
 	syslog "log"
 	"os"
 	"path"
+	"runtime"
 	"strings"
 	"syscall"
 
+	"github.com/gofrs/flock"
 	"github.com/milvus-io/milvus/cmd/roles"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -90,7 +92,7 @@ func getPidFileName(serverType string, alias string) string {
 	return filename
 }
 
-func createPidFile(w io.Writer, filename string, runtimeDir string) (*os.File, error) {
+func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Flock, error) {
 	fileFullName := path.Join(runtimeDir, filename)
 
 	fd, err := os.OpenFile(fileFullName, os.O_CREATE|os.O_RDWR, 0664)
@@ -99,11 +101,7 @@ func createPidFile(w io.Writer, filename string, runtimeDir string) (*os.File, e
 	}
 	fmt.Fprintln(w, "open pid file:", fileFullName)
 
-	err = syscall.Flock(int(fd.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	if err != nil {
-		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
-	}
-	fmt.Fprintln(w, "lock pid file:", fileFullName)
+	defer fd.Close()
 
 	fd.Truncate(0)
 	_, err = fd.WriteString(fmt.Sprintf("%d", os.Getpid()))
@@ -111,16 +109,24 @@ func createPidFile(w io.Writer, filename string, runtimeDir string) (*os.File, e
 		return nil, fmt.Errorf("file %s write fail, error = %w", filename, err)
 	}
 
-	return fd, nil
+	lock := flock.New(fileFullName)
+	_, err = lock.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("file %s is locked, error = %w", filename, err)
+	}
+
+	fmt.Fprintln(w, "lock pid file:", fileFullName)
+	return lock, nil
 }
 
 func closePidFile(fd *os.File) {
 	fd.Close()
 }
 
-func removePidFile(fd *os.File) {
-	syscall.Close(int(fd.Fd()))
-	os.Remove(fd.Name())
+func removePidFile(lock *flock.Flock) {
+	filename := lock.Path()
+	lock.Close()
+	os.Remove(filename)
 }
 
 func stopPid(filename string, runtimeDir string) error {
@@ -180,6 +186,28 @@ func printUsage(w io.Writer, f *flag.Flag) {
 	s += strings.ReplaceAll(usage, "\n", "\n    \t")
 
 	fmt.Fprint(w, s, "\n")
+}
+
+// create runtime folder
+func createRuntimeDir() string {
+	runtimeDir := "/run/milvus"
+	if runtime.GOOS == "windows" {
+		runtimeDir = "run"
+		if err := makeRuntimeDir(runtimeDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
+			os.Exit(-1)
+		}
+	} else {
+		if err := makeRuntimeDir(runtimeDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
+			runtimeDir = "/tmp/milvus"
+			if err = makeRuntimeDir(runtimeDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
+				os.Exit(-1)
+			}
+		}
+	}
+	return runtimeDir
 }
 
 func RunMilvus(args []string) {
@@ -283,36 +311,17 @@ func RunMilvus(args []string) {
 		params.SetLogger(0)
 	}
 
-	var runtimeDir string
-	// For embedded Milvus, runtime dir is always /run/milvus.
-	if serverType == typeutil.EmbeddedRole {
-		runtimeDir = "/tmp/milvus"
-	} else {
-		runtimeDir = "/run/milvus"
-	}
-	if err := makeRuntimeDir(runtimeDir); err != nil {
-		if serverType == typeutil.EmbeddedRole {
-			fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
-			os.Exit(-1)
-		}
-		fmt.Fprintf(os.Stderr, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
-		runtimeDir = "/tmp/milvus"
-		if err = makeRuntimeDir(runtimeDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
-			os.Exit(-1)
-		}
-	}
-
+	runtimeDir := createRuntimeDir()
 	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":
 		printBanner(flags.Output())
 		injectVariablesToEnv()
-		fd, err := createPidFile(flags.Output(), filename, runtimeDir)
+		lock, err := createPidFile(flags.Output(), filename, runtimeDir)
 		if err != nil {
 			panic(err)
 		}
-		defer removePidFile(fd)
+		defer removePidFile(lock)
 		role.Run(local, svrAlias)
 	case "stop":
 		if err := stopPid(filename, runtimeDir); err != nil {

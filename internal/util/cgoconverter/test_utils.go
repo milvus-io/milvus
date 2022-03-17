@@ -12,8 +12,8 @@ func copyToCBytes(data []byte) unsafe.Pointer {
 }
 
 func mallocCBytes(v byte, len int) unsafe.Pointer {
-	p := C.malloc(C.ulong(len))
-	C.memset(p, C.int(v), C.ulong(len))
+	p := C.malloc(C.size_t(len))
+	C.memset(p, C.int(v), C.size_t(len))
 
 	return p
 }

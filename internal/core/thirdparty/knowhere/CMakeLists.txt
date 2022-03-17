@@ -21,6 +21,13 @@ else ()
         "https://github.com/milvus-io/knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
 endif ()
 
+if (MSYS)
+    # TODO(matrixji) replace with official release after `support windows` merged/tagged
+    # windows adaptation + milvus-io/knowhere@v1.0.1
+    set (KNOWHERE_SOURCE_URL "https://github.com/matrixji/knowhere/archive/refs/tags/windows-int-20220310-p1.tar.gz")
+    set (KNOWHERE_SOURCE_MD5 "7a75cbaa68377f0c310e7f71bfd7becf")
+endif (MSYS)
+
 macro(build_knowhere)
     message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
     set (KNOWHERE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
@@ -55,6 +62,7 @@ macro(build_knowhere)
             PROPERTIES
                 IMPORTED_GLOBAL     TRUE
                 IMPORTED_LOCATION   ${INSTALL_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
+                IMPORTED_IMPLIB     ${INSTALL_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}.a
                 INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
 
     add_dependencies(knowhere knowhere_ep)

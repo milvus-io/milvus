@@ -22,6 +22,7 @@ package indexnode
 
 #cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_indexbuilder -Wl,-rpath,"${SRCDIR}/../core/output/lib"
 #cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo windows LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_common -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include <stdlib.h>	// free
 #include "segcore/collection_c.h"
