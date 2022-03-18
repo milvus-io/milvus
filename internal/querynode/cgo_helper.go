@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/util/cgoconverter"
 )
 
 // HandleCStatus deals with the error returned from CGO
@@ -53,4 +54,14 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
 	log.Warn(logMsg)
 	return errors.New(finalMsg)
+}
+
+func CopyCProtoBlob(cProto *C.CProto) []byte {
+	blob := C.GoBytes(unsafe.Pointer(cProto.proto_blob), C.int32_t(cProto.proto_size))
+	return blob
+}
+
+func GetCProtoBlob(cProto *C.CProto) []byte {
+	_, blob := cgoconverter.UnsafeGoBytes(&cProto.proto_blob, int(cProto.proto_size))
+	return blob
 }

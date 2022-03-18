@@ -15,8 +15,15 @@
 #include <algorithm>
 
 #include "utils/Status.h"
+#include "common/type_c.h"
 
 namespace milvus::segcore {
+
+// SearchResultDataBlobs contains the marshal blobs of many `milvus::proto::schema::SearchResultData`
+struct SearchResultDataBlobs {
+    std::vector<std::vector<char>> blobs;
+};
+
 Status
 merge_into(int64_t num_queries,
            int64_t topk,

@@ -44,53 +44,38 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
     AssertInfo(results.ids_.size() == size, "Size of result distances is not equal to size of ids");
-    Assert(results.row_data_.size() == 0);
 
     std::vector<int64_t> element_sizeofs;
     std::vector<aligned_vector<char>> blobs;
 
     // fill row_ids
     {
-        aligned_vector<char> blob(size * sizeof(int64_t));
+        results.ids_data_.resize(size * sizeof(int64_t));
         if (plan->schema_.get_is_auto_id()) {
-            bulk_subscript(SystemFieldType::RowId, results.ids_.data(), size, blob.data());
+            bulk_subscript(SystemFieldType::RowId, results.ids_.data(), size, results.ids_data_.data());
         } else {
             auto key_offset_opt = get_schema().get_primary_key_offset();
             AssertInfo(key_offset_opt.has_value(), "Cannot get primary key offset from schema");
             auto key_offset = key_offset_opt.value();
             AssertInfo(get_schema()[key_offset].get_data_type() == DataType::INT64,
                        "Primary key field is not INT64 type");
-            bulk_subscript(key_offset, results.ids_.data(), size, blob.data());
+            bulk_subscript(key_offset, results.ids_.data(), size, results.ids_data_.data());
         }
-        blobs.emplace_back(std::move(blob));
-        element_sizeofs.push_back(sizeof(int64_t));
     }
 
-    // fill other entries except primary key
+    // fill other entries except primary key by result_offset
     for (auto field_offset : plan->target_entries_) {
         auto& field_meta = get_schema()[field_offset];
         auto element_sizeof = field_meta.get_sizeof();
         aligned_vector<char> blob(size * element_sizeof);
         bulk_subscript(field_offset, results.ids_.data(), size, blob.data());
-        blobs.emplace_back(std::move(blob));
-        element_sizeofs.push_back(element_sizeof);
-    }
-
-    auto target_sizeof = std::accumulate(element_sizeofs.begin(), element_sizeofs.end(), 0);
-
-    for (int64_t i = 0; i < size; ++i) {
-        int64_t element_offset = 0;
-        std::vector<char> target(target_sizeof);
-        for (int loc = 0; loc < blobs.size(); ++loc) {
-            auto element_sizeof = element_sizeofs[loc];
-            auto blob_ptr = blobs[loc].data();
-            auto src = blob_ptr + element_sizeof * i;
-            auto dst = target.data() + element_offset;
-            memcpy(dst, src, element_sizeof);
-            element_offset += element_sizeof;
+        results.output_fields_data_.emplace_back(std::move(blob));
+        if (field_meta.is_vector()) {
+            results.AddField(field_meta.get_name(), field_meta.get_id(), field_meta.get_data_type(),
+                             field_meta.get_dim(), field_meta.get_metric_type());
+        } else {
+            results.AddField(field_meta.get_name(), field_meta.get_id(), field_meta.get_data_type());
         }
-        assert(element_offset == target_sizeof);
-        results.row_data_.emplace_back(std::move(target));
     }
 }
 
@@ -162,7 +147,7 @@ CreateScalarArrayFrom(const void* data_raw, int64_t count, DataType data_type) {
     return scalar_array;
 }
 
-static std::unique_ptr<DataArray>
+std::unique_ptr<DataArray>
 CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
