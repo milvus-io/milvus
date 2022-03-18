@@ -19,52 +19,9 @@ package etcd
 import (
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 )
-
-// EtcdServer is the singleton of embedded etcd server
-var EtcdServer *embed.Etcd
-
-// InitEtcdServer initializes embedded etcd server singleton.
-func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
-	if etcdCfg.UseEmbedEtcd {
-		path := etcdCfg.ConfigPath
-		log.Info("Setting Etcd config", zap.String("path", path), zap.String("data", etcdCfg.DataDir))
-		var cfg *embed.Config
-		if len(path) > 0 {
-			cfgFromFile, err := embed.ConfigFromFile(path)
-			if err != nil {
-				return err
-			}
-			cfg = cfgFromFile
-		} else {
-			cfg = embed.NewConfig()
-		}
-		cfg.Dir = etcdCfg.DataDir
-		cfg.LogOutputs = []string{etcdCfg.EtcdLogPath}
-		cfg.LogLevel = etcdCfg.EtcdLogLevel
-		e, err := embed.StartEtcd(cfg)
-		if err != nil {
-			return err
-		}
-		EtcdServer = e
-		log.Info("finish init embedded etcd")
-	}
-	return nil
-}
-
-// StopEtcdServer stops embedded etcd server singleton.
-func StopEtcdServer() {
-	if EtcdServer != nil {
-		EtcdServer.Close()
-	}
-}
 
 // GetEtcdClient returns etcd client
 func GetEtcdClient(cfg *paramtable.EtcdConfig) (*clientv3.Client, error) {
@@ -72,12 +29,6 @@ func GetEtcdClient(cfg *paramtable.EtcdConfig) (*clientv3.Client, error) {
 		return GetEmbedEtcdClient()
 	}
 	return GetRemoteEtcdClient(cfg.Endpoints)
-}
-
-// GetEmbedEtcdClient returns client of embed etcd server
-func GetEmbedEtcdClient() (*clientv3.Client, error) {
-	client := v3client.New(EtcdServer.Server)
-	return client, nil
 }
 
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints

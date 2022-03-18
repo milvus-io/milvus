@@ -31,12 +31,12 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -108,6 +108,14 @@ const (
 	sleepDuration = time.Millisecond * 200
 )
 
+var Registry *prometheus.Registry
+
+func init() {
+	Registry = prometheus.NewRegistry()
+	Registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	Registry.MustRegister(prometheus.NewGoCollector())
+}
+
 func newMsgFactory(localMsg bool) msgstream.Factory {
 	if localMsg {
 		return msgstream.NewRmsFactory()
@@ -141,7 +149,7 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	}()
 	wg.Wait()
 
-	metrics.RegisterRootCoord()
+	metrics.RegisterRootCoord(Registry)
 	return rc
 }
 
@@ -172,7 +180,7 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 	}()
 	wg.Wait()
 
-	metrics.RegisterQueryCoord()
+	metrics.RegisterQueryCoord(Registry)
 	return qs
 }
 
@@ -204,7 +212,7 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 	}()
 	wg.Wait()
 
-	metrics.RegisterQueryNode()
+	metrics.RegisterQueryNode(Registry)
 	return qn
 }
 
@@ -231,7 +239,7 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 	}()
 	wg.Wait()
 
-	metrics.RegisterDataCoord()
+	metrics.RegisterDataCoord(Registry)
 	return ds
 }
 
@@ -263,7 +271,7 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 	}()
 	wg.Wait()
 
-	metrics.RegisterDataNode()
+	metrics.RegisterDataNode(Registry)
 	return dn
 }
 
@@ -293,7 +301,7 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 	}()
 	wg.Wait()
 
-	metrics.RegisterIndexCoord()
+	metrics.RegisterIndexCoord(Registry)
 	return is
 }
 
@@ -329,7 +337,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 	}()
 	wg.Wait()
 
-	metrics.RegisterIndexNode()
+	metrics.RegisterIndexNode(Registry)
 	return in
 }
 

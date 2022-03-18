@@ -18,16 +18,19 @@ package metrics
 
 import (
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestRegisterMetrics(t *testing.T) {
+	r := prometheus.NewRegistry()
 	// Make sure it doesn't panic.
-	RegisterRootCoord()
-	RegisterDataNode()
-	RegisterDataCoord()
-	RegisterIndexNode()
-	RegisterIndexCoord()
-	RegisterProxy()
-	RegisterQueryNode()
-	RegisterQueryCoord()
+	RegisterRootCoord(r)
+	RegisterDataNode(r)
+	RegisterDataCoord(r)
+	RegisterIndexNode(r)
+	RegisterIndexCoord(r)
+	RegisterProxy(r)
+	RegisterQueryNode(r)
+	RegisterQueryCoord(r)
 }

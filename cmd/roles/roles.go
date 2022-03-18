@@ -51,9 +51,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var Params paramtable.ComponentParam
+
+// all milvus related metrics is in a separate registry
+var Registry *prometheus.Registry
+
+func init() {
+	Registry = prometheus.NewRegistry()
+	Registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+	Registry.MustRegister(prometheus.NewGoCollector())
+}
 
 func newMsgFactory(localMsg bool) msgstream.Factory {
 	if localMsg {
@@ -117,7 +127,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 	}()
 	wg.Wait()
 
-	metrics.RegisterRootCoord()
+	metrics.RegisterRootCoord(Registry)
 	return rc
 }
 
@@ -149,7 +159,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 	}()
 	wg.Wait()
 
-	metrics.RegisterProxy()
+	metrics.RegisterProxy(Registry)
 	return pn
 }
 
@@ -180,7 +190,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 	}()
 	wg.Wait()
 
-	metrics.RegisterQueryCoord()
+	metrics.RegisterQueryCoord(Registry)
 	return qs
 }
 
@@ -212,7 +222,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 	}()
 	wg.Wait()
 
-	metrics.RegisterQueryNode()
+	metrics.RegisterQueryNode(Registry)
 	return qn
 }
 
@@ -245,7 +255,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 	}()
 	wg.Wait()
 
-	metrics.RegisterDataCoord()
+	metrics.RegisterDataCoord(Registry)
 	return ds
 }
 
@@ -277,7 +287,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 	}()
 	wg.Wait()
 
-	metrics.RegisterDataNode()
+	metrics.RegisterDataNode(Registry)
 	return dn
 }
 
@@ -307,7 +317,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 	}()
 	wg.Wait()
 
-	metrics.RegisterIndexCoord()
+	metrics.RegisterIndexCoord(Registry)
 	return is
 }
 
@@ -338,7 +348,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 	}()
 	wg.Wait()
 
-	metrics.RegisterIndexNode()
+	metrics.RegisterIndexNode(Registry)
 	return in
 }
 
@@ -486,7 +496,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		http.HandleFunc(healthz.HealthzRouterPath, standaloneHealthzHandler)
 	}
 
-	metrics.ServeHTTP()
+	metrics.ServeHTTP(Registry)
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,

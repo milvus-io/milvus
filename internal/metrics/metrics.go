@@ -18,7 +18,6 @@ package metrics
 
 import (
 	"net/http"
-
 	// nolint:gosec
 	_ "net/http/pprof"
 
@@ -74,8 +73,9 @@ var (
 )
 
 //ServeHTTP serves prometheus http service
-func ServeHTTP() {
-	http.Handle("/metrics", promhttp.Handler())
+func ServeHTTP(r *prometheus.Registry) {
+	http.Handle("/metrics", promhttp.HandlerFor(r, promhttp.HandlerOpts{}))
+	http.Handle("/metrics_default", promhttp.Handler())
 	go func() {
 		if err := http.ListenAndServe(":9091", nil); err != nil {
 			log.Error("handle metrics failed", zap.Error(err))

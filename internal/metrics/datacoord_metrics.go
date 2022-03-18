@@ -124,15 +124,10 @@ var (
 )
 
 //RegisterDataCoord registers DataCoord metrics
-func RegisterDataCoord() {
-	prometheus.MustRegister(DataCoordNumDataNodes)
-	prometheus.MustRegister(DataCoordNumSegments)
-	prometheus.MustRegister(DataCoordNumCollections)
-	prometheus.MustRegister(DataCoordNumStoredRows)
-	prometheus.MustRegister(DataCoordSyncUTC)
-	//	prometheus.MustRegister(DataCoordSegmentSizeRatio)
-	//	prometheus.MustRegister(DataCoordSegmentFlushDuration)
-	//	prometheus.MustRegister(DataCoordCompactDuration)
-	//	prometheus.MustRegister(DataCoordCompactLoad)
-	//	prometheus.MustRegister(DataCoordNumCompactionTask)
+func RegisterDataCoord(registry *prometheus.Registry) {
+	registry.MustRegister(DataCoordNumDataNodes)
+	registry.MustRegister(DataCoordNumSegments)
+	registry.MustRegister(DataCoordNumCollections)
+	registry.MustRegister(DataCoordNumStoredRows)
+	registry.MustRegister(DataCoordSyncUTC)
 }
