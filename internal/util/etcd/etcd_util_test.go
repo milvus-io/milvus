@@ -37,10 +37,6 @@ func TestEtcd(t *testing.T) {
 	defer os.RemoveAll(Params.EtcdCfg.DataDir)
 	defer StopEtcdServer()
 
-	// port is binded
-	err = InitEtcdServer(&Params.EtcdCfg)
-	assert.Error(t, err)
-
 	etcdCli, err := GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 

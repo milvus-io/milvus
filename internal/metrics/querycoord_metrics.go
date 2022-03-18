@@ -112,15 +112,15 @@ var (
 )
 
 //RegisterQueryCoord registers QueryCoord metrics
-func RegisterQueryCoord() {
-	prometheus.MustRegister(QueryCoordNumCollections)
-	prometheus.MustRegister(QueryCoordNumEntities)
-	prometheus.MustRegister(QueryCoordLoadCount)
-	prometheus.MustRegister(QueryCoordReleaseCount)
-	prometheus.MustRegister(QueryCoordLoadLatency)
-	prometheus.MustRegister(QueryCoordReleaseLatency)
-	prometheus.MustRegister(QueryCoordNumChildTasks)
-	prometheus.MustRegister(QueryCoordNumParentTasks)
-	prometheus.MustRegister(QueryCoordChildTaskLatency)
-	prometheus.MustRegister(QueryCoordNumQueryNodes)
+func RegisterQueryCoord(registry *prometheus.Registry) {
+	registry.MustRegister(QueryCoordNumCollections)
+	registry.MustRegister(QueryCoordNumEntities)
+	registry.MustRegister(QueryCoordLoadCount)
+	registry.MustRegister(QueryCoordReleaseCount)
+	registry.MustRegister(QueryCoordLoadLatency)
+	registry.MustRegister(QueryCoordReleaseLatency)
+	registry.MustRegister(QueryCoordNumChildTasks)
+	registry.MustRegister(QueryCoordNumParentTasks)
+	registry.MustRegister(QueryCoordChildTaskLatency)
+	registry.MustRegister(QueryCoordNumQueryNodes)
 }

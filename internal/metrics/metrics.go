@@ -18,7 +18,6 @@ package metrics
 
 import (
 	"net/http"
-
 	// nolint:gosec
 	_ "net/http/pprof"
 
@@ -85,11 +84,6 @@ var (
 	)
 )
 
-//RegisterDataCoord registers DataCoord metrics
-func RegisterDataCoord() {
-	prometheus.MustRegister(DataCoordDataNodeList)
-}
-
 var (
 	// DataNodeFlushSegmentsCounter counts the num of calls of FlushSegments
 	DataNodeFlushSegmentsCounter = prometheus.NewCounterVec(
@@ -111,8 +105,9 @@ var (
 )
 
 //ServeHTTP serves prometheus http service
-func ServeHTTP() {
-	http.Handle("/metrics", promhttp.Handler())
+func ServeHTTP(r *prometheus.Registry) {
+	http.Handle("/metrics", promhttp.HandlerFor(r, promhttp.HandlerOpts{}))
+	http.Handle("/metrics_default", promhttp.Handler())
 	go func() {
 		if err := http.ListenAndServe(":9091", nil); err != nil {
 			log.Error("handle metrics failed", zap.Error(err))

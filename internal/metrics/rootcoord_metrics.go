@@ -338,55 +338,55 @@ var (
 )
 
 //RegisterRootCoord registers RootCoord metrics
-func RegisterRootCoord() {
-	prometheus.MustRegister(RootCoordProxyLister)
+func RegisterRootCoord(registry *prometheus.Registry) {
+	registry.Register(RootCoordProxyLister)
 
 	// for grpc
-	prometheus.MustRegister(RootCoordCreateCollectionCounter)
-	prometheus.MustRegister(RootCoordDropCollectionCounter)
-	prometheus.MustRegister(RootCoordHasCollectionCounter)
-	prometheus.MustRegister(RootCoordDescribeCollectionCounter)
-	prometheus.MustRegister(RootCoordShowCollectionsCounter)
-	prometheus.MustRegister(RootCoordCreatePartitionCounter)
-	prometheus.MustRegister(RootCoordDropPartitionCounter)
-	prometheus.MustRegister(RootCoordHasPartitionCounter)
-	prometheus.MustRegister(RootCoordShowPartitionsCounter)
-	prometheus.MustRegister(RootCoordCreateIndexCounter)
-	prometheus.MustRegister(RootCoordDropIndexCounter)
-	prometheus.MustRegister(RootCoordDescribeIndexCounter)
-	prometheus.MustRegister(RootCoordDescribeSegmentCounter)
-	prometheus.MustRegister(RootCoordShowSegmentsCounter)
+	registry.MustRegister(RootCoordCreateCollectionCounter)
+	registry.MustRegister(RootCoordDropCollectionCounter)
+	registry.MustRegister(RootCoordHasCollectionCounter)
+	registry.MustRegister(RootCoordDescribeCollectionCounter)
+	registry.MustRegister(RootCoordShowCollectionsCounter)
+	registry.MustRegister(RootCoordCreatePartitionCounter)
+	registry.MustRegister(RootCoordDropPartitionCounter)
+	registry.MustRegister(RootCoordHasPartitionCounter)
+	registry.MustRegister(RootCoordShowPartitionsCounter)
+	registry.MustRegister(RootCoordCreateIndexCounter)
+	registry.MustRegister(RootCoordDropIndexCounter)
+	registry.MustRegister(RootCoordDescribeIndexCounter)
+	registry.MustRegister(RootCoordDescribeSegmentCounter)
+	registry.MustRegister(RootCoordShowSegmentsCounter)
 
 	// for time tick
-	prometheus.MustRegister(RootCoordInsertChannelTimeTick)
+	registry.MustRegister(RootCoordInsertChannelTimeTick)
 	//prometheus.MustRegister(PanicCounter)
-	prometheus.MustRegister(RootCoordSyncTimeTickLatency)
+	registry.MustRegister(RootCoordSyncTimeTickLatency)
 
 	// for DDL latency
-	prometheus.MustRegister(RootCoordDDLReadTypeLatency)
-	prometheus.MustRegister(RootCoordDDLWriteTypeLatency)
+	registry.MustRegister(RootCoordDDLReadTypeLatency)
+	registry.MustRegister(RootCoordDDLWriteTypeLatency)
 
 	// for allocator
-	prometheus.MustRegister(RootCoordIDAllocCounter)
-	prometheus.MustRegister(RootCoordTimestampAllocCounter)
-	prometheus.MustRegister(RootCoordETCDTimestampAllocCounter)
+	registry.MustRegister(RootCoordIDAllocCounter)
+	registry.MustRegister(RootCoordTimestampAllocCounter)
+	registry.MustRegister(RootCoordETCDTimestampAllocCounter)
 
 	// for collection
-	prometheus.MustRegister(RootCoordNumOfCollections)
-	prometheus.MustRegister(RootCoordNumOfPartitions)
-	prometheus.MustRegister(RootCoordNumOfSegments)
-	prometheus.MustRegister(RootCoordNumOfIndexedSegments)
+	registry.MustRegister(RootCoordNumOfCollections)
+	registry.MustRegister(RootCoordNumOfPartitions)
+	registry.MustRegister(RootCoordNumOfSegments)
+	registry.MustRegister(RootCoordNumOfIndexedSegments)
 
-	prometheus.MustRegister(RootCoordNumOfDMLChannel)
-	prometheus.MustRegister(RootCoordNumOfMsgStream)
+	registry.MustRegister(RootCoordNumOfDMLChannel)
+	registry.MustRegister(RootCoordNumOfMsgStream)
 
 	// for credential
-	prometheus.MustRegister(RootCoordCreateCredentialCounter)
-	prometheus.MustRegister(RootCoordGetCredentialCounter)
-	prometheus.MustRegister(RootCoordDeleteCredentialCounter)
-	prometheus.MustRegister(RootCoordUpdateCredentialCounter)
-	prometheus.MustRegister(RootCoordListCredUsersCounter)
-	prometheus.MustRegister(RootCoordCredentialWriteTypeLatency)
-	prometheus.MustRegister(RootCoordCredentialReadTypeLatency)
-	prometheus.MustRegister(RootCoordNumOfCredentials)
+	registry.MustRegister(RootCoordCreateCredentialCounter)
+	registry.MustRegister(RootCoordGetCredentialCounter)
+	registry.MustRegister(RootCoordDeleteCredentialCounter)
+	registry.MustRegister(RootCoordUpdateCredentialCounter)
+	registry.MustRegister(RootCoordListCredUsersCounter)
+	registry.MustRegister(RootCoordCredentialWriteTypeLatency)
+	registry.MustRegister(RootCoordCredentialReadTypeLatency)
+	registry.MustRegister(RootCoordNumOfCredentials)
 }

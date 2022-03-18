@@ -22,15 +22,6 @@ import (
 )
 
 var (
-	// ProxyDmlChannelTimeTick counts the time tick value of dml channels
-	ProxyDmlChannelTimeTick = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "dml_channels_time_tick",
-			Help:      "Time tick of dml channels",
-		}, []string{nodeIDLabelName, "pchan"})
-
 	// ProxySearchCount record the number of times search succeeded or failed.
 	ProxySearchCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -38,7 +29,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "search_counter",
 			Help:      "The number of times search succeeded or failed",
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName, statusLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName, statusLabelName})
 
 	// ProxyInsertCount record the number of times insert succeeded or failed.
 	ProxyInsertCount = prometheus.NewCounterVec(
@@ -47,7 +38,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "insert_counter",
 			Help:      "The number of times insert succeeded or failed",
-		}, []string{nodeIDLabelName, collectionIDLabelName, statusLabelName})
+		}, []string{nodeIDLabelName, statusLabelName})
 
 	// ProxySearchVectors record the number of vectors search successfully.
 	ProxySearchVectors = prometheus.NewGaugeVec(
@@ -56,7 +47,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "search_vectors",
 			Help:      "The number of vectors search successfully",
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyInsertVectors record the number of vectors insert successfully.
 	ProxyInsertVectors = prometheus.NewGaugeVec(
@@ -65,17 +56,17 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "insert_vectors",
 			Help:      "The number of vectors insert successfully",
-		}, []string{nodeIDLabelName, collectionIDLabelName})
+		}, []string{nodeIDLabelName})
 
 	// ProxyLinkedSDKs record The number of SDK linked proxy.
 	// TODO: how to know when sdk disconnect?
-	ProxyLinkedSDKs = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "linked_sdk_numbers",
-			Help:      "The number of SDK linked proxy",
-		}, []string{nodeIDLabelName})
+	//ProxyLinkedSDKs = prometheus.NewGaugeVec(
+	//	prometheus.GaugeOpts{
+	//		Namespace: milvusNamespace,
+	//		Subsystem: typeutil.ProxyRole,
+	//		Name:      "linked_sdk_numbers",
+	//		Help:      "The number of SDK linked proxy",
+	//	}, []string{nodeIDLabelName})
 
 	// ProxySearchLatency record the latency of search successfully.
 	ProxySearchLatency = prometheus.NewHistogramVec(
@@ -85,7 +76,7 @@ var (
 			Name:      "search_latency",
 			Help:      "The latency of search successfully",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxySendMessageLatency record the latency that the proxy sent the search request to the message stream.
 	ProxySendMessageLatency = prometheus.NewHistogramVec(
@@ -95,7 +86,7 @@ var (
 			Name:      "send_search_msg_time",
 			Help:      "The latency that the proxy sent the search request to the message stream",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyWaitForSearchResultLatency record the time that the proxy waits for the search result.
 	ProxyWaitForSearchResultLatency = prometheus.NewHistogramVec(
@@ -105,7 +96,7 @@ var (
 			Name:      "wait_for_search_result_time",
 			Help:      "The time that the proxy waits for the search result",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyReduceSearchResultLatency record the time that the proxy reduces search result.
 	ProxyReduceSearchResultLatency = prometheus.NewHistogramVec(
@@ -115,7 +106,7 @@ var (
 			Name:      "reduce_search_result_time",
 			Help:      "The time that the proxy reduces search result",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyDecodeSearchResultLatency record the time that the proxy decodes the search result.
 	ProxyDecodeSearchResultLatency = prometheus.NewHistogramVec(
@@ -125,7 +116,7 @@ var (
 			Name:      "decode_search_result_time",
 			Help:      "The time that the proxy decodes the search result",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyMsgStreamObjectsForPChan record the number of MsgStream objects per PChannel on each collection_id on Proxy.
 	ProxyMsgStreamObjectsForPChan = prometheus.NewGaugeVec(
@@ -134,7 +125,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "msg_stream_obj_for_PChan",
 			Help:      "The number of MsgStream objects per PChannel on each collection on Proxy",
-		}, []string{nodeIDLabelName, collectionIDLabelName})
+		}, []string{nodeIDLabelName, channelNameLabelName})
 
 	// ProxyMsgStreamObjectsForSearch record the number of MsgStream objects for search per collection_id.
 	ProxyMsgStreamObjectsForSearch = prometheus.NewGaugeVec(
@@ -143,7 +134,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "msg_stream_obj_for_search",
 			Help:      "The number of MsgStream objects for search per collection",
-		}, []string{nodeIDLabelName, collectionIDLabelName, queryTypeLabelName})
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyInsertLatency record the latency that insert successfully.
 	ProxyInsertLatency = prometheus.NewHistogramVec(
@@ -153,17 +144,7 @@ var (
 			Name:      "insert_latency",
 			Help:      "The latency that insert successfully.",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, collectionIDLabelName})
-
-	// ProxyInsertColToRowLatency record the latency that column to row for inserting in Proxy.
-	ProxyInsertColToRowLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "col_to_row_latency",
-			Help:      "The time that column to row for inserting in Proxy",
-			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, collectionIDLabelName})
+		}, []string{nodeIDLabelName})
 
 	// ProxySendInsertReqLatency record the latency that Proxy send insert request to MsgStream.
 	ProxySendInsertReqLatency = prometheus.NewHistogramVec(
@@ -173,10 +154,9 @@ var (
 			Name:      "send_insert_req_latency",
 			Help:      "The latency that Proxy send insert request to MsgStream",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, collectionIDLabelName})
+		}, []string{nodeIDLabelName})
 
 	// ProxyCacheHitCounter record the number of Proxy cache hits or miss.
-	// TODO: @xiaocai2333 add more cache type
 	ProxyCacheHitCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -240,7 +220,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DQL_call_counter",
 			Help:      "",
-		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName, statusLabelName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
 
 	// ProxyDMLFunctionCall records the number of times the function of the DML operation was executed, like `LoadCollection`.
 	ProxyDMLFunctionCall = prometheus.NewCounterVec(
@@ -249,7 +229,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "DML_call_counter",
 			Help:      "",
-		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName, statusLabelName})
+		}, []string{nodeIDLabelName, functionLabelName, statusLabelName})
 
 	// ProxyDDLReqLatency records the latency that for DML request, like "CreateCollection".
 	ProxyDDLReqLatency = prometheus.NewHistogramVec(
@@ -269,7 +249,7 @@ var (
 			Name:      "DML_call_latency",
 			Help:      "The latency that for DML request",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName})
+		}, []string{nodeIDLabelName, functionLabelName})
 
 	// ProxyDQLReqLatency record the latency that for DQL request, like "HasCollection".
 	ProxyDQLReqLatency = prometheus.NewHistogramVec(
@@ -279,7 +259,7 @@ var (
 			Name:      "DQL_call_latency",
 			Help:      "The latency that for DQL request",
 			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, functionLabelName, collectionIDLabelName})
+		}, []string{nodeIDLabelName, functionLabelName})
 
 	// ProxySearchLatencyPerNQ records the latency for searching.
 	ProxySearchLatencyPerNQ = prometheus.NewHistogramVec(
@@ -289,58 +269,40 @@ var (
 			Name:      "proxy_search_latency_count",
 			Help:      "The latency for searching",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, collectionIDLabelName})
-
-	// ProxyCredentialReqLatency record the latency that for credential request, like "CreateCredential".
-	ProxyCredentialReqLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "credential_call_latency",
-			Help:      "The latency that for credential request",
-			Buckets:   buckets, // unit: ms
-		}, []string{nodeIDLabelName, functionLabelName, usernameLabelName})
+		}, []string{nodeIDLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
-func RegisterProxy() {
-	prometheus.MustRegister(ProxyDmlChannelTimeTick)
+func RegisterProxy(registry *prometheus.Registry) {
+	registry.MustRegister(ProxySearchCount)
+	registry.MustRegister(ProxyInsertCount)
+	registry.MustRegister(ProxySearchVectors)
+	registry.MustRegister(ProxyInsertVectors)
 
-	prometheus.MustRegister(ProxySearchCount)
-	prometheus.MustRegister(ProxyInsertCount)
-	prometheus.MustRegister(ProxySearchVectors)
-	prometheus.MustRegister(ProxyInsertVectors)
+	registry.MustRegister(ProxySearchLatency)
+	registry.MustRegister(ProxySearchLatencyPerNQ)
+	registry.MustRegister(ProxySendMessageLatency)
+	registry.MustRegister(ProxyWaitForSearchResultLatency)
+	registry.MustRegister(ProxyReduceSearchResultLatency)
+	registry.MustRegister(ProxyDecodeSearchResultLatency)
 
-	prometheus.MustRegister(ProxyLinkedSDKs)
+	registry.MustRegister(ProxyMsgStreamObjectsForPChan)
+	registry.MustRegister(ProxyMsgStreamObjectsForSearch)
 
-	prometheus.MustRegister(ProxySearchLatency)
-	prometheus.MustRegister(ProxySearchLatencyPerNQ)
-	prometheus.MustRegister(ProxySendMessageLatency)
-	prometheus.MustRegister(ProxyWaitForSearchResultLatency)
-	prometheus.MustRegister(ProxyReduceSearchResultLatency)
-	prometheus.MustRegister(ProxyDecodeSearchResultLatency)
+	registry.MustRegister(ProxyInsertLatency)
+	registry.MustRegister(ProxySendInsertReqLatency)
 
-	prometheus.MustRegister(ProxyMsgStreamObjectsForPChan)
-	prometheus.MustRegister(ProxyMsgStreamObjectsForSearch)
+	registry.MustRegister(ProxyCacheHitCounter)
+	registry.MustRegister(ProxyUpdateCacheLatency)
 
-	prometheus.MustRegister(ProxyInsertLatency)
-	prometheus.MustRegister(ProxyInsertColToRowLatency)
-	prometheus.MustRegister(ProxySendInsertReqLatency)
+	registry.MustRegister(ProxySyncTimeTick)
+	registry.MustRegister(ProxyApplyPrimaryKeyLatency)
+	registry.MustRegister(ProxyApplyTimestampLatency)
 
-	prometheus.MustRegister(ProxyCacheHitCounter)
-	prometheus.MustRegister(ProxyUpdateCacheLatency)
-
-	prometheus.MustRegister(ProxySyncTimeTick)
-	prometheus.MustRegister(ProxyApplyPrimaryKeyLatency)
-	prometheus.MustRegister(ProxyApplyTimestampLatency)
-
-	prometheus.MustRegister(ProxyDDLFunctionCall)
-	prometheus.MustRegister(ProxyDQLFunctionCall)
-	prometheus.MustRegister(ProxyDMLFunctionCall)
-	prometheus.MustRegister(ProxyDDLReqLatency)
-	prometheus.MustRegister(ProxyDMLReqLatency)
-	prometheus.MustRegister(ProxyDQLReqLatency)
-
-	// for credential
-	prometheus.MustRegister(ProxyCredentialReqLatency)
+	registry.MustRegister(ProxyDDLFunctionCall)
+	registry.MustRegister(ProxyDQLFunctionCall)
+	registry.MustRegister(ProxyDMLFunctionCall)
+	registry.MustRegister(ProxyDDLReqLatency)
+	registry.MustRegister(ProxyDMLReqLatency)
+	registry.MustRegister(ProxyDQLReqLatency)
 }
