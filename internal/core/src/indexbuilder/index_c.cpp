@@ -17,28 +17,23 @@
 
 #endif
 
+#include "exceptions/EasyAssert.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "indexbuilder/IndexWrapper.h"
+#include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
-
-class CGODebugUtils {
- public:
-    static int64_t
-    Strlen(const char* str, int64_t size) {
-        if (size == 0) {
-            return size;
-        } else {
-            return strlen(str);
-        }
-    }
-};
+#include "indexbuilder/IndexFactory.h"
 
 CStatus
-CreateIndex(const char* serialized_type_params, const char* serialized_index_params, CIndex* res_index) {
+CreateIndex(DataType dtype,
+            const char* serialized_type_params,
+            const char* serialized_index_params,
+            CIndex* res_index) {
     auto status = CStatus();
     try {
-        auto index =
-            std::make_unique<milvus::indexbuilder::IndexWrapper>(serialized_type_params, serialized_index_params);
+        AssertInfo(res_index, "failed to create index, passed index was null");
+
+        auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(dtype, serialized_type_params,
+                                                                                   serialized_index_params);
         *res_index = index.release();
         status.error_code = Success;
         status.error_msg = "";
@@ -49,24 +44,36 @@ CreateIndex(const char* serialized_type_params, const char* serialized_index_par
     return status;
 }
 
-void
+CStatus
 DeleteIndex(CIndex index) {
-    auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-    delete cIndex;
+    auto status = CStatus();
+    try {
+        AssertInfo(index, "failed to delete index, passed index was null");
+        auto cIndex = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        delete cIndex;
 #ifdef __linux__
-    malloc_trim(0);
+        malloc_trim(0);
 #endif
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
 }
 
 CStatus
-BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float* vectors) {
+BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        AssertInfo(index, "failed to build float vector index, passed index was null");
+        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
         auto ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
-        cIndex->BuildWithoutIds(ds);
+        cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -77,14 +84,41 @@ BuildFloatVecIndexWithoutIds(CIndex index, int64_t float_value_num, const float*
 }
 
 CStatus
-BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* vectors) {
+BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        AssertInfo(index, "failed to build binary vector index, passed index was null");
+        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
         auto ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
-        cIndex->BuildWithoutIds(ds);
+        cIndex->Build(ds);
+        status.error_code = Success;
+        status.error_msg = "";
+    } catch (std::exception& e) {
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+    }
+    return status;
+}
+
+// field_data:
+//  1, serialized proto::schema::BoolArray, if type is bool;
+//  2, serialized proto::schema::StringArray, if type is string;
+//  3, raw pointer, if type is of fundamental except bool type;
+// TODO: optimize here if necessary.
+CStatus
+BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
+    auto status = CStatus();
+    try {
+        AssertInfo(c_index, "failed to build scalar index, passed index was null");
+
+        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(c_index);
+        const int64_t dim = 8;  // not important here
+        auto dataset = milvus::knowhere::GenDataset(size, dim, field_data);
+        real_index->Build(dataset);
+
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -95,11 +129,12 @@ BuildBinaryVecIndexWithoutIds(CIndex index, int64_t data_size, const uint8_t* ve
 }
 
 CStatus
-SerializeToBinarySet(CIndex index, CBinarySet* c_binary_set) {
+SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-        auto binary = cIndex->SerializeBinarySet();
+        AssertInfo(index, "failed to serialize index to binary set, passed index was null");
+        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto binary = std::make_unique<milvus::knowhere::BinarySet>(real_index->Serialize());
         *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";
@@ -111,62 +146,13 @@ SerializeToBinarySet(CIndex index, CBinarySet* c_binary_set) {
 }
 
 CStatus
-SerializeToSlicedBuffer(CIndex index, CBinary* c_binary) {
+LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-        auto binary = cIndex->Serialize();
-        *c_binary = binary.release();
-        status.error_code = Success;
-        status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-    }
-    return status;
-}
-
-int64_t
-GetCBinarySize(CBinary c_binary) {
-    auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
-    return cBinary->data.size();
-}
-
-// Note: the memory of data has been allocated outside
-void
-GetCBinaryData(CBinary c_binary, void* data) {
-    auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
-    memcpy(data, cBinary->data.data(), cBinary->data.size());
-}
-
-void
-DeleteCBinary(CBinary c_binary) {
-    auto cBinary = (milvus::indexbuilder::IndexWrapper::Binary*)c_binary;
-    delete cBinary;
-}
-
-CStatus
-LoadFromSlicedBuffer(CIndex index, const char* serialized_sliced_blob_buffer, int32_t size) {
-    auto status = CStatus();
-    try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-        cIndex->Load(serialized_sliced_blob_buffer, size);
-        status.error_code = Success;
-        status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-    }
-    return status;
-}
-
-CStatus
-LoadFromBinarySet(CIndex index, CBinarySet c_binary_set) {
-    auto status = CStatus();
-    try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
-        auto binary_set = (milvus::knowhere::BinarySet*)c_binary_set;
-        cIndex->LoadFromBinarySet(*binary_set);
+        AssertInfo(index, "failed to load index from binary set, passed index was null");
+        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto binary_set = reinterpret_cast<milvus::knowhere::BinarySet*>(c_binary_set);
+        real_index->Load(*binary_set);
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -180,7 +166,7 @@ CStatus
 QueryOnFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors, CIndexQueryResult* res) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
         auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
@@ -204,7 +190,7 @@ QueryOnFloatVecIndexWithParam(CIndex index,
                               CIndexQueryResult* res) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
         auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
@@ -224,7 +210,7 @@ CStatus
 QueryOnBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors, CIndexQueryResult* res) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
         auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
@@ -248,7 +234,7 @@ QueryOnBinaryVecIndexWithParam(CIndex index,
                                CIndexQueryResult* res) {
     auto status = CStatus();
     try {
-        auto cIndex = (milvus::indexbuilder::IndexWrapper*)index;
+        auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
         auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
@@ -268,7 +254,7 @@ CStatus
 CreateQueryResult(CIndexQueryResult* res) {
     auto status = CStatus();
     try {
-        auto query_result = std::make_unique<milvus::indexbuilder::IndexWrapper::QueryResult>();
+        auto query_result = std::make_unique<milvus::indexbuilder::VecIndexCreator::QueryResult>();
         *res = query_result.release();
 
         status.error_code = Success;
@@ -282,19 +268,19 @@ CreateQueryResult(CIndexQueryResult* res) {
 
 int64_t
 NqOfQueryResult(CIndexQueryResult res) {
-    auto c_res = (milvus::indexbuilder::IndexWrapper::QueryResult*)res;
+    auto c_res = (milvus::indexbuilder::VecIndexCreator::QueryResult*)res;
     return c_res->nq;
 }
 
 int64_t
 TopkOfQueryResult(CIndexQueryResult res) {
-    auto c_res = (milvus::indexbuilder::IndexWrapper::QueryResult*)res;
+    auto c_res = (milvus::indexbuilder::VecIndexCreator::QueryResult*)res;
     return c_res->topk;
 }
 
 void
 GetIdsOfQueryResult(CIndexQueryResult res, int64_t* ids) {
-    auto c_res = (milvus::indexbuilder::IndexWrapper::QueryResult*)res;
+    auto c_res = (milvus::indexbuilder::VecIndexCreator::QueryResult*)res;
     auto nq = c_res->nq;
     auto k = c_res->topk;
     // TODO: how could we avoid memory copy whenever this called
@@ -303,7 +289,7 @@ GetIdsOfQueryResult(CIndexQueryResult res, int64_t* ids) {
 
 void
 GetDistancesOfQueryResult(CIndexQueryResult res, float* distances) {
-    auto c_res = (milvus::indexbuilder::IndexWrapper::QueryResult*)res;
+    auto c_res = (milvus::indexbuilder::VecIndexCreator::QueryResult*)res;
     auto nq = c_res->nq;
     auto k = c_res->topk;
     // TODO: how could we avoid memory copy whenever this called
@@ -314,7 +300,7 @@ CStatus
 DeleteIndexQueryResult(CIndexQueryResult res) {
     auto status = CStatus();
     try {
-        auto c_res = (milvus::indexbuilder::IndexWrapper::QueryResult*)res;
+        auto c_res = (milvus::indexbuilder::VecIndexCreator::QueryResult*)res;
         delete c_res;
 
         status.error_code = Success;
@@ -324,9 +310,4 @@ DeleteIndexQueryResult(CIndexQueryResult res) {
         status.error_msg = strdup(e.what());
     }
     return status;
-}
-
-void
-DeleteByteArray(const char* array) {
-    delete[] array;
 }

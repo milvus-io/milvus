@@ -5531,6 +5531,7 @@ class CreateIndexRequest :
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kFieldNameFieldNumber = 4,
+    kIndexNameFieldNumber = 6,
     kBaseFieldNumber = 1,
   };
   // repeated .milvus.proto.common.KeyValuePair extra_params = 5;
@@ -5577,6 +5578,17 @@ class CreateIndexRequest :
   std::string* release_field_name();
   void set_allocated_field_name(std::string* field_name);
 
+  // string index_name = 6;
+  void clear_index_name();
+  const std::string& index_name() const;
+  void set_index_name(const std::string& value);
+  void set_index_name(std::string&& value);
+  void set_index_name(const char* value);
+  void set_index_name(const char* value, size_t size);
+  std::string* mutable_index_name();
+  std::string* release_index_name();
+  void set_allocated_index_name(std::string* index_name);
+
   // .milvus.proto.common.MsgBase base = 1;
   bool has_base() const;
   void clear_base();
@@ -5594,6 +5606,7 @@ class CreateIndexRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr field_name_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr index_name_;
   ::milvus::proto::common::MsgBase* base_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -18995,6 +19008,57 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common:
 CreateIndexRequest::extra_params() const {
   // @@protoc_insertion_point(field_list:milvus.proto.milvus.CreateIndexRequest.extra_params)
   return extra_params_;
+}
+
+// string index_name = 6;
+inline void CreateIndexRequest::clear_index_name() {
+  index_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& CreateIndexRequest::index_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.CreateIndexRequest.index_name)
+  return index_name_.GetNoArena();
+}
+inline void CreateIndexRequest::set_index_name(const std::string& value) {
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.CreateIndexRequest.index_name)
+}
+inline void CreateIndexRequest::set_index_name(std::string&& value) {
+  
+  index_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.CreateIndexRequest.index_name)
+}
+inline void CreateIndexRequest::set_index_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.CreateIndexRequest.index_name)
+}
+inline void CreateIndexRequest::set_index_name(const char* value, size_t size) {
+  
+  index_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.CreateIndexRequest.index_name)
+}
+inline std::string* CreateIndexRequest::mutable_index_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.CreateIndexRequest.index_name)
+  return index_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* CreateIndexRequest::release_index_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.CreateIndexRequest.index_name)
+  
+  return index_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void CreateIndexRequest::set_allocated_index_name(std::string* index_name) {
+  if (index_name != nullptr) {
+    
+  } else {
+    
+  }
+  index_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), index_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.CreateIndexRequest.index_name)
 }
 
 // -------------------------------------------------------------------
