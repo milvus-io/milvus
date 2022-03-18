@@ -16,6 +16,22 @@ class ApiUtilityWrapper:
 
     ut = utility
 
+    # def import_data(self, collection_name, files, partition_name=None, options=None, using="default",
+    #                 check_task=None, check_items=None):
+    #     func_name = sys._getframe().f_code.co_name
+    #     res, is_succ = api_request([self.ut.import_data, collection_name, files,
+    #                                 partition_name, options, using])
+    #     check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+    #                                    collection_name=collection_name, using=using).run()
+    #     return res, check_result
+    #
+    # def get_import_state(self, task_id, using="default", check_task=None, check_items=None):
+    #     func_name = sys._getframe().f_code.co_name
+    #     res, is_succ = api_request([self.ut.get_import_state, task_id, using])
+    #     check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+    #                                    task_id=task_id, using=using).run()
+    #     return res, check_result
+
     def get_query_segment_info(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
