@@ -17,19 +17,13 @@ import argparse
 from pymilvus import (
     connections, list_collections,
     FieldSchema, CollectionSchema, DataType,
-    Collection
+    Collection, utility
 )
 TIMEOUT = 120
 
 
-def hello_milvus(host="127.0.0.1"):
+def hello_milvus(collection_name):
     import time
-    # create connection
-    connections.connect(host=host, port="19530")
-
-    print(f"\nList collections...")
-    print(list_collections())
-
     # create collection
     dim = 128
     default_fields = [
@@ -38,17 +32,18 @@ def hello_milvus(host="127.0.0.1"):
         FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
-
+    if utility.has_collection(collection_name):
+        print("collection is exist")
+        collection = Collection(name=collection_name)
+        default_schema = collection.schema
+        dim = [field.params['dim'] for field in default_schema.fields if field.dtype in [101, 102]][0]
     print(f"\nCreate collection...")
-    collection = Collection(name="hello_milvus", schema=default_schema)
-
-    print(f"\nList collections...")
-    print(list_collections())
-
+    collection = Collection(name=collection_name, schema=default_schema)
     #  insert data
     nb = 3000
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
     t0 = time.time()
+    
     collection.insert(
         [
             [i for i in range(nb)],
@@ -103,12 +98,19 @@ def hello_milvus(host="127.0.0.1"):
     sorted_res = sorted(res, key=lambda k: k['int64'])
     for r in sorted_res:
         print(r)
-    # collection.release()
+    collection.release()
 
 
 parser = argparse.ArgumentParser(description='host ip')
-parser.add_argument('--host', type=str, default='127.0.0.1', help='host ip')
+parser.add_argument('--host', type=str, default='10.96.77.209', help='host ip')
 args = parser.parse_args()
 # add time stamp
 print(f"\nStart time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
-hello_milvus(args.host)
+# create connection
+connections.connect(host=args.host, port="19530")
+print(f"\nList collections...")
+collection_list = list_collections()
+print(collection_list)
+for collection_name in collection_list:
+    print(f"check collection {collection_name}")
+    hello_milvus(collection_name)
