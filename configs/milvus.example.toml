@@ -1,0 +1,133 @@
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This file is not used for now.
+timetick-interval = 200
+
+timetick-buffer-size = 512
+
+name-length-limit = 255
+
+field-count-limit = 256
+
+dimension-limit = 32768
+
+shard-count-limit = 256
+
+dml-channel-count = 256
+
+partition-count-limit = 4096
+
+enable-index-min-segment-size = 1024
+
+simd-type = "auto"
+
+skip-query-channel-recover = false
+
+[etcd]
+endpoints = ["localhost:2379"]
+use-embed = false
+
+[minio]
+address = "localhost"
+port = 9000
+access-key-id = "minioadmin"
+secret-access-key = "minioadmin"
+use-ssl = false
+bucket-name = "a-bucket"
+root-path = "files"
+
+[pulsar]
+address = "localhost"
+port = 6650
+max-message-size = 5242880 
+
+[rocksmq]
+path = "/var/lib/milvus/rdb_data"
+page-size = 2147483648
+retention-duration = 10080
+retention-size = 8192
+
+[grpc]
+server-max-receive-size = 2147483647
+server-max-send-size = 2147483647
+client-max-receive-size = 104857600
+client-max-send-size = 104857600
+
+[rootcoord]
+address = "localhost"
+port = 53100
+
+[proxy]
+port = 19530
+max-task-count = 1024
+
+[querycoord]
+address = "localhost"
+port = 19531
+auto-handoff = true
+auto-balance = true
+balance-interval = 60
+memory-usage-limit-ratio = 90
+auto-balance-memory-usage-gap-ratio = 30
+
+[flowgraph]
+queue-length-limit = 1024
+parallelism-limit = 1024
+
+[querynode]
+port = 21123
+graceful-time = 0
+stats-publish-interval = 1000
+segcore-chunk-rows = 32768
+
+[indexcoord]
+address = "localhost"
+port = 31000
+
+[indexnode]
+port = 21121
+
+[datacoord]
+address = "localhost"
+port = 13333
+
+[gc]
+interval = 3600
+missed-files-tolerance = 86400
+dropped-files-tolerance = 86400
+
+[compaction]
+enable-compaction = true
+
+[datanode]
+port = 21124
+insert-buffer-size-limit = 16777216
+
+[localstorage]
+enable = true
+path = "/var/lib/milvus/data/"
+
+[log]
+level = "debug"
+format = "text"
+
+[log.file]
+root-path = ""
+max-size = 300
+max-age = 10
+max-backups = 20
+
