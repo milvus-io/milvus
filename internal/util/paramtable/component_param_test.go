@@ -280,3 +280,11 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("IndexStorageRootPath: %v", Params.IndexStorageRootPath)
 	})
 }
+
+func TestComponentParam_MqEnable(t *testing.T) {
+	var CParams ComponentParam
+	CParams.Init()
+	assert.Equal(t, true, CParams.RocksmqEnable())
+
+	assert.Equal(t, true, CParams.PulsarEnable())
+}

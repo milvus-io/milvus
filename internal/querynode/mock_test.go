@@ -28,7 +28,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -44,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 // ---------- unittest util functions ----------
@@ -242,12 +243,12 @@ func genIndexBinarySet() ([][]byte, error) {
 		}
 	}
 
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
 
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
 		return nil, err
 	}
@@ -348,12 +349,12 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 		}
 	}
 
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
 
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
 		return nil, err
 	}
@@ -415,12 +416,12 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 		}
 	}
 
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
 
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
 		return nil, err
 	}
@@ -621,29 +622,8 @@ func genEtcdKV() (*etcdkv.EtcdKV, error) {
 
 func genFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
-
-	pulsarURL := Params.PulsarCfg.Address
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  pulsarURL,
-		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
-	if err != nil {
-		return nil, err
-	}
-	return msFactory, nil
-}
-
-func genInvalidFactory() (msgstream.Factory, error) {
-	const receiveBufSize = 1024
-
-	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  "",
-		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err := msFactory.Init(&Params)
 	if err != nil {
 		return nil, err
 	}
@@ -1834,7 +1814,7 @@ type mockMsgStreamFactory struct {
 
 var _ msgstream.Factory = &mockMsgStreamFactory{}
 
-func (mm *mockMsgStreamFactory) SetParams(params map[string]interface{}) error {
+func (mm *mockMsgStreamFactory) Init(params *paramtable.ComponentParam) error {
 	return nil
 }
 

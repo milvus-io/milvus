@@ -41,11 +41,7 @@ func TestDmlChannels(t *testing.T) {
 	factory := msgstream.NewPmsFactory()
 	Params.Init()
 
-	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024}
-	err := factory.SetParams(m)
+	err := factory.Init(&Params)
 	assert.Nil(t, err)
 
 	dml := newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum)

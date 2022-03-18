@@ -20,12 +20,14 @@ import (
 	"context"
 
 	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	puslarmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
-	"github.com/mitchellh/mapstructure"
 )
+
+var p paramtable.BaseTable
 
 // PmsFactory is a pulsar msgstream factory that implemented Factory interface(msgstream.go)
 type PmsFactory struct {
@@ -36,12 +38,10 @@ type PmsFactory struct {
 	PulsarBufSize  int64
 }
 
-// SetParams is used to set parameters for PmsFactory
-func (f *PmsFactory) SetParams(params map[string]interface{}) error {
-	err := mapstructure.Decode(params, f)
-	if err != nil {
-		return err
-	}
+func (f *PmsFactory) Init(params *paramtable.ComponentParam) error {
+	f.PulsarAddress = params.PulsarCfg.Address
+	f.ReceiveBufSize = 1024
+	f.PulsarBufSize = 1024
 	return nil
 }
 
@@ -86,12 +86,9 @@ type RmsFactory struct {
 	RmqBufSize     int64
 }
 
-// SetParams is used to set parameters for RmsFactory
-func (f *RmsFactory) SetParams(params map[string]interface{}) error {
-	err := mapstructure.Decode(params, f)
-	if err != nil {
-		return err
-	}
+func (f *RmsFactory) Init(params *paramtable.ComponentParam) error {
+	f.RmqBufSize = 1024
+	f.ReceiveBufSize = 1024
 	return nil
 }
 

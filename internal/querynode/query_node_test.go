@@ -227,13 +227,8 @@ func makeNewChannelNames(names []string, suffix string) []string {
 func newMessageStreamFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
-	pulsarURL := Params.PulsarCfg.Address
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  pulsarURL,
-		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err := msFactory.Init(&Params)
 	return msFactory, err
 }
 

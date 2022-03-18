@@ -18,35 +18,31 @@
 
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/common/BinarySet.h"
+#include "indexbuilder/IndexCreatorBase.h"
 
 namespace milvus::indexbuilder {
 
-class IndexWrapper {
+// TODO: better to distinguish binary vec & float vec.
+class VecIndexCreator : public IndexCreatorBase {
  public:
-    explicit IndexWrapper(const char* serialized_type_params, const char* serialized_index_params);
+    explicit VecIndexCreator(const char* serialized_type_params, const char* serialized_index_params);
+
+    void
+    Build(const knowhere::DatasetPtr& dataset) override {
+        BuildWithoutIds(dataset);
+    }
+
+    knowhere::BinarySet
+    Serialize() override;
+
+    void
+    Load(const knowhere::BinarySet& binary_set) override;
 
     int64_t
     dim();
 
-    void
-    BuildWithoutIds(const knowhere::DatasetPtr& dataset);
-
-    struct Binary {
-        std::vector<char> data;
-    };
-
-    std::unique_ptr<Binary>
-    Serialize();
-
-    std::unique_ptr<milvus::knowhere::BinarySet>
-    SerializeBinarySet();
-
-    void
-    LoadFromBinarySet(milvus::knowhere::BinarySet&);
-
-    void
-    Load(const char* serialized_sliced_blob_buffer, int32_t size);
-
+ public:
+    // used for tests
     struct QueryResult {
         std::vector<milvus::knowhere::IDType> ids;
         std::vector<float> distances;
@@ -103,6 +99,9 @@ class IndexWrapper {
  public:
     void
     BuildWithIds(const knowhere::DatasetPtr& dataset);
+
+    void
+    BuildWithoutIds(const knowhere::DatasetPtr& dataset);
 
  private:
     knowhere::VecIndexPtr index_ = nullptr;

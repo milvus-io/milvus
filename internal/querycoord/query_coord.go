@@ -24,7 +24,6 @@ import (
 	"math/rand"
 	"os"
 	"sort"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -223,11 +222,7 @@ func (qc *QueryCoord) Init() error {
 
 // Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err := qc.msFactory.SetParams(m)
+	err := qc.msFactory.Init(&Params)
 	if err != nil {
 		return err
 	}
@@ -296,18 +291,6 @@ func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 // NewQueryCoord creates a QueryCoord object.
 func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
 	rand.Seed(time.Now().UnixNano())
-	queryChannels := make([]*queryChannelInfo, 0)
-	channelID := len(queryChannels)
-	searchPrefix := Params.CommonCfg.QueryCoordSearch
-	searchResultPrefix := Params.CommonCfg.QueryCoordSearchResult
-	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
-	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(int64(channelID), 10)
-
-	queryChannels = append(queryChannels, &queryChannelInfo{
-		requestChannel:  allocatedQueryChannel,
-		responseChannel: allocatedQueryResultChannel,
-	})
-
 	ctx1, cancel := context.WithCancel(ctx)
 	service := &QueryCoord{
 		loopCtx:    ctx1,
@@ -317,7 +300,6 @@ func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord,
 	}
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)
-	log.Debug("query coordinator", zap.Any("queryChannels", queryChannels))
 	return service, nil
 }
 

@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -373,10 +375,9 @@ func newSimpleMockMsgStream() *simpleMockMsgStream {
 type simpleMockMsgStreamFactory struct {
 }
 
-func (factory *simpleMockMsgStreamFactory) SetParams(params map[string]interface{}) error {
+func (factory *simpleMockMsgStreamFactory) Init(param *paramtable.ComponentParam) error {
 	return nil
 }
-
 func (factory *simpleMockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return newSimpleMockMsgStream(), nil
 }

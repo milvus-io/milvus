@@ -48,7 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
-var Params paramtable.BaseTable
+var Params paramtable.ComponentParam
 
 func TestMain(m *testing.M) {
 	Params.Init()
@@ -66,7 +66,7 @@ type parameters struct {
 }
 
 func (f *fixture) setup() []parameters {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	pulsarClient, err := pulsarwrapper.NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(f.t, err)
 
@@ -368,7 +368,7 @@ func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 
 /* ========================== Pulsar & RocksMQ Tests ========================== */
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -391,7 +391,7 @@ func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_Delete(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -412,7 +412,7 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_Search(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -435,7 +435,7 @@ func TestStream_PulsarMsgStream_Search(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -457,7 +457,7 @@ func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -479,7 +479,7 @@ func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -502,7 +502,7 @@ func TestStream_PulsarMsgStream_BroadCast(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -524,7 +524,7 @@ func TestStream_PulsarMsgStream_RepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -581,7 +581,7 @@ func TestStream_PulsarMsgStream_InsertRepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -635,7 +635,7 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -670,7 +670,7 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 }
 
 func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -704,7 +704,7 @@ func TestStream_PulsarTtMsgStream_Insert(t *testing.T) {
 }
 
 func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
 	consumerChannels := []string{c1}
@@ -771,7 +771,7 @@ func TestStream_PulsarTtMsgStream_NoSeek(t *testing.T) {
 }
 
 func TestStream_PulsarMsgStream_SeekToLast(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -848,7 +848,7 @@ func TestStream_PulsarMsgStream_SeekToLast(t *testing.T) {
 }
 
 func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
 	consumerChannels := []string{c1}
@@ -960,7 +960,7 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 }
 
 func TestStream_PulsarTtMsgStream_UnMarshalHeader(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
 	consumerChannels := []string{c1, c2}
@@ -1063,7 +1063,7 @@ func sendMsgPacks(ms MsgStream, msgPacks []*MsgPack) error {
 //   2. The count of consumed msg should be equal to the count of produced msg
 //
 func TestStream_PulsarTtMsgStream_1(t *testing.T) {
-	pulsarAddr, _ := Params.Load("_PulsarAddress")
+	pulsarAddr := Params.PulsarCfg.Address
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
 	p1Channels := []string{c1}
@@ -1126,7 +1126,7 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 //   2. The count of consumed msg should be equal to the count of produced msg
 //
 func TestStream_PulsarTtMsgStream_2(t *testing.T) {
-	pulsarAddr, _ := Params.Load("_PulsarAddress")
+	pulsarAddr := Params.PulsarCfg.Address
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
 	p1Channels := []string{c1}
@@ -1182,7 +1182,7 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 }
 
 func TestStream_MqMsgStream_Seek(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -1226,7 +1226,7 @@ func TestStream_MqMsgStream_Seek(t *testing.T) {
 }
 
 func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -1347,7 +1347,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 }
 
 func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -1639,7 +1639,7 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 }
 
 func TestStream_BroadcastMark(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}
@@ -1701,7 +1701,7 @@ func TestStream_BroadcastMark(t *testing.T) {
 }
 
 func TestStream_ProduceMark(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := Params.PulsarCfg.Address
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
 	producerChannels := []string{c1, c2}

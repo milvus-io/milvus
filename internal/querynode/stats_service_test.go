@@ -30,11 +30,7 @@ func TestStatsService_start(t *testing.T) {
 	initTestMeta(t, node, 0, 0)
 
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	msFactory.SetParams(m)
+	msFactory.Init(&Params)
 	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, msFactory)
 	node.statsService.start()
 	node.Stop()
@@ -53,11 +49,7 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 	producerChannels := []string{Params.CommonCfg.QueryNodeStats}
 
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	statsStream, err := msFactory.NewMsgStream(node.queryNodeLoopCtx)

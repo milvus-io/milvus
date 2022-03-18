@@ -15,6 +15,7 @@ include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
 if (LINUX)
+    # TODO: better to use ls/find pattern
     set(MILVUS_TEST_FILES
             init_gtest.cpp
             test_binary.cpp
@@ -38,10 +39,14 @@ if (LINUX)
             test_conf_adapter_mgr.cpp
             test_similarity_corelation.cpp
             test_utils.cpp
+            test_scalar_index_creator.cpp
+            test_index_c_api.cpp
             )
     # check if memory leak exists in index builder
     set(INDEX_BUILDER_TEST_FILES
             test_index_wrapper.cpp
+            test_scalar_index_creator.cpp
+            test_index_c_api.cpp
             )
 
     add_executable(index_builder_test

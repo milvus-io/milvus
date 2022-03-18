@@ -331,12 +331,8 @@ func (node *QueryNode) Init() error {
 
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
-	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = node.msFactory.SetParams(m)
+
+	err := node.msFactory.Init(&Params)
 	if err != nil {
 		return err
 	}

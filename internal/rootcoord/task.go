@@ -845,7 +845,10 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateIndex {
 		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	indexName := Params.CommonCfg.DefaultIndexName //TODO, get name from request
+	indexName := t.Req.GetIndexName()
+	if len(indexName) <= 0 {
+		indexName = Params.CommonCfg.DefaultIndexName //TODO, get name from request
+	}
 	indexID, _, err := t.core.IDAllocator(1)
 	log.Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {
@@ -856,6 +859,12 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		IndexID:     indexID,
 		IndexParams: t.Req.ExtraParams,
 	}
+	log.Info("create index for collection",
+		zap.String("collection", t.Req.GetCollectionName()),
+		zap.String("field", t.Req.GetFieldName()),
+		zap.String("index", indexName),
+		zap.Int64("index_id", indexID),
+		zap.Any("params", t.Req.GetExtraParams()))
 	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
 	if err != nil {
 		return err
@@ -874,9 +883,6 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		log.Debug("RootCoord CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
 		return err
-	}
-	if field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
-		return fmt.Errorf("field name = %s, data type = %s", t.Req.FieldName, schemapb.DataType_name[int32(field.DataType)])
 	}
 
 	collectionID := collMeta.ID

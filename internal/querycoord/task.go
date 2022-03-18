@@ -375,10 +375,13 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	}
 	log.Debug("loadCollectionTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toLoadPartitionIDs), zap.Int64("msgID", lct.Base.MsgID))
 
-	loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
-	watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
-	var deltaChannelInfos []*datapb.VchannelInfo
-	var dmChannelInfos []*datapb.VchannelInfo
+	var (
+		loadSegmentReqs    = []*querypb.LoadSegmentsRequest{}
+		watchDmChannelReqs = []*querypb.WatchDmChannelsRequest{}
+		deltaChannelInfos  = []*datapb.VchannelInfo{}
+		dmChannelInfos     = []*datapb.VchannelInfo{}
+	)
+
 	for _, partitionID := range toLoadPartitionIDs {
 		vChannelInfos, binlogs, err := lct.broker.getRecoveryInfo(lct.ctx, collectionID, partitionID)
 		if err != nil {

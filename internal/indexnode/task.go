@@ -25,6 +25,10 @@ import (
 	"runtime/debug"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+
 	"github.com/milvus-io/milvus/internal/metrics"
 
 	"go.uber.org/zap"
@@ -48,6 +52,8 @@ const (
 	// IndexBuildTaskName is the name of the operation to add an index task.
 	IndexBuildTaskName = "IndexBuildTask"
 )
+
+type Blob = storage.Blob
 
 type task interface {
 	Ctx() context.Context
@@ -118,8 +124,8 @@ func (bt *BaseTask) Notify(err error) {
 // IndexBuildTask is used to record the information of the index tasks.
 type IndexBuildTask struct {
 	BaseTask
-	index          Index
 	cm             storage.ChunkManager
+	index          indexcgowrapper.CodecIndex
 	etcdKV         *etcdkv.EtcdKV
 	savePaths      []string
 	req            *indexpb.CreateIndexRequest
@@ -326,7 +332,7 @@ func (it *IndexBuildTask) prepareParams(ctx context.Context) error {
 	return nil
 }
 
-func (it *IndexBuildTask) loadVector(ctx context.Context) (storage.FieldID, storage.FieldData, error) {
+func (it *IndexBuildTask) loadFieldData(ctx context.Context) (storage.FieldID, storage.FieldData, error) {
 	getValueByPath := func(path string) ([]byte, error) {
 		data, err := it.cm.Read(path)
 		if err != nil {
@@ -370,7 +376,7 @@ func (it *IndexBuildTask) loadVector(ctx context.Context) (storage.FieldID, stor
 	}
 	loadVectorDuration := it.tr.RecordSpan()
 	log.Debug("IndexNode load data success", zap.Int64("buildId", it.req.IndexBuildID))
-	it.tr.Record("load vector data done")
+	it.tr.Record("load field data done")
 
 	var insertCodec storage.InsertCodec
 	collectionID, partitionID, segmentID, insertData, err2 := insertCodec.DeserializeAll(blobs)
@@ -415,33 +421,29 @@ func (it *IndexBuildTask) buildIndex(ctx context.Context) ([]*storage.Blob, erro
 	{
 		var err error
 		var fieldData storage.FieldData
-		fieldID, fieldData, err = it.loadVector(ctx)
+		fieldID, fieldData, err = it.loadFieldData(ctx)
 		if err != nil {
 			return nil, err
 		}
 
-		floatVectorFieldData, fOk := fieldData.(*storage.FloatVectorFieldData)
-		if fOk {
-			err := it.index.BuildFloatVecIndexWithoutIds(floatVectorFieldData.Data)
+		dataset := indexcgowrapper.GenDataset(fieldData)
+		dType := dataset.DType
+		if dType != schemapb.DataType_None {
+			it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams)
 			if err != nil {
-				log.Error("IndexNode BuildFloatVecIndexWithoutIds failed", zap.Error(err))
+				log.Error("failed to create index", zap.Error(err))
 				return nil, err
 			}
-		}
-		binaryVectorFieldData, bOk := fieldData.(*storage.BinaryVectorFieldData)
-		if bOk {
-			err := it.index.BuildBinaryVecIndexWithoutIds(binaryVectorFieldData.Data)
+
+			err = it.index.Build(dataset)
 			if err != nil {
-				log.Error("IndexNode BuildBinaryVecIndexWithoutIds failed", zap.Error(err))
+				log.Error("failed to build index", zap.Error(err))
 				return nil, err
 			}
 		}
 
 		metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.NodeID, 10)).Observe(float64(it.tr.RecordSpan()))
 
-		if !fOk && !bOk {
-			return nil, errors.New("we expect FloatVectorFieldData or BinaryVectorFieldData")
-		}
 		it.tr.Record("build index done")
 	}
 
@@ -556,25 +558,7 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	defer it.releaseMemory()
 
 	var err error
-	it.index, err = NewCIndex(it.newTypeParams, it.newIndexParams)
-	if err != nil {
-		it.SetState(TaskStateFailed)
-		log.Error("IndexNode IndexBuildTask Execute NewCIndex failed",
-			zap.Int64("buildId", it.req.IndexBuildID),
-			zap.Error(err))
-		return err
-	}
 
-	defer func() {
-		err := it.index.Delete()
-		if err != nil {
-			log.Error("IndexNode IndexBuildTask Execute CIndexDelete failed",
-				zap.Int64("buildId", it.req.IndexBuildID),
-				zap.Error(err))
-		}
-	}()
-
-	it.tr.Record("new CIndex")
 	var blobs []*storage.Blob
 	blobs, err = it.buildIndex(ctx)
 	if err != nil {

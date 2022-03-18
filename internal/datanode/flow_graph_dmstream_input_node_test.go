@@ -24,21 +24,21 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
 type mockMsgStreamFactory struct {
-	SetParamsReturnNil  bool
+	InitReturnNil       bool
 	NewMsgStreamNoError bool
 }
 
 var _ msgstream.Factory = &mockMsgStreamFactory{}
 
-func (mm *mockMsgStreamFactory) SetParams(params map[string]interface{}) error {
-	if !mm.SetParamsReturnNil {
-		return errors.New("Set Params Error")
+func (mm *mockMsgStreamFactory) Init(params *paramtable.ComponentParam) error {
+	if !mm.InitReturnNil {
+		return errors.New("Init Error")
 	}
-
 	return nil
 }
 

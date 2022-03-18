@@ -259,11 +259,8 @@ func (s *Server) Init() error {
 // 4. set server state to Healthy
 func (s *Server) Start() error {
 	var err error
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = s.msFactory.SetParams(m)
+
+	err = s.msFactory.Init(&Params)
 	if err != nil {
 		return err
 	}

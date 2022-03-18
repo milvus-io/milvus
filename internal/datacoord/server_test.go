@@ -2295,12 +2295,8 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	var err error
 	factory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024,
-	}
-	err = factory.SetParams(m)
+
+	err = factory.Init(&Params)
 	assert.Nil(t, err)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
