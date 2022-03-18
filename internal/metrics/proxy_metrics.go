@@ -273,38 +273,36 @@ var (
 )
 
 //RegisterProxy registers Proxy metrics
-func RegisterProxy() {
-	prometheus.MustRegister(ProxySearchCount)
-	prometheus.MustRegister(ProxyInsertCount)
-	prometheus.MustRegister(ProxySearchVectors)
-	prometheus.MustRegister(ProxyInsertVectors)
+func RegisterProxy(registry *prometheus.Registry) {
+	registry.MustRegister(ProxySearchCount)
+	registry.MustRegister(ProxyInsertCount)
+	registry.MustRegister(ProxySearchVectors)
+	registry.MustRegister(ProxyInsertVectors)
 
-	//prometheus.MustRegister(ProxyLinkedSDKs)
+	registry.MustRegister(ProxySearchLatency)
+	registry.MustRegister(ProxySearchLatencyPerNQ)
+	registry.MustRegister(ProxySendMessageLatency)
+	registry.MustRegister(ProxyWaitForSearchResultLatency)
+	registry.MustRegister(ProxyReduceSearchResultLatency)
+	registry.MustRegister(ProxyDecodeSearchResultLatency)
 
-	prometheus.MustRegister(ProxySearchLatency)
-	prometheus.MustRegister(ProxySearchLatencyPerNQ)
-	prometheus.MustRegister(ProxySendMessageLatency)
-	prometheus.MustRegister(ProxyWaitForSearchResultLatency)
-	prometheus.MustRegister(ProxyReduceSearchResultLatency)
-	prometheus.MustRegister(ProxyDecodeSearchResultLatency)
+	registry.MustRegister(ProxyMsgStreamObjectsForPChan)
+	registry.MustRegister(ProxyMsgStreamObjectsForSearch)
 
-	prometheus.MustRegister(ProxyMsgStreamObjectsForPChan)
-	prometheus.MustRegister(ProxyMsgStreamObjectsForSearch)
+	registry.MustRegister(ProxyInsertLatency)
+	registry.MustRegister(ProxySendInsertReqLatency)
 
-	prometheus.MustRegister(ProxyInsertLatency)
-	prometheus.MustRegister(ProxySendInsertReqLatency)
+	registry.MustRegister(ProxyCacheHitCounter)
+	registry.MustRegister(ProxyUpdateCacheLatency)
 
-	prometheus.MustRegister(ProxyCacheHitCounter)
-	prometheus.MustRegister(ProxyUpdateCacheLatency)
+	registry.MustRegister(ProxySyncTimeTick)
+	registry.MustRegister(ProxyApplyPrimaryKeyLatency)
+	registry.MustRegister(ProxyApplyTimestampLatency)
 
-	prometheus.MustRegister(ProxySyncTimeTick)
-	prometheus.MustRegister(ProxyApplyPrimaryKeyLatency)
-	prometheus.MustRegister(ProxyApplyTimestampLatency)
-
-	prometheus.MustRegister(ProxyDDLFunctionCall)
-	prometheus.MustRegister(ProxyDQLFunctionCall)
-	prometheus.MustRegister(ProxyDMLFunctionCall)
-	prometheus.MustRegister(ProxyDDLReqLatency)
-	prometheus.MustRegister(ProxyDMLReqLatency)
-	prometheus.MustRegister(ProxyDQLReqLatency)
+	registry.MustRegister(ProxyDDLFunctionCall)
+	registry.MustRegister(ProxyDQLFunctionCall)
+	registry.MustRegister(ProxyDMLFunctionCall)
+	registry.MustRegister(ProxyDDLReqLatency)
+	registry.MustRegister(ProxyDMLReqLatency)
+	registry.MustRegister(ProxyDQLReqLatency)
 }

@@ -77,11 +77,11 @@ var (
 )
 
 //RegisterIndexNode registers IndexNode metrics
-func RegisterIndexNode() {
-	prometheus.MustRegister(IndexNodeBuildIndexTaskCounter)
-	prometheus.MustRegister(IndexNodeLoadBinlogLatency)
-	prometheus.MustRegister(IndexNodeDecodeBinlogLatency)
-	prometheus.MustRegister(IndexNodeKnowhereBuildIndexLatency)
-	prometheus.MustRegister(IndexNodeEncodeIndexFileLatency)
-	prometheus.MustRegister(IndexNodeSaveIndexFileLatency)
+func RegisterIndexNode(registry *prometheus.Registry) {
+	registry.MustRegister(IndexNodeBuildIndexTaskCounter)
+	registry.MustRegister(IndexNodeLoadBinlogLatency)
+	registry.MustRegister(IndexNodeDecodeBinlogLatency)
+	registry.MustRegister(IndexNodeKnowhereBuildIndexLatency)
+	registry.MustRegister(IndexNodeEncodeIndexFileLatency)
+	registry.MustRegister(IndexNodeSaveIndexFileLatency)
 }

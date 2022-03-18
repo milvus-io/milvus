@@ -51,8 +51,8 @@ var (
 )
 
 //RegisterIndexCoord registers IndexCoord metrics
-func RegisterIndexCoord() {
-	prometheus.MustRegister(IndexCoordIndexRequestCounter)
-	prometheus.MustRegister(IndexCoordIndexTaskCounter)
-	prometheus.MustRegister(IndexCoordIndexNodeNum)
+func RegisterIndexCoord(registry *prometheus.Registry) {
+	registry.MustRegister(IndexCoordIndexRequestCounter)
+	registry.MustRegister(IndexCoordIndexTaskCounter)
+	registry.MustRegister(IndexCoordIndexNodeNum)
 }
