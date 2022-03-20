@@ -184,7 +184,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 		Address: "",
 	})
 	queryCollection.sessionManager = sessionManager
-
+	queryCollection.start()
 	dim := 2
 	// generate search rawData
 	var vec = make([]float32, dim)
@@ -486,7 +486,7 @@ func TestQueryCollection_serviceableTime(t *testing.T) {
 
 	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
 	assert.NoError(t, err)
-
+	queryCollection.start()
 	st := Timestamp(1000)
 	queryCollection.setServiceableTime(st)
 
@@ -597,7 +597,7 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 		err = updateTSafe(queryCollection, timestamp)
 		assert.NoError(t, err)
 
-		go queryCollection.doUnsolvedQueryMsg()
+		go queryCollection.schedulerSearchMsgs()
 
 		msg, err := genSimpleSearchMsg()
 		assert.NoError(t, err)
@@ -621,7 +621,7 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 		err = updateTSafe(queryCollection, timestamp)
 		assert.NoError(t, err)
 
-		go queryCollection.doUnsolvedQueryMsg()
+		go queryCollection.schedulerSearchMsgs()
 
 		msg, err := genSimpleSearchMsg()
 		assert.NoError(t, err)
