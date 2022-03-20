@@ -209,6 +209,28 @@ then
     python scripts/action_after_upgrade.py || error_exit
 fi
 
+
+# test for third deployment(after docker-compose restart)
+pushd ${Deploy_Dir}
+printf "start to restart milvus\n"
+docker-compose restart
+check_healthy
+docker-compose ps
+popd
+
+# wait for milvus ready
+sleep 120
+printf "test for third deployment\n"
+if [ "$Task" == "reinstall" ];
+then
+    python scripts/action_after_reinstall.py || error_exit
+fi
+if [ "$Task" == "upgrade" ];
+then
+    python scripts/action_after_upgrade.py || error_exit
+fi
+
+
 pushd ${Deploy_Dir}
 # clean env
 docker-compose ps
