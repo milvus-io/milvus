@@ -446,7 +446,9 @@ message CreateIndexRequest {
   // The vector field name in this particular collection
   string field_name = 4;
   // Support keys: index_type,metric_type, params. Different index_type may has different params.
-  repeated common.KeyValuePair extra_params = 5; 
+  repeated common.KeyValuePair extra_params = 5;
+  // Version before 2.0.2 doesn't contain index_name, we use default index name.
+  string index_name = 6;
 }
 
 /*

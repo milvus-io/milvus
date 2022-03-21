@@ -15,87 +15,45 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <functional>
+#include <knowhere/common/Typedef.h>
 
 #include "knowhere/index/IndexType.h"
 
 namespace milvus::indexbuilder {
 
 std::vector<std::string>
-NM_List() {
-    static std::vector<std::string> ret{
-        milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-        milvus::knowhere::IndexEnum::INDEX_NSG,
-        milvus::knowhere::IndexEnum::INDEX_RHNSWFlat,
-    };
-    return ret;
-}
+NM_List();
 
 std::vector<std::string>
-BIN_List() {
-    static std::vector<std::string> ret{
-        milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP,
-        milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-    };
-    return ret;
-}
+BIN_List();
 
 std::vector<std::string>
-Need_ID_List() {
-    static std::vector<std::string> ret{
-        // milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-        // milvus::knowhere::IndexEnum::INDEX_NSG,
-    };
-
-    return ret;
-}
+Need_ID_List();
 
 std::vector<std::string>
-Need_BuildAll_list() {
-    static std::vector<std::string> ret{
-        milvus::knowhere::IndexEnum::INDEX_NSG,
-    };
-    return ret;
-}
+Need_BuildAll_list();
 
 std::vector<std::tuple<std::string, std::string>>
-unsupported_index_combinations() {
-    static std::vector<std::tuple<std::string, std::string>> ret{
-        std::make_tuple(std::string(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT), std::string(knowhere::Metric::L2)),
-    };
-    return ret;
-}
+unsupported_index_combinations();
 
 template <typename T>
 bool
-is_in_list(const T& t, std::function<std::vector<T>()> list_func) {
-    auto l = list_func();
-    return std::find(l.begin(), l.end(), t) != l.end();
-}
+is_in_list(const T& t, std::function<std::vector<T>()> list_func);
 
 bool
-is_in_bin_list(const milvus::knowhere::IndexType& index_type) {
-    return is_in_list<std::string>(index_type, BIN_List);
-}
+is_in_bin_list(const milvus::knowhere::IndexType& index_type);
 
 bool
-is_in_nm_list(const milvus::knowhere::IndexType& index_type) {
-    return is_in_list<std::string>(index_type, NM_List);
-}
+is_in_nm_list(const milvus::knowhere::IndexType& index_type);
 
 bool
-is_in_need_build_all_list(const milvus::knowhere::IndexType& index_type) {
-    return is_in_list<std::string>(index_type, Need_BuildAll_list);
-}
+is_in_need_build_all_list(const milvus::knowhere::IndexType& index_type);
 
 bool
-is_in_need_id_list(const milvus::knowhere::IndexType& index_type) {
-    return is_in_list<std::string>(index_type, Need_ID_List);
-}
+is_in_need_id_list(const milvus::knowhere::IndexType& index_type);
 
 bool
-is_unsupported(const milvus::knowhere::IndexType& index_type, const milvus::knowhere::MetricType& metric_type) {
-    return is_in_list<std::tuple<std::string, std::string>>(std::make_tuple(index_type, metric_type),
-                                                            unsupported_index_combinations);
-}
+is_unsupported(const milvus::knowhere::IndexType& index_type, const milvus::knowhere::MetricType& metric_type);
 
 }  // namespace milvus::indexbuilder

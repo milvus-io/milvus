@@ -3213,6 +3213,12 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 
 	collName, fieldName := cit.CollectionName, cit.FieldName
 
+	collID, err := globalMetaCache.GetCollectionID(ctx, collName)
+	if err != nil {
+		return err
+	}
+	cit.collectionID = collID
+
 	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
@@ -3245,6 +3251,18 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		indexType = indexparamcheck.IndexFaissIvfPQ // IVF_PQ is the default index type
 	}
 
+	// skip params check of non-vector field.
+	vecDataTypes := []schemapb.DataType{
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_BinaryVector,
+	}
+	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collName)
+	for _, f := range schema.GetFields() {
+		if f.GetName() == fieldName && !funcutil.SliceContain(vecDataTypes, f.GetDataType()) {
+			return indexparamcheck.CheckIndexValid(f.GetDataType(), indexType, indexParams)
+		}
+	}
+
 	adapter, err := indexparamcheck.GetConfAdapterMgrInstance().GetAdapter(indexType)
 	if err != nil {
 		log.Warn("Failed to get conf adapter", zap.String("index_type", indexType))
@@ -3257,8 +3275,6 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("invalid index params: %v", cit.CreateIndexRequest.ExtraParams)
 	}
 
-	collID, _ := globalMetaCache.GetCollectionID(ctx, collName)
-	cit.collectionID = collID
 	return nil
 }
 

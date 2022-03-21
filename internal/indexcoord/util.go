@@ -54,7 +54,10 @@ func estimateIndexSize(dim int64, numRows int64, dataType schemapb.DataType) (ui
 		return uint64(dim) / 8 * uint64(numRows), nil
 	}
 
-	errMsg := "the field to build index must be a vector field"
-	log.Error(errMsg)
-	return 0, errors.New(errMsg)
+	// TODO: optimize here.
+	return 0, nil
+
+	// errMsg := "the field to build index must be a vector field"
+	// log.Error(errMsg)
+	// return 0, errors.New(errMsg)
 }

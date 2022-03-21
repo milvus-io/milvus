@@ -17,7 +17,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 
 #include "pb/index_cgo_msg.pb.h"
-#include "indexbuilder/IndexWrapper.h"
+#include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -64,7 +64,7 @@ IndexBuilder_build(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index =
-            std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+            std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
         index->BuildWithoutIds(xb_dataset);
     }
 }
@@ -93,7 +93,7 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index =
-            std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+            std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
 
         index->BuildWithoutIds(xb_dataset);
         index->Serialize();
