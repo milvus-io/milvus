@@ -969,5 +969,12 @@ func (s *Server) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
+	if s.isClosed() {
+		log.Warn("failed to import because of closed server", zap.String("collectionName", req.GetCollectionName()))
+		resp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
+		return resp, nil
+	}
+
+	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

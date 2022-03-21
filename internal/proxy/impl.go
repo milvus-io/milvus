@@ -3987,26 +3987,30 @@ func unhealthyStatus() *commonpb.Status {
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	log.Info("received Import request")
+	log.Info("received import request")
 	resp := &milvuspb.ImportResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
 		return resp, nil
 	}
 
-	return resp, nil
+	resp, err := node.rootCoord.Import(ctx, req)
+	log.Info("received import response", zap.String("collectionName", req.GetCollectionName()), zap.Any("resp", resp), zap.Error(err))
+	return resp, err
 }
 
 // Check import task state from datanode
 func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	log.Info("received GetImportState request", zap.Int64("taskID", req.GetTask()))
+	log.Info("received get import state request", zap.Int64("taskID", req.GetTask()))
 	resp := &milvuspb.GetImportStateResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
 		return resp, nil
 	}
 
-	return resp, nil
+	resp, err := node.rootCoord.GetImportState(ctx, req)
+	log.Info("received get import state response", zap.Int64("taskID", req.GetTask()), zap.Any("resp", resp), zap.Error(err))
+	return resp, err
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
