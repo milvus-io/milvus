@@ -55,6 +55,7 @@ type MockDataCoord struct {
 	watchChannelsResp    *datapb.WatchChannelsResponse
 	getFlushStateResp    *milvuspb.GetFlushStateResponse
 	dropVChanResp        *datapb.DropVirtualChannelResponse
+	importResp           *datapb.ImportTaskResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -164,8 +165,8 @@ func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.Drop
 	return m.dropVChanResp, m.err
 }
 
-func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
-	return m.status, m.err
+func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTask) (*datapb.ImportTaskResponse, error) {
+	return m.importResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -380,7 +381,9 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Import", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{
-			status: &commonpb.Status{},
+			importResp: &datapb.ImportTaskResponse{
+				Status: &commonpb.Status{},
+			},
 		}
 		resp, err := server.Import(ctx, nil)
 		assert.Nil(t, err)

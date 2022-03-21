@@ -119,6 +119,6 @@ func (m *DataCoordClient) DropVirtualChannel(ctx context.Context, req *datapb.Dr
 	return &datapb.DropVirtualChannelResponse{}, m.Err
 }
 
-func (m *DataCoordClient) Import(ctx context.Context, req *datapb.ImportTask, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (m *DataCoordClient) Import(ctx context.Context, req *datapb.ImportTask, opts ...grpc.CallOption) (*datapb.ImportTaskResponse, error) {
+	return &datapb.ImportTaskResponse{}, m.Err
 }
