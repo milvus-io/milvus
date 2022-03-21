@@ -18,7 +18,7 @@
 #include <knowhere/index/vector_index/ConfAdapterMgr.h>
 #include <knowhere/archive/KnowhereConfig.h>
 
-#include "indexbuilder/IndexWrapper.h"
+#include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/utils.h"
 #include "pb/index_cgo_msg.pb.h"
@@ -191,7 +191,7 @@ TEST(BINFLAT, Build) {
 }
 
 void
-print_query_result(const std::unique_ptr<milvus::indexbuilder::IndexWrapper::QueryResult>& result) {
+print_query_result(const std::unique_ptr<milvus::indexbuilder::VecIndexCreator::QueryResult>& result) {
     for (auto i = 0; i < result->nq; i++) {
         printf("result of %dth query:\n", i);
         for (auto j = 0; j < result->topk; j++) {
@@ -228,7 +228,7 @@ TEST(BinIVFFlat, Build_and_Query) {
     auto hit_ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
     auto distances = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
 
-    auto query_res = std::make_unique<milvus::indexbuilder::IndexWrapper::QueryResult>();
+    auto query_res = std::make_unique<milvus::indexbuilder::VecIndexCreator::QueryResult>();
     query_res->nq = nq;
     query_res->topk = topk;
     query_res->ids.resize(nq * topk);
@@ -275,7 +275,7 @@ TEST(PQWrapper, Build) {
     auto xb_data = dataset.get_col<float>(0);
     auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
 }
 
@@ -295,7 +295,7 @@ TEST(IVFFLATNMWrapper, Build) {
     auto xb_data = dataset.get_col<float>(0);
     auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
 }
 
@@ -316,15 +316,22 @@ TEST(IVFFLATNMWrapper, Codec) {
     auto xb_data = dataset.get_col<float>(0);
     auto xb_dataset = milvus::knowhere::GenDataset(flat_nb, DIM, xb_data.data());
     auto index_wrapper =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index_wrapper->BuildWithoutIds(xb_dataset));
 
-    auto binary = index_wrapper->Serialize();
+    auto binary_set = index_wrapper->Serialize();
     auto copy_index_wrapper =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_NO_THROW(copy_index_wrapper->Load(binary->data.data(), binary->data.size()));
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
+
+    ASSERT_NO_THROW(copy_index_wrapper->Load(binary_set));
     ASSERT_EQ(copy_index_wrapper->dim(), copy_index_wrapper->dim());
-    auto copy_binary = copy_index_wrapper->Serialize();
+
+    auto copy_binary_set = copy_index_wrapper->Serialize();
+    ASSERT_EQ(binary_set.binary_map_.size(), copy_binary_set.binary_map_.size());
+
+    for (const auto& [k, v] : binary_set.binary_map_) {
+        ASSERT_TRUE(copy_binary_set.Contains(k));
+    }
 }
 
 TEST(BinFlatWrapper, Build) {
@@ -345,7 +352,7 @@ TEST(BinFlatWrapper, Build) {
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
     // ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
 }
@@ -368,7 +375,7 @@ TEST(BinIdMapWrapper, Build) {
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
     // ASSERT_NO_THROW(index->BuildWithIds(xb_dataset));
 }
@@ -399,48 +406,50 @@ INSTANTIATE_TEST_CASE_P(
 
 TEST_P(IndexWrapperTest, Constructor) {
     auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
 }
 
 TEST_P(IndexWrapperTest, Dim) {
     auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
 
     ASSERT_EQ(index->dim(), DIM);
 }
 
 TEST_P(IndexWrapperTest, BuildWithoutIds) {
     auto index =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
 }
 
 TEST_P(IndexWrapperTest, Codec) {
     auto index_wrapper =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
 
     ASSERT_NO_THROW(index_wrapper->BuildWithoutIds(xb_dataset));
 
-    auto binary = index_wrapper->Serialize();
+    auto binary_set = index_wrapper->Serialize();
     auto copy_index_wrapper =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
-    ASSERT_NO_THROW(copy_index_wrapper->Load(binary->data.data(), binary->data.size()));
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
+
+    ASSERT_NO_THROW(copy_index_wrapper->Load(binary_set));
     ASSERT_EQ(copy_index_wrapper->dim(), copy_index_wrapper->dim());
-    auto copy_binary = copy_index_wrapper->Serialize();
-    if (!milvus::indexbuilder::is_in_nm_list(index_type)) {
-        // binary may be not same due to uncertain internal map order
-        ASSERT_EQ(binary->data.size(), copy_binary->data.size());
-        ASSERT_EQ(binary->data, copy_binary->data);
+
+    auto copy_binary_set = copy_index_wrapper->Serialize();
+    ASSERT_EQ(binary_set.binary_map_.size(), copy_binary_set.binary_map_.size());
+
+    for (const auto& [k, v] : binary_set.binary_map_) {
+        ASSERT_TRUE(copy_binary_set.Contains(k));
     }
 }
 
 TEST_P(IndexWrapperTest, Query) {
     auto index_wrapper =
-        std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+        std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
 
     index_wrapper->BuildWithoutIds(xb_dataset);
 
-    std::unique_ptr<milvus::indexbuilder::IndexWrapper::QueryResult> query_result = index_wrapper->Query(xq_dataset);
+    std::unique_ptr<milvus::indexbuilder::VecIndexCreator::QueryResult> query_result = index_wrapper->Query(xq_dataset);
     ASSERT_EQ(query_result->topk, K);
     ASSERT_EQ(query_result->nq, NQ);
     ASSERT_EQ(query_result->distances.size(), query_result->topk * query_result->nq);

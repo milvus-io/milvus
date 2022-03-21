@@ -25,10 +25,11 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -311,12 +312,12 @@ func generateIndex(indexBuildID UniqueID, cm storage.ChunkManager) ([]string, er
 		}
 	}
 
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
 
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
 		return nil, err
 	}

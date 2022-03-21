@@ -24,11 +24,12 @@ import (
 	"math/rand"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -242,12 +243,12 @@ func genIndexBinarySet() ([][]byte, error) {
 		}
 	}
 
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
 
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
 		return nil, err
 	}
@@ -348,12 +349,12 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 		}
 	}
 
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
 
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
 		return nil, err
 	}
@@ -415,12 +416,12 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 		}
 	}
 
-	index, err := indexnode.NewCIndex(typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
 	if err != nil {
 		return nil, err
 	}
 
-	err = index.BuildFloatVecIndexWithoutIds(indexRowData)
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
 		return nil, err
 	}

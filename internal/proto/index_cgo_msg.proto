@@ -18,6 +18,10 @@ message MapParams {
   repeated common.KeyValuePair params = 1;
 }
 
+message MapParamsV2 {
+  map<string, string> params = 1;
+}
+
 message Binary {
   string key = 1;
   bytes value = 2;

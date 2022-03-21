@@ -11,9 +11,11 @@
 
 
 set(INDEXBUILDER_FILES
-        IndexWrapper.cpp
+        VecIndexCreator.cpp
         index_c.cpp
         init_c.cpp
+        utils.cpp
+        StringIndexImpl.cpp
         )
 add_library(milvus_indexbuilder SHARED
         ${INDEXBUILDER_FILES}
@@ -27,8 +29,8 @@ endif ()
 
 # link order matters
 target_link_libraries(milvus_indexbuilder
-        knowhere
         milvus_common
+        knowhere
         ${TBB}
         ${PLATFORM_LIBS}
         pthread
