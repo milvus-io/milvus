@@ -1,2 +1,3 @@
 docker==5.0.0
 nested-lookup==0.2.22
+pyyaml==6.0
