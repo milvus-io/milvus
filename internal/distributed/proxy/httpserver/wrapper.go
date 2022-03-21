@@ -25,7 +25,7 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 		data, err := handle(c)
 		// format body by accept header, protobuf marshal not supported by gin by default
 		// TODO: add marshal handler to support protobuf response
-		formatOffered := []string{binding.MIMEJSON, binding.MIMEYAML, binding.MIMEXML}
+		formatOffered := []string{binding.MIMEJSON, binding.MIMEYAML}
 		bodyFormatNegotiate := gin.Negotiate{
 			Offered: formatOffered,
 			Data:    data,
@@ -49,5 +49,21 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 			}
 		}
 		c.Negotiate(http.StatusOK, bodyFormatNegotiate)
+	}
+}
+
+// gin.ShouldBind() default as `form`, but we want JSON
+func shouldBind(c *gin.Context, obj interface{}) error {
+	b := getBinding(c.ContentType())
+	return c.ShouldBindWith(obj, b)
+}
+
+func getBinding(contentType string) binding.Binding {
+	// ref: binding.Default
+	switch contentType {
+	case binding.MIMEYAML:
+		return binding.YAML
+	default:
+		return binding.JSON
 	}
 }
