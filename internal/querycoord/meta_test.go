@@ -354,3 +354,50 @@ func TestReloadMetaFromKV(t *testing.T) {
 	segment := meta.segmentsInfo.getSegment(defaultSegmentID)
 	assert.NotNil(t, segment)
 }
+
+func TestCreateQueryChannel(t *testing.T) {
+	refreshParams()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+
+	nodeID := defaultQueryNodeID
+	segmentsInfo := newSegmentsInfo(kv)
+	segmentsInfo.segmentIDMap[defaultSegmentID] = &querypb.SegmentInfo{
+		CollectionID: defaultCollectionID,
+		PartitionID:  defaultPartitionID,
+		SegmentID:    defaultSegmentID,
+		NodeID:       nodeID,
+	}
+
+	fixedQueryChannel := Params.CommonCfg.QueryCoordSearch + "-0"
+	fixedQueryResultChannel := Params.CommonCfg.QueryCoordSearchResult + "-0"
+
+	tests := []struct {
+		inID             UniqueID
+		outQueryChannel  string
+		outResultChannel string
+
+		description string
+	}{
+		{0, fixedQueryChannel, fixedQueryResultChannel, "collection ID = 0"},
+		{1, fixedQueryChannel, fixedQueryResultChannel, "collection ID = 1"},
+	}
+
+	m := &MetaReplica{
+		client:            kv,
+		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
+		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
+		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
+		segmentsInfo:      segmentsInfo,
+	}
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			info := m.createQueryChannel(test.inID)
+			assert.Equal(t, info.GetQueryChannel(), test.outQueryChannel)
+			assert.Equal(t, info.GetQueryResultChannel(), test.outResultChannel)
+		})
+	}
+
+}
