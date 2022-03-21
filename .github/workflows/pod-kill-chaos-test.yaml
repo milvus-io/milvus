@@ -127,6 +127,7 @@ jobs:
 
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
+          python chaos/scripts/verify_all_collections.py --host 127.0.0.1
 
       - name: Export logs
         if: ${{ always() }}
