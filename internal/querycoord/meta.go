@@ -779,16 +779,16 @@ func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos []*querypb.DmChannel
 	return nil
 }
 
+// createQueryChannel creates topic names for search channel and search result channel
+// Search channel's suffix is fixed with "-0"
+// Search result channel's suffix is fixed with "-0"
 func (m *MetaReplica) createQueryChannel(collectionID UniqueID) *querypb.QueryChannelInfo {
-	// TODO::to remove
-	// all collection use the same query channel
-	colIDForAssignChannel := UniqueID(0)
+	allocatedQueryChannel := fmt.Sprintf("%s-0", Params.CommonCfg.QueryCoordSearch)
+	allocatedQueryResultChannel := fmt.Sprintf("%s-0", Params.CommonCfg.QueryCoordSearchResult)
 
-	searchPrefix := Params.CommonCfg.QueryCoordSearch
-	searchResultPrefix := Params.CommonCfg.QueryCoordSearchResult
-	allocatedQueryChannel := searchPrefix + "-" + strconv.FormatInt(colIDForAssignChannel, 10)
-	allocatedQueryResultChannel := searchResultPrefix + "-" + strconv.FormatInt(colIDForAssignChannel, 10)
-	log.Debug("query coordinator create query channel", zap.String("queryChannelName", allocatedQueryChannel), zap.String("queryResultChannelName", allocatedQueryResultChannel))
+	log.Debug("query coordinator is creating query channel",
+		zap.String("query channel name", allocatedQueryChannel),
+		zap.String("query result channel name", allocatedQueryResultChannel))
 
 	seekPosition := &internalpb.MsgPosition{
 		ChannelName: allocatedQueryChannel,
