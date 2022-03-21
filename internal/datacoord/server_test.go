@@ -2248,6 +2248,31 @@ func TestGetFlushState(t *testing.T) {
 	})
 }
 
+func TestImport(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		resp, err := svr.Import(svr.ctx, &datapb.ImportTask{
+			CollectionName: "dummy",
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+	})
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+
+		resp, err := svr.Import(svr.ctx, &datapb.ImportTask{
+			CollectionName: "dummy",
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.GetReason())
+	})
+}
+
 // https://github.com/milvus-io/milvus/issues/15659
 func TestIssue15659(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

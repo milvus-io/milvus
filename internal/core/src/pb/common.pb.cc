@@ -319,12 +319,13 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\n\017CompactionState\022\021\n\rUndefiedState\020\000\022\r\n\t"
   "Executing\020\001\022\r\n\tCompleted\020\002*X\n\020Consistenc"
   "yLevel\022\n\n\006Strong\020\000\022\013\n\007Session\020\001\022\013\n\007Bound"
-  "ed\020\002\022\016\n\nEventually\020\003\022\016\n\nCustomized\020\004*\203\001\n"
+  "ed\020\002\022\016\n\nEventually\020\003\022\016\n\nCustomized\020\004*\232\001\n"
   "\013ImportState\022\021\n\rImportPending\020\000\022\020\n\014Impor"
-  "tFailed\020\001\022\021\n\rImportParsing\020\002\022\023\n\017ImportPe"
-  "rsisted\020\003\022\022\n\016ImportIndexing\020\004\022\023\n\017ImportC"
-  "ompleted\020\005B5Z3github.com/milvus-io/milvu"
-  "s/internal/proto/commonpbb\006proto3"
+  "tFailed\020\001\022\025\n\021ImportDownloading\020\002\022\021\n\rImpo"
+  "rtParsing\020\003\022\023\n\017ImportPersisted\020\004\022\022\n\016Impo"
+  "rtIndexing\020\005\022\023\n\017ImportCompleted\020\006B5Z3git"
+  "hub.com/milvus-io/milvus/internal/proto/"
+  "commonpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -341,7 +342,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2873,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 2896,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 8, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 8, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -555,6 +556,7 @@ bool ImportState_IsValid(int value) {
     case 3:
     case 4:
     case 5:
+    case 6:
       return true;
     default:
       return false;

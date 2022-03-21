@@ -926,6 +926,62 @@ func (coord *RootCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMet
 	}, nil
 }
 
+func (coord *RootCoordMock) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.ImportResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			Tasks: make([]int64, 0),
+		}, nil
+	}
+	return &milvuspb.ImportResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Tasks: make([]int64, 3),
+	}, nil
+}
+
+func (coord *RootCoordMock) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.GetImportStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			RowCount: 0,
+			IdList:   make([]int64, 0),
+		}, nil
+	}
+	return &milvuspb.GetImportStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		RowCount: 10,
+		IdList:   make([]int64, 3),
+	}, nil
+}
+
+func (coord *RootCoordMock) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 func NewRootCoordMock(opts ...RootCoordMockOption) *RootCoordMock {
 	rc := &RootCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),

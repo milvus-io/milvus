@@ -166,6 +166,13 @@ func (d *dataMock) WatchChannels(ctx context.Context, req *datapb.WatchChannelsR
 		}}, nil
 }
 
+func (d *dataMock) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 type queryMock struct {
 	types.QueryCoord
 	collID []typeutil.UniqueID
@@ -2070,6 +2077,43 @@ func TestRootCoord(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("import", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.ImportRequest{
+			CollectionName: "c1",
+			PartitionName:  "p1",
+			RowBased:       true,
+			Files:          []string{"f1", "f2", "f3"},
+		}
+		rsp, err := core.Import(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("get import state", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.GetImportStateRequest{
+			Task: 0,
+		}
+		rsp, err := core.GetImportState(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("report import", func(t *testing.T) {
+		defer wg.Done()
+		req := &rootcoordpb.ImportResult{
+			TaskId:   0,
+			RowCount: 100,
+		}
+		rsp, err := core.ReportImport(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("get system info", func(t *testing.T) {
 		defer wg.Done()
 		// normal case
@@ -2245,6 +2289,26 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
 
+		rsp9, err := core.Import(ctx, &milvuspb.ImportRequest{
+			CollectionName: "c1",
+			PartitionName:  "p1",
+			RowBased:       true,
+			Files:          []string{"f1", "f2", "f3"},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp9.Status.ErrorCode)
+
+		rsp10, err := core.GetImportState(ctx, &milvuspb.GetImportStateRequest{
+			Task: 0,
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp10.Status.ErrorCode)
+
+		rsp11, err := core.ReportImport(ctx, &rootcoordpb.ImportResult{
+			RowCount: 0,
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp11.ErrorCode)
 	})
 
 	wg.Add(1)
@@ -2565,6 +2629,11 @@ func TestCheckInit(t *testing.T) {
 
 	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
 		return nil
+	}
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}
 	}
 	err = c.checkInit()
 	assert.Nil(t, err)

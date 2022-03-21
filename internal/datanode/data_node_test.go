@@ -319,6 +319,15 @@ func TestDataNode(t *testing.T) {
 			zap.String("response", resp.Response))
 	})
 
+	t.Run("Test Import", func(t *testing.T) {
+		req := &datapb.ImportTask{
+			CollectionName: "dummy",
+		}
+		stat, err := node.Import(node.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, stat.ErrorCode)
+	})
+
 	t.Run("Test BackGroundGC", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		node := newIDLEDataNodeMock(ctx)

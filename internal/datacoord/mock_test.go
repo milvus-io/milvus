@@ -447,6 +447,20 @@ func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.Get
 	}, nil
 }
 
+func (m *mockRootCoordService) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Check import task state from datanode
+func (m *mockRootCoordService) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Report impot task state to rootcoord
+func (m *mockRootCoordService) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 type mockCompactionHandler struct {
 	methods map[string]interface{}
 }

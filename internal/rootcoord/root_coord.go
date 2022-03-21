@@ -141,6 +141,9 @@ type Core struct {
 
 	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
+	//assign import task to data service
+	CallImportService func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status
+
 	//Proxy manager
 	proxyManager *proxyManager
 
@@ -167,6 +170,9 @@ type Core struct {
 	session *sessionutil.Session
 
 	msFactory ms.Factory
+
+	//import manager
+	importManager *importManager
 }
 
 // --------------------- function --------------------------
@@ -270,6 +276,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallReleasePartitionService == nil {
 		return fmt.Errorf("callReleasePartitionService is nil")
+	}
+	if c.CallImportService == nil {
+		return fmt.Errorf("callImportService is nil")
 	}
 
 	return nil
@@ -715,6 +724,25 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}
 		return nil
 	}
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
+		st := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}
+		defer func() {
+			if err := recover(); err != nil {
+				st.ErrorCode = commonpb.ErrorCode_UnexpectedError
+				st.Reason = "assign import task to data coord panic"
+			}
+		}()
+
+		rsp, _ := s.Import(ctx, req)
+		if rsp.ErrorCode != commonpb.ErrorCode_Success {
+			return rsp
+		}
+
+		return st
+	}
+
 	return nil
 }
 
@@ -1053,6 +1081,13 @@ func (c *Core) Init() error {
 		if initError != nil {
 			return
 		}
+
+		c.importManager = newImportManager(
+			c.ctx,
+			c.etcdCli,
+			c.CallImportService,
+		)
+		c.importManager.init()
 	})
 	if initError != nil {
 		log.Debug("RootCoord init error", zap.Error(initError))
@@ -2098,22 +2133,29 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	log.Info("receive import request")
-	resp := &milvuspb.ImportResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.ImportResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
+		}, nil
 	}
 
+	log.Info("receive import request")
+	resp := c.importManager.importJob(req)
 	return resp, nil
 }
 
 // Check import task state from datanode
 func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.GetImportStateResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+
 	log.Info("receive get import state request")
 	resp := &milvuspb.GetImportStateResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
 
@@ -2122,11 +2164,21 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 
 // Report impot task state to rootcoord
 func (c *Core) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	log.Info("receive complete import request")
-
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	if code, ok := c.checkHealthy(); !ok {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	return resp, nil
+	log.Info("receive import state report")
+
+	err := c.importManager.updateTaskState(req)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
