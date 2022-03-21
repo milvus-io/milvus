@@ -48,7 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
-var Params paramtable.BaseTable
+var Params paramtable.ComponentParam
 
 func TestMain(m *testing.M) {
 	Params.Init()

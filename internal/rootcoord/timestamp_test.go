@@ -120,11 +120,7 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	err = core.Start()
 	assert.Nil(b, err)
 
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = msFactory.Init(&Params)
 	assert.Nil(b, err)
 
 	b.ResetTimer()

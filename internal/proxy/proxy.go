@@ -182,18 +182,15 @@ func (node *Proxy) Init() error {
 		log.Debug("create query channel for Proxy done", zap.String("QueryResultChannel", resp.QueryResultChannel))
 	}
 
-	m := map[string]interface{}{
-		"PulsarAddress": Params.PulsarCfg.Address,
-		"PulsarBufSize": 1024}
-	log.Debug("set parameters for ms factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", m))
-	if err := node.msFactory.SetParams(m); err != nil {
+	log.Debug("set parameters for ms factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
+	if err := node.msFactory.Init(&Params); err != nil {
 		log.Warn("failed to set parameters for ms factory",
 			zap.Error(err),
 			zap.String("role", typeutil.ProxyRole),
-			zap.Any("parameters", m))
+			zap.Any("parameters", Params.ServiceParam))
 		return err
 	}
-	log.Debug("set parameters for ms factory done", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", m))
+	log.Debug("set parameters for ms factory done", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
 
 	log.Debug("create id allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.ProxyID)

@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -57,8 +59,8 @@ func generateMsgPack() msgstream.MsgPack {
 func TestNodeCtx_Start(t *testing.T) {
 	os.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestNodeStart")
 	msFactory := msgstream.NewRmsFactory()
-	m := map[string]interface{}{}
-	err := msFactory.SetParams(m)
+	var Params paramtable.ComponentParam
+	err := msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	msgStream, _ := msFactory.NewMsgStream(context.TODO())

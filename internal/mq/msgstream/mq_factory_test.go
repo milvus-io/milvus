@@ -27,13 +27,7 @@ import (
 func TestPmsFactory(t *testing.T) {
 	pmsFactory := NewPmsFactory()
 
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
-	m := map[string]interface{}{
-		"PulsarAddress":  pulsarAddress,
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024,
-	}
-	pmsFactory.SetParams(m)
+	pmsFactory.Init(&Params)
 
 	ctx := context.Background()
 	_, err := pmsFactory.NewMsgStream(ctx)
@@ -46,17 +40,10 @@ func TestPmsFactory(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestPmsFactory_SetParams(t *testing.T) {
-	pmsFactory := (*PmsFactory)(nil)
-
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
-	m := map[string]interface{}{
-		"PulsarAddress":  pulsarAddress,
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024,
-	}
-	err := pmsFactory.SetParams(m)
-	assert.NotNil(t, err)
+func TestPmsFactory_Init(t *testing.T) {
+	rmsFactory := NewRmsFactory()
+	err := rmsFactory.Init(&Params)
+	assert.Nil(t, err)
 }
 
 func TestRmsFactory(t *testing.T) {
@@ -65,11 +52,7 @@ func TestRmsFactory(t *testing.T) {
 
 	rmsFactory := NewRmsFactory()
 
-	m := map[string]interface{}{
-		"ReceiveBufSize": 1024,
-		"RmqBufSize":     1024,
-	}
-	rmsFactory.SetParams(m)
+	rmsFactory.Init(&Params)
 
 	ctx := context.Background()
 	_, err := rmsFactory.NewMsgStream(ctx)
@@ -82,13 +65,8 @@ func TestRmsFactory(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestRmsFactory_SetParams(t *testing.T) {
-	rmsFactory := (*RmsFactory)(nil)
-
-	m := map[string]interface{}{
-		"ReceiveBufSize": 1024,
-		"RmqBufSize":     1024,
-	}
-	err := rmsFactory.SetParams(m)
-	assert.NotNil(t, err)
+func TestRmsFactory_Init(t *testing.T) {
+	rmsFactory := NewRmsFactory()
+	err := rmsFactory.Init(&Params)
+	assert.Nil(t, err)
 }

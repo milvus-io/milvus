@@ -21,6 +21,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/stretchr/testify/assert"
 )
@@ -28,8 +30,8 @@ import (
 func TestInputNode(t *testing.T) {
 	os.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestInputNode")
 	msFactory := msgstream.NewRmsFactory()
-	m := map[string]interface{}{}
-	err := msFactory.SetParams(m)
+	var Params paramtable.ComponentParam
+	err := msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	msgStream, _ := msFactory.NewMsgStream(context.TODO())
