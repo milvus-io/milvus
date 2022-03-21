@@ -7982,9 +7982,10 @@ class SearchRequest :
     kDslFieldNumber = 5,
     kPlaceholderGroupFieldNumber = 6,
     kBaseFieldNumber = 1,
+    kDslTypeFieldNumber = 7,
+    kNqFieldNumber = 12,
     kTravelTimestampFieldNumber = 10,
     kGuaranteeTimestampFieldNumber = 11,
-    kDslTypeFieldNumber = 7,
   };
   // repeated string partition_names = 4;
   int partition_names_size() const;
@@ -8083,6 +8084,16 @@ class SearchRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // .milvus.proto.common.DslType dsl_type = 7;
+  void clear_dsl_type();
+  ::milvus::proto::common::DslType dsl_type() const;
+  void set_dsl_type(::milvus::proto::common::DslType value);
+
+  // int32 nq = 12;
+  void clear_nq();
+  ::PROTOBUF_NAMESPACE_ID::int32 nq() const;
+  void set_nq(::PROTOBUF_NAMESPACE_ID::int32 value);
+
   // uint64 travel_timestamp = 10;
   void clear_travel_timestamp();
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp() const;
@@ -8092,11 +8103,6 @@ class SearchRequest :
   void clear_guarantee_timestamp();
   ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp() const;
   void set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
-
-  // .milvus.proto.common.DslType dsl_type = 7;
-  void clear_dsl_type();
-  ::milvus::proto::common::DslType dsl_type() const;
-  void set_dsl_type(::milvus::proto::common::DslType value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.SearchRequest)
  private:
@@ -8111,9 +8117,10 @@ class SearchRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr dsl_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr placeholder_group_;
   ::milvus::proto::common::MsgBase* base_;
+  int dsl_type_;
+  ::PROTOBUF_NAMESPACE_ID::int32 nq_;
   ::PROTOBUF_NAMESPACE_ID::uint64 travel_timestamp_;
   ::PROTOBUF_NAMESPACE_ID::uint64 guarantee_timestamp_;
-  int dsl_type_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -21165,6 +21172,20 @@ inline void SearchRequest::set_guarantee_timestamp(::PROTOBUF_NAMESPACE_ID::uint
   
   guarantee_timestamp_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.guarantee_timestamp)
+}
+
+// int32 nq = 12;
+inline void SearchRequest::clear_nq() {
+  nq_ = 0;
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 SearchRequest::nq() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.SearchRequest.nq)
+  return nq_;
+}
+inline void SearchRequest::set_nq(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  
+  nq_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.SearchRequest.nq)
 }
 
 // -------------------------------------------------------------------

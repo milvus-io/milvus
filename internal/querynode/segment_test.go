@@ -510,10 +510,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
 
-	placeholderGroups := make([]*searchRequest, 0)
-	placeholderGroups = append(placeholderGroups, holder)
-
-	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{0})
+	searchResult, err := segment.search(plan, holder, []Timestamp{0})
 	assert.NoError(t, err)
 
 	err = checkSearchResult(nq, plan, searchResult)

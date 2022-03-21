@@ -753,6 +753,7 @@ func TestProxy(t *testing.T) {
 			DbName:           dbName,
 			CollectionName:   collectionName,
 			PartitionNames:   nil,
+			Nq:               int32(nq),
 			Dsl:              expr,
 			PlaceholderGroup: plgBs,
 			DslType:          commonpb.DslType_BoolExprV1,

@@ -59,6 +59,7 @@ const (
 	defaultConstFieldName = "const"
 	defaultPKFieldName    = "pk"
 	defaultTopK           = int64(10)
+	defaultNQ             = int64(10)
 	defaultRoundDecimal   = int64(6)
 	defaultDim            = 128
 	defaultNProb          = 10
@@ -997,7 +998,7 @@ func genSimplePlaceHolderGroup() ([]byte, error) {
 		Type:   milvuspb.PlaceholderType_FloatVector,
 		Values: make([][]byte, 0),
 	}
-	for i := 0; i < int(defaultTopK); i++ {
+	for i := 0; i < int(defaultNQ); i++ {
 		var vec = make([]float32, defaultDim)
 		for j := 0; j < defaultDim; j++ {
 			vec[j] = rand.Float32()
@@ -1022,7 +1023,7 @@ func genSimplePlaceHolderGroup() ([]byte, error) {
 	return placeGroupByte, nil
 }
 
-func genSimpleSearchPlanAndRequests() (*SearchPlan, []*searchRequest, error) {
+func genSimpleSearchPlanAndRequests() (*SearchPlan, *searchRequest, error) {
 	schema := genSimpleSegCoreSchema()
 	collection := newCollection(defaultCollectionID, schema)
 
@@ -1032,7 +1033,7 @@ func genSimpleSearchPlanAndRequests() (*SearchPlan, []*searchRequest, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if sm.GetDslType() == commonpb.DslType_BoolExprV1 {
+	if sm.DslType == commonpb.DslType_BoolExprV1 {
 		expr := sm.SerializedExprPlan
 		plan, err = createSearchPlanByExpr(collection, expr)
 		if err != nil {
@@ -1050,10 +1051,8 @@ func genSimpleSearchPlanAndRequests() (*SearchPlan, []*searchRequest, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	searchRequests := make([]*searchRequest, 0)
-	searchRequests = append(searchRequests, searchReq)
 
-	return plan, searchRequests, nil
+	return plan, searchReq, nil
 }
 
 func genSimpleRetrievePlanExpr() ([]byte, error) {
@@ -1094,7 +1093,7 @@ func genSimpleRetrievePlanExpr() ([]byte, error) {
 }
 
 func genSimpleRetrievePlan() (*RetrievePlan, error) {
-	retrieveMsg, err := genSimpleRetrieveMsg()
+	retrieveMsg, err := genSimpleMsgStreamRetrieveMsg()
 	if err != nil {
 		return nil, err
 	}
@@ -1128,6 +1127,9 @@ func genSimpleSearchRequest() (*internalpb.SearchRequest, error) {
 		Dsl:              simpleDSL,
 		PlaceholderGroup: placeHolder,
 		DslType:          commonpb.DslType_Dsl,
+		Nq:               defaultNQ,
+		MetricType:       defaultMetricType,
+		Topk:             defaultTopK,
 	}, nil
 }
 
@@ -1150,7 +1152,7 @@ func genSimpleRetrieveRequest() (*internalpb.RetrieveRequest, error) {
 	}, nil
 }
 
-func genSimpleSearchMsg() (*msgstream.SearchMsg, error) {
+func genSimpleMsgStreamSearchMsg() (*msgstream.SearchMsg, error) {
 	req, err := genSimpleSearchRequest()
 	if err != nil {
 		return nil, err
@@ -1163,7 +1165,35 @@ func genSimpleSearchMsg() (*msgstream.SearchMsg, error) {
 	return msg, nil
 }
 
-func genSimpleRetrieveMsg() (*msgstream.RetrieveMsg, error) {
+func genSimpleSearchMsg() (*searchMsg, error) {
+	req, err := genSimpleSearchRequest()
+	if err != nil {
+		return nil, err
+	}
+	msg := &searchMsg{
+		Base:               req.Base,
+		BaseMsg:            genMsgStreamBaseMsg(),
+		ReqIDs:             []UniqueID{req.GetReqID()},
+		DbID:               req.DbID,
+		CollectionID:       req.GetCollectionID(),
+		PartitionIDs:       req.GetPartitionIDs(),
+		Dsl:                req.GetDsl(),
+		DslType:            req.GetDslType(),
+		PlaceholderGroup:   req.GetPlaceholderGroup(),
+		SerializedExprPlan: req.GetSerializedExprPlan(),
+		TravelTimestamp:    req.GetTravelTimestamp(),
+		GuaranteeTimestamp: req.GetGuaranteeTimestamp(),
+		TimeoutTimestamp:   req.GetTimeoutTimestamp(),
+		NQ:                 defaultNQ,
+		OrigNQs:            []int64{defaultNQ},
+		SourceIDs:          []UniqueID{req.Base.SourceID},
+		TopK:               defaultTopK,
+	}
+	msg.SetTimeRecorder()
+	return msg, nil
+}
+
+func genSimpleMsgStreamRetrieveMsg() (*msgstream.RetrieveMsg, error) {
 	req, err := genSimpleRetrieveRequest()
 	if err != nil {
 		return nil, err
@@ -1174,6 +1204,16 @@ func genSimpleRetrieveMsg() (*msgstream.RetrieveMsg, error) {
 	}
 	msg.SetTimeRecorder()
 	return msg, nil
+}
+
+func genSimpleRetrieveMsg() (queryMsg, error) {
+	msg, err := genSimpleMsgStreamRetrieveMsg()
+	if err != nil {
+		return nil, err
+	}
+	nMsg := convertToRetrieveMsg(msg)
+	nMsg.SetTimeRecorder()
+	return nMsg, nil
 }
 
 func genQueryChannel() Channel {
@@ -1194,7 +1234,7 @@ func produceSimpleSearchMsg(ctx context.Context, queryChannel Channel) error {
 	stream.AsProducer([]string{queryChannel})
 	stream.Start()
 	defer stream.Close()
-	msg, err := genSimpleSearchMsg()
+	msg, err := genSimpleMsgStreamSearchMsg()
 	if err != nil {
 		return err
 	}
@@ -1217,7 +1257,7 @@ func produceSimpleRetrieveMsg(ctx context.Context, queryChannel Channel) error {
 	stream.AsProducer([]string{queryChannel})
 	stream.Start()
 	defer stream.Close()
-	msg, err := genSimpleRetrieveMsg()
+	msg, err := genSimpleMsgStreamRetrieveMsg()
 	if err != nil {
 		return err
 	}

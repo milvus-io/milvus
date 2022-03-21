@@ -155,7 +155,7 @@ message InsertRequest {
 
 message SearchRequest {
   common.MsgBase base = 1;
-  string result_channelID = 2;
+  int64 reqID = 2;
   int64 dbID = 3;
   int64 collectionID = 4;
   repeated int64 partitionIDs = 5;
@@ -168,12 +168,15 @@ message SearchRequest {
   uint64 travel_timestamp = 11;
   uint64 guarantee_timestamp = 12;
   uint64 timeout_timestamp = 13;
+  int64  nq = 14;
+  int64  topk = 15;
+  string metricType = 16;
 }
 
 message SearchResults {
   common.MsgBase base = 1;
   common.Status status = 2;
-  string result_channelID = 3;
+  int64 reqID = 3;
   string metric_type = 4;
   int64 num_queries = 5;
   int64 top_k = 6;
@@ -188,7 +191,7 @@ message SearchResults {
 
 message RetrieveRequest {
   common.MsgBase base = 1;
-  string result_channelID = 2;
+  int64 reqID = 2;
   int64 dbID = 3;
   int64 collectionID = 4;
   repeated int64 partitionIDs = 5;
@@ -202,7 +205,7 @@ message RetrieveRequest {
 message RetrieveResults {
   common.MsgBase base = 1;
   common.Status status = 2;
-  string result_channelID = 3;
+  int64 reqID = 3;
   schema.IDs ids = 4;
   repeated schema.FieldData fields_data = 5;
   repeated int64 sealed_segmentIDs_retrieved = 6;

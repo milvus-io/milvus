@@ -317,7 +317,6 @@ func TestSearchMsg(t *testing.T) {
 				Timestamp: 2,
 				SourceID:  3,
 			},
-			ResultChannelID:    "test-channel",
 			DbID:               4,
 			CollectionID:       5,
 			PartitionIDs:       []int64{},
@@ -377,7 +376,6 @@ func TestSearchResultMsg(t *testing.T) {
 				Timestamp: 2,
 				SourceID:  3,
 			},
-			ResultChannelID:          "test-channel",
 			MetricType:               "l2",
 			NumQueries:               5,
 			TopK:                     6,
@@ -427,7 +425,6 @@ func TestRetrieveMsg(t *testing.T) {
 				Timestamp: 2,
 				SourceID:  3,
 			},
-			ResultChannelID:    "test-channel",
 			DbID:               5,
 			CollectionID:       6,
 			PartitionIDs:       []int64{7, 8},
@@ -484,7 +481,6 @@ func TestRetrieveResultMsg(t *testing.T) {
 				Timestamp: 2,
 				SourceID:  3,
 			},
-			ResultChannelID: "test-channel",
 			Ids: &schemapb.IDs{
 				IdField: &schemapb.IDs_IntId{
 					IntId: &schemapb.LongArray{

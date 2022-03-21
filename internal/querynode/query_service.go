@@ -130,9 +130,7 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) error {
 		err := errors.New(fmt.Sprintln("query collection already exists, collectionID = ", collectionID))
 		return err
 	}
-	ctx1, cancel := context.WithCancel(q.ctx)
-	qc, err := newQueryCollection(ctx1,
-		cancel,
+	qc, err := newQueryCollection(q.ctx,
 		collectionID,
 		q.historical,
 		q.streaming,

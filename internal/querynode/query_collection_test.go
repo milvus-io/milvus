@@ -17,9 +17,7 @@
 package querynode
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"math"
 	"math/rand"
 	"sync"
@@ -41,9 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*queryCollection, error) {
@@ -73,7 +69,7 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		return nil, err
 	}
 
-	queryCollection, err := newQueryCollection(ctx, cancel,
+	queryCollection, err := newQueryCollection(ctx,
 		defaultCollectionID,
 		historical,
 		streaming,
@@ -173,11 +169,10 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	queryCollection, err := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
+	defer cancel()
+	queryCollection, err := newQueryCollection(ctx, 0, historical, streaming, factory, nil, nil, false)
 	assert.NoError(t, err)
 
-	// producerChannels := []string{"testResultChannel"}
-	// queryCollection.queryResultMsgStream.AsProducer(producerChannels)
 	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
 	sessionManager.AddSession(&NodeInfo{
 		NodeID:  1,
@@ -231,17 +226,19 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 				SourceID:  1,
 			},
 			CollectionID:       0,
-			ResultChannelID:    "testResultChannel",
 			Dsl:                dslString,
 			PlaceholderGroup:   placeGroupByte,
 			TravelTimestamp:    10,
 			GuaranteeTimestamp: 10,
+			Nq:                 2,
+			MetricType:         defaultMetricType,
+			Topk:               defaultTopK,
 		},
 	}
-	err = queryCollection.receiveQueryMsg(queryMsg)
+	newQMsg := convertSearchMsg(queryMsg)
+	err = queryCollection.receiveQueryMsg(newQMsg)
 	assert.Nil(t, err)
 
-	queryCollection.cancel()
 	queryCollection.close()
 	historical.close()
 	streaming.close()
@@ -299,13 +296,13 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 	}
 
 	t.Run("consume search", func(t *testing.T) {
-		msg, err := genSimpleSearchMsg()
+		msg, err := genSimpleMsgStreamSearchMsg()
 		assert.NoError(t, err)
 		runConsumeQuery(msg)
 	})
 
 	t.Run("consume retrieve", func(t *testing.T) {
-		msg, err := genSimpleRetrieveMsg()
+		msg, err := genSimpleMsgStreamRetrieveMsg()
 		assert.NoError(t, err)
 		runConsumeQuery(msg)
 	})
@@ -320,164 +317,17 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 	})
 
 	t.Run("consume invalid msg", func(t *testing.T) {
-		msg, err := genSimpleRetrieveMsg()
+		msg, err := genSimpleMsgStreamRetrieveMsg()
 		assert.NoError(t, err)
 		msg.Base.MsgType = commonpb.MsgType_CreateCollection
 		runConsumeQuery(msg)
 	})
 
 	t.Run("consume timeout msg", func(t *testing.T) {
-		msg, err := genSimpleRetrieveMsg()
+		msg, err := genSimpleMsgStreamRetrieveMsg()
 		assert.NoError(t, err)
 		msg.TimeoutTimestamp = tsoutil.GetCurrentTime() - Timestamp(time.Second<<18)
 		runConsumeQuery(msg)
-	})
-}
-
-func TestQueryCollection_TranslateHits(t *testing.T) {
-	fieldID := FieldID(0)
-	fieldIDs := []FieldID{fieldID}
-
-	genRawHits := func(dataType schemapb.DataType) [][]byte {
-		// ids
-		ids := make([]int64, 0)
-		for i := 0; i < defaultMsgLength; i++ {
-			ids = append(ids, int64(i))
-		}
-
-		// raw data
-		rawData := make([][]byte, 0)
-		switch dataType {
-		case schemapb.DataType_Bool:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, true)
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int8:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int8(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int16:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int16(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int32:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int32(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int64:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int64(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Float:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, float32(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Double:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, float64(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		}
-		hit := &milvuspb.Hits{
-			IDs:     ids,
-			RowData: rawData,
-		}
-		hits := []*milvuspb.Hits{hit}
-		rawHits := make([][]byte, 0)
-		for _, h := range hits {
-			rawHit, err := proto.Marshal(h)
-			assert.NoError(t, err)
-			rawHits = append(rawHits, rawHit)
-		}
-		return rawHits
-	}
-
-	genSchema := func(dataType schemapb.DataType) *typeutil.SchemaHelper {
-		schema := &schemapb.CollectionSchema{
-			Name:   defaultCollectionName,
-			AutoID: true,
-			Fields: []*schemapb.FieldSchema{
-				genConstantField(constFieldParam{
-					id:       fieldID,
-					dataType: dataType,
-				}),
-			},
-		}
-		schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-		assert.NoError(t, err)
-		return schemaHelper
-	}
-
-	t.Run("test bool field", func(t *testing.T) {
-		dataType := schemapb.DataType_Bool
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int8 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int8
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int16 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int16
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int32 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int32
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int64 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int64
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test float field", func(t *testing.T) {
-		dataType := schemapb.DataType_Float
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test double field", func(t *testing.T) {
-		dataType := schemapb.DataType_Double
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test field with error type", func(t *testing.T) {
-		dataType := schemapb.DataType_FloatVector
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.Error(t, err)
-
-		dataType = schemapb.DataType_BinaryVector
-		_, err = translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.Error(t, err)
 	})
 }
 
@@ -513,20 +363,20 @@ func TestQueryCollection_tSafeWatcher(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestQueryCollection_waitNewTSafe(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
-	assert.NoError(t, err)
-
-	timestamp := Timestamp(1000)
-	err = updateTSafe(queryCollection, timestamp)
-	assert.NoError(t, err)
-
-	resTimestamp, err := queryCollection.waitNewTSafe()
-	assert.NoError(t, err)
-	assert.Equal(t, timestamp, resTimestamp)
-}
+//func TestQueryCollection_waitNewTSafe(t *testing.T) {
+//	ctx, cancel := context.WithCancel(context.Background())
+//
+//	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+//	assert.NoError(t, err)
+//
+//	timestamp := Timestamp(1000)
+//	err = updateTSafe(queryCollection, timestamp)
+//	assert.NoError(t, err)
+//
+//	resTimestamp, err := queryCollection.waitNewTSafe()
+//	assert.NoError(t, err)
+//	assert.Equal(t, timestamp, resTimestamp)
+//}
 
 func TestQueryCollection_mergeRetrieveResults(t *testing.T) {
 	const (
@@ -657,47 +507,47 @@ func TestQueryCollection_search(t *testing.T) {
 	msg, err := genSimpleSearchMsg()
 	assert.NoError(t, err)
 
-	err = queryCollection.search(msg)
+	_, err = queryCollection.search(msg)
 	assert.NoError(t, err)
 }
 
-func TestQueryCollection_searchMerged(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
-	assert.NoError(t, err)
-
-	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
-	sessionManager.AddSession(&NodeInfo{
-		NodeID:  0,
-		Address: "",
-	})
-	queryCollection.sessionManager = sessionManager
-
-	msg, err := genSimpleSearchMsg()
-	assert.NoError(t, err)
-
-	msm := &mergedSearchMsg{
-		Base:               msg.Base,
-		BaseMsg:            msg.BaseMsg,
-		ReqIDs:             []int64{100, 200, 300},
-		CollectionID:       defaultCollectionID,
-		DslType:            msg.DslType,
-		Dsl:                msg.Dsl,
-		PlaceholderGroup:   msg.PlaceholderGroup,
-		SerializedExprPlan: msg.SerializedExprPlan,
-		TravelTimestamp:    msg.TravelTimestamp,
-		GuaranteeTimestamp: msg.GuaranteeTimestamp,
-		TimeoutTimestamp:   msg.TimeoutTimestamp,
-		NQ:                 2,
-		OrigNQs:            []int64{3, 2, 5},
-		TopK:               defaultTopK,
-		tr:                 timerecord.NewTimeRecorder(""),
-	}
-
-	err = queryCollection.searchMerged(msm)
-	assert.NoError(t, err)
-}
+//func TestQueryCollection_searchMerged(t *testing.T) {
+//	ctx, cancel := context.WithCancel(context.Background())
+//
+//	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+//	assert.NoError(t, err)
+//
+//	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+//	sessionManager.AddSession(&NodeInfo{
+//		NodeID:  0,
+//		Address: "",
+//	})
+//	queryCollection.sessionManager = sessionManager
+//
+//	msg, err := genSimpleSearchMsg()
+//	assert.NoError(t, err)
+//
+//	msm := &searchMsg{
+//		Base:               msg.Base,
+//		BaseMsg:            msg.BaseMsg,
+//		ReqIDs:             []int64{100, 200, 300},
+//		CollectionID:       defaultCollectionID,
+//		DslType:            msg.DslType,
+//		Dsl:                msg.Dsl,
+//		PlaceholderGroup:   msg.PlaceholderGroup,
+//		SerializedExprPlan: msg.SerializedExprPlan,
+//		TravelTimestamp:    msg.TravelTimestamp,
+//		GuaranteeTimestamp: msg.GuaranteeTimestamp,
+//		TimeoutTimestamp:   msg.TimeoutTimestamp,
+//		NQ:                 2,
+//		OrigNQs:            []int64{3, 2, 5},
+//		TopK:               defaultTopK,
+//		tr:                 timerecord.NewTimeRecorder(""),
+//	}
+//
+//	_, err = queryCollection.search(msm)
+//	assert.NoError(t, err)
+//}
 
 func TestQueryCollection_receive(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -729,7 +579,7 @@ func TestQueryCollection_receive(t *testing.T) {
 	msg, err := genSimpleRetrieveMsg()
 	assert.NoError(t, err)
 
-	err = queryCollection.retrieve(msg)
+	_, err = queryCollection.retrieve(msg)
 	assert.NoError(t, err)
 }
 
@@ -739,11 +589,13 @@ func TestQueryCollection_AddPopUnsolvedMsg(t *testing.T) {
 	assert.Nil(t, err)
 	var i int64
 	for i = 0; i < 3; i++ {
-		qCollection.addToUnsolvedMsg(&msgstream.RetrieveMsg{
+		nMsg := &msgstream.RetrieveMsg{
 			RetrieveRequest: internalpb.RetrieveRequest{
 				Base: &commonpb.MsgBase{MsgID: i},
 			},
-		})
+		}
+		msg := convertToRetrieveMsg(nMsg)
+		qCollection.addToUnsolvedMsg(msg)
 	}
 
 	unsolved := qCollection.popAllUnsolvedMsg()
@@ -754,11 +606,13 @@ func TestQueryCollection_AddPopUnsolvedMsg(t *testing.T) {
 
 	// add new msg to unsolved msgs and check old unsolved msg
 	for i := 0; i < 3; i++ {
-		qCollection.addToUnsolvedMsg(&msgstream.RetrieveMsg{
+		nMsg := &msgstream.RetrieveMsg{
 			RetrieveRequest: internalpb.RetrieveRequest{
 				Base: &commonpb.MsgBase{MsgID: 4},
 			},
-		})
+		}
+		msg := convertToRetrieveMsg(nMsg)
+		qCollection.addToUnsolvedMsg(msg)
 	}
 
 	for i := 0; i < 3; i++ {
@@ -858,7 +712,7 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 
 			go func() {
 				searchMu.Lock()
-				_ = queryCollection.search(msg)
+				_, _ = queryCollection.search(msg)
 				searchMu.Unlock()
 				wg.Done()
 			}()
@@ -903,7 +757,7 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 
 			go func() {
 				searchMu.Lock()
-				_ = queryCollection.search(msg)
+				_, _ = queryCollection.search(msg)
 				searchMu.Unlock()
 				wg.Done()
 			}()

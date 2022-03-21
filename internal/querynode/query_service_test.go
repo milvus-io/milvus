@@ -118,7 +118,6 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 				Timestamp: Timestamp(10),
 				SourceID:  1,
 			},
-			ResultChannelID:  "0",
 			Dsl:              dslString,
 			PlaceholderGroup: placeGroupByte,
 			DslType:          commonpb.DslType_Dsl,
