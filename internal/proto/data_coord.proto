@@ -43,7 +43,7 @@ service DataCoord {
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(ImportTask) returns (common.Status) {}
+  rpc Import(ImportTask) returns (ImportTaskResponse) {}
 }
 
 service DataNode {
@@ -426,4 +426,9 @@ message ImportTask {
   int64 task_id = 5;                         // id of the task
   repeated string files = 6;                 // file paths to be imported
   repeated common.KeyValuePair infos = 7;    // more informations about the task, bucket, etc.
+}
+
+message ImportTaskResponse {
+  common.Status status = 1;
+  int64 datanode_id = 2;                     // which datanode takes this task
 }

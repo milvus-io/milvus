@@ -3,6 +3,11 @@ package milvus.proto.milvus;
 
 option go_package = "github.com/milvus-io/milvus/internal/proto/milvuspb";
 
+option java_multiple_files = true;
+option java_package = "io.milvus.grpc";
+option java_outer_classname = "MilvusProto";
+option java_generate_equals_and_hash = true;
+
 import "common.proto";
 import "schema.proto";
 
@@ -814,7 +819,7 @@ message GetImportStateRequest {
  
 message GetImportStateResponse {
   common.Status status = 1;
-  common.ImportState state = 2;                   // is this import task finished or not
+  common.ImportState state = 2;            // is this import task finished or not
   int64 row_count = 3;                     // if the task is finished, this value is how many rows are imported. if the task is not finished, this value is how many rows are parsed. return 0 if failed.
   repeated int64 id_list = 4;              // auto generated ids if the primary key is autoid
   repeated common.KeyValuePair infos = 5;  // more informations about the task, progress percent, file path, failed reason, etc.

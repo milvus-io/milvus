@@ -2257,7 +2257,7 @@ func TestImport(t *testing.T) {
 			CollectionName: "dummy",
 		})
 		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
 
 	})
 	t.Run("with closed server", func(t *testing.T) {
@@ -2268,8 +2268,8 @@ func TestImport(t *testing.T) {
 			CollectionName: "dummy",
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.GetReason())
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.Status.GetReason())
 	})
 }
 

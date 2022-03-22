@@ -166,10 +166,12 @@ func (d *dataMock) WatchChannels(ctx context.Context, req *datapb.WatchChannelsR
 		}}, nil
 }
 
-func (d *dataMock) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
+func (d *dataMock) Import(ctx context.Context, req *datapb.ImportTask) (*datapb.ImportTaskResponse, error) {
+	return &datapb.ImportTaskResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
 	}, nil
 }
 
@@ -2630,9 +2632,11 @@ func TestCheckInit(t *testing.T) {
 	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
 		return nil
 	}
-	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
 		}
 	}
 	err = c.checkInit()

@@ -1,8 +1,12 @@
 syntax = "proto3";
-
 package milvus.proto.common;
+
 option go_package="github.com/milvus-io/milvus/internal/proto/commonpb";
 
+option java_multiple_files = true;
+option java_package = "io.milvus.grpc";
+option java_outer_classname = "CommonProto";
+option java_generate_equals_and_hash = true;
 
 enum ErrorCode {
     Success = 0;
@@ -203,9 +207,8 @@ enum ConsistencyLevel {
 enum ImportState {
     ImportPending = 0;
     ImportFailed = 1;
-    ImportDownloading = 2;
-    ImportParsing = 3;
+    ImportDownloaded = 2;
+    ImportParsed = 3;
     ImportPersisted = 4;
-    ImportIndexing = 5;
-    ImportCompleted = 6;
+    ImportCompleted = 5;
 }

@@ -963,18 +963,20 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (s *Server) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+func (s *Server) Import(ctx context.Context, req *datapb.ImportTask) (*datapb.ImportTaskResponse, error) {
 	log.Info("receive import request")
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	resp := &datapb.ImportTaskResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
 	}
 
 	if s.isClosed() {
 		log.Warn("failed to import because of closed server", zap.String("collectionName", req.GetCollectionName()))
-		resp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}
 
-	resp.ErrorCode = commonpb.ErrorCode_Success
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

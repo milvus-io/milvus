@@ -142,7 +142,7 @@ type Core struct {
 	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
 	//assign import task to data service
-	CallImportService func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status
+	CallImportService func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse
 
 	//Proxy manager
 	proxyManager *proxyManager
@@ -724,23 +724,26 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}
 		return nil
 	}
-	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
-		st := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		resp := &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
 		}
+
 		defer func() {
 			if err := recover(); err != nil {
-				st.ErrorCode = commonpb.ErrorCode_UnexpectedError
-				st.Reason = "assign import task to data coord panic"
+				resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+				resp.Status.Reason = "assign import task to data coord panic"
 			}
 		}()
 
-		rsp, _ := s.Import(ctx, req)
-		if rsp.ErrorCode != commonpb.ErrorCode_Success {
-			return rsp
+		resp, _ = s.Import(ctx, req)
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return resp
 		}
 
-		return st
+		return resp
 	}
 
 	return nil
