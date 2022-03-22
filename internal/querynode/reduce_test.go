@@ -94,6 +94,38 @@ func TestReduce_AllFunc(t *testing.T) {
 	deleteCollection(collection)
 }
 
+func TestSliceInfo(t *testing.T) {
+	originNQs := []int64{3, 2, 3}
+	nq := int64(2)
+	originReqIDs := []UniqueID{100, 200, 300}
+	sInfo, err := parseSliceInfo(originNQs, nq, originReqIDs)
+	assert.NoError(t, err)
+
+	expectedSlices := []int32{2, 1, 2, 2, 1}
+	expectedReqIDs := []UniqueID{100, 100, 200, 300, 300}
+	expectedReqNum := map[UniqueID]int64{100: 2, 200: 1, 300: 2}
+
+	assert.Equal(t, len(expectedSlices), len(sInfo.slices))
+	assert.Equal(t, len(expectedReqIDs), len(sInfo.reqIDs))
+	for i := 0; i < len(expectedSlices); i++ {
+		assert.Equal(t, expectedSlices[i], sInfo.slices[i])
+		assert.Equal(t, expectedReqIDs[i], sInfo.reqIDs[i])
+	}
+	assert.Equal(t, len(expectedReqNum), len(sInfo.reqNum))
+	for id, num := range expectedReqNum {
+		assert.Equal(t, num, sInfo.reqNum[id])
+	}
+
+	expectedSliceOffset := make(map[UniqueID]int64)
+	for i := 0; i < len(expectedSlices); i++ {
+		num := sInfo.getSliceNum(i)
+		reqID := sInfo.reqIDs[i]
+		expectedSliceOffset[reqID]++
+		assert.Equal(t, expectedReqNum[reqID], num)
+		assert.Equal(t, expectedSliceOffset[reqID], sInfo.getSliceOffset(i))
+	}
+}
+
 func TestReduce_nilPlan(t *testing.T) {
 	plan := &SearchPlan{}
 	err := reduceSearchResultsAndFillData(plan, nil, 1)

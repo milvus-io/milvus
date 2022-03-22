@@ -1542,3 +1542,280 @@ func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg s
 // 	return q.queryResultMsgStream.Produce(&msgPack)
 // }
 //
+
+type mergedSearchMsg struct {
+	Base *commonpb.MsgBase
+	msgstream.BaseMsg
+	ReqIDs             []int64
+	DbID               int64
+	CollectionID       int64
+	PartitionIDs       []int64
+	DslType            commonpb.DslType
+	Dsl                string
+	PlaceholderGroup   []byte
+	SerializedExprPlan []byte
+	TravelTimestamp    uint64
+	GuaranteeTimestamp uint64
+	TimeoutTimestamp   uint64
+	NQ                 int64
+	OrigNQs            []int64
+	TopK               int64
+	tr                 *timerecord.TimeRecorder
+}
+
+func (m *mergedSearchMsg) ID() UniqueID {
+	return m.Base.MsgID
+}
+
+func (m *mergedSearchMsg) GetDslType() commonpb.DslType {
+	return m.DslType
+}
+
+func (q *queryCollection) searchMerged(searchMsg *mergedSearchMsg) error {
+	q.streaming.replica.queryRLock()
+	q.historical.replica.queryRLock()
+	defer q.historical.replica.queryRUnlock()
+	defer q.streaming.replica.queryRUnlock()
+
+	collectionID := searchMsg.CollectionID
+
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "start search"),
+		zap.Int64(log.BenchmarkCollectionID, collectionID),
+		zap.Int64(log.BenchmarkMsgID, searchMsg.Base.GetMsgID()), zap.Int64(log.BenchmarkDuration, searchMsg.tr.ElapseSpan().Microseconds()))
+
+	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
+	defer sp.Finish()
+	searchMsg.SetTraceCtx(ctx)
+
+	searchTimestamp := searchMsg.BeginTs()
+	travelTimestamp := searchMsg.TravelTimestamp
+
+	collection, err := q.streaming.replica.getCollectionByID(searchMsg.CollectionID)
+	if err != nil {
+		return err
+	}
+
+	var plan *SearchPlan
+	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
+		expr := searchMsg.SerializedExprPlan
+		plan, err = createSearchPlanByExpr(collection, expr)
+		if err != nil {
+			return err
+		}
+	} else {
+		dsl := searchMsg.Dsl
+		plan, err = createSearchPlan(collection, dsl)
+		if err != nil {
+			return err
+		}
+	}
+
+	defer plan.delete()
+
+	topK := plan.getTopK()
+	if topK == 0 {
+		return fmt.Errorf("limit must be greater than 0, msgID = %d", searchMsg.ID())
+	}
+	if topK >= 16385 {
+		return fmt.Errorf("limit %d is too large, msgID = %d", topK, searchMsg.ID())
+	}
+	searchRequestBlob := searchMsg.PlaceholderGroup
+	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
+	if err != nil {
+		return err
+	}
+	defer searchReq.delete()
+
+	nq := searchReq.getNumOfQuery()
+	searchRequests := make([]*searchRequest, 0)
+	searchRequests = append(searchRequests, searchReq)
+
+	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
+		sp.LogFields(oplog.String("statistical time", "stats start"),
+			oplog.Object("nq", nq),
+			oplog.Object("expr", searchMsg.SerializedExprPlan))
+	} else {
+		sp.LogFields(oplog.String("statistical time", "stats start"),
+			oplog.Object("nq", nq),
+			oplog.Object("dsl", searchMsg.Dsl))
+	}
+
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d), msgID = %d", searchMsg.CollectionID, nq, topK, searchMsg.ID()))
+
+	// get global sealed segments
+	var globalSealedSegments []UniqueID
+	if len(searchMsg.PartitionIDs) > 0 {
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
+	} else {
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDs()
+	}
+
+	searchResults := make([]*SearchResult, 0)
+	defer func() {
+		deleteSearchResults(searchResults)
+	}()
+	// historical search
+	log.Debug("historical search start", zap.Int64("msgID", searchMsg.ID()))
+	hisSearchResults, sealedSegmentSearched, sealedPartitionSearched, err := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
+	if err != nil {
+		return err
+	}
+	searchResults = append(searchResults, hisSearchResults...)
+
+	log.Debug("historical search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("searched partitionIDs", sealedPartitionSearched), zap.Int64s("searched segmentIDs", sealedSegmentSearched))
+	hisSearchDur := tr.Record(fmt.Sprintf("historical search done, msgID = %d", searchMsg.ID()))
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "HistoricalSearch"),
+		zap.Int64(log.BenchmarkCollectionID, collectionID),
+		zap.Int64(log.BenchmarkMsgID, searchMsg.ID()), zap.Int64(log.BenchmarkDuration, hisSearchDur.Microseconds()))
+
+	log.Debug("streaming search start", zap.Int64("msgID", searchMsg.ID()))
+	for _, channel := range collection.getVChannels() {
+		strSearchResults, growingSegmentSearched, growingPartitionSearched, err := q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		if err != nil {
+			return err
+		}
+		searchResults = append(searchResults, strSearchResults...)
+		log.Debug("streaming search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.String("searched dmChannel", channel), zap.Int64s("searched partitionIDs", growingPartitionSearched), zap.Int64s("searched segmentIDs", growingSegmentSearched))
+	}
+	streamingSearchDuration := tr.Record(fmt.Sprintf("streaming search done, msgID = %d", searchMsg.ID()))
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "StreamingSearch"),
+		zap.Int64(log.BenchmarkCollectionID, collectionID),
+		zap.Int64(log.BenchmarkMsgID, searchMsg.ID()), zap.Int64(log.BenchmarkDuration, streamingSearchDuration.Microseconds()))
+
+	sp.LogFields(oplog.String("statistical time", "segment search end"))
+	if len(searchResults) <= 0 {
+		for range searchRequests {
+			resultChannelInt := 0
+			searchResultMsg := &msgstream.SearchResultMsg{
+				BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
+				SearchResults: internalpb.SearchResults{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_SearchResult,
+						MsgID:     searchMsg.Base.MsgID,
+						Timestamp: searchTimestamp,
+						SourceID:  searchMsg.Base.SourceID,
+					},
+					Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+					MetricType:               plan.getMetricType(),
+					NumQueries:               nq,
+					TopK:                     topK,
+					SlicedBlob:               nil,
+					SlicedOffset:             0,
+					SlicedNumCount:           0,
+					SealedSegmentIDsSearched: sealedSegmentSearched,
+					ChannelIDsSearched:       collection.getVChannels(),
+					GlobalSealedSegmentIDs:   globalSealedSegments,
+				},
+			}
+			log.Debug("QueryNode Empty SearchResultMsg",
+				zap.Any("collectionID", collection.id),
+				zap.Any("msgID", searchMsg.ID()),
+				zap.Any("vChannels", collection.getVChannels()),
+				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
+			)
+			err = q.publishSearchResult(&searchResultMsg.SearchResults, searchMsg.Base.SourceID)
+			if err != nil {
+				return err
+			}
+			metrics.QueryNodeSQReqLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(searchMsg.tr.ElapseSpan().Milliseconds()))
+			metrics.QueryNodeSQCount.WithLabelValues(metrics.SuccessLabel, metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+
+			tr.Record(fmt.Sprintf("publish empty search result done, msgID = %d", searchMsg.ID()))
+			tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))
+			return nil
+		}
+	}
+
+	numSegment := int64(len(searchResults))
+
+	log.Debug("QueryNode reduce data", zap.Int64("msgID", searchMsg.ID()), zap.Int64("numSegment", numSegment))
+	tr.RecordSpan()
+	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
+	log.Debug("QueryNode reduce data finished", zap.Int64("msgID", searchMsg.ID()))
+	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
+	if err != nil {
+		log.Error("QueryNode reduce data failed", zap.Int64("msgID", searchMsg.ID()), zap.Error(err))
+		return err
+	}
+	sInfo, err := parseSliceInfo(searchMsg.OrigNQs, searchMsg.NQ, searchMsg.ReqIDs)
+	if err != nil {
+		return err
+	}
+	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, int(numSegment), sInfo.slices)
+	defer deleteSearchResultDataBlobs(blobs)
+	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < len(sInfo.reqIDs); i++ {
+		blob, err := getSearchResultDataBlob(blobs, i)
+		if err != nil {
+			return err
+		}
+
+		reduceTime := tr.RecordSpan()
+		log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "QNReduceSearchResults"),
+			zap.Int64(log.BenchmarkCollectionID, collectionID),
+			zap.Int64(log.BenchmarkMsgID, searchMsg.ID()), zap.Int64(log.BenchmarkDuration, reduceTime.Microseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(reduceTime.Milliseconds()))
+
+		resultChannelInt := 0
+		searchResultMsg := &msgstream.SearchResultMsg{
+			BaseMsg: msgstream.BaseMsg{Ctx: searchMsg.Ctx, HashValues: []uint32{uint32(resultChannelInt)}},
+			SearchResults: internalpb.SearchResults{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_SearchResult,
+					MsgID:     searchMsg.Base.MsgID,
+					Timestamp: searchTimestamp,
+					SourceID:  searchMsg.Base.SourceID,
+				},
+				// TODO: ReqIDs: sInfo.reqIDs[i],
+				Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				MetricType:               plan.getMetricType(),
+				NumQueries:               nq,
+				TopK:                     topK,
+				SlicedBlob:               blob,
+				SlicedOffset:             sInfo.getSliceOffset(i),
+				SlicedNumCount:           sInfo.getSliceNum(i),
+				SealedSegmentIDsSearched: sealedSegmentSearched,
+				ChannelIDsSearched:       collection.getVChannels(),
+				GlobalSealedSegmentIDs:   globalSealedSegments,
+			},
+		}
+		log.Debug("QueryNode SearchResultMsg",
+			zap.Any("collectionID", collection.id),
+			zap.Any("msgID", sInfo.reqIDs[i]),
+			zap.Any("vChannels", collection.getVChannels()),
+			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
+		)
+
+		// For debugging, please don't delete.
+		//fmt.Println("==================== search result ======================")
+		//for i := 0; i < len(hits); i++ {
+		//	testHits := milvuspb.Hits{}
+		//	err := proto.Unmarshal(hits[i], &testHits)
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	fmt.Println(testHits.IDs)
+		//	fmt.Println(testHits.Scores)
+		//}
+		err = q.publishSearchResult(&searchResultMsg.SearchResults, searchMsg.Base.SourceID)
+		if err != nil {
+			return err
+		}
+		metrics.QueryNodeSQReqLatency.WithLabelValues(metrics.SearchLabel,
+			fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(searchMsg.tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(metrics.SuccessLabel,
+			metrics.SearchLabel,
+			fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+		publishResultDuration := tr.Record(fmt.Sprintf("publish search result, msgID = %d", searchMsg.ID()))
+		log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "PublishSearchResult"),
+			zap.Int64(log.BenchmarkCollectionID, collectionID),
+			zap.Int64(log.BenchmarkMsgID, searchMsg.ID()), zap.Int64(log.BenchmarkDuration, publishResultDuration.Microseconds()))
+	}
+	sp.LogFields(oplog.String("statistical time", "stats done"))
+	tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))
+	return nil
+}

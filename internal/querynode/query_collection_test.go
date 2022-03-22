@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -657,6 +658,44 @@ func TestQueryCollection_search(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = queryCollection.search(msg)
+	assert.NoError(t, err)
+}
+
+func TestQueryCollection_searchMerged(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	assert.NoError(t, err)
+
+	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
+	sessionManager.AddSession(&NodeInfo{
+		NodeID:  0,
+		Address: "",
+	})
+	queryCollection.sessionManager = sessionManager
+
+	msg, err := genSimpleSearchMsg()
+	assert.NoError(t, err)
+
+	msm := &mergedSearchMsg{
+		Base:               msg.Base,
+		BaseMsg:            msg.BaseMsg,
+		ReqIDs:             []int64{100, 200, 300},
+		CollectionID:       defaultCollectionID,
+		DslType:            msg.DslType,
+		Dsl:                msg.Dsl,
+		PlaceholderGroup:   msg.PlaceholderGroup,
+		SerializedExprPlan: msg.SerializedExprPlan,
+		TravelTimestamp:    msg.TravelTimestamp,
+		GuaranteeTimestamp: msg.GuaranteeTimestamp,
+		TimeoutTimestamp:   msg.TimeoutTimestamp,
+		NQ:                 2,
+		OrigNQs:            []int64{3, 2, 5},
+		TopK:               defaultTopK,
+		tr:                 timerecord.NewTimeRecorder(""),
+	}
+
+	err = queryCollection.searchMerged(msm)
 	assert.NoError(t, err)
 }
 

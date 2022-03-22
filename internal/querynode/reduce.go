@@ -35,6 +35,13 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+type sliceInfo struct {
+	slices   []int32
+	reqIDs   []UniqueID
+	reqNum   map[UniqueID]int64
+	reqCount map[UniqueID]int64
+}
+
 // SearchResult contains a pointer to the search result in C++ memory
 type SearchResult struct {
 	cSearchResult C.CSearchResult
@@ -46,6 +53,56 @@ type searchResultDataBlobs = C.CSearchResultDataBlobs
 // RetrieveResult contains a pointer to the retrieve result in C++ memory
 type RetrieveResult struct {
 	cRetrieveResult C.CRetrieveResult
+}
+
+func parseSliceInfo(originNQs []int64, nq int64, originReqIDs []UniqueID) (*sliceInfo, error) {
+	if nq == 0 {
+		return nil, fmt.Errorf("zero nq is not allowed")
+	}
+
+	if len(originNQs) != len(originReqIDs) {
+		return nil, fmt.Errorf("unaligned originNQs and ReqIDs, len(originNQs) = %d, len(originReqIDs) = %d", len(originNQs), len(originReqIDs))
+	}
+
+	sInfo := &sliceInfo{
+		slices:   make([]int32, 0),
+		reqIDs:   make([]UniqueID, 0),
+		reqNum:   make(map[UniqueID]int64),
+		reqCount: make(map[UniqueID]int64),
+	}
+
+	for i := 0; i < len(originNQs); i++ {
+		for j := 0; j < int(originNQs[i]/nq); j++ {
+			sInfo.slices = append(sInfo.slices, int32(nq))
+			sInfo.reqIDs = append(sInfo.reqIDs, originReqIDs[i])
+			sInfo.reqNum[originReqIDs[i]]++
+		}
+		if tailSliceSize := originNQs[i] % nq; tailSliceSize > 0 {
+			sInfo.slices = append(sInfo.slices, int32(tailSliceSize))
+			sInfo.reqIDs = append(sInfo.reqIDs, originReqIDs[i])
+			sInfo.reqNum[originReqIDs[i]]++
+		}
+	}
+	if len(sInfo.slices) != len(sInfo.reqIDs) {
+		return nil, fmt.Errorf("unexpected slices and reqIDs when parseSliceInfo, len(slices) = %d, len(reqIDs) = %d", len(sInfo.slices), len(sInfo.reqIDs))
+	}
+	if len(sInfo.reqNum) != len(originReqIDs) {
+		return nil, fmt.Errorf("unexpected reqNum when parseSliceInfo, len(reqNum) = %d, len(originReqIDs) = %d", len(sInfo.reqNum), len(originReqIDs))
+	}
+	return sInfo, nil
+}
+
+// TODO: rename by SearchResult.SliceOffset
+func (s *sliceInfo) getSliceOffset(i int) int64 {
+	reqID := s.reqIDs[i]
+	s.reqCount[reqID]++
+	return s.reqCount[reqID]
+}
+
+// TODO: rename by SearchResult.SliceNum
+func (s *sliceInfo) getSliceNum(i int) int64 {
+	reqID := s.reqIDs[i]
+	return s.reqNum[reqID]
 }
 
 func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchResult, numSegments int64) error {
