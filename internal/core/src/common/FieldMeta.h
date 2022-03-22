@@ -117,7 +117,7 @@ datatype_is_floating(DataType datatype) {
 class FieldMeta {
  public:
     static const FieldMeta RowIdMeta;
-    FieldMeta(const FieldMeta&) = delete;
+    FieldMeta(const FieldMeta&) = default;
     FieldMeta(FieldMeta&&) = default;
     FieldMeta&
     operator=(const FieldMeta&) = delete;

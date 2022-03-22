@@ -462,104 +462,62 @@ func TestSegment_segmentDelete(t *testing.T) {
 }
 
 func TestSegment_segmentSearch(t *testing.T) {
-	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
-	assert.Equal(t, collection.ID(), collectionID)
-
-	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
-	assert.Equal(t, segmentID, segment.segmentID)
-	assert.Nil(t, err)
-
-	ids := []int64{1, 2, 3}
-	timestamps := []uint64{0, 0, 0}
-
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
-	}
-
-	offset, err := segment.segmentPreInsert(N)
-	assert.Nil(t, err)
-	assert.GreaterOrEqual(t, offset, int64(0))
-
-	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	nq := int64(10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
+
+	collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+	assert.NoError(t, err)
+
+	segment, err := node.historical.replica.getSegmentByID(defaultSegmentID)
+	assert.NoError(t, err)
+
+	// TODO: replace below by genPlaceholderGroup(nq)
+	vec := genSimpleFloatVectors()
 	var searchRawData []byte
-	for _, ele := range vec {
+	for i, ele := range vec {
 		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
+		common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i*2)))
 		searchRawData = append(searchRawData, buf...)
 	}
+
 	placeholderValue := milvuspb.PlaceholderValue{
 		Tag:    "$0",
 		Type:   milvuspb.PlaceholderType_FloatVector,
-		Values: [][]byte{searchRawData},
+		Values: [][]byte{},
+	}
+
+	for i := 0; i < int(nq); i++ {
+		placeholderValue.Values = append(placeholderValue.Values, searchRawData)
 	}
 
 	placeholderGroup := milvuspb.PlaceholderGroup{
 		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
 	}
 
-	placeHolderGroupBlob, err := proto.Marshal(&placeholderGroup)
+	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	if err != nil {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	travelTimestamp := Timestamp(1020)
+	dslString, err := genSimpleDSL()
+	assert.NoError(t, err)
+
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
-	holder, err := parseSearchRequest(plan, placeHolderGroupBlob)
+	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
+
 	placeholderGroups := make([]*searchRequest, 0)
 	placeholderGroups = append(placeholderGroups, holder)
 
-	searchResults := make([]*SearchResult, 0)
-	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{travelTimestamp})
-	assert.Nil(t, err)
-	searchResults = append(searchResults, searchResult)
-
-	///////////////////////////////////
-	numSegment := int64(len(searchResults))
-	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
-	assert.NoError(t, err)
-	marshaledHits, err := reorganizeSearchResults(searchResults, numSegment)
-	assert.NoError(t, err)
-	hitsBlob, err := marshaledHits.getHitsBlob()
+	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{0})
 	assert.NoError(t, err)
 
-	var placeHolderOffset int64
-	for index := range placeholderGroups {
-		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
-		assert.NoError(t, err)
-		hits := make([][]byte, 0)
-		for _, len := range hitBlobSizePeerQuery {
-			hits = append(hits, hitsBlob[placeHolderOffset:placeHolderOffset+len])
-			placeHolderOffset += len
-		}
-	}
-
-	deleteSearchResults(searchResults)
-	deleteMarshaledHits(marshaledHits)
-	///////////////////////////////////
+	err = checkSearchResult(nq, plan, searchResult)
+	assert.NoError(t, err)
 
 	plan.delete()
 	holder.delete()

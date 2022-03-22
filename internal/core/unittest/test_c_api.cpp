@@ -27,6 +27,7 @@
 #include "query/ExprImpl.h"
 #include "segcore/Collection.h"
 #include "segcore/reduce_c.h"
+#include "segcore/Reduce.h"
 #include "test_utils/DataGen.h"
 #include "utils/Types.h"
 
@@ -467,35 +468,6 @@ TEST(CApiTest, GetRowCountTest) {
 //    DeleteSegment(segment);
 //}
 
-TEST(CApiTest, MergeInto) {
-    std::vector<int64_t> uids;
-    std::vector<float> distance;
-
-    std::vector<int64_t> new_uids;
-    std::vector<float> new_distance;
-
-    int64_t num_queries = 1;
-    int64_t topk = 2;
-
-    uids.push_back(1);
-    uids.push_back(2);
-    distance.push_back(5);
-    distance.push_back(1000);
-
-    new_uids.push_back(3);
-    new_uids.push_back(4);
-    new_distance.push_back(2);
-    new_distance.push_back(6);
-
-    auto res = MergeInto(num_queries, topk, distance.data(), uids.data(), new_distance.data(), new_uids.data());
-
-    ASSERT_EQ(res, 0);
-    ASSERT_EQ(uids[0], 3);
-    ASSERT_EQ(distance[0], 2);
-    ASSERT_EQ(uids[1], 1);
-    ASSERT_EQ(distance[1], 5);
-}
-
 void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     auto sr = (SearchResult*)results[0];
@@ -621,89 +593,6 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, Reduce) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
-
-    int N = 10000;
-    auto [raw_data, timestamps, uids] = generate_data(N);
-    auto line_sizeof = (sizeof(int) + sizeof(float) * DIM);
-
-    int64_t offset;
-    PreInsert(segment, N, &offset);
-    auto ins_res = Insert(segment, offset, N, uids.data(), timestamps.data(), raw_data.data(), (int)line_sizeof, N);
-    assert(ins_res.error_code == Success);
-
-    const char* dsl_string = R"(
-    {
-        "bool": {
-            "vector": {
-                "fakevec": {
-                    "metric_type": "L2",
-                    "params": {
-                        "nprobe": 10
-                    },
-                    "query": "$0",
-                    "topk": 10,
-                    "round_decimal": 3
-                }
-            }
-        }
-    })";
-
-    int num_queries = 10;
-    auto blob = generate_query_data(num_queries);
-
-    void* plan = nullptr;
-    auto status = CreateSearchPlan(collection, dsl_string, &plan);
-    assert(status.error_code == Success);
-
-    void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
-    assert(status.error_code == Success);
-
-    std::vector<CPlaceholderGroup> placeholderGroups;
-    placeholderGroups.push_back(placeholderGroup);
-    timestamps.clear();
-    timestamps.push_back(1);
-
-    std::vector<CSearchResult> results;
-    CSearchResult res1;
-    CSearchResult res2;
-    auto res = Search(segment, plan, placeholderGroup, timestamps[0], &res1, -1);
-    assert(res.error_code == Success);
-    res = Search(segment, plan, placeholderGroup, timestamps[0], &res2, -1);
-    assert(res.error_code == Success);
-    results.push_back(res1);
-    results.push_back(res2);
-
-    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
-    assert(status.error_code == Success);
-    void* reorganize_search_result = nullptr;
-    status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
-    assert(status.error_code == Success);
-    auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
-    assert(hits_blob_size > 0);
-    std::vector<char> hits_blob;
-    hits_blob.resize(hits_blob_size);
-    GetHitsBlob(reorganize_search_result, hits_blob.data());
-    assert(hits_blob.data() != nullptr);
-    auto num_queries_group = GetNumQueriesPerGroup(reorganize_search_result, 0);
-    assert(num_queries_group == num_queries);
-    std::vector<int64_t> hit_size_per_query;
-    hit_size_per_query.resize(num_queries_group);
-    GetHitSizePerQueries(reorganize_search_result, 0, hit_size_per_query.data());
-    assert(hit_size_per_query[0] > 0);
-
-    DeleteSearchPlan(plan);
-    DeletePlaceholderGroup(placeholderGroup);
-    DeleteSearchResult(res1);
-    DeleteSearchResult(res2);
-    DeleteMarshaledHits(reorganize_search_result);
-    DeleteCollection(collection);
-    DeleteSegment(segment);
-}
-
 TEST(CApiTest, ReduceSearchWithExpr) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, Growing, -1);
@@ -724,9 +613,10 @@ TEST(CApiTest, ReduceSearchWithExpr) {
                                                 metric_type: "L2"
                                                 search_params: "{\"nprobe\": 10}"
                                             >
-                                            placeholder_tag: "$0"
-                                         >)";
+                                            placeholder_tag: "$0">
+                                            output_field_ids: 100)";
 
+    int topK = 10;
     int num_queries = 10;
     auto blob = generate_query_data(num_queries);
 
@@ -754,29 +644,34 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     results.push_back(res1);
     results.push_back(res2);
 
+    // 1. reduce
     status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
     assert(status.error_code == Success);
-    void* reorganize_search_result = nullptr;
-    status = ReorganizeSearchResults(&reorganize_search_result, results.data(), results.size());
-    assert(status.error_code == Success);
-    auto hits_blob_size = GetHitsBlobSize(reorganize_search_result);
-    assert(hits_blob_size > 0);
-    std::vector<char> hits_blob;
-    hits_blob.resize(hits_blob_size);
-    GetHitsBlob(reorganize_search_result, hits_blob.data());
-    assert(hits_blob.data() != nullptr);
-    auto num_queries_group = GetNumQueriesPerGroup(reorganize_search_result, 0);
-    assert(num_queries_group == num_queries);
-    std::vector<int64_t> hit_size_per_query;
-    hit_size_per_query.resize(num_queries_group);
-    GetHitSizePerQueries(reorganize_search_result, 0, hit_size_per_query.data());
-    assert(hit_size_per_query[0] > 0);
 
+    // 2. marshal
+    CSearchResultDataBlobs cSearchResultData;
+    auto req_sizes = std::vector<int32_t>{5, 5};
+    status = Marshal(&cSearchResultData, results.data(), results.size(), req_sizes.data(), req_sizes.size());
+    assert(status.error_code == Success);
+    auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultData);
+
+    // check result
+    for (int i = 0; i < req_sizes.size(); i++) {
+        milvus::proto::schema::SearchResultData search_result_data;
+        auto suc = search_result_data.ParseFromArray(search_result_data_blobs->blobs[i].data(),
+                                                     search_result_data_blobs->blobs[i].size());
+        assert(suc);
+        assert(search_result_data.top_k() == topK);
+        assert(search_result_data.num_queries() == num_queries);
+        assert(search_result_data.scores().size() == topK * req_sizes[i]);
+        assert(search_result_data.ids().int_id().data_size() == topK * req_sizes[i]);
+    }
+
+    DeleteSearchResultDataBlobs(cSearchResultData);
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteSearchResult(res1);
     DeleteSearchResult(res2);
-    DeleteMarshaledHits(reorganize_search_result);
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
