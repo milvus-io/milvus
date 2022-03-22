@@ -637,9 +637,9 @@ TEST(Query, FillSegment) {
     // dispatch here
     int N = 100000;
     auto dataset = DataGen(schema, N);
-    const auto std_vec = dataset.get_col<int64_t>(1);
-    const auto std_vfloat_vec = dataset.get_col<float>(0);
-    const auto std_i32_vec = dataset.get_col<int32_t>(2);
+    const auto std_vec = dataset.get_col<int64_t>(1);       // ids field
+    const auto std_vfloat_vec = dataset.get_col<float>(0);  // vector field
+    const auto std_i32_vec = dataset.get_col<int32_t>(2);   // scalar field
 
     std::vector<std::unique_ptr<SegmentInternalInterface>> segments;
     segments.emplace_back([&] {
@@ -701,16 +701,20 @@ TEST(Query, FillSegment) {
         result->result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), *result);
 
-        auto ans = result->row_data_;
-        ASSERT_EQ(ans.size(), topk * num_queries);
-        int64_t std_index = 0;
+        auto fields_data = result->output_fields_data_;
+        auto fields_meta = result->output_fields_meta_;
+        ASSERT_EQ(fields_data.size(), 2);
+        ASSERT_EQ(fields_data.size(), 2);
+        ASSERT_EQ(fields_meta[0].get_sizeof(), sizeof(float) * dim);
+        ASSERT_EQ(fields_meta[1].get_sizeof(), sizeof(int32_t));
+        ASSERT_EQ(fields_data[0].size(), fields_meta[0].get_sizeof() * topk * num_queries);
+        ASSERT_EQ(fields_data[1].size(), fields_meta[1].get_sizeof() * topk * num_queries);
 
-        for (auto& vec : ans) {
-            ASSERT_EQ(vec.size(), sizeof(int64_t) + sizeof(float) * dim + sizeof(int32_t));
+        for (int i = 0; i < topk * num_queries; i++) {
             int64_t val;
-            memcpy(&val, vec.data(), sizeof(int64_t));
+            memcpy(&val, &result->ids_data_[i * sizeof(int64_t)], sizeof(int64_t));
 
-            auto internal_offset = result->ids_[std_index];
+            auto internal_offset = result->ids_[i];
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
             std::vector<float> std_vfloat(dim);
@@ -718,14 +722,16 @@ TEST(Query, FillSegment) {
 
             ASSERT_EQ(val, std_val) << "io:" << internal_offset;
             if (val != -1) {
+                // check vector field
                 std::vector<float> vfloat(dim);
+                memcpy(vfloat.data(), &fields_data[0][i * sizeof(float) * dim], dim * sizeof(float));
+                ASSERT_EQ(vfloat, std_vfloat);
+
+                // check int32 field
                 int i32;
-                memcpy(vfloat.data(), vec.data() + sizeof(int64_t), dim * sizeof(float));
-                memcpy(&i32, vec.data() + sizeof(int64_t) + dim * sizeof(float), sizeof(int32_t));
-                ASSERT_EQ(vfloat, std_vfloat) << std_index;
-                ASSERT_EQ(i32, std_i32) << std_index;
+                memcpy(&i32, &fields_data[1][i * sizeof(int32_t)], sizeof(int32_t));
+                ASSERT_EQ(i32, std_i32);
             }
-            ++std_index;
         }
     }
 }

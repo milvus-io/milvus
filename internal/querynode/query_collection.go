@@ -1005,11 +1005,6 @@ func (q *queryCollection) search(msg queryMsg) error {
 		return err
 	}
 
-	schema, err := typeutil.CreateSchemaHelper(collection.schema)
-	if err != nil {
-		return err
-	}
-
 	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
@@ -1041,21 +1036,21 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 	defer searchReq.delete()
 
-	queryNum := searchReq.getNumOfQuery()
+	nq := searchReq.getNumOfQuery()
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
 
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
-			oplog.Object("nq", queryNum),
+			oplog.Object("nq", nq),
 			oplog.Object("expr", searchMsg.SerializedExprPlan))
 	} else {
 		sp.LogFields(oplog.String("statistical time", "stats start"),
-			oplog.Object("nq", queryNum),
+			oplog.Object("nq", nq),
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
 
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d), msgID = %d", searchMsg.CollectionID, queryNum, topK, searchMsg.ID()))
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d), msgID = %d", searchMsg.CollectionID, nq, topK, searchMsg.ID()))
 
 	// get global sealed segments
 	var globalSealedSegments []UniqueID
@@ -1106,7 +1101,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 					Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 					ResultChannelID:          searchMsg.ResultChannelID,
 					MetricType:               plan.getMetricType(),
-					NumQueries:               queryNum,
+					NumQueries:               nq,
 					TopK:                     topK,
 					SlicedBlob:               nil,
 					SlicedOffset:             1,
@@ -1136,7 +1131,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	}
 
 	numSegment := int64(len(searchResults))
-	var marshaledHits *MarshaledHits
+
 	log.Debug("QueryNode reduce data", zap.Int64("msgID", searchMsg.ID()), zap.Int64("numSegment", numSegment))
 	tr.RecordSpan()
 	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
@@ -1146,49 +1141,22 @@ func (q *queryCollection) search(msg queryMsg) error {
 		log.Error("QueryNode reduce data failed", zap.Int64("msgID", searchMsg.ID()), zap.Error(err))
 		return err
 	}
-	marshaledHits, err = reorganizeSearchResults(searchResults, numSegment)
-	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
+	nqOfReqs := []int64{nq}
+	nqPerSlice := nq
+	reqSlices, err := getReqSlices(nqOfReqs, nqPerSlice)
 	if err != nil {
 		return err
 	}
-	defer deleteMarshaledHits(marshaledHits)
-
-	hitsBlob, err := marshaledHits.getHitsBlob()
-	sp.LogFields(oplog.String("statistical time", "getHitsBlob end"))
+	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, int(numSegment), reqSlices)
+	defer deleteSearchResultDataBlobs(blobs)
+	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 	if err != nil {
 		return err
 	}
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
-	var offset int64
-	for index := range searchRequests {
-		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
-		if err != nil {
-			return err
-		}
-		hits := make([][]byte, len(hitBlobSizePeerQuery))
-		for i, len := range hitBlobSizePeerQuery {
-			hits[i] = hitsBlob[offset : offset+len]
-			//test code to checkout marshaled hits
-			//marshaledHit := hitsBlob[offset:offset+len]
-			//unMarshaledHit := milvuspb.Hits{}
-			//err = proto.Unmarshal(marshaledHit, &unMarshaledHit)
-			//if err != nil {
-			//	return err
-			//}
-			//log.Debug("hits msg  = ", unMarshaledHit)
-			offset += len
-		}
-
-		// TODO: remove inefficient code in cgo and use SearchResultData directly
-		// TODO: Currently add a translate layer from hits to SearchResultData
-		// TODO: hits marshal and unmarshal is likely bottleneck
-
-		transformed, err := translateHits(schema, searchMsg.OutputFieldsId, hits)
-		if err != nil {
-			return err
-		}
-		byteBlobs, err := proto.Marshal(transformed)
+	for i := 0; i < len(reqSlices); i++ {
+		blob, err := getSearchResultDataBlob(blobs, i)
 		if err != nil {
 			return err
 		}
@@ -1206,9 +1174,9 @@ func (q *queryCollection) search(msg queryMsg) error {
 				Status:                   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 				ResultChannelID:          searchMsg.ResultChannelID,
 				MetricType:               plan.getMetricType(),
-				NumQueries:               queryNum,
+				NumQueries:               nq,
 				TopK:                     topK,
-				SlicedBlob:               byteBlobs,
+				SlicedBlob:               blob,
 				SlicedOffset:             1,
 				SlicedNumCount:           1,
 				SealedSegmentIDsSearched: sealedSegmentSearched,

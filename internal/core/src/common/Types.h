@@ -61,49 +61,6 @@ constexpr std::false_type always_false{};
 template <typename T>
 using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 64>>;
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-struct SearchResult {
-    SearchResult() = default;
-    SearchResult(int64_t num_queries, int64_t topk) : topk_(topk), num_queries_(num_queries) {
-        auto count = get_row_count();
-        distances_.resize(count);
-        ids_.resize(count);
-    }
-
-    int64_t
-    get_row_count() const {
-        return topk_ * num_queries_;
-    }
-
- public:
-    int64_t num_queries_;
-    int64_t topk_;
-    std::vector<float> distances_;
-    std::vector<int64_t> ids_;
-
- public:
-    // TODO(gexi): utilize these fields
-    void* segment_;
-    std::vector<int64_t> result_offsets_;
-    std::vector<int64_t> primary_keys_;
-    std::vector<std::vector<char>> row_data_;
-};
-
-using SearchResultPtr = std::shared_ptr<SearchResult>;
-using SearchResultOpt = std::optional<SearchResult>;
-
-struct RetrieveResult {
-    RetrieveResult() = default;
-
- public:
-    void* segment_;
-    std::vector<int64_t> result_offsets_;
-    std::vector<DataArray> field_data_;
-};
-
-using RetrieveResultPtr = std::shared_ptr<RetrieveResult>;
-using RetrieveResultOpt = std::optional<RetrieveResult>;
-
 namespace impl {
 // hide identifier name to make auto-completion happy
 struct FieldIdTag;
