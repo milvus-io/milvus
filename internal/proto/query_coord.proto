@@ -83,6 +83,7 @@ message LoadCollectionRequest {
   int64 dbID = 2;
   int64 collectionID = 3;
   schema.CollectionSchema schema = 4;
+  int32 replica_number = 5;
 }
 
 message ReleaseCollectionRequest {
@@ -305,6 +306,8 @@ message SegmentInfo {
   bool createdByCompaction = 11;
   common.SegmentState segment_state = 12;
   repeated VecFieldIndexInfo index_infos = 13;
+  repeated int64 replica_ids = 14;
+  repeated int64 node_ids = 15;
 }
 
 message CollectionInfo {
@@ -315,6 +318,7 @@ message CollectionInfo {
   schema.CollectionSchema schema = 5;
   repeated int64 released_partitionIDs = 6;
   int64 inMemory_percentage = 7;
+  repeated int64 replica_ids = 8;
 }
 
 message UnsubscribeChannels {
@@ -338,4 +342,17 @@ message SegmentChangeInfo {
 message SealedSegmentsChangeInfo {
   common.MsgBase base = 1;
   repeated SegmentChangeInfo infos = 2;
+}
+
+message ReplicaInfo {    // ReplicaGroup
+  int64 replica_id = 1;
+  int64 collection_id = 2;
+  repeated int64 partition_ids = 3;    // empty indicates to load collection
+  repeated ShardReplica shard_replicas = 4;
+}
+
+message ShardReplica {
+    int64 leader = 1;
+    string dm_channel_name = 2;
+    repeated int64 node_ids = 3;    // include leader
 }
