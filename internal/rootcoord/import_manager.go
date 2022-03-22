@@ -50,6 +50,8 @@ type importTaskState struct {
 // import task
 type importTask struct {
 	id         int64           // task id
+	request    int64           // request id
+	datanode   int64           // datanode id which execute this task
 	collection string          // target collection
 	partition  string          // target partition
 	bucket     string          // target bucket of storage
@@ -70,12 +72,13 @@ type importManager struct {
 	pendingLock  sync.Mutex            // lock pending task list
 	workingLock  sync.Mutex            // lock working task map
 	nextTaskID   int64                 // for generating next import task id
+	lastReqID    int64                 // for generateing a unique id for import request
 
-	callImportService func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status
+	callImportService func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse
 }
 
 // newImportManager helper function to create a importManager
-func newImportManager(ctx context.Context, client *clientv3.Client, importService func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status) *importManager {
+func newImportManager(ctx context.Context, client *clientv3.Client, importService func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse) *importManager {
 	ctx, cancel := context.WithCancel(ctx)
 	mgr := &importManager{
 		ctx:               ctx,
@@ -86,6 +89,7 @@ func newImportManager(ctx context.Context, client *clientv3.Client, importServic
 		pendingLock:       sync.Mutex{},
 		workingLock:       sync.Mutex{},
 		nextTaskID:        0,
+		lastReqID:         0,
 		callImportService: importService,
 	}
 
@@ -130,11 +134,13 @@ func (m *importManager) pushTasks() error {
 		}
 
 		// call DataCoord.Import()
-		st := m.callImportService(m.ctx, dbTask)
-		if st.ErrorCode == commonpb.ErrorCode_UnexpectedError {
+		resp := m.callImportService(m.ctx, dbTask)
+		if resp.Status.ErrorCode == commonpb.ErrorCode_UnexpectedError {
 			log.Debug("import task is rejected", zap.Int64("task id", dbTask.TaskId))
 			break
 		}
+		task.datanode = resp.DatanodeId
+		log.Debug("import task is assigned", zap.Int64("task id", dbTask.TaskId), zap.Int64("datanode id", task.datanode))
 
 		// erase this task from head of pending list if the callImportService succeed
 		m.pendingTasks = m.pendingTasks[1:]
@@ -153,6 +159,22 @@ func (m *importManager) pushTasks() error {
 	}
 
 	return nil
+}
+
+// generate an unique id for import request, this method has no lock, should only be called by importJob()
+func (m *importManager) genReqID() int64 {
+	if m.lastReqID == 0 {
+		m.lastReqID = time.Now().Unix()
+
+	} else {
+		id := time.Now().Unix()
+		if id == m.lastReqID {
+			id++
+		}
+		m.lastReqID = id
+	}
+
+	return m.lastReqID
 }
 
 func (m *importManager) importJob(req *milvuspb.ImportRequest) *milvuspb.ImportResponse {
@@ -210,13 +232,15 @@ func (m *importManager) importJob(req *milvuspb.ImportRequest) *milvuspb.ImportR
 			}
 		}
 
+		reqID := m.genReqID()
 		// convert import request to import tasks
 		if req.RowBased {
-			log.Debug("import manager process row-based request", zap.Int("fileCount", len(req.Files)))
 			// for row-based, each file is a task
+			taskList := make([]int64, len(req.Files))
 			for i := 0; i < len(req.Files); i++ {
 				newTask := &importTask{
 					id:         m.nextTaskID,
+					request:    reqID,
 					collection: req.CollectionName,
 					partition:  req.PartitionName,
 					bucket:     bucket,
@@ -225,14 +249,16 @@ func (m *importManager) importJob(req *milvuspb.ImportRequest) *milvuspb.ImportR
 					timestamp:  time.Now().Unix(),
 				}
 
+				taskList[i] = newTask.id
 				m.nextTaskID++
 				m.pendingTasks = append(m.pendingTasks, newTask)
 			}
+			log.Debug("process row-based import request", zap.Int64("reqID", reqID), zap.Any("taskIDs", taskList))
 		} else {
-			log.Debug("import manager process column-based request", zap.Int("fileCount", len(req.Files)))
 			// for column-based, all files is a task
 			newTask := &importTask{
 				id:         m.nextTaskID,
+				request:    reqID,
 				collection: req.CollectionName,
 				partition:  req.PartitionName,
 				bucket:     bucket,
@@ -242,6 +268,7 @@ func (m *importManager) importJob(req *milvuspb.ImportRequest) *milvuspb.ImportR
 			}
 			m.nextTaskID++
 			m.pendingTasks = append(m.pendingTasks, newTask)
+			log.Debug("process row-based import request", zap.Int64("reqID", reqID), zap.Int64("taskID", newTask.id))
 		}
 	}()
 

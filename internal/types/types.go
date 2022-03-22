@@ -274,7 +274,7 @@ type DataCoord interface {
 	// The `Status` in response struct `ImportResponse` indicates if this operation is processed successfully or fail cause;
 	// the `tasks` in `ImportResponse` return an id list of tasks.
 	// error is always nil
-	Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error)
+	Import(ctx context.Context, req *datapb.ImportTask) (*datapb.ImportTaskResponse, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.

@@ -28,9 +28,11 @@ import (
 )
 
 func TestImportManager_NewImportManager(t *testing.T) {
-	fn := func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
 		}
 	}
 	mgr := newImportManager(context.TODO(), nil, fn)
@@ -65,9 +67,11 @@ func TestImportManager_ImportJob(t *testing.T) {
 		},
 	}
 
-	fn := func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
 		}
 	}
 
@@ -81,9 +85,11 @@ func TestImportManager_ImportJob(t *testing.T) {
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
-	fn = func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+	fn = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
 		}
 	}
 
@@ -98,15 +104,19 @@ func TestImportManager_ImportJob(t *testing.T) {
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
 	count := 0
-	fn = func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
+	fn = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
 		if count >= 2 {
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			return &datapb.ImportTaskResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				},
 			}
 		}
 		count++
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
 		}
 	}
 
@@ -117,9 +127,11 @@ func TestImportManager_ImportJob(t *testing.T) {
 }
 
 func TestImportManager_TaskState(t *testing.T) {
-	fn := func(ctx context.Context, req *datapb.ImportTask) *commonpb.Status {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
 		}
 	}
 

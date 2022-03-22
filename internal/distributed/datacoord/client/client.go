@@ -488,7 +488,7 @@ func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (c *Client) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+func (c *Client) Import(ctx context.Context, req *datapb.ImportTask) (*datapb.ImportTaskResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -498,5 +498,5 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*commonpb.Status), err
+	return ret.(*datapb.ImportTaskResponse), err
 }

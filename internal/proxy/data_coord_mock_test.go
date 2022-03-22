@@ -206,8 +206,8 @@ func (coord *DataCoordMock) DropVirtualChannel(ctx context.Context, req *datapb.
 	return &datapb.DropVirtualChannelResponse{}, nil
 }
 
-func (coord *DataCoordMock) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
-	return &commonpb.Status{}, nil
+func (coord *DataCoordMock) Import(ctx context.Context, req *datapb.ImportTask) (*datapb.ImportTaskResponse, error) {
+	return &datapb.ImportTaskResponse{}, nil
 }
 
 func NewDataCoordMock() *DataCoordMock {
