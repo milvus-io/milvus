@@ -72,6 +72,15 @@ Insert(CSegmentInterface c_segment,
        int64_t count);
 
 CStatus
+InsertColumnData(CSegmentInterface c_segment,
+                 int64_t reserved_offset,
+                 int64_t size,
+                 const int64_t* row_ids,
+                 const uint64_t* timestamps,
+                 void* raw_data,
+                 int64_t count);
+
+CStatus
 PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset);
 
 CStatus
