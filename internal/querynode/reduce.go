@@ -124,11 +124,15 @@ func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 	return nil
 }
 
-func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResult, numSegments int, reqSlices []int32) (searchResultDataBlobs, error) {
+func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResult, numSegments int, sliceNQs []int32, sliceTopKs []int32) (searchResultDataBlobs, error) {
 	log.Debug("start marshal...",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("msgID", msgID),
-		zap.Int32s("reqSlices", reqSlices))
+		zap.Int32s("sliceNQs", sliceNQs))
+
+	if len(sliceNQs) != len(sliceTopKs) {
+		return nil, fmt.Errorf("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
+	}
 
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
@@ -137,12 +141,13 @@ func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResul
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 
 	var cNumSegments = C.int32_t(numSegments)
-	var cSlicesPtr = (*C.int32_t)(&reqSlices[0])
-	var cNumSlices = C.int32_t(len(reqSlices))
+	var cSliceNQSPtr = (*C.int32_t)(&sliceNQs[0])
+	var cSliceTopKSPtr = (*C.int32_t)(&sliceTopKs[0])
+	var cNumSlices = C.int32_t(len(sliceNQs))
 
 	var cSearchResultDataBlobs searchResultDataBlobs
 
-	status := C.Marshal(&cSearchResultDataBlobs, cSearchResultPtr, cNumSegments, cSlicesPtr, cNumSlices)
+	status := C.Marshal(&cSearchResultDataBlobs, cSearchResultPtr, cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)
 	if err := HandleCStatus(&status, "ReorganizeSearchResults failed"); err != nil {
 		return nil, err
 	}

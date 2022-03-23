@@ -1249,7 +1249,10 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 		return err
 	}
 
-	res, err := marshal(defaultCollectionID, UniqueID(0), searchResults, 1, reqSlices)
+	topK := int32(plan.getTopK())
+	sliceTopKs := []int32{topK, topK, topK, topK, topK}
+
+	res, err := marshal(defaultCollectionID, UniqueID(0), searchResults, 1, reqSlices, sliceTopKs)
 	if err != nil {
 		return err
 	}
@@ -1272,7 +1275,7 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 		if result.TopK != defaultTopK {
 			return fmt.Errorf("unexpected topK when checkSearchResult")
 		}
-		if result.NumQueries != nq {
+		if result.NumQueries != nq/5 {
 			return fmt.Errorf("unexpected nq when checkSearchResult")
 		}
 		if len(result.Ids.IdField.(*schemapb.IDs_IntId).IntId.Data) != int(defaultTopK*nq/5) {
