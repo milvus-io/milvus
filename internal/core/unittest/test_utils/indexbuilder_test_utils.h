@@ -368,8 +368,8 @@ generate_index_params(const MapParams& m) {
 }
 
 // TODO: std::is_arithmetic_v, hard to compare float point value. std::is_integral_v.
-template <typename T, typename = typename std::enable_if_t<std::is_arithmetic_v<T>>>
-inline auto
+template <typename T, typename = typename std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>>
+inline std::vector<T>
 GenArr(int64_t n) {
     auto max_i8 = std::numeric_limits<int8_t>::max() - 1;
     std::vector<T> arr;
@@ -392,6 +392,12 @@ GenStrArr(int64_t n) {
     }
     std::sort(arr.begin(), arr.end());
     return arr;
+}
+
+template <>
+inline std::vector<std::string>
+GenArr<std::string>(int64_t n) {
+    return GenStrArr(n);
 }
 
 template <typename T, typename = typename std::enable_if_t<std::is_arithmetic_v<T>>>
