@@ -151,8 +151,7 @@ ReorganizeSearchResults(std::vector<SearchResult*>& search_results,
 #pragma omp parallel for
         for (int j = 0; j < num_results; j++) {
             auto loc = search_result->result_offsets_[j];
-            //            AssertInfo(loc < nq * topK, "result location of out range, location = " +
-            //            std::to_string(loc));
+            AssertInfo(loc < nq * topK, "result location of out range, location = " + std::to_string(loc));
             // set result ids
             memcpy(&result_ids[loc], &search_result->ids_data_[j * sizeof(int64_t)], sizeof(int64_t));
             // set result distances
@@ -177,55 +176,61 @@ std::vector<char>
 GetSearchResultDataSlice(milvus::aligned_vector<int64_t>& result_ids,
                          std::vector<float>& result_distances,
                          std::vector<milvus::aligned_vector<char>>& result_output_fields_data,
-                         int32_t nq,
-                         int32_t topK,
+                         std::vector<milvus::FieldMeta>& output_fields_meta,
+                         int32_t unify_topK,
+                         int32_t slice_topK,
                          int32_t nq_begin,
-                         int32_t nq_end,
-                         std::vector<milvus::FieldMeta>& output_fields_meta) {
+                         int32_t nq_end) {
+    AssertInfo(nq_begin <= nq_end,
+               "illegal offsets when GetSearchResultDataSlice"
+               ", nq_begin = " +
+                   std::to_string(nq_begin) + ", nq_end = " + std::to_string(nq_end));
+
     auto search_result_data = std::make_unique<milvus::proto::schema::SearchResultData>();
-    // set topK and nq
-    search_result_data->set_top_k(topK);
+    // set unify_topK and nq
+    auto nq = nq_end - nq_begin;
+    search_result_data->set_top_k(slice_topK);
     search_result_data->set_num_queries(nq);
 
-    auto offset_begin = nq_begin * topK;
-    auto offset_end = nq_end * topK;
-    AssertInfo(offset_begin <= offset_end,
-               "illegal offsets when GetSearchResultDataSlice"
-               ", offset_begin = " +
-                   std::to_string(offset_begin) + ", offset_end = " + std::to_string(offset_end));
-    AssertInfo(offset_end <= topK * nq,
-               "illegal offset_end when GetSearchResultDataSlice"
-               ", offset_end = " +
-                   std::to_string(offset_end) + ", nq = " + std::to_string(nq) + ", topK = " + std::to_string(topK));
+    auto offset_begin = nq_begin * unify_topK;
 
     // set ids
     auto proto_ids = std::make_unique<milvus::proto::schema::IDs>();
     auto ids = std::make_unique<milvus::proto::schema::LongArray>();
-    *ids->mutable_data() = {result_ids.begin() + offset_begin, result_ids.begin() + offset_end};
+    for (int i = 0; i < nq; i++) {
+        auto begin = result_ids.begin() + offset_begin * (unify_topK * i);
+        ids->mutable_data()->Add(begin, begin + slice_topK);
+    }
     proto_ids->set_allocated_int_id(ids.release());
     search_result_data->set_allocated_ids(proto_ids.release());
-    AssertInfo(search_result_data->ids().int_id().data_size() == offset_end - offset_begin,
+    AssertInfo(search_result_data->ids().int_id().data_size() == nq * slice_topK,
                "wrong ids size"
                ", size = " +
                    std::to_string(search_result_data->ids().int_id().data_size()) +
-                   ", expected size = " + std::to_string(offset_end - offset_begin));
+                   ", expected size = " + std::to_string(nq * slice_topK));
 
     // set scores
-    *search_result_data->mutable_scores() = {result_distances.begin() + offset_begin,
-                                             result_distances.begin() + offset_end};
-    AssertInfo(search_result_data->scores_size() == offset_end - offset_begin,
+    for (int i = 0; i < nq; i++) {
+        auto begin = result_distances.begin() + offset_begin * (unify_topK * i);
+        search_result_data->mutable_scores()->Add(begin, begin + slice_topK);
+    }
+    AssertInfo(search_result_data->scores_size() == nq * slice_topK,
                "wrong scores size"
                ", size = " +
                    std::to_string(search_result_data->scores_size()) +
-                   ", expected size = " + std::to_string(offset_end - offset_begin));
+                   ", expected size = " + std::to_string(nq * slice_topK));
 
     // set output fields
     for (int i = 0; i < result_output_fields_data.size(); i++) {
         auto& field_meta = output_fields_meta[i];
         auto field_size = field_meta.get_sizeof();
-        auto array = milvus::segcore::CreateDataArrayFrom(
-            result_output_fields_data[i].data() + offset_begin * field_size, offset_end - offset_begin, field_meta);
-        search_result_data->mutable_fields_data()->AddAllocated(array.release());
+        auto arrays = std::make_unique<milvus::DataArray>();
+        for (int j = 0; j < nq; j++) {
+            auto begin = result_output_fields_data[i].data() + (offset_begin + unify_topK * j) * field_size;
+            auto array = milvus::segcore::CreateDataArrayFrom(begin, slice_topK, field_meta);
+            arrays->MergeFrom(*array);
+        }
+        search_result_data->mutable_fields_data()->AddAllocated(arrays.release());
     }
 
     // SearchResultData to blob
@@ -240,7 +245,8 @@ CStatus
 Marshal(CSearchResultDataBlobs* cSearchResultDataBlobs,
         CSearchResult* c_search_results,
         int32_t num_segments,
-        int32_t* nq_slice_sizes,
+        int32_t* slice_nqs,
+        int32_t* slice_topks,
         int32_t num_slices) {
     try {
         // parse search results and get topK, nq
@@ -269,13 +275,13 @@ Marshal(CSearchResultDataBlobs* cSearchResultDataBlobs,
         ReorganizeSearchResults(search_results, nq, topK, result_ids, result_distances, result_output_fields_data);
 
         // prefix sum, get slices offsets
-        AssertInfo(num_slices > 0, "empty nq_slice_sizes is not allowed");
+        AssertInfo(num_slices > 0, "empty slice_nqs is not allowed");
         auto slice_offsets_size = num_slices + 1;
         auto slice_offsets = std::vector<int32_t>(slice_offsets_size);
         slice_offsets[0] = 0;
-        slice_offsets[1] = nq_slice_sizes[0];
+        slice_offsets[1] = slice_nqs[0];
         for (int i = 2; i < slice_offsets_size; i++) {
-            slice_offsets[i] = slice_offsets[i - 1] + nq_slice_sizes[i - 1];
+            slice_offsets[i] = slice_offsets[i - 1] + slice_nqs[i - 1];
         }
         AssertInfo(slice_offsets[num_slices] == nq,
                    "illegal req sizes"
@@ -287,8 +293,9 @@ Marshal(CSearchResultDataBlobs* cSearchResultDataBlobs,
         search_result_data_blobs->blobs.resize(num_slices);
 #pragma omp parallel for
         for (int i = 0; i < num_slices; i++) {
-            auto proto = GetSearchResultDataSlice(result_ids, result_distances, result_output_fields_data, nq, topK,
-                                                  slice_offsets[i], slice_offsets[i + 1], output_fields_meta);
+            auto proto =
+                GetSearchResultDataSlice(result_ids, result_distances, result_output_fields_data, output_fields_meta,
+                                         topK, slice_topks[i], slice_offsets[i], slice_offsets[i + 1]);
             search_result_data_blobs->blobs[i] = proto;
         }
 

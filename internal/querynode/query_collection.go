@@ -1128,7 +1128,12 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, int(numSegment), reqSlices)
+	// TODO: remove sliceTopKs to sliceInfo
+	sliceTopKs := make([]int32, 0)
+	for i := 0; i < len(reqSlices); i++ {
+		sliceTopKs = append(sliceTopKs, int32(topK))
+	}
+	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, int(numSegment), reqSlices, sliceTopKs)
 	defer deleteSearchResultDataBlobs(blobs)
 	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 	if err != nil {
@@ -1699,7 +1704,12 @@ func (q *queryCollection) searchMerged(searchMsg *mergedSearchMsg) error {
 	if err != nil {
 		return err
 	}
-	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, int(numSegment), sInfo.slices)
+	// TODO: move sliceTopKs to sliceInfo
+	sliceTopKs := make([]int32, 0)
+	for i := 0; i < len(sInfo.slices); i++ {
+		sliceTopKs = append(sliceTopKs, int32(topK))
+	}
+	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, int(numSegment), sInfo.slices, sliceTopKs)
 	defer deleteSearchResultDataBlobs(blobs)
 	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 	if err != nil {

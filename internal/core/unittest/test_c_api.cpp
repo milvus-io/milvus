@@ -650,21 +650,31 @@ TEST(CApiTest, ReduceSearchWithExpr) {
 
     // 2. marshal
     CSearchResultDataBlobs cSearchResultData;
-    auto req_sizes = std::vector<int32_t>{5, 5};
-    status = Marshal(&cSearchResultData, results.data(), results.size(), req_sizes.data(), req_sizes.size());
+    auto slice_nqs = std::vector<int32_t>{5, 5};
+    auto slice_topks = std::vector<int32_t>{10, 5};
+    status = Marshal(&cSearchResultData, results.data(), results.size(), slice_nqs.data(), slice_topks.data(),
+                     slice_nqs.size());
     assert(status.error_code == Success);
     auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultData);
 
     // check result
-    for (int i = 0; i < req_sizes.size(); i++) {
+    for (int i = 0; i < slice_nqs.size(); i++) {
         milvus::proto::schema::SearchResultData search_result_data;
         auto suc = search_result_data.ParseFromArray(search_result_data_blobs->blobs[i].data(),
                                                      search_result_data_blobs->blobs[i].size());
         assert(suc);
-        assert(search_result_data.top_k() == topK);
-        assert(search_result_data.num_queries() == num_queries);
-        assert(search_result_data.scores().size() == topK * req_sizes[i]);
-        assert(search_result_data.ids().int_id().data_size() == topK * req_sizes[i]);
+        assert(search_result_data.top_k() == slice_topks[i]);
+        assert(search_result_data.num_queries() == slice_nqs[i]);
+        assert(search_result_data.scores().size() == slice_topks[i] * slice_nqs[i]);
+        assert(search_result_data.ids().int_id().data_size() == slice_topks[i] * slice_nqs[i]);
+        // check output fields
+        assert(search_result_data.fields_data().size() == 1);
+        auto field_data = search_result_data.fields_data().at(0);
+        assert(field_data.has_vectors());
+        assert(field_data.vectors().has_float_vector());
+        auto size = field_data.vectors().float_vector().data_size();
+        auto expected = slice_nqs[i] * slice_topks[i] * 16 /*dim*/;
+        assert(size == expected);
     }
 
     DeleteSearchResultDataBlobs(cSearchResultData);
