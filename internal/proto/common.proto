@@ -200,8 +200,9 @@ enum ConsistencyLevel {
 enum ImportState {
     ImportPending = 0;
     ImportFailed = 1;
-    ImportDownloaded = 2;
-    ImportParsed = 3;
-    ImportPersisted = 4;
-    ImportCompleted = 5;
+    ImportStarted = 2;
+    ImportDownloaded = 3;
+    ImportParsed = 4;
+    ImportPersisted = 5;
+    ImportCompleted = 6;
 }
