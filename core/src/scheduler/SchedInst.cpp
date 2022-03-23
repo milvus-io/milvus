@@ -116,9 +116,9 @@ void
 StartSchedulerService() {
     load_simple_config();
     OptimizerInst::GetInstance()->Init();
-    ResMgrInst::GetInstance()->Start();
-    SchedInst::GetInstance()->Start();
-    JobMgrInst::GetInstance()->Start();
+    ResMgrInst::GetInstance()->Start(); // resevt_thread
+    SchedInst::GetInstance()->Start(); // schedevt_thread
+    JobMgrInst::GetInstance()->Start(); // jobmgr_thread
     CPUBuilderInst::GetInstance()->Start();
 }
 

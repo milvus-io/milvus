@@ -221,6 +221,7 @@ class TaskTable : public interface::dumpable {
  private:
     std::uint64_t id_ = 0;
     CircleQueue<TaskTableItemPtr> table_;
+    std::mutex table_mutex_; // protect table_
     std::function<void(void)> subscriber_ = nullptr;
 
     // cache last finish avoid Pick task from begin always

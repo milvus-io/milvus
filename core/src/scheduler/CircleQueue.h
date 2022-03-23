@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "utils/Log.h"
 
 namespace milvus {
 namespace scheduler {
@@ -71,6 +72,8 @@ class CircleQueue {
     void
     set_front(uint64_t last_finish) {
         if (last_finish == rear_) {
+            LOG_ENGINE_ERROR_ << "set_front CircleQueue throw exception, capacity_=" << capacity_ << " rear_="
+                              << rear_ << " size_=" << size_ << " front_=" << front_;
             throw;
         }
         front_.store(last_finish % capacity_, MEMORY_ORDER);
@@ -79,6 +82,8 @@ class CircleQueue {
     void
     put(const value_type& x) {
         if ((rear_) % capacity_ == front_.load(MEMORY_ORDER)) {
+            LOG_ENGINE_ERROR_ << "put CircleQueue throw exception, capacity_=" << capacity_ << " rear_="
+                              << rear_ << " size_=" << size_ << " front_=" << front_;
             throw;
         }
         data_[rear_] = x;
@@ -91,6 +96,8 @@ class CircleQueue {
     void
     put(value_type&& x) {
         if ((rear_) % capacity_ == front_.load(MEMORY_ORDER)) {
+            LOG_ENGINE_ERROR_ << "put2 CircleQueue throw exception, capacity_=" << capacity_ << " rear_="
+                              << rear_ << " size_=" << size_ << " front_=" << front_;
             throw;
         }
         data_[rear_] = std::move(x);

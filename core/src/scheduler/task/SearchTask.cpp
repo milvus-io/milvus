@@ -133,6 +133,7 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
 
 void
 XSearchTask::Load(LoadType type, uint8_t device_id) {
+    LOG_ENGINE_DEBUG_ << "XSearchTask::Load() start";
     milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
 
     TimeRecorder rc(LogOut("[%s][%ld]", "search", 0));
@@ -174,6 +175,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
     fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
 
     if (!stat.ok()) {
+        LOG_ENGINE_DEBUG_ << "XSearchTask::Load() failed status:" << stat.ToString();
         Status s;
         if (stat.ToString().find("out of memory") != std::string::npos) {
             error_msg = "out of memory: " + type_str + " : " + stat.message();
@@ -184,9 +186,11 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
         }
 
         if (auto job = job_.lock()) {
+            LOG_ENGINE_DEBUG_ << "XSearchTask::Load() failed status begin set";
             auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
             search_job->SetStatus(s);
             search_job->SearchDone(file_->id_);
+            LOG_ENGINE_DEBUG_ << "XSearchTask::Load() failed status finish set";
         }
 
         return;

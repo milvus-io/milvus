@@ -165,7 +165,10 @@ TaskTable::PickToLoad(uint64_t limit) {
     std::vector<uint64_t> indexes;
     bool cross = false;
 
+    std::lock_guard<std::mutex> lock(table_mutex_);
     uint64_t available_begin = table_.front() + 1;
+    LOG_SERVER_DEBUG_ << "[TaskTable::PickToLoad BEGIN] table size: " << table_.size() << ", table front: "
+                      << table_.front() << ", table rear: " << table_.rear();
     for (uint64_t i = 0, loaded_count = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
         auto index = available_begin + i;
         if (not table_[index])
@@ -178,6 +181,9 @@ TaskTable::PickToLoad(uint64_t limit) {
             cross = true;
             ++loaded_count;
             if (loaded_count >= 1)
+                LOG_SERVER_DEBUG_ << "[TaskTable::PickToLoad END] had already loaded task, " << " table size: "
+                                  << table_.size() << ", table front: " << table_.front() << ", table rear: "
+                                  << table_.rear();
                 return std::vector<uint64_t>();
         } else if (table_[index]->state == TaskTableItemState::START) {
             auto task = table_[index]->get_task();
@@ -197,6 +203,8 @@ TaskTable::PickToLoad(uint64_t limit) {
         }
     }
     // rc.ElapseFromBegin("PickToLoad ");
+    LOG_SERVER_DEBUG_ << "[TaskTable::PickToLoad END] indexes size: " << indexes.size() << " table size: "
+                      << table_.size() << ", table front: " << table_.front() << ", table rear: " << table_.rear();
     return indexes;
 #else
     size_t count = 0;
@@ -250,7 +258,11 @@ TaskTable::PickToExecute(uint64_t limit) {
     // TimeRecorder rc("");
     std::vector<uint64_t> indexes;
     bool cross = false;
+    std::lock_guard<std::mutex> lock(table_mutex_);
     uint64_t available_begin = table_.front() + 1;
+
+    LOG_SERVER_DEBUG_ << "[TaskTable::PickToExecute BEGIN] table size: " << table_.size() << ", table front: "
+                      << table_.front() << ", table rear: " << table_.rear();
     for (uint64_t i = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
         uint64_t index = available_begin + i;
         if (not table_[index]) {
@@ -271,6 +283,8 @@ TaskTable::PickToExecute(uint64_t limit) {
         }
     }
     // rc.ElapseFromBegin("PickToExecute ");
+    LOG_SERVER_DEBUG_ << "[TaskTable::PickToExecute END] indexes size: " << indexes.size() << " table size: "
+                      << table_.size() << ", table front: " << table_.front() << ", table rear: " << table_.rear();
     return indexes;
 }
 
@@ -281,7 +295,13 @@ TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
     item->set_task(std::move(task));
     item->state = TaskTableItemState::START;
     item->timestamp.start = get_current_timestamp();
+    LOG_SERVER_DEBUG_ << "[TaskTable::Put BEGIN] table size: " << table_.size() << ", table front: " << table_.front()
+                      << ", table rear: " << table_.rear();
+    std::unique_lock<std::mutex> lock(table_mutex_);
     table_.put(std::move(item));
+    lock.unlock();
+    LOG_SERVER_DEBUG_ << "[TaskTable::Put END] table size: " << table_.size() << ", table front: " << table_.front()
+                      << ", table rear: " << table_.rear();
     if (subscriber_) {
         subscriber_();
     }
@@ -290,13 +310,18 @@ TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
 size_t
 TaskTable::TaskToExecute() {
     size_t count = 0;
+    std::lock_guard<std::mutex> lock(table_mutex_);
     auto begin = table_.front() + 1;
+    LOG_SERVER_DEBUG_ << "[TaskTable::TaskToExecute BEGIN] table size: " << table_.size() << ", table front: "
+                      << table_.front() << ", table rear: " << table_.rear();
     for (size_t i = 0; i < table_.size(); ++i) {
         auto index = begin + i;
         if (table_[index] && table_[index]->state == TaskTableItemState::LOADED) {
             ++count;
         }
     }
+    LOG_SERVER_DEBUG_ << "[TaskTable::TaskToExecute END] count << " << count << ", table size: " << table_.size()
+                      << ", table front: " << table_.front() << ", table rear: " << table_.rear();
     return count;
 }
 

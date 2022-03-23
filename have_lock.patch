@@ -1,0 +1,238 @@
+diff --git a/core/src/db/engine/ExecutionEngineImpl.cpp b/core/src/db/engine/ExecutionEngineImpl.cpp
+index 69b7968fb..e58ae6a34 100644
+--- a/core/src/db/engine/ExecutionEngineImpl.cpp
++++ b/core/src/db/engine/ExecutionEngineImpl.cpp
+@@ -394,12 +394,14 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
+     auto cpu_cache_mgr = cache::CpuCacheMgr::GetInstance();
+ 
+     // step 1: Load index
++    LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() get index from cache";
+     index_ = std::static_pointer_cast<knowhere::VecIndex>(cpu_cache_mgr->GetItem(location_));
+     if (!index_) {
+         // not in the cache
+         knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
+ 
+         if (utils::IsRawIndexType((int32_t)index_type_)) {
++            LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() load raw file";
+             if (index_type_ == EngineType::FAISS_IDMAP) {
+                 index_ = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
+             } else {
+@@ -444,6 +446,7 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
+             LOG_ENGINE_DEBUG_ << "Finished loading raw data from segment " << segment_dir;
+         } else {
+             try {
++                LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() load index file";
+                 segment::SegmentPtr segment_ptr;
+                 segment_reader_ptr->GetSegment(segment_ptr);
+                 auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
+@@ -467,12 +470,14 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
+         }
+ 
+         if (to_cache) {
++            LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() insert index to cache";
+             cpu_cache_mgr->InsertItem(location_, index_);
+         }
+     }
+ 
+     // step 2: Load blacklist
+     if (load_blacklist) {
++        LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() get blacklist";
+         auto blacklist_cache_key = segment_dir + cache::Blacklist_Suffix;
+         blacklist_ = std::static_pointer_cast<knowhere::Blacklist>(cpu_cache_mgr->GetItem(blacklist_cache_key));
+ 
+@@ -486,6 +491,7 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
+         }
+ 
+         if (cache_miss) {
++            LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() cache blacklist";
+             segment::DeletedDocsPtr deleted_docs_ptr;
+             auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
+             if (!status.ok()) {
+diff --git a/core/src/scheduler/CircleQueue.h b/core/src/scheduler/CircleQueue.h
+index 174ca0880..11a6845bc 100644
+--- a/core/src/scheduler/CircleQueue.h
++++ b/core/src/scheduler/CircleQueue.h
+@@ -22,6 +22,7 @@
+ #include <unordered_map>
+ #include <utility>
+ #include <vector>
++#include "utils/Log.h"
+ 
+ namespace milvus {
+ namespace scheduler {
+@@ -71,6 +72,8 @@ class CircleQueue {
+     void
+     set_front(uint64_t last_finish) {
+         if (last_finish == rear_) {
++            LOG_ENGINE_ERROR_ << "set_front CircleQueue throw exception, capacity_=" << capacity_ << " rear_="
++                              << rear_ << " size_=" << size_ << " front_=" << front_;
+             throw;
+         }
+         front_.store(last_finish % capacity_, MEMORY_ORDER);
+@@ -79,6 +82,8 @@ class CircleQueue {
+     void
+     put(const value_type& x) {
+         if ((rear_) % capacity_ == front_.load(MEMORY_ORDER)) {
++            LOG_ENGINE_ERROR_ << "put CircleQueue throw exception, capacity_=" << capacity_ << " rear_="
++                              << rear_ << " size_=" << size_ << " front_=" << front_;
+             throw;
+         }
+         data_[rear_] = x;
+@@ -91,6 +96,8 @@ class CircleQueue {
+     void
+     put(value_type&& x) {
+         if ((rear_) % capacity_ == front_.load(MEMORY_ORDER)) {
++            LOG_ENGINE_ERROR_ << "put2 CircleQueue throw exception, capacity_=" << capacity_ << " rear_="
++                              << rear_ << " size_=" << size_ << " front_=" << front_;
+             throw;
+         }
+         data_[rear_] = std::move(x);
+diff --git a/core/src/scheduler/SchedInst.cpp b/core/src/scheduler/SchedInst.cpp
+index dc166a2c4..5c4c90d91 100644
+--- a/core/src/scheduler/SchedInst.cpp
++++ b/core/src/scheduler/SchedInst.cpp
+@@ -116,9 +116,9 @@ void
+ StartSchedulerService() {
+     load_simple_config();
+     OptimizerInst::GetInstance()->Init();
+-    ResMgrInst::GetInstance()->Start();
+-    SchedInst::GetInstance()->Start();
+-    JobMgrInst::GetInstance()->Start();
++    ResMgrInst::GetInstance()->Start(); // resevt_thread
++    SchedInst::GetInstance()->Start(); // schedevt_thread
++    JobMgrInst::GetInstance()->Start(); // jobmgr_thread
+     CPUBuilderInst::GetInstance()->Start();
+ }
+ 
+diff --git a/core/src/scheduler/TaskTable.cpp b/core/src/scheduler/TaskTable.cpp
+index 69389a44d..f61333a37 100644
+--- a/core/src/scheduler/TaskTable.cpp
++++ b/core/src/scheduler/TaskTable.cpp
+@@ -165,7 +165,10 @@ TaskTable::PickToLoad(uint64_t limit) {
+     std::vector<uint64_t> indexes;
+     bool cross = false;
+ 
++    std::lock_guard<std::mutex> lock(table_mutex_);
+     uint64_t available_begin = table_.front() + 1;
++    LOG_SERVER_DEBUG_ << "[TaskTable::PickToLoad BEGIN] table size: " << table_.size() << ", table front: "
++                      << table_.front() << ", table rear: " << table_.rear();
+     for (uint64_t i = 0, loaded_count = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
+         auto index = available_begin + i;
+         if (not table_[index])
+@@ -178,6 +181,9 @@ TaskTable::PickToLoad(uint64_t limit) {
+             cross = true;
+             ++loaded_count;
+             if (loaded_count >= 1)
++                LOG_SERVER_DEBUG_ << "[TaskTable::PickToLoad END] had already loaded task, " << " table size: "
++                                  << table_.size() << ", table front: " << table_.front() << ", table rear: "
++                                  << table_.rear();
+                 return std::vector<uint64_t>();
+         } else if (table_[index]->state == TaskTableItemState::START) {
+             auto task = table_[index]->get_task();
+@@ -197,6 +203,8 @@ TaskTable::PickToLoad(uint64_t limit) {
+         }
+     }
+     // rc.ElapseFromBegin("PickToLoad ");
++    LOG_SERVER_DEBUG_ << "[TaskTable::PickToLoad END] indexes size: " << indexes.size() << " table size: "
++                      << table_.size() << ", table front: " << table_.front() << ", table rear: " << table_.rear();
+     return indexes;
+ #else
+     size_t count = 0;
+@@ -250,7 +258,11 @@ TaskTable::PickToExecute(uint64_t limit) {
+     // TimeRecorder rc("");
+     std::vector<uint64_t> indexes;
+     bool cross = false;
++    std::lock_guard<std::mutex> lock(table_mutex_);
+     uint64_t available_begin = table_.front() + 1;
++
++    LOG_SERVER_DEBUG_ << "[TaskTable::PickToExecute BEGIN] table size: " << table_.size() << ", table front: "
++                      << table_.front() << ", table rear: " << table_.rear();
+     for (uint64_t i = 0, pick_count = 0; i < table_.size() && pick_count < limit; ++i) {
+         uint64_t index = available_begin + i;
+         if (not table_[index]) {
+@@ -271,6 +283,8 @@ TaskTable::PickToExecute(uint64_t limit) {
+         }
+     }
+     // rc.ElapseFromBegin("PickToExecute ");
++    LOG_SERVER_DEBUG_ << "[TaskTable::PickToExecute END] indexes size: " << indexes.size() << " table size: "
++                      << table_.size() << ", table front: " << table_.front() << ", table rear: " << table_.rear();
+     return indexes;
+ }
+ 
+@@ -281,7 +295,13 @@ TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
+     item->set_task(std::move(task));
+     item->state = TaskTableItemState::START;
+     item->timestamp.start = get_current_timestamp();
++    LOG_SERVER_DEBUG_ << "[TaskTable::Put BEGIN] table size: " << table_.size() << ", table front: " << table_.front()
++                      << ", table rear: " << table_.rear();
++    std::unique_lock<std::mutex> lock(table_mutex_);
+     table_.put(std::move(item));
++    lock.unlock();
++    LOG_SERVER_DEBUG_ << "[TaskTable::Put END] table size: " << table_.size() << ", table front: " << table_.front()
++                      << ", table rear: " << table_.rear();
+     if (subscriber_) {
+         subscriber_();
+     }
+@@ -290,13 +310,18 @@ TaskTable::Put(TaskPtr task, TaskTableItemPtr from) {
+ size_t
+ TaskTable::TaskToExecute() {
+     size_t count = 0;
++    std::lock_guard<std::mutex> lock(table_mutex_);
+     auto begin = table_.front() + 1;
++    LOG_SERVER_DEBUG_ << "[TaskTable::TaskToExecute BEGIN] table size: " << table_.size() << ", table front: "
++                      << table_.front() << ", table rear: " << table_.rear();
+     for (size_t i = 0; i < table_.size(); ++i) {
+         auto index = begin + i;
+         if (table_[index] && table_[index]->state == TaskTableItemState::LOADED) {
+             ++count;
+         }
+     }
++    LOG_SERVER_DEBUG_ << "[TaskTable::TaskToExecute END] count << " << count << ", table size: " << table_.size()
++                      << ", table front: " << table_.front() << ", table rear: " << table_.rear();
+     return count;
+ }
+ 
+diff --git a/core/src/scheduler/TaskTable.h b/core/src/scheduler/TaskTable.h
+index 561a0782e..eedf70494 100644
+--- a/core/src/scheduler/TaskTable.h
++++ b/core/src/scheduler/TaskTable.h
+@@ -221,6 +221,7 @@ class TaskTable : public interface::dumpable {
+  private:
+     std::uint64_t id_ = 0;
+     CircleQueue<TaskTableItemPtr> table_;
++    std::mutex table_mutex_; // protect table_
+     std::function<void(void)> subscriber_ = nullptr;
+ 
+     // cache last finish avoid Pick task from begin always
+diff --git a/core/src/scheduler/task/SearchTask.cpp b/core/src/scheduler/task/SearchTask.cpp
+index 67937e803..5cf80374c 100644
+--- a/core/src/scheduler/task/SearchTask.cpp
++++ b/core/src/scheduler/task/SearchTask.cpp
+@@ -133,6 +133,7 @@ XSearchTask::XSearchTask(const std::shared_ptr<server::Context>& context, Segmen
+ 
+ void
+ XSearchTask::Load(LoadType type, uint8_t device_id) {
++    LOG_ENGINE_DEBUG_ << "XSearchTask::Load() start";
+     milvus::server::ContextFollower tracer(context_, "XSearchTask::Load " + std::to_string(file_->id_));
+ 
+     TimeRecorder rc(LogOut("[%s][%ld]", "search", 0));
+@@ -174,6 +175,7 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
+     fiu_do_on("XSearchTask.Load.out_of_memory", stat = Status(SERVER_UNEXPECTED_ERROR, "out of memory"));
+ 
+     if (!stat.ok()) {
++        LOG_ENGINE_DEBUG_ << "XSearchTask::Load() failed status:" << stat.ToString();
+         Status s;
+         if (stat.ToString().find("out of memory") != std::string::npos) {
+             error_msg = "out of memory: " + type_str + " : " + stat.message();
+@@ -184,9 +186,11 @@ XSearchTask::Load(LoadType type, uint8_t device_id) {
+         }
+ 
+         if (auto job = job_.lock()) {
++            LOG_ENGINE_DEBUG_ << "XSearchTask::Load() failed status begin set";
+             auto search_job = std::static_pointer_cast<scheduler::SearchJob>(job);
+             search_job->SetStatus(s);
+             search_job->SearchDone(file_->id_);
++            LOG_ENGINE_DEBUG_ << "XSearchTask::Load() failed status finish set";
+         }
+ 
+         return;

@@ -394,12 +394,14 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
     auto cpu_cache_mgr = cache::CpuCacheMgr::GetInstance();
 
     // step 1: Load index
+    LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() get index from cache";
     index_ = std::static_pointer_cast<knowhere::VecIndex>(cpu_cache_mgr->GetItem(location_));
     if (!index_) {
         // not in the cache
         knowhere::VecIndexFactory& vec_index_factory = knowhere::VecIndexFactory::GetInstance();
 
         if (utils::IsRawIndexType((int32_t)index_type_)) {
+            LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() load raw file";
             if (index_type_ == EngineType::FAISS_IDMAP) {
                 index_ = vec_index_factory.CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IDMAP);
             } else {
@@ -444,6 +446,7 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
             LOG_ENGINE_DEBUG_ << "Finished loading raw data from segment " << segment_dir;
         } else {
             try {
+                LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() load index file";
                 segment::SegmentPtr segment_ptr;
                 segment_reader_ptr->GetSegment(segment_ptr);
                 auto status = segment_reader_ptr->LoadVectorIndex(location_, segment_ptr->vector_index_ptr_);
@@ -467,12 +470,14 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
         }
 
         if (to_cache) {
+            LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() insert index to cache";
             cpu_cache_mgr->InsertItem(location_, index_);
         }
     }
 
     // step 2: Load blacklist
     if (load_blacklist) {
+        LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() get blacklist";
         auto blacklist_cache_key = segment_dir + cache::Blacklist_Suffix;
         blacklist_ = std::static_pointer_cast<knowhere::Blacklist>(cpu_cache_mgr->GetItem(blacklist_cache_key));
 
@@ -486,6 +491,7 @@ ExecutionEngineImpl::Load(bool load_blacklist, bool to_cache) {
         }
 
         if (cache_miss) {
+            LOG_ENGINE_DEBUG_ << "ExecutionEngineImpl::Load() cache blacklist";
             segment::DeletedDocsPtr deleted_docs_ptr;
             auto status = segment_reader_ptr->LoadDeletedDocs(deleted_docs_ptr);
             if (!status.ok()) {
