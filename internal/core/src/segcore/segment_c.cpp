@@ -151,6 +151,43 @@ Insert(CSegmentInterface c_segment,
 }
 
 CStatus
+InsertColumnData(CSegmentInterface c_segment,
+                 int64_t reserved_offset,
+                 int64_t size,
+                 const int64_t* row_ids,
+                 const uint64_t* timestamps,
+                 void* raw_data,
+                 int64_t count) {
+    try {
+        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+        milvus::segcore::ColumnBasedRawData dataChunk{};
+
+        auto& schema = segment->get_schema();
+        auto sizeof_infos = schema.get_sizeof_infos();
+        dataChunk.columns_ = std::vector<milvus::aligned_vector<uint8_t>>(schema.size());
+        // reverse space for each field
+        for (int fid = 0; fid < schema.size(); ++fid) {
+            auto len = sizeof_infos[fid];
+            dataChunk.columns_[fid].resize(len * size);
+        }
+        auto col_data = reinterpret_cast<const char*>(raw_data);
+        int64_t offset = 0;
+        for (int fid = 0; fid < schema.size(); ++fid) {
+            auto len = sizeof_infos[fid] * size;
+            auto src = col_data + offset;
+            auto dst = dataChunk.columns_[fid].data();
+            memcpy(dst, src, len);
+            offset += len;
+        }
+        dataChunk.count = count;
+        segment->Insert(reserved_offset, size, row_ids, timestamps, dataChunk);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+CStatus
 PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
     try {
         auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
