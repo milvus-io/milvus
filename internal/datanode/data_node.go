@@ -313,7 +313,7 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 		}
 
 		if isEndWatchState(watchInfo.State) {
-			log.Warn("DataNode received a PUT event with an end State", zap.String("state", watchInfo.State.String()))
+			log.Debug("DataNode received a PUT event with an end State", zap.String("state", watchInfo.State.String()))
 			return
 		}
 
@@ -328,14 +328,13 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 	actualManager, loaded := node.eventManagerMap.LoadOrStore(e.vChanName, newChannelEventManager(
 		node.handlePutEvent, node.handleDeleteEvent, retryWatchInterval,
 	))
-
 	if !loaded {
 		actualManager.(*channelEventManager).Run()
 	}
 
 	actualManager.(*channelEventManager).handleEvent(*e)
 
-	// Whenever a delete event comes, this eventManger will be removed from map
+	// Whenever a delete event comes, this eventManager will be removed from map
 	if e.eventType == deleteEventType {
 		if m, loaded := node.eventManagerMap.LoadAndDelete(e.vChanName); loaded {
 			m.(*channelEventManager).Close()
@@ -371,29 +370,15 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
 			return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
 		}
-		log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
-		defer func() {
-			if err != nil {
-				node.releaseFlowgraph(vChanName)
-			}
-		}()
+
+		log.Debug("handle put event: new data sync service success", zap.String("vChanName", vChanName))
 		watchInfo.State = datapb.ChannelWatchState_WatchSuccess
 
 	case datapb.ChannelWatchState_ToRelease:
-		success := true
-		func() {
-			defer func() {
-				if x := recover(); x != nil {
-					log.Error("release flowgraph panic", zap.Any("recovered", x))
-					success = false
-				}
-			}()
-			node.releaseFlowgraph(vChanName)
-		}()
-		if !success {
-			watchInfo.State = datapb.ChannelWatchState_ReleaseFailure
-		} else {
+		if node.tryToReleaseFlowgraph(vChanName) {
 			watchInfo.State = datapb.ChannelWatchState_ReleaseSuccess
+		} else {
+			watchInfo.State = datapb.ChannelWatchState_ReleaseFailure
 		}
 	}
 
@@ -403,8 +388,8 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 	}
 
 	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), vChanName)
-	log.Info("handle put event: try to save result state", zap.String("key", k), zap.String("state", watchInfo.State.String()))
 
+	log.Debug("handle put event: try to save result state", zap.String("key", k), zap.String("state", watchInfo.State.String()))
 	err = node.watchKv.CompareVersionAndSwap(k, version, string(v))
 	if err != nil {
 		return fmt.Errorf("fail to update watch state to etcd, vChanName: %s, state: %s, err: %w", vChanName, watchInfo.State.String(), err)
@@ -412,22 +397,33 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 	return nil
 }
 
-func (node *DataNode) handleDeleteEvent(vChanName string) {
-	node.releaseFlowgraph(vChanName)
+func (node *DataNode) handleDeleteEvent(vChanName string) bool {
+	return node.tryToReleaseFlowgraph(vChanName)
 }
 
-func (node *DataNode) releaseFlowgraph(vChanName string) {
+// tryToReleaseFlowgraph tries to release a flowgraph, returns false if failed
+func (node *DataNode) tryToReleaseFlowgraph(vChanName string) bool {
+	success := true
+	defer func() {
+		if x := recover(); x != nil {
+			log.Error("release flowgraph panic", zap.String("vChanName", vChanName), zap.Any("recovered", x))
+			success = false
+		}
+	}()
 	node.flowgraphManager.release(vChanName)
+	log.Info("try to release flowgraph success", zap.String("vChanName", vChanName))
+	return success
 }
 
 // BackGroundGC runs in background to release datanode resources
+// GOOSE TODO: remove background GC, using ToRelease for drop-collection after #15846
 func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 	log.Info("DataNode Background GC Start")
 	for {
 		select {
 		case vchanName := <-vChannelCh:
 			log.Info("GC flowgraph", zap.String("vChanName", vchanName))
-			node.releaseFlowgraph(vchanName)
+			node.tryToReleaseFlowgraph(vchanName)
 		case <-node.ctx.Done():
 			log.Warn("DataNode context done, exiting background GC")
 			return
