@@ -197,8 +197,13 @@ GetSearchResultDataSlice(milvus::aligned_vector<int64_t>& result_ids,
     // set ids
     auto proto_ids = std::make_unique<milvus::proto::schema::IDs>();
     auto ids = std::make_unique<milvus::proto::schema::LongArray>();
+    AssertInfo(offset_begin + unify_topK * (nq - 1) + slice_topK <= result_ids.size(),
+               "set ids out of range"
+               ", offset_end = " +
+                   std::to_string(offset_begin + unify_topK * (nq - 1) + slice_topK) +
+                   ", ids_size = " + std::to_string(result_ids.size()));
     for (int i = 0; i < nq; i++) {
-        auto begin = result_ids.begin() + offset_begin * (unify_topK * i);
+        auto begin = result_ids.begin() + offset_begin + (unify_topK * i);
         ids->mutable_data()->Add(begin, begin + slice_topK);
     }
     proto_ids->set_allocated_int_id(ids.release());
@@ -210,8 +215,13 @@ GetSearchResultDataSlice(milvus::aligned_vector<int64_t>& result_ids,
                    ", expected size = " + std::to_string(nq * slice_topK));
 
     // set scores
+    AssertInfo(offset_begin + unify_topK * (nq - 1) + slice_topK <= result_distances.size(),
+               "set scores out of range"
+               ", offset_end = " +
+                   std::to_string(offset_begin + unify_topK * (nq - 1) + slice_topK) +
+                   ", scores_size = " + std::to_string(result_distances.size()));
     for (int i = 0; i < nq; i++) {
-        auto begin = result_distances.begin() + offset_begin * (unify_topK * i);
+        auto begin = result_distances.begin() + offset_begin + (unify_topK * i);
         search_result_data->mutable_scores()->Add(begin, begin + slice_topK);
     }
     AssertInfo(search_result_data->scores_size() == nq * slice_topK,
@@ -225,6 +235,12 @@ GetSearchResultDataSlice(milvus::aligned_vector<int64_t>& result_ids,
         auto& field_meta = output_fields_meta[i];
         auto field_size = field_meta.get_sizeof();
         auto arrays = std::make_unique<milvus::DataArray>();
+        AssertInfo(
+            (offset_begin + unify_topK * (nq - 1)) * field_size + slice_topK <= result_output_fields_data[i].size(),
+            "set output fields out of range"
+            ", offset_end = " +
+                std::to_string(offset_begin + unify_topK * (nq - 1) + slice_topK) +
+                ", output_fields_size = " + std::to_string(result_distances.size()));
         for (int j = 0; j < nq; j++) {
             auto begin = result_output_fields_data[i].data() + (offset_begin + unify_topK * j) * field_size;
             auto array = milvus::segcore::CreateDataArrayFrom(begin, slice_topK, field_meta);
@@ -303,7 +319,6 @@ Marshal(CSearchResultDataBlobs* cSearchResultDataBlobs,
         *cSearchResultDataBlobs = search_result_data_blobs.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
-        DeleteSearchResultDataBlobs(cSearchResultDataBlobs);
         return milvus::FailureCStatus(UnexpectedError, e.what());
     }
 }
