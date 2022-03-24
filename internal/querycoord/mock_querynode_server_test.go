@@ -48,6 +48,8 @@ var (
 	globalSegInfosMutex sync.RWMutex
 )
 
+type rpcHandler func() (*commonpb.Status, error)
+
 type queryNodeServerMock struct {
 	querypb.QueryNodeServer
 	ctx         context.Context
@@ -60,14 +62,15 @@ type queryNodeServerMock struct {
 	queryNodePort int64
 	queryNodeID   int64
 
-	addQueryChannels    func() (*commonpb.Status, error)
-	removeQueryChannels func() (*commonpb.Status, error)
-	watchDmChannels     func() (*commonpb.Status, error)
-	watchDeltaChannels  func() (*commonpb.Status, error)
-	loadSegment         func() (*commonpb.Status, error)
-	releaseCollection   func() (*commonpb.Status, error)
-	releasePartition    func() (*commonpb.Status, error)
-	releaseSegments     func() (*commonpb.Status, error)
+	rwmutex             sync.RWMutex // guard for all modification
+	addQueryChannels    rpcHandler
+	removeQueryChannels rpcHandler
+	watchDmChannels     rpcHandler
+	watchDeltaChannels  rpcHandler
+	loadSegment         rpcHandler
+	releaseCollection   rpcHandler
+	releasePartition    rpcHandler
+	releaseSegments     rpcHandler
 	getSegmentInfos     func() (*querypb.GetSegmentInfoResponse, error)
 	getMetrics          func() (*milvuspb.GetMetricsResponse, error)
 
@@ -83,6 +86,7 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 
+		rwmutex:             sync.RWMutex{},
 		addQueryChannels:    returnSuccessResult,
 		removeQueryChannels: returnSuccessResult,
 		watchDmChannels:     returnSuccessResult,
@@ -98,6 +102,12 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 
 		totalMem: defaultTotalmemPerNode,
 	}
+}
+
+func (qs *queryNodeServerMock) setRPCInterface(interfacePointer *rpcHandler, newhandler rpcHandler) {
+	qs.rwmutex.Lock()
+	defer qs.rwmutex.Unlock()
+	*interfacePointer = newhandler
 }
 
 func (qs *queryNodeServerMock) Register() error {
@@ -231,6 +241,8 @@ func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.Lo
 }
 
 func (qs *queryNodeServerMock) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	qs.rwmutex.RLock()
+	defer qs.rwmutex.RUnlock()
 	return qs.releaseCollection()
 }
 

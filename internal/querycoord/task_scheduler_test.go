@@ -515,6 +515,7 @@ func Test_saveInternalTaskToEtcd(t *testing.T) {
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
+	defer queryCoord.Stop()
 
 	testTask := &testTask{
 		baseTask: baseTask{
@@ -577,6 +578,7 @@ func Test_generateDerivedInternalTasks(t *testing.T) {
 		}
 	}
 
+	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
 }
