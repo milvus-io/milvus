@@ -22,9 +22,10 @@
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/IndexFactory.h"
+#include "common/type_c.h"
 
 CStatus
-CreateIndex(DataType dtype,
+CreateIndex(enum CDataType dtype,
             const char* serialized_type_params,
             const char* serialized_index_params,
             CIndex* res_index) {

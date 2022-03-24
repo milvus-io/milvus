@@ -41,6 +41,7 @@ if (LINUX)
             test_utils.cpp
             test_scalar_index_creator.cpp
             test_index_c_api.cpp
+            test_index.cpp
             )
     # check if memory leak exists in index builder
     set(INDEX_BUILDER_TEST_FILES
@@ -58,6 +59,7 @@ if (LINUX)
             gtest_main
             milvus_segcore
             milvus_indexbuilder
+            milvus_index
             log
             pthread
             )
@@ -88,6 +90,7 @@ target_link_libraries(all_tests
         gtest
         milvus_segcore
         milvus_indexbuilder
+        milvus_index
         log
         pthread
         )

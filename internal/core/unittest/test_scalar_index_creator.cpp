@@ -135,7 +135,7 @@ assert_range(const std::unique_ptr<ScalarIndexCreator<std::string>>& creator, co
 }  // namespace
 
 template <typename T>
-class TypedScalarIndexTest : public ::testing::Test {
+class TypedScalarIndexCreatorTest : public ::testing::Test {
  protected:
     // void
     // SetUp() override {
@@ -149,15 +149,15 @@ class TypedScalarIndexTest : public ::testing::Test {
 // TODO: it's easy to overflow for int8_t. Design more reasonable ut.
 using ArithmeticT = ::testing::Types<int8_t, int16_t, int32_t, int64_t, float, double>;
 
-TYPED_TEST_CASE_P(TypedScalarIndexTest);
+TYPED_TEST_CASE_P(TypedScalarIndexCreatorTest);
 
-TYPED_TEST_P(TypedScalarIndexTest, Dummy) {
+TYPED_TEST_P(TypedScalarIndexCreatorTest, Dummy) {
     using T = TypeParam;
     std::cout << typeid(T()).name() << std::endl;
     PrintMapParams(GenParams<T>());
 }
 
-TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
+TYPED_TEST_P(TypedScalarIndexCreatorTest, Constructor) {
     using T = TypeParam;
     for (const auto& tp : GenParams<T>()) {
         auto type_params = tp.first;
@@ -169,7 +169,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
     }
 }
 
-TYPED_TEST_P(TypedScalarIndexTest, In) {
+TYPED_TEST_P(TypedScalarIndexCreatorTest, In) {
     using T = TypeParam;
     for (const auto& tp : GenParams<T>()) {
         auto type_params = tp.first;
@@ -184,7 +184,7 @@ TYPED_TEST_P(TypedScalarIndexTest, In) {
     }
 }
 
-TYPED_TEST_P(TypedScalarIndexTest, NotIn) {
+TYPED_TEST_P(TypedScalarIndexCreatorTest, NotIn) {
     using T = TypeParam;
     for (const auto& tp : GenParams<T>()) {
         auto type_params = tp.first;
@@ -199,7 +199,7 @@ TYPED_TEST_P(TypedScalarIndexTest, NotIn) {
     }
 }
 
-TYPED_TEST_P(TypedScalarIndexTest, Range) {
+TYPED_TEST_P(TypedScalarIndexCreatorTest, Range) {
     using T = TypeParam;
     for (const auto& tp : GenParams<T>()) {
         auto type_params = tp.first;
@@ -214,7 +214,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Range) {
     }
 }
 
-TYPED_TEST_P(TypedScalarIndexTest, Codec) {
+TYPED_TEST_P(TypedScalarIndexCreatorTest, Codec) {
     using T = TypeParam;
     for (const auto& tp : GenParams<T>()) {
         auto type_params = tp.first;
@@ -238,9 +238,9 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
     }
 }
 
-REGISTER_TYPED_TEST_CASE_P(TypedScalarIndexTest, Dummy, Constructor, In, NotIn, Range, Codec);
+REGISTER_TYPED_TEST_CASE_P(TypedScalarIndexCreatorTest, Dummy, Constructor, In, NotIn, Range, Codec);
 
-INSTANTIATE_TYPED_TEST_CASE_P(ArithmeticCheck, TypedScalarIndexTest, ArithmeticT);
+INSTANTIATE_TYPED_TEST_CASE_P(ArithmeticCheck, TypedScalarIndexCreatorTest, ArithmeticT);
 
 class BoolIndexTest : public ::testing::Test {
  protected:

@@ -36,6 +36,28 @@ enum ErrorCode {
     IllegalArgument = 5,
 };
 
+// pure C don't support that we use schemapb.DataType directly.
+// Note: the value of all enumerations must match the corresponding schemapb.DataType.
+// TODO: what if there are increments in schemapb.DataType.
+enum CDataType {
+    None = 0,
+    Bool = 1,
+    Int8 = 2,
+    Int16 = 3,
+    Int32 = 4,
+    Int64 = 5,
+
+    Float = 10,
+    Double = 11,
+
+    String = 20,
+    VarChar = 21,
+
+    BinaryVector = 100,
+    FloatVector = 101,
+};
+typedef enum CDataType CDataType;
+
 typedef struct CStatus {
     int error_code;
     const char* error_msg;

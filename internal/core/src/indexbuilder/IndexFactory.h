@@ -39,7 +39,7 @@ class IndexFactory {
     }
 
     IndexCreatorBasePtr
-    CreateIndex(DataType dtype, const char* type_params, const char* index_params) {
+    CreateIndex(CDataType dtype, const char* type_params, const char* index_params) {
         auto real_dtype = proto::schema::DataType(dtype);
         auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(real_dtype);
 
