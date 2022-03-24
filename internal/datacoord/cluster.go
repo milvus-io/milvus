@@ -72,7 +72,7 @@ func (c *Cluster) UnRegister(node *NodeInfo) error {
 	if err == nil {
 		metrics.DataCoordNumDataNodes.WithLabelValues().Dec()
 	}
-	return c.channelManager.DeleteNode(node.NodeID)
+	return err
 }
 
 // Watch tries to add a channel in datanode cluster
