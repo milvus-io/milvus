@@ -457,11 +457,7 @@ func TestGrpcRequest(t *testing.T) {
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 	clusterSession.Register()
 	factory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = factory.SetParams(m)
+	err = factory.Init(&Params)
 	assert.Nil(t, err)
 	idAllocator := func() (UniqueID, error) {
 		return 0, nil
@@ -652,11 +648,7 @@ func TestSetNodeState(t *testing.T) {
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 	clusterSession.Register()
 	factory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	err = factory.SetParams(m)
+	err = factory.Init(&Params)
 	assert.Nil(t, err)
 	idAllocator := func() (UniqueID, error) {
 		return 0, nil

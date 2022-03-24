@@ -78,11 +78,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	require.NoError(t, err)
 
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
@@ -168,11 +164,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	require.NoError(t, err)
 
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
@@ -372,11 +364,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	colRep.metaService = newMetaService(mockRootCoord, collMeta.ID)
 
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	flushPacks := []*segmentFlushPack{}
@@ -649,11 +637,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	require.NoError(t, err)
 
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarCfg.Address,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)

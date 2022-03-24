@@ -24,6 +24,8 @@ import (
 	"math/rand"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 
 	"github.com/golang/protobuf/proto"
@@ -623,13 +625,8 @@ func genEtcdKV() (*etcdkv.EtcdKV, error) {
 func genFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
-	pulsarURL := Params.PulsarCfg.Address
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  pulsarURL,
-		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err := msFactory.Init(&Params)
 	if err != nil {
 		return nil, err
 	}
@@ -640,11 +637,7 @@ func genInvalidFactory() (msgstream.Factory, error) {
 	const receiveBufSize = 1024
 
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"receiveBufSize": receiveBufSize,
-		"pulsarAddress":  "",
-		"pulsarBufSize":  1024}
-	err := msFactory.SetParams(m)
+	err := msFactory.Init(&Params)
 	if err != nil {
 		return nil, err
 	}
@@ -1835,7 +1828,7 @@ type mockMsgStreamFactory struct {
 
 var _ msgstream.Factory = &mockMsgStreamFactory{}
 
-func (mm *mockMsgStreamFactory) SetParams(params map[string]interface{}) error {
+func (mm *mockMsgStreamFactory) Init(params *paramtable.ComponentParam) error {
 	return nil
 }
 

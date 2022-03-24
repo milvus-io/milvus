@@ -209,11 +209,7 @@ func TestDataNode(t *testing.T) {
 
 			// pulsar produce
 			msFactory := msgstream.NewPmsFactory()
-			m := map[string]interface{}{
-				"pulsarAddress":  Params.PulsarCfg.Address,
-				"receiveBufSize": 1024,
-				"pulsarBufSize":  1024}
-			err = msFactory.SetParams(m)
+			err = msFactory.Init(&Params)
 			assert.NoError(t, err)
 			insertStream, err := msFactory.NewMsgStream(node1.ctx)
 			assert.NoError(t, err)

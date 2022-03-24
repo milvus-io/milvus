@@ -96,11 +96,7 @@ func Test_HandleChannelUnsubscribeLoop(t *testing.T) {
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	factory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024}
-	factory.SetParams(m)
+	factory.Init(&Params)
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
 
