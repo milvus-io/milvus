@@ -217,13 +217,7 @@ func (node *DataNode) Init() error {
 		return err
 	}
 
-	m := map[string]interface{}{
-		"PulsarAddress":  Params.PulsarCfg.Address,
-		"ReceiveBufSize": 1024,
-		"PulsarBufSize":  1024,
-	}
-
-	if err := node.msFactory.SetParams(m); err != nil {
+	if err := node.msFactory.Init(&Params); err != nil {
 		log.Warn("DataNode Init msFactory SetParams failed, use default",
 			zap.Error(err))
 		return err

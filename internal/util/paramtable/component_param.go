@@ -75,6 +75,14 @@ func (p *ComponentParam) SetLogConfig(role string) {
 	p.BaseTable.SetLogConfig()
 }
 
+func (p *ComponentParam) RocksmqEnable() bool {
+	return p.RocksmqCfg.Path != ""
+}
+
+func (p *ComponentParam) PulsarEnable() bool {
+	return p.PulsarCfg.Address != ""
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {

@@ -1088,11 +1088,7 @@ func (c *Core) Init() error {
 			return tsoAllocator.GetLastSavedTime()
 		}
 
-		m := map[string]interface{}{
-			"PulsarAddress":  Params.PulsarCfg.Address,
-			"ReceiveBufSize": 1024,
-			"PulsarBufSize":  1024}
-		if initError = c.msFactory.SetParams(m); initError != nil {
+		if initError = c.msFactory.Init(&Params); initError != nil {
 			return
 		}
 

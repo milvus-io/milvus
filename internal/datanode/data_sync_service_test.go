@@ -181,7 +181,6 @@ func TestDataSyncService_Start(t *testing.T) {
 	defer cancel()
 
 	// init data node
-	pulsarURL := Params.PulsarCfg.Address
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
@@ -196,11 +195,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	allocFactory := NewAllocatorFactory(1)
 	msFactory := msgstream.NewPmsFactory()
-	m := map[string]interface{}{
-		"pulsarAddress":  pulsarURL,
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	insertChannelName := "data_sync_service_test_dml"

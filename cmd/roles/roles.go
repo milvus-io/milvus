@@ -67,7 +67,10 @@ func init() {
 
 func newMsgFactory(localMsg bool) msgstream.Factory {
 	if localMsg {
-		return msgstream.NewRmsFactory()
+		if Params.RocksmqEnable() {
+			return msgstream.NewRmsFactory()
+		}
+		return msgstream.NewPmsFactory()
 	}
 	return msgstream.NewPmsFactory()
 }
