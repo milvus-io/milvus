@@ -87,7 +87,15 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 		zap.Any("loadType", segmentType),
 	)
 	// check memory limit
-	err := loader.checkSegmentSize(req.CollectionID, req.Infos, runtime.GOMAXPROCS(0))
+	concurrencyLevel := runtime.GOMAXPROCS(0)
+	for ; concurrencyLevel > 1; concurrencyLevel /= 2 {
+		err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
+		if err == nil {
+			break
+		}
+	}
+
+	err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
 	if err != nil {
 		log.Error("load failed, OOM if loaded", zap.Int64("loadSegmentRequest msgID", req.Base.MsgID), zap.Error(err))
 		return err
@@ -148,7 +156,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 		return nil
 	}
 	// start to load
-	err = funcutil.ProcessFuncParallel(len(req.Infos), runtime.GOMAXPROCS(0), loadSegmentFunc, "loadSegmentFunc")
+	err = funcutil.ProcessFuncParallel(len(req.Infos), concurrencyLevel, loadSegmentFunc, "loadSegmentFunc")
 	if err != nil {
 		segmentGC()
 		return err
