@@ -477,6 +477,9 @@ func TestRootCoordInit(t *testing.T) {
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		return nil, retry.Unrecoverable(errors.New("injected"))
 	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
+		return nil, retry.Unrecoverable(errors.New("injected"))
+	}
 	err = core.Init()
 	assert.NotNil(t, err)
 
@@ -500,6 +503,9 @@ func TestRootCoordInit(t *testing.T) {
 		}
 		return memkv.NewMemoryKV(), nil
 	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
+		return nil, nil
+	}
 	err = core.Init()
 	assert.NotNil(t, err)
 
@@ -518,6 +524,9 @@ func TestRootCoordInit(t *testing.T) {
 	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
 
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
+		return nil, nil
+	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
 		return nil, nil
 	}
 	err = core.Init()
@@ -540,6 +549,9 @@ func TestRootCoordInit(t *testing.T) {
 	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
 		kv := memkv.NewMemoryKV()
 		return &loadPrefixFailKV{TxnKV: kv}, nil
+	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
+		return nil, nil
 	}
 	err = core.Init()
 	assert.NotNil(t, err)
@@ -2554,6 +2566,10 @@ func TestCheckInit(t *testing.T) {
 	assert.NotNil(t, err)
 
 	c.kvBase = &etcdkv.EtcdKV{}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.impTaskKv = &etcdkv.EtcdKV{}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 

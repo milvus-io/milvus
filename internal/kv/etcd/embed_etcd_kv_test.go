@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -898,6 +899,10 @@ func TestEmbedEtcd(te *testing.T) {
 		}
 
 		for k, v := range tests {
+			// SaveWithIgnoreLease must be used when the key already exists.
+			err = metaKv.SaveWithIgnoreLease(k, v)
+			assert.Error(t, err)
+
 			err = metaKv.SaveWithLease(k, v, leaseID)
 			assert.NoError(t, err)
 
@@ -907,33 +912,41 @@ func TestEmbedEtcd(te *testing.T) {
 
 	})
 
-	te.Run("Etcd Lease Bytes", func(t *testing.T) {
-		rootPath := "/etcd/test/root/lease_bytes"
-		_metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
-		metaKv := _metaKv.(*embed_etcd_kv.EmbedEtcdKV)
+	te.Run("Etcd Lease Ignore", func(t *testing.T) {
+		rootPath := "/etcd/test/root/lease_ignore"
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
 		assert.Nil(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")
 
-		leaseID, err := metaKv.Grant(10)
-		assert.NoError(t, err)
-
-		metaKv.KeepAlive(leaseID)
-
-		tests := map[string][]byte{
-			"a/b":   []byte("v1"),
-			"a/b/c": []byte("v2"),
-			"x":     []byte("v3"),
+		tests := map[string]string{
+			"a/b":   "v1",
+			"a/b/c": "v2",
+			"x":     "v3",
 		}
 
 		for k, v := range tests {
-			err = metaKv.SaveBytesWithLease(k, v, leaseID)
+			leaseID, err := metaKv.Grant(1)
 			assert.NoError(t, err)
 
-			err = metaKv.SaveBytesWithLease(k, v, clientv3.LeaseID(999))
+			err = metaKv.SaveWithLease(k, v, leaseID)
+			assert.NoError(t, err)
+
+			err = metaKv.SaveWithIgnoreLease(k, "updated_"+v)
+			assert.NoError(t, err)
+
+			// Record should be updated correctly.
+			value, err := metaKv.Load(k)
+			assert.NoError(t, err)
+			assert.Equal(t, "updated_"+v, value)
+
+			// Let the lease expire. 3 seconds should be pretty safe.
+			time.Sleep(3 * time.Second)
+
+			// Updated record should still expire with lease.
+			_, err = metaKv.Load(k)
 			assert.Error(t, err)
 		}
-
 	})
 }

@@ -97,16 +97,19 @@ type Core struct {
 	TSOGetLastSavedTime func() time.Time
 
 	//inner members
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	etcdCli *clientv3.Client
-	kvBase  kv.TxnKV //*etcdkv.EtcdKV
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	etcdCli   *clientv3.Client
+	kvBase    kv.TxnKV //*etcdkv.EtcdKV
+	impTaskKv kv.MetaKv
 
 	//DDL lock
 	ddlLock sync.Mutex
 
 	kvBaseCreate func(root string) (kv.TxnKV, error)
+
+	metaKVCreate func(root string) (kv.MetaKv, error)
 
 	//setMsgStreams, send time tick into dd channel and time tick channel
 	SendTimeTick func(t typeutil.Timestamp, reason string) error
@@ -237,6 +240,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.kvBase == nil {
 		return fmt.Errorf("kvBase is nil")
+	}
+	if c.impTaskKv == nil {
+		return fmt.Errorf("impTaskKv is nil")
 	}
 	if c.SendDdCreateCollectionReq == nil {
 		return fmt.Errorf("sendDdCreateCollectionReq is nil")
@@ -992,6 +998,11 @@ func (c *Core) Init() error {
 			return etcdkv.NewEtcdKV(c.etcdCli, root), nil
 		}
 	}
+	if c.metaKVCreate == nil {
+		c.metaKVCreate = func(root string) (kv.MetaKv, error) {
+			return etcdkv.NewEtcdKV(c.etcdCli, root), nil
+		}
+	}
 	c.initOnce.Do(func() {
 		if err := c.initSession(); err != nil {
 			initError = err
@@ -1000,7 +1011,11 @@ func (c *Core) Init() error {
 		}
 		connectEtcdFn := func() error {
 			if c.kvBase, initError = c.kvBaseCreate(Params.EtcdCfg.KvRootPath); initError != nil {
-				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
+				log.Error("RootCoord failed to new EtcdKV for kvBase", zap.Any("reason", initError))
+				return initError
+			}
+			if c.impTaskKv, initError = c.metaKVCreate(Params.EtcdCfg.KvRootPath); initError != nil {
+				log.Error("RootCoord failed to new EtcdKV for MetaKV", zap.Any("reason", initError))
 				return initError
 			}
 			var metaKV kv.TxnKV
@@ -1087,7 +1102,7 @@ func (c *Core) Init() error {
 
 		c.importManager = newImportManager(
 			c.ctx,
-			c.etcdCli,
+			c.impTaskKv,
 			c.CallImportService,
 		)
 		c.importManager.init()
