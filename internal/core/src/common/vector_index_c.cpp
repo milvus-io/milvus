@@ -47,7 +47,9 @@ AppendIndexBinary(CBinarySet c_binary_set, void* index_binary, int64_t index_siz
         auto binary_set = (milvus::knowhere::BinarySet*)c_binary_set;
         std::string index_key(c_index_key);
         uint8_t* index = (uint8_t*)index_binary;
-        std::shared_ptr<uint8_t[]> data(index, [](void*) {});
+        uint8_t* dup = new uint8_t[index_size]();
+        memcpy(dup, index, index_size);
+        std::shared_ptr<uint8_t[]> data(dup);
         binary_set->Append(index_key, data, index_size);
 
         status.error_code = Success;
