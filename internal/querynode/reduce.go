@@ -128,7 +128,8 @@ func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResul
 	log.Debug("start marshal...",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("msgID", msgID),
-		zap.Int32s("sliceNQs", sliceNQs))
+		zap.Int32s("sliceNQs", sliceNQs),
+		zap.Int32s("sliceTopKs", sliceTopKs))
 
 	if len(sliceNQs) != len(sliceTopKs) {
 		return nil, fmt.Errorf("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
