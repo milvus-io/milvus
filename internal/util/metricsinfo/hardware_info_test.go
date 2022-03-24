@@ -14,8 +14,10 @@ package metricsinfo
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 func Test_GetCPUCoreCount(t *testing.T) {
@@ -34,6 +36,8 @@ func Test_GetCPUUsage(t *testing.T) {
 func Test_GetMemoryCount(t *testing.T) {
 	log.Info("TestGetMemoryCount",
 		zap.Uint64("MemoryCount", GetMemoryCount()))
+
+	assert.NotZero(t, GetMemoryCount())
 }
 
 func Test_GetUsedMemoryCount(t *testing.T) {
