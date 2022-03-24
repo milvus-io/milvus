@@ -657,20 +657,24 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 		return fmt.Errorf("get memory failed when checkSegmentSize, collectionID = %d", collectionID)
 	}
 
-	usedMemAfterLoad := int64(usedMem)
-	maxSegmentSize := int64(0)
+	usedMemAfterLoad := usedMem
+	maxSegmentSize := uint64(0)
 	for _, loadInfo := range segmentLoadInfos {
-		segmentSize := loadInfo.SegmentSize
+		segmentSize := uint64(loadInfo.SegmentSize)
 		usedMemAfterLoad += segmentSize
 		if segmentSize > maxSegmentSize {
 			maxSegmentSize = segmentSize
 		}
 	}
 
+	toMB := func(mem uint64) float64 {
+		return float64(mem) / 1024 / 1024
+	}
+
 	// when load segment, data will be copied from go memory to c++ memory
-	if uint64(usedMemAfterLoad+maxSegmentSize*int64(concurrency)) > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
-		return fmt.Errorf("load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %d, usedMemAfterLoad = %d, totalMem = %d, thresholdFactor = %f",
-			collectionID, maxSegmentSize, usedMemAfterLoad, totalMem, Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage)
+	if usedMemAfterLoad+maxSegmentSize*uint64(concurrency) > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
+		return fmt.Errorf("load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %.2f MB, concurrency = %d, usedMemAfterLoad = %.2f MB, totalMem = %.2f MB, thresholdFactor = %f",
+			collectionID, toMB(maxSegmentSize), concurrency, toMB(usedMemAfterLoad), toMB(totalMem), Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage)
 	}
 
 	return nil
