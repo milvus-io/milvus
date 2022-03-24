@@ -339,7 +339,7 @@ GenIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
     auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
                                  {knowhere::IndexParams::nlist, 1024},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
     auto database = knowhere::GenDataset(N, dim, vec);
     auto indexing = std::make_shared<knowhere::IVF>();

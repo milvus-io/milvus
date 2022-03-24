@@ -42,7 +42,7 @@ class ScalarIndexCreator : public IndexCreatorBase {
     std::unique_ptr<knowhere::scalar::StructuredIndex<T>> index_ = nullptr;
     proto::indexcgo::TypeParams type_params_;
     proto::indexcgo::IndexParams index_params_;
-    milvus::json config_;
+    knowhere::Config config_;
 };
 }  // namespace milvus::indexbuilder
 

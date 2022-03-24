@@ -73,7 +73,7 @@ BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors) 
         auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
-        auto ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
+        auto ds = knowhere::GenDataset(row_nums, dim, vectors);
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
@@ -93,7 +93,7 @@ BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
         auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
-        auto ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
+        auto ds = knowhere::GenDataset(row_nums, dim, vectors);
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
@@ -117,7 +117,7 @@ BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
 
         auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(c_index);
         const int64_t dim = 8;  // not important here
-        auto dataset = milvus::knowhere::GenDataset(size, dim, field_data);
+        auto dataset = knowhere::GenDataset(size, dim, field_data);
         real_index->Build(dataset);
 
         status.error_code = Success;
@@ -135,7 +135,7 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
     try {
         AssertInfo(index, "failed to serialize index to binary set, passed index was null");
         auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto binary = std::make_unique<milvus::knowhere::BinarySet>(real_index->Serialize());
+        auto binary = std::make_unique<knowhere::BinarySet>(real_index->Serialize());
         *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";
@@ -152,7 +152,7 @@ LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
     try {
         AssertInfo(index, "failed to load index from binary set, passed index was null");
         auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto binary_set = reinterpret_cast<milvus::knowhere::BinarySet*>(c_binary_set);
+        auto binary_set = reinterpret_cast<knowhere::BinarySet*>(c_binary_set);
         real_index->Load(*binary_set);
         status.error_code = Success;
         status.error_msg = "";
@@ -170,7 +170,7 @@ QueryOnFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors
         auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
-        auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
+        auto query_ds = knowhere::GenDataset(row_nums, dim, vectors);
         auto query_res = cIndex->Query(query_ds);
         *res = query_res.release();
 
@@ -194,7 +194,7 @@ QueryOnFloatVecIndexWithParam(CIndex index,
         auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
-        auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
+        auto query_ds = knowhere::GenDataset(row_nums, dim, vectors);
         auto query_res = cIndex->QueryWithParam(query_ds, serialized_search_params);
         *res = query_res.release();
 
@@ -214,7 +214,7 @@ QueryOnBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors, C
         auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
-        auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
+        auto query_ds = knowhere::GenDataset(row_nums, dim, vectors);
         auto query_res = cIndex->Query(query_ds);
         *res = query_res.release();
 
@@ -238,7 +238,7 @@ QueryOnBinaryVecIndexWithParam(CIndex index,
         auto cIndex = (milvus::indexbuilder::VecIndexCreator*)index;
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
-        auto query_ds = milvus::knowhere::GenDataset(row_nums, dim, vectors);
+        auto query_ds = knowhere::GenDataset(row_nums, dim, vectors);
         auto query_res = cIndex->QueryWithParam(query_ds, serialized_search_params);
         *res = query_res.release();
 

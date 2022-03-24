@@ -38,7 +38,7 @@ namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
 using milvus::indexbuilder::MapParams;
 using milvus::indexbuilder::ScalarIndexCreator;
-using milvus::knowhere::scalar::OperatorType;
+using knowhere::scalar::OperatorType;
 using ScalarTestParams = std::pair<MapParams, MapParams>;
 
 namespace {
@@ -225,7 +225,7 @@ TYPED_TEST_P(TypedScalarIndexCreatorTest, Codec) {
             std::make_unique<ScalarIndexCreator<T>>(serialized_type_params.c_str(), serialized_index_params.c_str());
         auto arr = GenArr<T>(nb);
         const int64_t dim = 8;  // not important here
-        auto dataset = milvus::knowhere::GenDataset(arr.size(), dim, arr.data());
+        auto dataset = knowhere::GenDataset(arr.size(), dim, arr.data());
         creator->Build(dataset);
 
         auto binary_set = creator->Serialize();
@@ -262,9 +262,9 @@ class BoolIndexTest : public ::testing::Test {
 
     void
     TearDown() override {
-        delete[](char*)(all_true_ds->Get<const void*>(milvus::knowhere::meta::TENSOR));
-        delete[](char*) all_false_ds->Get<const void*>(milvus::knowhere::meta::TENSOR);
-        delete[](char*) half_ds->Get<const void*>(milvus::knowhere::meta::TENSOR);
+        delete[](char*)(all_true_ds->Get<const void*>(knowhere::meta::TENSOR));
+        delete[](char*) all_false_ds->Get<const void*>(knowhere::meta::TENSOR);
+        delete[](char*) half_ds->Get<const void*>(knowhere::meta::TENSOR);
     }
 
  private:
@@ -277,9 +277,9 @@ class BoolIndexTest : public ::testing::Test {
     schemapb::BoolArray all_true;
     schemapb::BoolArray all_false;
     schemapb::BoolArray half;
-    milvus::knowhere::DatasetPtr all_true_ds;
-    milvus::knowhere::DatasetPtr all_false_ds;
-    milvus::knowhere::DatasetPtr half_ds;
+    knowhere::DatasetPtr all_true_ds;
+    knowhere::DatasetPtr all_false_ds;
+    knowhere::DatasetPtr half_ds;
     size_t n;
     std::vector<ScalarTestParams> params;
 };
@@ -489,7 +489,7 @@ class StringIndexTest : public ::testing::Test {
 
     void
     TearDown() override {
-        delete[](char*)(str_ds->Get<const void*>(milvus::knowhere::meta::TENSOR));
+        delete[](char*)(str_ds->Get<const void*>(knowhere::meta::TENSOR));
     }
 
  private:
@@ -501,7 +501,7 @@ class StringIndexTest : public ::testing::Test {
  protected:
     std::vector<std::string> strs;
     schemapb::StringArray str_arr;
-    milvus::knowhere::DatasetPtr str_ds;
+    knowhere::DatasetPtr str_ds;
     std::vector<ScalarTestParams> params;
 };
 

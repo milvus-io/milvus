@@ -31,8 +31,8 @@
 constexpr int NB = 10;
 
 TEST(FloatVecIndex, All) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
+    auto metric_type = knowhere::Metric::L2;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -82,8 +82,8 @@ TEST(FloatVecIndex, All) {
 }
 
 TEST(BinaryVecIndex, All) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::JACCARD;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+    auto metric_type = knowhere::Metric::JACCARD;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -134,7 +134,7 @@ TEST(BinaryVecIndex, All) {
 
 TEST(CBoolIndexTest, All) {
     schemapb::BoolArray half;
-    milvus::knowhere::DatasetPtr half_ds;
+    knowhere::DatasetPtr half_ds;
 
     for (size_t i = 0; i < NB; i++) {
         *(half.mutable_data()->Add()) = (i % 2) == 0;
@@ -159,8 +159,8 @@ TEST(CBoolIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = BuildScalarIndex(index, half_ds->Get<int64_t>(milvus::knowhere::meta::ROWS),
-                                      half_ds->Get<const void*>(milvus::knowhere::meta::TENSOR));
+            status = BuildScalarIndex(index, half_ds->Get<int64_t>(knowhere::meta::ROWS),
+                                      half_ds->Get<const void*>(knowhere::meta::TENSOR));
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -185,7 +185,7 @@ TEST(CBoolIndexTest, All) {
         }
     }
 
-    delete[](char*) half_ds->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    delete[](char*) half_ds->Get<const void*>(knowhere::meta::TENSOR);
 }
 
 // TODO: more scalar type.
@@ -260,8 +260,8 @@ TEST(CStringIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = BuildScalarIndex(index, str_ds->Get<int64_t>(milvus::knowhere::meta::ROWS),
-                                      str_ds->Get<const void*>(milvus::knowhere::meta::TENSOR));
+            status = BuildScalarIndex(index, str_ds->Get<int64_t>(knowhere::meta::ROWS),
+                                      str_ds->Get<const void*>(knowhere::meta::TENSOR));
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -286,5 +286,5 @@ TEST(CStringIndexTest, All) {
         }
     }
 
-    delete[](char*) str_ds->Get<const void*>(milvus::knowhere::meta::TENSOR);
+    delete[](char*) str_ds->Get<const void*>(knowhere::meta::TENSOR);
 }
