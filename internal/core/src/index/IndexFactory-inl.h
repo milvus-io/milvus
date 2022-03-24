@@ -9,9 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#pragma once
+#include <string>
+#include "ScalarIndexSort.h"
 
-#include "common/type_c.h"
+namespace milvus::scalar {
 
-typedef void* CIndex;
-typedef void* CIndexQueryResult;
+template <typename T>
+inline ScalarIndexPtr<T>
+IndexFactory::CreateIndex(std::string index_type) {
+    return CreateScalarIndexSort<T>();
+}
+
+}  // namespace milvus::scalar

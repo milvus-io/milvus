@@ -11,7 +11,23 @@
 
 #pragma once
 
-#include "common/type_c.h"
+#include <memory>
+#include <knowhere/index/Index.h>
+#include <knowhere/common/Dataset.h>
+#include <knowhere/index/structured_index_simple/StructuredIndex.h>
 
-typedef void* CIndex;
-typedef void* CIndexQueryResult;
+namespace milvus::scalar {
+using Index = milvus::knowhere::Index;
+using IndexPtr = std::unique_ptr<Index>;
+using BinarySet = knowhere::BinarySet;
+using Config = knowhere::Config;
+using DatasetPtr = knowhere::DatasetPtr;
+using OperatorType = knowhere::scalar::OperatorType;
+
+class IndexBase : public Index {
+    virtual void
+    Build(const DatasetPtr& dataset) = 0;
+};
+using IndexBasePtr = std::unique_ptr<IndexBase>;
+
+}  // namespace milvus::scalar

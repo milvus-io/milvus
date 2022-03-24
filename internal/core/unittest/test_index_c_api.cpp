@@ -26,6 +26,7 @@
 #include "test_utils/indexbuilder_test_utils.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/IndexFactory.h"
+#include "common/type_c.h"
 
 constexpr int NB = 10;
 
@@ -44,7 +45,7 @@ TEST(FloatVecIndex, All) {
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
 
-    DataType dtype = FloatVector;
+    CDataType dtype = FloatVector;
     CIndex index;
     CStatus status;
     CBinarySet binary_set;
@@ -95,7 +96,7 @@ TEST(BinaryVecIndex, All) {
     auto dataset = GenDataset(NB, metric_type, true);
     auto xb_data = dataset.get_col<uint8_t>(0);
 
-    DataType dtype = BinaryVector;
+    CDataType dtype = BinaryVector;
     CIndex index;
     CStatus status;
     CBinarySet binary_set;
@@ -147,7 +148,7 @@ TEST(CBoolIndexTest, All) {
         auto type_params_str = generate_type_params(type_params);
         auto index_params_str = generate_index_params(index_params);
 
-        DataType dtype = Bool;
+        CDataType dtype = Bool;
         CIndex index;
         CStatus status;
         CBinarySet binary_set;
@@ -198,7 +199,7 @@ TEST(CInt64IndexTest, All) {
         auto type_params_str = generate_type_params(type_params);
         auto index_params_str = generate_index_params(index_params);
 
-        DataType dtype = Int64;
+        CDataType dtype = Int64;
         CIndex index;
         CStatus status;
         CBinarySet binary_set;
@@ -248,7 +249,7 @@ TEST(CStringIndexTest, All) {
         auto type_params_str = generate_type_params(type_params);
         auto index_params_str = generate_index_params(index_params);
 
-        DataType dtype = String;
+        CDataType dtype = String;
         CIndex index;
         CStatus status;
         CBinarySet binary_set;
