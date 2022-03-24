@@ -60,6 +60,7 @@ jobs:
             pip install --upgrade protobuf
       
       - name: Deploy Chaos Mesh
+        timeout-minutes: 2
         shell: bash
         run: |
           helm repo add chaos-mesh https://charts.chaos-mesh.org
@@ -69,6 +70,7 @@ jobs:
           kubectl get po -n chaos-testing
       
       - name: Deploy Milvus
+        timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
@@ -101,7 +103,7 @@ jobs:
           timeout 14m pytest -s -v test_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "chaos test failed"
 
       - name: Result Analysis
-        timeout-minutes: 15
+        timeout-minutes: 1
         shell: bash
         working-directory: tests/python_client/chaos/reports
         run: |
@@ -109,7 +111,7 @@ jobs:
           cat ${{ env.RELEASE }}.log || echo "no log file"
 
       - name: Milvus E2E Test
-        timeout-minutes: 10
+        timeout-minutes: 15
         if: ${{ always() }}
         shell: bash
         working-directory: tests/python_client
@@ -166,7 +168,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/chaos
         run: |
-          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO --capture=no || echo "data consist chaos test failed"
+          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
 
       - name: Milvus E2E Test
         timeout-minutes: 10
