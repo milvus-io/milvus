@@ -520,20 +520,16 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 
 	node, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
-	node.releaseCollection = returnFailedResult
+	node.setRPCInterface(&node.releaseCollection, returnFailedResult)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
 	releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(releaseCollectionTask)
 	assert.Nil(t, err)
 
-	for {
-		if releaseCollectionTask.getState() == taskDone {
-			break
-		}
-	}
-	node.releaseCollection = returnSuccessResult
+	waitTaskFinalState(releaseCollectionTask, taskDone)
 
+	node.setRPCInterface(&node.releaseCollection, returnSuccessResult)
 	waitTaskFinalState(releaseCollectionTask, taskExpired)
 
 	node.stop()
@@ -1107,10 +1103,12 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
+	defer queryCoord.Stop()
 
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+	defer node1.stop()
 
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
 
@@ -1120,6 +1118,7 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 
 	node2, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
+	defer node2.stop()
 	node2.watchDmChannels = returnFailedResult
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
@@ -1134,6 +1133,7 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 
 	node3, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
+	defer node3.stop()
 	waitQueryNodeOnline(queryCoord.cluster, node3.queryNodeID)
 
 	dmChannelInfos := queryCoord.meta.getDmChannelInfosByNodeID(node3.queryNodeID)
