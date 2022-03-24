@@ -23,13 +23,12 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/stretchr/testify/assert"
-
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -321,13 +320,8 @@ func TestSegmentLoader_checkSegmentSize(t *testing.T) {
 	loader := node.loader
 	assert.NotNil(t, loader)
 
-	err = loader.checkSegmentSize(defaultSegmentID, []*querypb.SegmentLoadInfo{{SegmentID: defaultSegmentID, SegmentSize: 1024}}, runtime.GOMAXPROCS(0))
+	err = loader.checkSegmentSize(defaultCollectionID, []*querypb.SegmentLoadInfo{{SegmentID: defaultSegmentID, SegmentSize: 1024}}, runtime.GOMAXPROCS(0))
 	assert.NoError(t, err)
-
-	//totalMem, err := getTotalMemory()
-	//assert.NoError(t, err)
-	//err = historical.loader.checkSegmentSize(defaultSegmentID, map[UniqueID]int64{defaultSegmentID: int64(totalMem * 2)})
-	//assert.Error(t, err)
 }
 
 func TestSegmentLoader_testLoadGrowing(t *testing.T) {
