@@ -24,7 +24,7 @@
 struct LoadIndexInfo {
     int64_t field_id;
     std::map<std::string, std::string> index_params;
-    milvus::knowhere::VecIndexPtr index;
+    knowhere::VecIndexPtr index;
 };
 
 // NOTE: field_id can be system field

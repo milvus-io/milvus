@@ -42,18 +42,18 @@ bool
 is_in_list(const T& t, std::function<std::vector<T>()> list_func);
 
 bool
-is_in_bin_list(const milvus::knowhere::IndexType& index_type);
+is_in_bin_list(const knowhere::IndexType& index_type);
 
 bool
-is_in_nm_list(const milvus::knowhere::IndexType& index_type);
+is_in_nm_list(const knowhere::IndexType& index_type);
 
 bool
-is_in_need_build_all_list(const milvus::knowhere::IndexType& index_type);
+is_in_need_build_all_list(const knowhere::IndexType& index_type);
 
 bool
-is_in_need_id_list(const milvus::knowhere::IndexType& index_type);
+is_in_need_id_list(const knowhere::IndexType& index_type);
 
 bool
-is_unsupported(const milvus::knowhere::IndexType& index_type, const milvus::knowhere::MetricType& metric_type);
+is_unsupported(const knowhere::IndexType& index_type, const knowhere::MetricType& metric_type);
 
 }  // namespace milvus::indexbuilder

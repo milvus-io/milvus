@@ -44,7 +44,7 @@ class VecIndexCreator : public IndexCreatorBase {
  public:
     // used for tests
     struct QueryResult {
-        std::vector<milvus::knowhere::IDType> ids;
+        std::vector<knowhere::IDType> ids;
         std::vector<float> distances;
         int64_t nq;
         int64_t topk;
@@ -107,8 +107,8 @@ class VecIndexCreator : public IndexCreatorBase {
     knowhere::VecIndexPtr index_ = nullptr;
     std::string type_params_;
     std::string index_params_;
-    milvus::json type_config_;
-    milvus::json index_config_;
+    knowhere::Config type_config_;
+    knowhere::Config index_config_;
     knowhere::Config config_;
     std::vector<uint8_t> raw_data_;
     std::once_flag raw_data_loaded_;

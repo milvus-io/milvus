@@ -16,8 +16,8 @@
 
 TEST(AdapterMgr, MultiThread) {
     auto run_case = [&]() {
-        auto& ins = milvus::knowhere::AdapterMgr::GetInstance();
-        auto adapter = ins.GetAdapter(milvus::knowhere::IndexEnum::INDEX_HNSW);
+        auto& ins = knowhere::AdapterMgr::GetInstance();
+        auto adapter = ins.GetAdapter(knowhere::IndexEnum::INDEX_HNSW);
         ASSERT_TRUE(adapter != nullptr);
         ASSERT_ANY_THROW(ins.GetAdapter("not supported now!"));
     };
