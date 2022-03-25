@@ -428,6 +428,27 @@ message ImportTask {
   repeated common.KeyValuePair infos = 7;    // more informations about the task, bucket, etc.
 }
 
+message ImportTaskState {
+  common.ImportState stateCode = 1;    // Import state code.
+  repeated int64 segments = 2;         // Ids of segments created in import task.
+  repeated int64 row_ids = 3;          // Row IDs for the newly inserted rows.
+  int64 row_count = 4;                 // # of rows added in the import task.
+  string error_message = 5;            // Error message for the failed task.
+}
+
+message ImportTaskInfo {
+  int64 id = 1;                  // Task ID.
+  int64 request_id = 2;          // Request ID of the import task.
+  int64 datanode_id = 3;         // ID of DataNode that processes the task.
+  string collection_id = 4;      // Collection ID for the import task.
+  string partition_id = 5;       // Partition ID for the import task.
+  string bucket = 6;             // Bucket for the import task.
+  bool row_based = 7;            // Boolean indicating whether import files are row-based or column-based.
+  repeated string files = 8;     // A list of files to import.
+  int64 create_ts = 9;           // Timestamp when the import task is created.
+  ImportTaskState state = 10;    // State of the import task.
+}
+
 message ImportTaskResponse {
   common.Status status = 1;
   int64 datanode_id = 2;                     // which datanode takes this task
