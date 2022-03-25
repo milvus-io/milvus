@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 
 	"github.com/stretchr/testify/assert"
@@ -36,7 +37,7 @@ func TestFlowGraphManager(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	node := newIDLEDataNodeMock(ctx)
+	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 	node.SetEtcdClient(etcdCli)
 	err = node.Init()
 	require.Nil(t, err)

@@ -502,3 +502,28 @@ func TestValidateMultipleVectorFields(t *testing.T) {
 		assert.Error(t, validateMultipleVectorFields(schema3))
 	}
 }
+
+func TestFillFieldIDBySchema(t *testing.T) {
+	schema := &schemapb.CollectionSchema{}
+	columns := []*schemapb.FieldData{
+		{
+			FieldName: "TestFillFieldIDBySchema",
+		},
+	}
+
+	// length mismatch
+	assert.Error(t, fillFieldIDBySchema(columns, schema))
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "TestFillFieldIDBySchema",
+				DataType: schemapb.DataType_Int64,
+				FieldID:  1,
+			},
+		},
+	}
+	assert.NoError(t, fillFieldIDBySchema(columns, schema))
+	assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
+	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
+	assert.Equal(t, int64(1), columns[0].FieldId)
+}

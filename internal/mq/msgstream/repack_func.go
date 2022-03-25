@@ -37,7 +37,10 @@ func InsertRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 
 		keysLen := len(keys)
 
-		if !insertRequest.CheckAligned() || insertRequest.NRows() != uint64(keysLen) {
+		if err := insertRequest.CheckAligned(); err != nil {
+			return nil, err
+		}
+		if insertRequest.NRows() != uint64(keysLen) {
 			return nil, errors.New("the length of hashValue, timestamps, rowIDs, RowData are not equal")
 		}
 		for index, key := range keys {

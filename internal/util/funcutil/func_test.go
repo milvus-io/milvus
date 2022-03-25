@@ -314,3 +314,88 @@ func Test_ConvertChannelName(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, deltaChanName, str)
 }
+
+func TestGetNumRowsOfScalarField(t *testing.T) {
+	cases := []struct {
+		datas interface{}
+		want  uint64
+	}{
+		{[]bool{}, 0},
+		{[]bool{true, false}, 2},
+		{[]int32{}, 0},
+		{[]int32{1, 2}, 2},
+		{[]int64{}, 0},
+		{[]int64{1, 2}, 2},
+		{[]float32{}, 0},
+		{[]float32{1.0, 2.0}, 2},
+		{[]float64{}, 0},
+		{[]float64{1.0, 2.0}, 2},
+	}
+
+	for _, test := range cases {
+		if got := getNumRowsOfScalarField(test.datas); got != test.want {
+			t.Errorf("getNumRowsOfScalarField(%v) = %v", test.datas, test.want)
+		}
+	}
+}
+
+func TestGetNumRowsOfFloatVectorField(t *testing.T) {
+	cases := []struct {
+		fDatas   []float32
+		dim      int64
+		want     uint64
+		errIsNil bool
+	}{
+		{[]float32{}, -1, 0, false},     // dim <= 0
+		{[]float32{}, 0, 0, false},      // dim <= 0
+		{[]float32{1.0}, 128, 0, false}, // length % dim != 0
+		{[]float32{}, 128, 0, true},
+		{[]float32{1.0, 2.0}, 2, 1, true},
+		{[]float32{1.0, 2.0, 3.0, 4.0}, 2, 2, true},
+	}
+
+	for _, test := range cases {
+		got, err := getNumRowsOfFloatVectorField(test.fDatas, test.dim)
+		if test.errIsNil {
+			assert.Equal(t, nil, err)
+			if got != test.want {
+				t.Errorf("getNumRowsOfFloatVectorField(%v, %v) = %v, %v", test.fDatas, test.dim, test.want, nil)
+			}
+		} else {
+			assert.NotEqual(t, nil, err)
+		}
+	}
+}
+
+func TestGetNumRowsOfBinaryVectorField(t *testing.T) {
+	cases := []struct {
+		bDatas   []byte
+		dim      int64
+		want     uint64
+		errIsNil bool
+	}{
+		{[]byte{}, -1, 0, false},     // dim <= 0
+		{[]byte{}, 0, 0, false},      // dim <= 0
+		{[]byte{1.0}, 128, 0, false}, // length % dim != 0
+		{[]byte{}, 128, 0, true},
+		{[]byte{1.0}, 1, 0, false}, // dim % 8 != 0
+		{[]byte{1.0}, 4, 0, false}, // dim % 8 != 0
+		{[]byte{1.0, 2.0}, 8, 2, true},
+		{[]byte{1.0, 2.0}, 16, 1, true},
+		{[]byte{1.0, 2.0, 3.0, 4.0}, 8, 4, true},
+		{[]byte{1.0, 2.0, 3.0, 4.0}, 16, 2, true},
+		{[]byte{1.0}, 128, 0, false}, // (8*l) % dim != 0
+	}
+
+	for _, test := range cases {
+		got, err := getNumRowsOfBinaryVectorField(test.bDatas, test.dim)
+		if test.errIsNil {
+			assert.Equal(t, nil, err)
+			if got != test.want {
+				t.Errorf("getNumRowsOfBinaryVectorField(%v, %v) = %v, %v", test.bDatas, test.dim, test.want, nil)
+			}
+		} else {
+			assert.NotEqual(t, nil, err)
+		}
+	}
+}

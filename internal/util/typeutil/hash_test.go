@@ -21,6 +21,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -66,4 +67,30 @@ func TestHash32_String(t *testing.T) {
 	log.Println(h2)
 
 	assert.Equal(t, uint32(h), h2)
+}
+
+func TestHashPK2Channels(t *testing.T) {
+	channels := []string{"test1", "test2"}
+	int64IDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: []int64{100, 102, 102, 103, 104},
+			},
+		},
+	}
+	ret := HashPK2Channels(int64IDs, channels)
+	assert.Equal(t, 5, len(ret))
+	//same pk hash to same channel
+	assert.Equal(t, ret[1], ret[2])
+
+	stringIDs := &schemapb.IDs{
+		IdField: &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: []string{"ab", "bc", "bc", "abd", "milvus"},
+			},
+		},
+	}
+	ret = HashPK2Channels(stringIDs, channels)
+	assert.Equal(t, 5, len(ret))
+	assert.Equal(t, ret[1], ret[2])
 }

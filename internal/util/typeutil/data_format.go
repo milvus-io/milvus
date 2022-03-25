@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 
@@ -102,15 +103,29 @@ func writeToBuffer(w io.Writer, endian binary.ByteOrder, d interface{}) error {
 	return binary.Write(w, endian, d)
 }
 
-func TransferColumnBasedDataToRowBasedData(columns []*schemapb.FieldData) (rows []*commonpb.Blob, err error) {
+func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, columns []*schemapb.FieldData) (rows []*commonpb.Blob, err error) {
 	dTypes := make([]schemapb.DataType, 0, len(columns))
 	datas := make([][]interface{}, 0, len(columns))
 	rowNum := 0
 
+	fieldID2FieldData := make(map[int64]schemapb.FieldData)
 	for _, field := range columns {
-		switch field.Field.(type) {
+		fieldID2FieldData[field.FieldId] = *field
+	}
+
+	// reorder field data by schema field orider
+	for _, field := range schema.Fields {
+		if field.FieldID == common.RowIDField || field.FieldID == common.TimeStampField {
+			continue
+		}
+		fieldData, ok := fieldID2FieldData[field.FieldID]
+		if !ok {
+			return nil, fmt.Errorf("field %s data not exist", field.Name)
+		}
+
+		switch fieldData.Field.(type) {
 		case *schemapb.FieldData_Scalars:
-			scalarField := field.GetScalars()
+			scalarField := fieldData.GetScalars()
 			switch scalarField.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
 				err := appendScalarField(&datas, &rowNum, func() interface{} {
@@ -157,7 +172,7 @@ func TransferColumnBasedDataToRowBasedData(columns []*schemapb.FieldData) (rows 
 				continue
 			}
 		case *schemapb.FieldData_Vectors:
-			vectorField := field.GetVectors()
+			vectorField := fieldData.GetVectors()
 			switch vectorField.Data.(type) {
 			case *schemapb.VectorField_FloatVector:
 				floatVectorFieldData := vectorField.GetFloatVector().Data
@@ -184,8 +199,7 @@ func TransferColumnBasedDataToRowBasedData(columns []*schemapb.FieldData) (rows 
 			continue
 		}
 
-		dTypes = append(dTypes, field.Type)
-
+		dTypes = append(dTypes, field.DataType)
 	}
 
 	rows = make([]*commonpb.Blob, 0, rowNum)

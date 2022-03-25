@@ -76,6 +76,7 @@ CPayloadWriter NewPayloadWriter(int columnType) {
       p->schema = arrow::schema({arrow::field("val", arrow::float64())});
       break;
     }
+    case ColumnType::VARCHAR:
     case ColumnType::STRING : {
       p->columnType = ColumnType::STRING;
       p->builder = std::make_shared<arrow::StringBuilder>();
@@ -384,6 +385,7 @@ CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_siz
     case ColumnType::FLOAT :
     case ColumnType::DOUBLE :
     case ColumnType::STRING :
+    case ColumnType::VARCHAR:
     case ColumnType::VECTOR_BINARY :
     case ColumnType::VECTOR_FLOAT : {
       break;
