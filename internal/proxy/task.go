@@ -3550,7 +3550,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 		gibpt.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
-	describeIndexReq := milvuspb.DescribeIndexRequest{
+	describeIndexReq := &milvuspb.DescribeIndexRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeIndex,
 			MsgID:     gibpt.Base.MsgID,
@@ -3562,7 +3562,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 		//		IndexName:      gibpt.IndexName,
 	}
 
-	indexDescriptionResp, err2 := gibpt.rootCoord.DescribeIndex(ctx, &describeIndexReq)
+	indexDescriptionResp, err2 := gibpt.rootCoord.DescribeIndex(ctx, describeIndexReq)
 	if err2 != nil {
 		return err2
 	}
@@ -3754,6 +3754,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	}
 	gist.collectionID = collectionID
 
+	// Get partition result for the given collection.
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
@@ -3774,6 +3775,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		gist.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
+	// Retrieve index status and detailed index information.
 	describeIndexReq := milvuspb.DescribeIndexRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeIndex,
@@ -3791,6 +3793,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		return err2
 	}
 
+	// Check if the target index name exists.
 	matchIndexID := int64(-1)
 	foundIndexID := false
 	for _, desc := range indexDescriptionResp.IndexDescriptions {
@@ -3804,6 +3807,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("no index is created")
 	}
 
+	// Fetch segments for partitions.
 	var allSegmentIDs []UniqueID
 	for _, partitionID := range partitions.PartitionIDs {
 		showSegmentsRequest := &milvuspb.ShowSegmentsRequest{
@@ -3830,6 +3834,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		IndexBuildIDs: make([]UniqueID, 0),
 	}
 
+	// Fetch index build IDs from segments.
 	for _, segmentID := range allSegmentIDs {
 		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
 			Base: &commonpb.MsgBase{
