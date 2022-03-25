@@ -439,10 +439,6 @@ Follow Milvus on social media:
 - [Twitter](https://twitter.com/milvusio)
 - [Youtube](https://www.youtube.com/channel/UCMCo_F7pKjMHBlfyxwOPw-g)
 
-## Join Us
-
-Zilliz, the company behind Milvus, is [actively hiring](https://app.mokahr.com/apply/zilliz/37974#/) algorithm, database, full-stack developers and solution engineers to build the next-generation open-source data fabric.
-
 ## Reference
 
 Reference to cite when you use Milvus in a research paper:
