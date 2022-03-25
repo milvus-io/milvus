@@ -205,6 +205,8 @@ message LoadCollectionRequest {
   string db_name = 2;
   // The collection name you want to load
   string collection_name = 3;
+  // The replica number to load, default by 1
+  int32 replica_number = 4;
 }
 
 /**

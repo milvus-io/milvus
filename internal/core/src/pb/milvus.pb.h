@@ -2325,6 +2325,7 @@ class LoadCollectionRequest :
     kDbNameFieldNumber = 2,
     kCollectionNameFieldNumber = 3,
     kBaseFieldNumber = 1,
+    kReplicaNumberFieldNumber = 4,
   };
   // string db_name = 2;
   void clear_db_name();
@@ -2356,6 +2357,11 @@ class LoadCollectionRequest :
   ::milvus::proto::common::MsgBase* mutable_base();
   void set_allocated_base(::milvus::proto::common::MsgBase* base);
 
+  // int32 replica_number = 4;
+  void clear_replica_number();
+  ::PROTOBUF_NAMESPACE_ID::int32 replica_number() const;
+  void set_replica_number(::PROTOBUF_NAMESPACE_ID::int32 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.LoadCollectionRequest)
  private:
   class _Internal;
@@ -2364,6 +2370,7 @@ class LoadCollectionRequest :
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr db_name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
   ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::int32 replica_number_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -16466,6 +16473,20 @@ inline void LoadCollectionRequest::set_allocated_collection_name(std::string* co
   }
   collection_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), collection_name);
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.LoadCollectionRequest.collection_name)
+}
+
+// int32 replica_number = 4;
+inline void LoadCollectionRequest::clear_replica_number() {
+  replica_number_ = 0;
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 LoadCollectionRequest::replica_number() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.LoadCollectionRequest.replica_number)
+  return replica_number_;
+}
+inline void LoadCollectionRequest::set_replica_number(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  
+  replica_number_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.LoadCollectionRequest.replica_number)
 }
 
 // -------------------------------------------------------------------
