@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -34,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
@@ -136,7 +137,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 		te.Run(test.description, func(t *testing.T) {
 			df := &DataCoordFactory{}
 
-			replica, err := newReplica(context.Background(), &RootCoordFactory{}, cm, test.collID)
+			replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, test.collID)
 			assert.Nil(t, err)
 			if test.replicaNil {
 				replica = nil
@@ -183,8 +184,10 @@ func TestDataSyncService_Start(t *testing.T) {
 	// init data node
 
 	Factory := &MetaFactory{}
-	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1")
-	mockRootCoord := &RootCoordFactory{}
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	mockRootCoord := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
 	collectionID := UniqueID(1)
 
 	flushChan := make(chan flushMsg, 100)

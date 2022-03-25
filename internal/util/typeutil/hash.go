@@ -17,11 +17,16 @@
 package typeutil
 
 import (
+	"hash/crc32"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/spaolacci/murmur3"
+
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
+
+const substringLengthForCRC = 100
 
 // Hash32Bytes hashing a byte array to uint32
 func Hash32Bytes(b []byte) (uint32, error) {
@@ -54,4 +59,38 @@ func Hash32String(s string) (int64, error) {
 		return 0, err
 	}
 	return int64(v), nil
+}
+
+// HashString2Uint32 hashing a string to uint32
+func HashString2Uint32(v string) uint32 {
+	subString := v
+	if len(v) > substringLengthForCRC {
+		subString = v[:substringLengthForCRC]
+	}
+
+	return crc32.ChecksumIEEE([]byte(subString))
+}
+
+// HashPK2Channels hash primary keys to channels
+func HashPK2Channels(primaryKeys *schemapb.IDs, shardNames []string) []uint32 {
+	numShard := uint32(len(shardNames))
+	var hashValues []uint32
+	switch primaryKeys.IdField.(type) {
+	case *schemapb.IDs_IntId:
+		pks := primaryKeys.GetIntId().Data
+		for _, pk := range pks {
+			value, _ := Hash32Int64(pk)
+			hashValues = append(hashValues, value%numShard)
+		}
+	case *schemapb.IDs_StrId:
+		pks := primaryKeys.GetStrId().Data
+		for _, pk := range pks {
+			hash := HashString2Uint32(pk)
+			hashValues = append(hashValues, hash%numShard)
+		}
+	default:
+		//TODO::
+	}
+
+	return hashValues
 }

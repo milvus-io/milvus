@@ -127,6 +127,7 @@ func newBufferData(dimension int64) (*BufferData, error) {
 
 	limit := Params.DataNodeCfg.FlushInsertBufferSize / (dimension * 4)
 
+	//TODO::xige-16 eval vec and string field
 	return &BufferData{&InsertData{Data: make(map[UniqueID]storage.FieldData)}, 0, limit}, nil
 }
 
@@ -417,8 +418,8 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 // 	1.3 Put back into buffer
 // 	1.4 Update related statistics
 func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos *internalpb.MsgPosition) error {
-	if !msg.CheckAligned() {
-		return errors.New("misaligned messages detected")
+	if err := msg.CheckAligned(); err != nil {
+		return err
 	}
 	currentSegID := msg.GetSegmentID()
 	collectionID := msg.GetCollectionID()

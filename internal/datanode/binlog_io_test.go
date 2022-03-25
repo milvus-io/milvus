@@ -25,7 +25,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -41,7 +43,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 	b := &binlogIO{cm, alloc}
 	t.Run("Test upload", func(t *testing.T) {
 		f := &MetaFactory{}
-		meta := f.GetCollectionMeta(UniqueID(10001), "uploads")
+		meta := f.GetCollectionMeta(UniqueID(10001), "uploads", schemapb.DataType_Int64)
 
 		iData := genInsertData()
 		dData := &DeleteData{
@@ -52,16 +54,16 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
 		assert.NoError(t, err)
-		assert.Equal(t, 11, len(p.inPaths))
-		assert.Equal(t, 3, len(p.statsPaths))
+		assert.Equal(t, 12, len(p.inPaths))
+		assert.Equal(t, 1, len(p.statsPaths))
 		assert.Equal(t, 1, len(p.inPaths[0].GetBinlogs()))
 		assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
 		assert.NotNil(t, p.deltaInfo)
 
 		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData, iData}, dData, meta)
 		assert.NoError(t, err)
-		assert.Equal(t, 11, len(p.inPaths))
-		assert.Equal(t, 3, len(p.statsPaths))
+		assert.Equal(t, 12, len(p.inPaths))
+		assert.Equal(t, 1, len(p.statsPaths))
 		assert.Equal(t, 2, len(p.inPaths[0].GetBinlogs()))
 		assert.Equal(t, 2, len(p.statsPaths[0].GetBinlogs()))
 		assert.NotNil(t, p.deltaInfo)
@@ -76,7 +78,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 	t.Run("Test upload error", func(t *testing.T) {
 		f := &MetaFactory{}
-		meta := f.GetCollectionMeta(UniqueID(10001), "uploads")
+		meta := f.GetCollectionMeta(UniqueID(10001), "uploads", schemapb.DataType_Int64)
 		dData := &DeleteData{
 			Pks: []int64{},
 			Tss: []uint64{},
@@ -197,7 +199,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 	t.Run("Test genDeltaBlobs", func(t *testing.T) {
 		f := &MetaFactory{}
-		meta := f.GetCollectionMeta(UniqueID(10002), "test_gen_blobs")
+		meta := f.GetCollectionMeta(UniqueID(10002), "test_gen_blobs", schemapb.DataType_Int64)
 
 		tests := []struct {
 			isvalid  bool
@@ -246,19 +248,36 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 	t.Run("Test genInsertBlobs", func(t *testing.T) {
 		f := &MetaFactory{}
-		meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs")
+		tests := []struct {
+			pkType      schemapb.DataType
+			description string
+		}{
+			{schemapb.DataType_Int64, "int64PrimaryField"},
+			{schemapb.DataType_VarChar, "varCharPrimaryField"},
+		}
 
-		kvs, pin, pstats, err := b.genInsertBlobs(genInsertData(), 10, 1, meta)
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", test.pkType)
+				helper, err := typeutil.CreateSchemaHelper(meta.Schema)
+				assert.NoError(t, err)
+				primaryKeyFieldSchema, err := helper.GetPrimaryKeyField()
+				assert.NoError(t, err)
+				primaryKeyFieldID := primaryKeyFieldSchema.GetFieldID()
 
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(pstats))
-		assert.Equal(t, 11, len(pin))
-		assert.Equal(t, 14, len(kvs))
+				kvs, pin, pstats, err := b.genInsertBlobs(genInsertData(), 10, 1, meta)
 
-		log.Debug("test paths",
-			zap.Any("kvs no.", len(kvs)),
-			zap.String("insert paths field0", pin[common.TimeStampField].GetBinlogs()[0].GetLogPath()),
-			zap.String("stats paths field0", pstats[common.TimeStampField].GetBinlogs()[0].GetLogPath()))
+				assert.NoError(t, err)
+				assert.Equal(t, 1, len(pstats))
+				assert.Equal(t, 12, len(pin))
+				assert.Equal(t, 13, len(kvs))
+
+				log.Debug("test paths",
+					zap.Any("kvs no.", len(kvs)),
+					zap.String("insert paths field0", pin[common.TimeStampField].GetBinlogs()[0].GetLogPath()),
+					zap.String("stats paths field0", pstats[primaryKeyFieldID].GetBinlogs()[0].GetLogPath()))
+			})
+		}
 	})
 
 	t.Run("Test genInsertBlobs error", func(t *testing.T) {
@@ -269,7 +288,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		assert.Empty(t, pstats)
 
 		f := &MetaFactory{}
-		meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs")
+		meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", schemapb.DataType_Int64)
 
 		kvs, pin, pstats, err = b.genInsertBlobs(genEmptyInsertData(), 10, 1, meta)
 		assert.Error(t, err)

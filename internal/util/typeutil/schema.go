@@ -100,6 +100,33 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	return res, nil
 }
 
+func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, error) {
+	res := 0
+	for _, fs := range fieldsData {
+		switch fs.GetType() {
+		case schemapb.DataType_Bool, schemapb.DataType_Int8:
+			res++
+		case schemapb.DataType_Int16:
+			res += 2
+		case schemapb.DataType_Int32, schemapb.DataType_Float:
+			res += 4
+		case schemapb.DataType_Int64, schemapb.DataType_Double:
+			res += 8
+		case schemapb.DataType_VarChar:
+			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
+				return 0, fmt.Errorf("offset out range of field datas")
+			}
+			//TODO:: check len(varChar) <= maxLengthPerRow
+			res += len(fs.GetScalars().GetStringData().Data[rowOffset])
+		case schemapb.DataType_BinaryVector:
+			res += int(fs.GetVectors().GetDim())
+		case schemapb.DataType_FloatVector:
+			res += int(fs.GetVectors().GetDim() * 4)
+		}
+	}
+	return res, nil
+}
+
 // SchemaHelper provides methods to get the schema of fields
 type SchemaHelper struct {
 	schema           *schemapb.CollectionSchema
@@ -288,6 +315,16 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 				} else {
 					dstScalar.GetDoubleData().Data = append(dstScalar.GetDoubleData().Data, srcScalar.DoubleData.Data[idx])
 				}
+			case *schemapb.ScalarField_StringData:
+				if dstScalar.GetStringData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: []string{srcScalar.StringData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetStringData().Data = append(dstScalar.GetStringData().Data, srcScalar.StringData.Data[idx])
+				}
 			default:
 				log.Error("Not supported field type", zap.String("field type", fieldData.Type.String()))
 			}
@@ -337,17 +374,13 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 	}
 }
 
-func FillFieldBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
-	if len(columns) != len(schema.GetFields()) {
-		return fmt.Errorf("len(columns) mismatch the len(fields), len(columns): %d, len(fields): %d",
-			len(columns), len(schema.GetFields()))
+// GetPrimaryFieldSchema get primary field schema from collection schema
+func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSchema, error) {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.IsPrimaryKey {
+			return fieldSchema, nil
+		}
 	}
 
-	for idx, f := range schema.GetFields() {
-		columns[idx].FieldName = f.Name
-		columns[idx].Type = f.DataType
-		columns[idx].FieldId = f.FieldID
-	}
-
-	return nil
+	return nil, errors.New("primary field is not found")
 }

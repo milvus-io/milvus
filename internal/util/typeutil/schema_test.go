@@ -512,29 +512,29 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, FloatVector, result[6].GetVectors().GetFloatVector().Data)
 }
 
-func TestFillFieldBySchema(t *testing.T) {
-	columns := []*schemapb.FieldData{
-		{},
+func TestGetPrimaryFieldSchema(t *testing.T) {
+	int64Field := &schemapb.FieldSchema{
+		FieldID:  1,
+		Name:     "int64Field",
+		DataType: schemapb.DataType_Int64,
 	}
-	schema := &schemapb.CollectionSchema{}
-	// length mismatch
-	assert.Error(t, FillFieldBySchema(columns, schema))
-	columns = []*schemapb.FieldData{
-		{
-			FieldId: 0,
-		},
+
+	floatField := &schemapb.FieldSchema{
+		FieldID:  2,
+		Name:     "floatField",
+		DataType: schemapb.DataType_Float,
 	}
-	schema = &schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				Name:     "TestFillFieldIDBySchema",
-				DataType: schemapb.DataType_Int64,
-				FieldID:  1,
-			},
-		},
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{int64Field, floatField},
 	}
-	assert.NoError(t, FillFieldBySchema(columns, schema))
-	assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
-	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
-	assert.Equal(t, int64(1), columns[0].FieldId)
+
+	// no primary field error
+	_, err := GetPrimaryFieldSchema(schema)
+	assert.Error(t, err)
+
+	int64Field.IsPrimaryKey = true
+	primaryField, err := GetPrimaryFieldSchema(schema)
+	assert.Nil(t, err)
+	assert.Equal(t, schemapb.DataType_Int64, primaryField.DataType)
 }

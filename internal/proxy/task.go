@@ -21,13 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -122,7 +119,7 @@ type BaseInsertTask = msgstream.InsertMsg
 
 type insertTask struct {
 	BaseInsertTask
-	req *milvuspb.InsertRequest
+	// req *milvuspb.InsertRequest
 	Condition
 	ctx context.Context
 
@@ -208,38 +205,7 @@ func (it *insertTask) getChannels() ([]pChan, error) {
 }
 
 func (it *insertTask) OnEnqueue() error {
-	it.BaseInsertTask.InsertRequest.Base = &commonpb.MsgBase{}
 	return nil
-}
-
-func getNumRowsOfScalarField(datas interface{}) uint32 {
-	realTypeDatas := reflect.ValueOf(datas)
-	return uint32(realTypeDatas.Len())
-}
-
-func getNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint32, error) {
-	if dim <= 0 {
-		return 0, errDimLessThanOrEqualToZero(int(dim))
-	}
-	l := len(fDatas)
-	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
-	}
-	return uint32(int(int64(l) / dim)), nil
-}
-
-func getNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint32, error) {
-	if dim <= 0 {
-		return 0, errDimLessThanOrEqualToZero(int(dim))
-	}
-	if dim%8 != 0 {
-		return 0, errDimShouldDivide8(int(dim))
-	}
-	l := len(bDatas)
-	if (8*int64(l))%dim != 0 {
-		return 0, fmt.Errorf("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
-	}
-	return uint32(int((8 * int64(l)) / dim)), nil
 }
 
 func (it *insertTask) checkLengthOfFieldsData() error {
@@ -250,236 +216,62 @@ func (it *insertTask) checkLengthOfFieldsData() error {
 		}
 	}
 
-	if len(it.req.FieldsData) < neededFieldsNum {
-		return errFieldsLessThanNeeded(len(it.req.FieldsData), neededFieldsNum)
+	if len(it.FieldsData) < neededFieldsNum {
+		return errFieldsLessThanNeeded(len(it.FieldsData), neededFieldsNum)
 	}
 
 	return nil
 }
 
-func (it *insertTask) checkRowNums() error {
-	if it.req.NumRows <= 0 {
-		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
-	}
-
-	if err := it.checkLengthOfFieldsData(); err != nil {
-		return err
-	}
-
-	rowNums := it.req.NumRows
-
-	for i, field := range it.req.FieldsData {
-		switch field.Field.(type) {
-		case *schemapb.FieldData_Scalars:
-			scalarField := field.GetScalars()
-			switch scalarField.Data.(type) {
-			case *schemapb.ScalarField_BoolData:
-				fieldNumRows := getNumRowsOfScalarField(scalarField.GetBoolData().Data)
-				if fieldNumRows != rowNums {
-					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
-				}
-			case *schemapb.ScalarField_IntData:
-				fieldNumRows := getNumRowsOfScalarField(scalarField.GetIntData().Data)
-				if fieldNumRows != rowNums {
-					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
-				}
-			case *schemapb.ScalarField_LongData:
-				fieldNumRows := getNumRowsOfScalarField(scalarField.GetLongData().Data)
-				if fieldNumRows != rowNums {
-					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
-				}
-			case *schemapb.ScalarField_FloatData:
-				fieldNumRows := getNumRowsOfScalarField(scalarField.GetFloatData().Data)
-				if fieldNumRows != rowNums {
-					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
-				}
-			case *schemapb.ScalarField_DoubleData:
-				fieldNumRows := getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
-				if fieldNumRows != rowNums {
-					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
-				}
-			case *schemapb.ScalarField_BytesData:
-				return errUnsupportedDType("bytes")
-			case *schemapb.ScalarField_StringData:
-				return errUnsupportedDType("string")
-			case nil:
-				continue
-			default:
-				continue
-			}
-		case *schemapb.FieldData_Vectors:
-			vectorField := field.GetVectors()
-			switch vectorField.Data.(type) {
-			case *schemapb.VectorField_FloatVector:
-				dim := vectorField.GetDim()
-				fieldNumRows, err := getNumRowsOfFloatVectorField(vectorField.GetFloatVector().Data, dim)
-				if err != nil {
-					return err
-				}
-				if fieldNumRows != rowNums {
-					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
-				}
-			case *schemapb.VectorField_BinaryVector:
-				dim := vectorField.GetDim()
-				fieldNumRows, err := getNumRowsOfBinaryVectorField(vectorField.GetBinaryVector(), dim)
-				if err != nil {
-					return err
-				}
-				if fieldNumRows != rowNums {
-					return errNumRowsOfFieldDataMismatchPassed(i, fieldNumRows, rowNums)
-				}
-			case nil:
-				continue
-			default:
-				continue
-			}
-		}
-	}
-
-	return nil
-}
-
-func (it *insertTask) checkFieldAutoIDAndHashPK() error {
+func (it *insertTask) checkPrimaryFieldData() error {
+	rowNums := uint32(it.NRows())
 	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	if it.req.NumRows <= 0 {
-		return errNumRowsLessThanOrEqualToZero(it.req.NumRows)
+	if it.NRows() <= 0 {
+		return errNumRowsLessThanOrEqualToZero(rowNums)
 	}
 
 	if err := it.checkLengthOfFieldsData(); err != nil {
 		return err
 	}
 
-	rowNums := it.req.NumRows
-
-	primaryFieldName := ""
-	autoIDFieldName := ""
-	autoIDLoc := -1
-	primaryLoc := -1
-	fields := it.schema.Fields
-
-	for loc, field := range fields {
-		if field.AutoID {
-			autoIDLoc = loc
-			autoIDFieldName = field.Name
-		}
-		if field.IsPrimaryKey {
-			primaryLoc = loc
-			primaryFieldName = field.Name
-		}
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema)
+	if err != nil {
+		log.Error("get primary field schema failed", zap.String("collection name", it.CollectionName), zap.Any("schema", it.schema), zap.Error(err))
+		return err
 	}
 
-	if primaryLoc < 0 {
-		return fmt.Errorf("primary field is not found")
-	}
-
-	if autoIDLoc >= 0 && autoIDLoc != primaryLoc {
-		return fmt.Errorf("currently auto id field is only supported on primary field")
-	}
-
-	var primaryField *schemapb.FieldData
-	var primaryData []int64
-	for _, field := range it.req.FieldsData {
-		if field.FieldName == autoIDFieldName {
-			return fmt.Errorf("autoID field (%v) does not require data", autoIDFieldName)
+	// get primaryFieldData whether autoID is true or not
+	var primaryFieldData *schemapb.FieldData
+	if !primaryFieldSchema.AutoID {
+		primaryFieldData, err = getPrimaryFieldData(it.GetFieldsData(), primaryFieldSchema)
+		if err != nil {
+			log.Error("get primary field data failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+			return err
 		}
-		if field.FieldName == primaryFieldName {
-			primaryField = field
-		}
-	}
-
-	if primaryField != nil {
-		if primaryField.Type != schemapb.DataType_Int64 {
-			return fmt.Errorf("currently only support DataType Int64 as PrimaryField and Enable autoID")
-		}
-		switch primaryField.Field.(type) {
-		case *schemapb.FieldData_Scalars:
-			scalarField := primaryField.GetScalars()
-			switch scalarField.Data.(type) {
-			case *schemapb.ScalarField_LongData:
-				primaryData = scalarField.GetLongData().Data
-			default:
-				return fmt.Errorf("currently only support DataType Int64 as PrimaryField and Enable autoID")
-			}
-		default:
-			return fmt.Errorf("currently only support DataType Int64 as PrimaryField and Enable autoID")
-		}
-		it.result.IDs.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: primaryData,
-			},
-		}
-	}
-
-	var rowIDBegin UniqueID
-	var rowIDEnd UniqueID
-
-	tr := timerecord.NewTimeRecorder("applyPK")
-	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(rowNums)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan()))
-
-	it.BaseInsertTask.RowIDs = make([]UniqueID, rowNums)
-	for i := rowIDBegin; i < rowIDEnd; i++ {
-		offset := i - rowIDBegin
-		it.BaseInsertTask.RowIDs[offset] = i
-	}
-
-	if autoIDLoc >= 0 {
-		fieldData := schemapb.FieldData{
-			FieldName: primaryFieldName,
-			FieldId:   -1,
-			Type:      schemapb.DataType_Int64,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{
-						LongData: &schemapb.LongArray{
-							Data: it.BaseInsertTask.RowIDs,
-						},
-					},
-				},
-			},
-		}
-
-		// TODO(dragondriver): when we can ignore the order of input fields, use append directly
-		// it.req.FieldsData = append(it.req.FieldsData, &fieldData)
-		it.req.FieldsData = append(it.req.FieldsData, &schemapb.FieldData{})
-		copy(it.req.FieldsData[autoIDLoc+1:], it.req.FieldsData[autoIDLoc:])
-		it.req.FieldsData[autoIDLoc] = &fieldData
-
-		it.result.IDs.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: it.BaseInsertTask.RowIDs,
-			},
-		}
-		it.HashPK(it.BaseInsertTask.RowIDs)
 	} else {
-		it.HashPK(primaryData)
+		// if autoID == true, currently only support autoID for int64 PrimaryField
+		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, it.RowIDs)
+		if err != nil {
+			log.Error("generate primary field data failed when autoID == true", zap.String("collection name", it.CollectionName), zap.Error(err))
+			return err
+		}
+		// if autoID == true, set the primary field data
+		it.FieldsData = append(it.FieldsData, primaryFieldData)
 	}
 
-	sliceIndex := make([]uint32, rowNums)
-	for i := uint32(0); i < rowNums; i++ {
-		sliceIndex[i] = i
+	// parse primaryFieldData to result.IDs, and as returned primary keys
+	it.result.IDs, err = parsePrimaryFieldData2IDs(primaryFieldData)
+	if err != nil {
+		log.Error("parse primary field data to IDs failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+		return err
 	}
-	it.result.SuccIndex = sliceIndex
 
 	return nil
-}
-
-func (it *insertTask) HashPK(pks []int64) {
-	if len(it.HashValues) != 0 {
-		log.Warn("the hashvalues passed through client is not supported now, and will be overwritten")
-	}
-	it.HashValues = make([]uint32, 0, len(pks))
-	for _, pk := range pks {
-		hash, _ := typeutil.Hash32Int64(pk)
-		it.HashValues = append(it.HashValues, hash)
-	}
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
 	defer sp.Finish()
-	it.Base.MsgType = commonpb.MsgType_Insert
-	it.Base.SourceID = Params.ProxyCfg.ProxyID
 
 	it.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -491,275 +283,199 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		Timestamp: it.EndTs(),
 	}
 
-	collectionName := it.BaseInsertTask.CollectionName
+	collectionName := it.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
+		log.Error("valid collection name failed", zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
-	partitionTag := it.BaseInsertTask.PartitionName
+	partitionTag := it.PartitionName
 	if err := validatePartitionTag(partitionTag, true); err != nil {
+		log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
 		return err
 	}
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
-	log.Debug("Proxy Insert PreExecute", zap.Any("collSchema", collSchema))
 	if err != nil {
+		log.Error("get collection schema from global meta cache failed", zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 	it.schema = collSchema
 
-	err = it.checkRowNums()
-	if err != nil {
-		return err
-	}
+	rowNums := uint32(it.NRows())
+	// set insertTask.rowIDs
+	var rowIDBegin UniqueID
+	var rowIDEnd UniqueID
+	tr := timerecord.NewTimeRecorder("applyPK")
+	rowIDBegin, rowIDEnd, _ = it.rowIDAllocator.Alloc(rowNums)
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan()))
 
-	err = it.checkFieldAutoIDAndHashPK()
-	if err != nil {
-		return err
+	it.RowIDs = make([]UniqueID, rowNums)
+	for i := rowIDBegin; i < rowIDEnd; i++ {
+		offset := i - rowIDBegin
+		it.RowIDs[offset] = i
 	}
-
-	it.BaseInsertTask.InsertRequest.Version = internalpb.InsertDataVersion_ColumnBased
-	it.BaseInsertTask.InsertRequest.FieldsData = it.req.GetFieldsData()
-	it.BaseInsertTask.InsertRequest.NumRows = uint64(it.req.GetNumRows())
-	err = typeutil.FillFieldBySchema(it.BaseInsertTask.InsertRequest.GetFieldsData(), collSchema)
-	if err != nil {
-		return err
-	}
-
-	rowNum := it.req.NumRows
+	// set insertTask.timeStamps
+	rowNum := it.NRows()
 	it.Timestamps = make([]uint64, rowNum)
 	for index := range it.Timestamps {
 		it.Timestamps[index] = it.BeginTimestamp
 	}
 
+	// set result.SuccIndex
+	sliceIndex := make([]uint32, rowNums)
+	for i := uint32(0); i < rowNums; i++ {
+		sliceIndex[i] = i
+	}
+	it.result.SuccIndex = sliceIndex
+
+	// check primaryFieldData whether autoID is true or not
+	// set rowIDs as primary data if autoID == true
+	err = it.checkPrimaryFieldData()
+	if err != nil {
+		log.Error("check primary field data and hash primary key failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		return err
+	}
+
+	// set field ID to insert field data
+	err = fillFieldIDBySchema(it.GetFieldsData(), collSchema)
+	if err != nil {
+		log.Error("set fieldID to fieldData failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		return err
+	}
+
+	// check that all field's number rows are equal
+	if err = it.CheckAligned(); err != nil {
+		log.Error("field data is not aligned", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		return err
+	}
+
+	log.Debug("Proxy Insert PreExecute done", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName))
+
 	return nil
 }
 
-func (it *insertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstream.MsgPack) (*msgstream.MsgPack, error) {
-	newPack := &msgstream.MsgPack{
-		BeginTs:        pack.BeginTs,
-		EndTs:          pack.EndTs,
-		StartPositions: pack.StartPositions,
-		EndPositions:   pack.EndPositions,
-		Msgs:           nil,
-	}
-	tsMsgs := pack.Msgs
-	hashKeys := stream.ComputeProduceChannelIndexes(tsMsgs)
-	if len(hashKeys) == 0 {
-		return nil, fmt.Errorf("the length of hashKeys is 0")
-	}
-	reqID := it.Base.MsgID
-	channelCountMap := make(map[int32]uint32)    //   channelID to count
-	channelMaxTSMap := make(map[int32]Timestamp) //  channelID to max Timestamp
-	channelNames, err := it.chMgr.getVChannels(it.GetCollectionID())
-	if err != nil {
-		return nil, err
-	}
-	log.Debug("_assignSemgentID, produceChannels:", zap.Any("Channels", channelNames))
+func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack, error) {
+	threshold := Params.PulsarCfg.MaxMessageSize
 
-	for i, request := range tsMsgs {
-		if request.Type() != commonpb.MsgType_Insert {
-			return nil, fmt.Errorf("msg's must be Insert")
-		}
-		insertRequest, ok := request.(*msgstream.InsertMsg)
-		if !ok {
-			return nil, fmt.Errorf("msg's must be Insert")
-		}
-
-		keys := hashKeys[i]
-		keysLen := len(keys)
-
-		if !insertRequest.CheckAligned() {
-			return nil,
-				fmt.Errorf("the length of timestamps(%d), rowIDs(%d) and num_rows(%d) are not equal",
-					len(insertRequest.GetTimestamps()),
-					len(insertRequest.GetRowIDs()),
-					insertRequest.NRows())
-		}
-		if uint64(keysLen) != insertRequest.NRows() {
-			return nil,
-				fmt.Errorf(
-					"the length of hashValue(%d), num_rows(%d) are not equal",
-					keysLen, insertRequest.NRows())
-		}
-		for idx, channelID := range keys {
-			channelCountMap[channelID]++
-			if _, ok := channelMaxTSMap[channelID]; !ok {
-				channelMaxTSMap[channelID] = typeutil.ZeroTimestamp
-			}
-			ts := insertRequest.Timestamps[idx]
-			if channelMaxTSMap[channelID] < ts {
-				channelMaxTSMap[channelID] = ts
-			}
-		}
+	result := &msgstream.MsgPack{
+		BeginTs: it.BeginTs(),
+		EndTs:   it.EndTs(),
 	}
 
-	reqSegCountMap := make(map[int32]map[UniqueID]uint32)
-	for channelID, count := range channelCountMap {
-		ts, ok := channelMaxTSMap[channelID]
-		if !ok {
-			ts = typeutil.ZeroTimestamp
-			log.Debug("Warning: did not get max Timestamp!")
-		}
+	// generate hash value for every primary key
+	if len(it.HashValues) != 0 {
+		log.Warn("the hashvalues passed through client is not supported now, and will be overwritten")
+	}
+	it.HashValues = typeutil.HashPK2Channels(it.result.IDs, channelNames)
+	// groupedHashKeys represents the dmChannel index
+	channel2RowOffsets := make(map[string][]int)  //   channelName to count
+	channelMaxTSMap := make(map[string]Timestamp) //  channelName to max Timestamp
+
+	// assert len(it.hashValues) < maxInt
+	for offset, channelID := range it.HashValues {
 		channelName := channelNames[channelID]
-		if channelName == "" {
-			return nil, fmt.Errorf("proxy, repack_func, can not found channelName")
+		if _, ok := channel2RowOffsets[channelName]; !ok {
+			channel2RowOffsets[channelName] = []int{}
 		}
-		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
+		channel2RowOffsets[channelName] = append(channel2RowOffsets[channelName], offset)
+
+		if _, ok := channelMaxTSMap[channelName]; !ok {
+			channelMaxTSMap[channelName] = typeutil.ZeroTimestamp
+		}
+		ts := it.Timestamps[offset]
+		if channelMaxTSMap[channelName] < ts {
+			channelMaxTSMap[channelName] = ts
+		}
+	}
+
+	// create empty insert message
+	createInsertMsg := func(segmentID UniqueID, channelName string) *msgstream.InsertMsg {
+		insertReq := internalpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Insert,
+				MsgID:     it.Base.MsgID,
+				Timestamp: it.BeginTimestamp, // entity's timestamp was set to equal it.BeginTimestamp in preExecute()
+				SourceID:  it.Base.SourceID,
+			},
+			CollectionID:   it.CollectionID,
+			PartitionID:    it.PartitionID,
+			CollectionName: it.CollectionName,
+			PartitionName:  it.PartitionName,
+			SegmentID:      segmentID,
+			ShardName:      channelName,
+			Version:        internalpb.InsertDataVersion_ColumnBased,
+		}
+		insertReq.FieldsData = make([]*schemapb.FieldData, len(it.GetFieldsData()))
+
+		insertMsg := &msgstream.InsertMsg{
+			BaseMsg: msgstream.BaseMsg{
+				Ctx: it.TraceCtx(),
+			},
+			InsertRequest: insertReq,
+		}
+
+		return insertMsg
+	}
+
+	// repack the row data corresponding to the offset to insertMsg
+	getInsertMsgsBySegmentID := func(segmentID UniqueID, rowOffsets []int, channelName string, mexMessageSize int) ([]msgstream.TsMsg, error) {
+		repackedMsgs := make([]msgstream.TsMsg, 0)
+		requestSize := 0
+		insertMsg := createInsertMsg(segmentID, channelName)
+		for _, offset := range rowOffsets {
+			curRowMessageSize, err := typeutil.EstimateEntitySize(it.InsertRequest.GetFieldsData(), offset)
+			if err != nil {
+				return nil, err
+			}
+
+			// if insertMsg's size is greater than the threshold, split into multiple insertMsgs
+			if requestSize+curRowMessageSize >= mexMessageSize {
+				repackedMsgs = append(repackedMsgs, insertMsg)
+				insertMsg = createInsertMsg(segmentID, channelName)
+				requestSize = 0
+			}
+
+			typeutil.AppendFieldData(insertMsg.FieldsData, it.GetFieldsData(), int64(offset))
+			insertMsg.HashValues = append(insertMsg.HashValues, it.HashValues[offset])
+			insertMsg.Timestamps = append(insertMsg.Timestamps, it.Timestamps[offset])
+			insertMsg.RowIDs = append(insertMsg.RowIDs, it.RowIDs[offset])
+			insertMsg.NumRows++
+			requestSize += curRowMessageSize
+		}
+		repackedMsgs = append(repackedMsgs, insertMsg)
+
+		return repackedMsgs, nil
+	}
+
+	// get allocated segmentID info for every dmChannel and repack insertMsgs for every segmentID
+	for channelName, rowOffsets := range channel2RowOffsets {
+		assignedSegmentInfos, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, uint32(len(rowOffsets)), channelMaxTSMap[channelName])
 		if err != nil {
-			log.Debug("insertTask.go", zap.Any("MapInfo", mapInfo),
+			log.Error("allocate segmentID for insert data failed",
+				zap.Int64("collectionID", it.CollectionID),
+				zap.String("channel name", channelName),
+				zap.Int("allocate count", len(rowOffsets)),
 				zap.Error(err))
 			return nil, err
 		}
-		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
-		reqSegCountMap[channelID] = mapInfo
-		log.Debug("Proxy", zap.Int64("repackFunc, reqSegCountMap, reqID", reqID), zap.Any("mapinfo", mapInfo))
-	}
 
-	reqSegAccumulateCountMap := make(map[int32][]uint32)
-	reqSegIDMap := make(map[int32][]UniqueID)
-	reqSegAllocateCounter := make(map[int32]uint32)
-
-	for channelID, segInfo := range reqSegCountMap {
-		reqSegAllocateCounter[channelID] = 0
-		keys := make([]UniqueID, len(segInfo))
-		i := 0
-		for key := range segInfo {
-			keys[i] = key
-			i++
-		}
-		sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
-		accumulate := uint32(0)
-		for _, key := range keys {
-			accumulate += segInfo[key]
-			if _, ok := reqSegAccumulateCountMap[channelID]; !ok {
-				reqSegAccumulateCountMap[channelID] = make([]uint32, 0)
+		startPos := 0
+		for segmentID, count := range assignedSegmentInfos {
+			subRowOffsets := rowOffsets[startPos : startPos+int(count)]
+			insertMsgs, err := getInsertMsgsBySegmentID(segmentID, subRowOffsets, channelName, threshold)
+			if err != nil {
+				log.Error("repack insert data to insert msgs failed",
+					zap.Int64("collectionID", it.CollectionID),
+					zap.Error(err))
+				return nil, err
 			}
-			reqSegAccumulateCountMap[channelID] = append(
-				reqSegAccumulateCountMap[channelID],
-				accumulate,
-			)
-			if _, ok := reqSegIDMap[channelID]; !ok {
-				reqSegIDMap[channelID] = make([]UniqueID, 0)
-			}
-			reqSegIDMap[channelID] = append(
-				reqSegIDMap[channelID],
-				key,
-			)
+			result.Msgs = append(result.Msgs, insertMsgs...)
+			startPos += int(count)
 		}
 	}
 
-	var getSegmentID = func(channelID int32) UniqueID {
-		reqSegAllocateCounter[channelID]++
-		cur := reqSegAllocateCounter[channelID]
-		accumulateSlice := reqSegAccumulateCountMap[channelID]
-		segIDSlice := reqSegIDMap[channelID]
-		for index, count := range accumulateSlice {
-			if cur <= count {
-				return segIDSlice[index]
-			}
-		}
-		log.Warn("Can't Found SegmentID", zap.Any("reqSegAllocateCounter", reqSegAllocateCounter))
-		return 0
-	}
-
-	threshold := Params.PulsarCfg.MaxMessageSize
-	// not accurate
-	/* #nosec G103 */
-	getFixedSizeOfInsertMsg := func(msg *msgstream.InsertMsg) int {
-		size := 0
-
-		size += int(unsafe.Sizeof(*msg.Base))
-		size += int(unsafe.Sizeof(msg.DbName))
-		size += int(unsafe.Sizeof(msg.CollectionName))
-		size += int(unsafe.Sizeof(msg.PartitionName))
-		size += int(unsafe.Sizeof(msg.DbID))
-		size += int(unsafe.Sizeof(msg.CollectionID))
-		size += int(unsafe.Sizeof(msg.PartitionID))
-		size += int(unsafe.Sizeof(msg.SegmentID))
-		size += int(unsafe.Sizeof(msg.ShardName))
-		size += int(unsafe.Sizeof(msg.Timestamps))
-		size += int(unsafe.Sizeof(msg.RowIDs))
-		return size
-	}
-
-	sizePerRow, _ := typeutil.EstimateSizePerRecord(it.schema)
-	result := make(map[int32]msgstream.TsMsg)
-	curMsgSizeMap := make(map[int32]int)
-
-	for i, request := range tsMsgs {
-		insertRequest := request.(*msgstream.InsertMsg)
-		keys := hashKeys[i]
-		collectionName := insertRequest.CollectionName
-		collectionID := insertRequest.CollectionID
-		partitionID := insertRequest.PartitionID
-		partitionName := insertRequest.PartitionName
-		proxyID := insertRequest.Base.SourceID
-		for index, key := range keys {
-			ts := insertRequest.Timestamps[index]
-			rowID := insertRequest.RowIDs[index]
-			segmentID := getSegmentID(key)
-			if segmentID == 0 {
-				return nil, fmt.Errorf("get SegmentID failed, segmentID is zero")
-			}
-			_, ok := result[key]
-			if !ok {
-				sliceRequest := internalpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Insert,
-						MsgID:     reqID,
-						Timestamp: ts,
-						SourceID:  proxyID,
-					},
-					CollectionID:   collectionID,
-					PartitionID:    partitionID,
-					CollectionName: collectionName,
-					PartitionName:  partitionName,
-					SegmentID:      segmentID,
-					ShardName:      channelNames[key],
-				}
-
-				sliceRequest.Version = internalpb.InsertDataVersion_ColumnBased
-				sliceRequest.NumRows = 0
-				sliceRequest.FieldsData = make([]*schemapb.FieldData, len(it.BaseInsertTask.InsertRequest.GetFieldsData()))
-
-				insertMsg := &msgstream.InsertMsg{
-					BaseMsg: msgstream.BaseMsg{
-						Ctx: request.TraceCtx(),
-					},
-					InsertRequest: sliceRequest,
-				}
-				result[key] = insertMsg
-				curMsgSizeMap[key] = getFixedSizeOfInsertMsg(insertMsg)
-			}
-
-			curMsg := result[key].(*msgstream.InsertMsg)
-			curMsgSize := curMsgSizeMap[key]
-
-			curMsg.HashValues = append(curMsg.HashValues, insertRequest.HashValues[index])
-			curMsg.Timestamps = append(curMsg.Timestamps, ts)
-			curMsg.RowIDs = append(curMsg.RowIDs, rowID)
-
-			typeutil.AppendFieldData(curMsg.FieldsData, it.BaseInsertTask.InsertRequest.GetFieldsData(), int64(index))
-			curMsg.NumRows++
-			curMsgSize += sizePerRow
-
-			if curMsgSize >= threshold {
-				newPack.Msgs = append(newPack.Msgs, curMsg)
-				delete(result, key)
-				curMsgSize = 0
-			}
-
-			curMsgSizeMap[key] = curMsgSize
-		}
-	}
-	for _, msg := range result {
-		if msg != nil {
-			newPack.Msgs = append(newPack.Msgs, msg)
-		}
-	}
-
-	return newPack, nil
+	return result, nil
 }
 
 func (it *insertTask) Execute(ctx context.Context) error {
@@ -769,7 +485,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
 	defer tr.Elapse("done")
 
-	collectionName := it.BaseInsertTask.CollectionName
+	collectionName := it.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
 		return err
@@ -790,16 +506,6 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.PartitionID = partitionID
 	tr.Record("get collection id & partition id from cache")
 
-	var tsMsg msgstream.TsMsg = &it.BaseInsertTask
-	it.BaseMsg.Ctx = ctx
-	msgPack := msgstream.MsgPack{
-		BeginTs: it.BeginTs(),
-		EndTs:   it.EndTs(),
-		Msgs:    make([]msgstream.TsMsg, 1),
-	}
-
-	msgPack.Msgs[0] = tsMsg
-
 	stream, err := it.chMgr.getDMLStream(collID)
 	if err != nil {
 		err = it.chMgr.createDMLMsgStream(collID)
@@ -817,16 +523,27 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 	tr.Record("get used message stream")
 
-	// Assign SegmentID
-	var pack *msgstream.MsgPack
-	pack, err = it._assignSegmentID(stream, &msgPack)
+	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
+		log.Error("get vChannels failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
+		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		it.result.Status.Reason = err.Error()
 		return err
 	}
+
+	// assign segmentID for insert data and repack data by segmentID
+	msgPack, err := it.assignSegmentID(channelNames)
+	if err != nil {
+		log.Error("assign segmentID and repack insert data failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
+		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		it.result.Status.Reason = err.Error()
+		return err
+	}
+	log.Debug("assign segmentID for insert data success", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.String("collection name", it.CollectionName))
 	tr.Record("assign segment id")
 
 	tr.Record("sendInsertMsg")
-	err = stream.Produce(pack)
+	err = stream.Produce(msgPack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
@@ -834,6 +551,8 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 	sendMsgDur := tr.Record("send insert request to message stream")
 	metrics.ProxySendInsertReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(sendMsgDur.Milliseconds()))
+
+	log.Debug("Proxy Insert Execute done", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName))
 
 	return nil
 }
@@ -4549,8 +4268,6 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	}
 	dt.result.DeleteCnt = int64(len(primaryKeys))
 
-	dt.HashPK(primaryKeys)
-
 	rowNum := len(primaryKeys)
 	dt.Timestamps = make([]uint64, rowNum)
 	for index := range dt.Timestamps {
@@ -4563,14 +4280,6 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(dt.ctx, "Proxy-Delete-Execute")
 	defer sp.Finish()
-
-	var tsMsg msgstream.TsMsg = &dt.BaseDeleteTask
-	msgPack := msgstream.MsgPack{
-		BeginTs: dt.BeginTs(),
-		EndTs:   dt.EndTs(),
-		Msgs:    make([]msgstream.TsMsg, 1),
-	}
-	msgPack.Msgs[0] = tsMsg
 
 	collID := dt.DeleteRequest.CollectionID
 	stream, err := dt.chMgr.getDMLStream(collID)
@@ -4588,64 +4297,66 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 			return err
 		}
 	}
-	result := make(map[int32]msgstream.TsMsg)
-	hashKeys := stream.ComputeProduceChannelIndexes(msgPack.Msgs)
-	// For each msg, assign PK to different message buckets by hash value of PK.
-	for i, request := range msgPack.Msgs {
-		deleteRequest := request.(*msgstream.DeleteMsg)
-		keys := hashKeys[i]
-		collectionName := deleteRequest.CollectionName
-		collectionID := deleteRequest.CollectionID
-		partitionID := deleteRequest.PartitionID
-		partitionName := deleteRequest.PartitionName
-		proxyID := deleteRequest.Base.SourceID
-		for index, key := range keys {
-			ts := deleteRequest.Timestamps[index]
-			pks := deleteRequest.PrimaryKeys[index]
-			_, ok := result[key]
-			if !ok {
-				sliceRequest := internalpb.DeleteRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_Delete,
-						MsgID:     dt.Base.MsgID,
-						Timestamp: ts,
-						SourceID:  proxyID,
-					},
-					CollectionID:   collectionID,
-					PartitionID:    partitionID,
-					CollectionName: collectionName,
-					PartitionName:  partitionName,
-				}
-				deleteMsg := &msgstream.DeleteMsg{
-					BaseMsg: msgstream.BaseMsg{
-						Ctx: ctx,
-					},
-					DeleteRequest: sliceRequest,
-				}
-				result[key] = deleteMsg
+
+	// hash primary keys to channels
+	channelNames, err := dt.chMgr.getVChannels(collID)
+	if err != nil {
+		log.Error("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
+		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		dt.result.Status.Reason = err.Error()
+		return err
+	}
+	dt.HashValues = typeutil.HashPK2Channels(dt.result.IDs, channelNames)
+
+	// repack delete msg by dmChannel
+	result := make(map[uint32]msgstream.TsMsg)
+	collectionName := dt.CollectionName
+	collectionID := dt.CollectionID
+	partitionID := dt.PartitionID
+	partitionName := dt.PartitionName
+	proxyID := dt.Base.SourceID
+	for index, key := range dt.HashValues {
+		ts := dt.Timestamps[index]
+		_, ok := result[key]
+		if !ok {
+			sliceRequest := internalpb.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Delete,
+					MsgID:     dt.Base.MsgID,
+					Timestamp: ts,
+					SourceID:  proxyID,
+				},
+				CollectionID:   collectionID,
+				PartitionID:    partitionID,
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
 			}
-			curMsg := result[key].(*msgstream.DeleteMsg)
-			curMsg.HashValues = append(curMsg.HashValues, deleteRequest.HashValues[index])
-			curMsg.Timestamps = append(curMsg.Timestamps, ts)
-			curMsg.PrimaryKeys = append(curMsg.PrimaryKeys, pks)
+			deleteMsg := &msgstream.DeleteMsg{
+				BaseMsg: msgstream.BaseMsg{
+					Ctx: ctx,
+				},
+				DeleteRequest: sliceRequest,
+			}
+			result[key] = deleteMsg
 		}
+		curMsg := result[key].(*msgstream.DeleteMsg)
+		curMsg.HashValues = append(curMsg.HashValues, dt.HashValues[index])
+		curMsg.Timestamps = append(curMsg.Timestamps, dt.Timestamps[index])
+		curMsg.PrimaryKeys = append(curMsg.PrimaryKeys, dt.PrimaryKeys[index])
 	}
 
-	newPack := &msgstream.MsgPack{
-		BeginTs:        msgPack.BeginTs,
-		EndTs:          msgPack.EndTs,
-		StartPositions: msgPack.StartPositions,
-		EndPositions:   msgPack.EndPositions,
-		Msgs:           make([]msgstream.TsMsg, 0),
+	// send delete request to log broker
+	msgPack := &msgstream.MsgPack{
+		BeginTs: dt.BeginTs(),
+		EndTs:   dt.EndTs(),
 	}
-
 	for _, msg := range result {
 		if msg != nil {
-			newPack.Msgs = append(newPack.Msgs, msg)
+			msgPack.Msgs = append(msgPack.Msgs, msg)
 		}
 	}
 
-	err = stream.Produce(newPack)
+	err = stream.Produce(msgPack)
 	if err != nil {
 		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		dt.result.Status.Reason = err.Error()
@@ -4656,17 +4367,6 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 func (dt *deleteTask) PostExecute(ctx context.Context) error {
 	return nil
-}
-
-func (dt *deleteTask) HashPK(pks []int64) {
-	if len(dt.HashValues) != 0 {
-		log.Warn("the hashvalues passed through client is not supported now, and will be overwritten")
-	}
-	dt.HashValues = make([]uint32, 0, len(pks))
-	for _, pk := range pks {
-		hash, _ := typeutil.Hash32Int64(pk)
-		dt.HashValues = append(dt.HashValues, hash)
-	}
 }
 
 // CreateAliasTask contains task information of CreateAlias

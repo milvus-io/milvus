@@ -19,9 +19,11 @@ package msgstream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
@@ -189,9 +191,32 @@ func (it *InsertMsg) NRows() uint64 {
 	return it.InsertRequest.GetNumRows()
 }
 
-func (it *InsertMsg) CheckAligned() bool {
-	return len(it.GetRowIDs()) == len(it.GetTimestamps()) &&
-		uint64(len(it.GetRowIDs())) == it.NRows()
+func (it *InsertMsg) CheckAligned() error {
+	numRowsOfFieldDataMismatch := func(fieldName string, fieldNumRows, passedNumRows uint64) error {
+		return fmt.Errorf("the num_rows(%d) of %sth field is not equal to passed NumRows(%d)", fieldNumRows, fieldName, passedNumRows)
+	}
+	rowNums := it.NRows()
+	if it.IsColumnBased() {
+		for _, field := range it.FieldsData {
+			fieldNumRows, err := funcutil.GetNumRowOfFieldData(field)
+			if err != nil {
+				return err
+			}
+			if fieldNumRows != rowNums {
+				return numRowsOfFieldDataMismatch(field.FieldName, fieldNumRows, rowNums)
+			}
+		}
+	}
+
+	if len(it.GetRowIDs()) != len(it.GetTimestamps()) {
+		return fmt.Errorf("the num_rows(%d) of rowIDs  is not equal to the num_rows(%d) of timestamps", len(it.GetRowIDs()), len(it.GetTimestamps()))
+	}
+
+	if uint64(len(it.GetRowIDs())) != it.NRows() {
+		return fmt.Errorf("the num_rows(%d) of rowIDs  is not equal to passed NumRows(%d)", len(it.GetRowIDs()), it.NRows())
+	}
+
+	return nil
 }
 
 func (it *InsertMsg) rowBasedIndexRequest(index int) internalpb.InsertRequest {

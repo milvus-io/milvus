@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -264,4 +265,82 @@ func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (stri
 		}
 	}
 	return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
+}
+
+func getNumRowsOfScalarField(datas interface{}) uint64 {
+	realTypeDatas := reflect.ValueOf(datas)
+	return uint64(realTypeDatas.Len())
+}
+
+func getNumRowsOfFloatVectorField(fDatas []float32, dim int64) (uint64, error) {
+	if dim <= 0 {
+		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+	}
+	l := len(fDatas)
+	if int64(l)%dim != 0 {
+		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+	}
+	return uint64(int64(l) / dim), nil
+}
+
+func getNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint64, error) {
+	if dim <= 0 {
+		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
+	}
+	if dim%8 != 0 {
+		return 0, fmt.Errorf("dim(%d) should divide 8", dim)
+	}
+	l := len(bDatas)
+	if (8*int64(l))%dim != 0 {
+		return 0, fmt.Errorf("the num(%d) of all bits should divide the dim(%d)", 8*l, dim)
+	}
+	return uint64((8 * int64(l)) / dim), nil
+}
+
+// GetNumRowOfFieldData return num rows of the field data
+func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
+	var fieldNumRows uint64
+	var err error
+	switch fieldType := fieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := fieldData.GetScalars()
+		switch scalarType := scalarField.Data.(type) {
+		case *schemapb.ScalarField_BoolData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetBoolData().Data)
+		case *schemapb.ScalarField_IntData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetIntData().Data)
+		case *schemapb.ScalarField_LongData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetLongData().Data)
+		case *schemapb.ScalarField_FloatData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetFloatData().Data)
+		case *schemapb.ScalarField_DoubleData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetDoubleData().Data)
+		case *schemapb.ScalarField_StringData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetStringData().Data)
+		default:
+			return 0, fmt.Errorf("%s is not supported now", scalarType)
+		}
+	case *schemapb.FieldData_Vectors:
+		vectorField := fieldData.GetVectors()
+		switch vectorFieldType := vectorField.Data.(type) {
+		case *schemapb.VectorField_FloatVector:
+			dim := vectorField.GetDim()
+			fieldNumRows, err = getNumRowsOfFloatVectorField(vectorField.GetFloatVector().Data, dim)
+			if err != nil {
+				return 0, err
+			}
+		case *schemapb.VectorField_BinaryVector:
+			dim := vectorField.GetDim()
+			fieldNumRows, err = getNumRowsOfBinaryVectorField(vectorField.GetBinaryVector(), dim)
+			if err != nil {
+				return 0, err
+			}
+		default:
+			return 0, fmt.Errorf("%s is not supported now", vectorFieldType)
+		}
+	default:
+		return 0, fmt.Errorf("%s is not supported now", fieldType)
+	}
+
+	return fieldNumRows, nil
 }

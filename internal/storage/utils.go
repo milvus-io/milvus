@@ -618,6 +618,16 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			fieldData.Data = append(fieldData.Data, srcData...)
 
 			idata.Data[field.FieldID] = fieldData
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
+			srcData := srcFields[field.FieldID].GetScalars().GetStringData().GetData()
+
+			fieldData := &StringFieldData{
+				NumRows: []int64{int64(msg.NumRows)},
+				Data:    make([]string, 0, len(srcData)),
+			}
+
+			fieldData.Data = append(fieldData.Data, srcData...)
+			idata.Data[field.FieldID] = fieldData
 		}
 	}
 
@@ -812,7 +822,7 @@ func MergeInsertData(datas ...*InsertData) *InsertData {
 }
 
 // TODO: string type.
-func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData) ([]int64, error) {
+func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData) (FieldData, error) {
 	helper, err := typeutil.CreateSchemaHelper(collSchema)
 	if err != nil {
 		log.Error("failed to create schema helper", zap.Error(err))
@@ -831,13 +841,21 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 		return nil, errors.New("no primary field found in insert msg")
 	}
 
-	realPfData, ok := pfData.(*Int64FieldData)
+	var realPfData FieldData
+	switch pf.DataType {
+	case schemapb.DataType_Int64:
+		realPfData, ok = pfData.(*Int64FieldData)
+	case schemapb.DataType_VarChar:
+		realPfData, ok = pfData.(*StringFieldData)
+	default:
+		//TODO
+	}
 	if !ok {
-		log.Warn("primary field not in int64 format", zap.Int64("fieldID", pf.FieldID))
-		return nil, errors.New("primary field not in int64 format")
+		log.Warn("primary field not in Int64 or VarChar format", zap.Int64("fieldID", pf.FieldID))
+		return nil, errors.New("primary field not in Int64 or VarChar format")
 	}
 
-	return realPfData.Data, nil
+	return realPfData, nil
 }
 
 func boolFieldDataToPbBytes(field *BoolFieldData) ([]byte, error) {

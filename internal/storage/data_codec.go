@@ -360,7 +360,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				return nil, nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*DoubleFieldData).GetMemorySize()))
-		case schemapb.DataType_String:
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			for _, singleString := range singleData.(*StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
 				if err != nil {
@@ -416,10 +416,9 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		writer.Close()
 
 		// stats fields
-		switch field.DataType {
-		case schemapb.DataType_Int64:
+		if field.GetIsPrimaryKey() {
 			statsWriter := &StatsWriter{}
-			err = statsWriter.StatsInt64(field.FieldID, field.IsPrimaryKey, singleData.(*Int64FieldData).Data)
+			err = statsWriter.generatePrimaryKeyStats(field.FieldID, field.DataType, singleData)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -621,7 +620,7 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 				totalLength += length
 				doubleFieldData.NumRows = append(doubleFieldData.NumRows, int64(length))
 				resultData.Data[fieldID] = doubleFieldData
-			case schemapb.DataType_String:
+			case schemapb.DataType_String, schemapb.DataType_VarChar:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &StringFieldData{}
 				}
