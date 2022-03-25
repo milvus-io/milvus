@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -27,7 +29,33 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type customKV struct {
+	kv.MockMetaKV
+}
+
 func TestImportManager_NewImportManager(t *testing.T) {
+	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	mockKv := &kv.MockMetaKV{}
+	mockKv.InMemKv = make(map[string]string)
+	ti1 := &datapb.ImportTaskInfo{
+		Id: 100,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportPending,
+		},
+	}
+	ti2 := &datapb.ImportTaskInfo{
+		Id: 200,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportPersisted,
+		},
+	}
+	taskInfo1, err := proto.Marshal(ti1)
+	assert.NoError(t, err)
+	taskInfo2, err := proto.Marshal(ti2)
+	assert.NoError(t, err)
+	mockKv.SaveWithLease(BuildImportTaskKey(1), "value", 1)
+	mockKv.SaveWithLease(BuildImportTaskKey(2), string(taskInfo1), 2)
+	mockKv.SaveWithLease(BuildImportTaskKey(3), string(taskInfo2), 3)
 	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
@@ -35,12 +63,16 @@ func TestImportManager_NewImportManager(t *testing.T) {
 			},
 		}
 	}
-	mgr := newImportManager(context.TODO(), nil, fn)
+	mgr := newImportManager(context.TODO(), mockKv, fn)
 	assert.NotNil(t, mgr)
+	mgr.init()
 }
 
 func TestImportManager_ImportJob(t *testing.T) {
-	mgr := newImportManager(context.TODO(), nil, nil)
+	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	mockKv := &kv.MockMetaKV{}
+	mockKv.InMemKv = make(map[string]string)
+	mgr := newImportManager(context.TODO(), mockKv, nil)
 	resp := mgr.importJob(nil)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
@@ -75,12 +107,12 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}
 	}
 
-	mgr = newImportManager(context.TODO(), nil, fn)
+	mgr = newImportManager(context.TODO(), mockKv, fn)
 	resp = mgr.importJob(rowReq)
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
-	mgr = newImportManager(context.TODO(), nil, fn)
+	mgr = newImportManager(context.TODO(), mockKv, fn)
 	resp = mgr.importJob(colReq)
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
@@ -93,12 +125,12 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}
 	}
 
-	mgr = newImportManager(context.TODO(), nil, fn)
+	mgr = newImportManager(context.TODO(), mockKv, fn)
 	resp = mgr.importJob(rowReq)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
 
-	mgr = newImportManager(context.TODO(), nil, fn)
+	mgr = newImportManager(context.TODO(), mockKv, fn)
 	resp = mgr.importJob(colReq)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
@@ -120,13 +152,16 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}
 	}
 
-	mgr = newImportManager(context.TODO(), nil, fn)
+	mgr = newImportManager(context.TODO(), mockKv, fn)
 	resp = mgr.importJob(rowReq)
 	assert.Equal(t, len(rowReq.Files)-2, len(mgr.pendingTasks))
 	assert.Equal(t, 2, len(mgr.workingTasks))
 }
 
 func TestImportManager_TaskState(t *testing.T) {
+	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	mockKv := &kv.MockMetaKV{}
+	mockKv.InMemKv = make(map[string]string)
 	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
@@ -142,7 +177,7 @@ func TestImportManager_TaskState(t *testing.T) {
 		Files:          []string{"f1", "f2", "f3"},
 	}
 
-	mgr := newImportManager(context.TODO(), nil, fn)
+	mgr := newImportManager(context.TODO(), mockKv, fn)
 	mgr.importJob(rowReq)
 
 	state := &rootcoordpb.ImportResult{
@@ -155,6 +190,16 @@ func TestImportManager_TaskState(t *testing.T) {
 		TaskId:   1,
 		RowCount: 1000,
 		State:    commonpb.ImportState_ImportCompleted,
+		Infos: []*commonpb.KeyValuePair{
+			{
+				Key:   "key1",
+				Value: "value1",
+			},
+			{
+				Key:   "failed_reason",
+				Value: "some_reason",
+			},
+		},
 	}
 	err = mgr.updateTaskState(state)
 	assert.Nil(t, err)

@@ -816,13 +816,53 @@ func TestEtcdKV_Load(te *testing.T) {
 		}
 
 		for k, v := range tests {
+			// SaveWithIgnoreLease must be used when the key already exists.
+			err = etcdKV.SaveWithIgnoreLease(k, v)
+			assert.Error(t, err)
+
 			err = etcdKV.SaveWithLease(k, v, leaseID)
 			assert.NoError(t, err)
 
 			err = etcdKV.SaveWithLease(k, v, clientv3.LeaseID(999))
 			assert.Error(t, err)
 		}
+	})
 
+	te.Run("Etcd Lease Ignore", func(t *testing.T) {
+		rootPath := "/etcd/test/root/lease_ignore"
+		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+
+		defer etcdKV.Close()
+		defer etcdKV.RemoveWithPrefix("")
+
+		tests := map[string]string{
+			"a/b":   "v1",
+			"a/b/c": "v2",
+			"x":     "v3",
+		}
+
+		for k, v := range tests {
+			leaseID, err := etcdKV.Grant(1)
+			assert.NoError(t, err)
+
+			err = etcdKV.SaveWithLease(k, v, leaseID)
+			assert.NoError(t, err)
+
+			err = etcdKV.SaveWithIgnoreLease(k, "updated_"+v)
+			assert.NoError(t, err)
+
+			// Record should be updated correctly.
+			value, err := etcdKV.Load(k)
+			assert.NoError(t, err)
+			assert.Equal(t, "updated_"+v, value)
+
+			// Let the lease expire. 3 seconds should be pretty safe.
+			time.Sleep(3 * time.Second)
+
+			// Updated record should still expire with lease.
+			_, err = etcdKV.Load(k)
+			assert.Error(t, err)
+		}
 	})
 
 	te.Run("Etcd Lease Bytes", func(t *testing.T) {
@@ -850,7 +890,6 @@ func TestEtcdKV_Load(te *testing.T) {
 			err = etcdKV.SaveBytesWithLease(k, v, clientv3.LeaseID(999))
 			assert.Error(t, err)
 		}
-
 	})
 }
 

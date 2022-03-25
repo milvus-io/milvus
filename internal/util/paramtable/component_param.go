@@ -336,28 +336,19 @@ type rootCoordConfig struct {
 	MaxPartitionNum             int64
 	MinSegmentSizeToEnableIndex int64
 
+	// --- ETCD Path ---
+	ImportTaskSubPath string
+
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
 	p.Base = base
-
-	p.initDmlChannelNum()
-	p.initMaxPartitionNum()
-	p.initMinSegmentSizeToEnableIndex()
-}
-
-func (p *rootCoordConfig) initDmlChannelNum() {
 	p.DmlChannelNum = p.Base.ParseInt64WithDefault("rootCoord.dmlChannelNum", 256)
-}
-
-func (p *rootCoordConfig) initMaxPartitionNum() {
 	p.MaxPartitionNum = p.Base.ParseInt64WithDefault("rootCoord.maxPartitionNum", 4096)
-}
-
-func (p *rootCoordConfig) initMinSegmentSizeToEnableIndex() {
 	p.MinSegmentSizeToEnableIndex = p.Base.ParseInt64WithDefault("rootCoord.minSegmentSizeToEnableIndex", 1024)
+	p.ImportTaskSubPath = "importtask"
 }
 
 ///////////////////////////////////////////////////////////////////////////////

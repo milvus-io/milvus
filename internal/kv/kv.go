@@ -76,6 +76,7 @@ type MetaKv interface {
 	WatchWithPrefix(key string) clientv3.WatchChan
 	WatchWithRevision(key string, revision int64) clientv3.WatchChan
 	SaveWithLease(key, value string, id clientv3.LeaseID) error
+	SaveWithIgnoreLease(key, value string) error
 	Grant(ttl int64) (id clientv3.LeaseID, err error)
 	KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
 	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error
