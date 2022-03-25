@@ -17,7 +17,7 @@
 #include <knowhere/index/structured_index_simple/StructuredIndex.h>
 
 namespace milvus::scalar {
-using Index = milvus::knowhere::Index;
+using Index = knowhere::Index;
 using IndexPtr = std::unique_ptr<Index>;
 using BinarySet = knowhere::BinarySet;
 using Config = knowhere::Config;

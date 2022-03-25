@@ -52,7 +52,7 @@ ScalarIndexCreator<T>::Load(const knowhere::BinarySet& binary_set) {
 // not sure that the pointer of a golang bool array acts like other types.
 template <>
 inline void
-ScalarIndexCreator<bool>::Build(const milvus::knowhere::DatasetPtr& dataset) {
+ScalarIndexCreator<bool>::Build(const knowhere::DatasetPtr& dataset) {
     auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
     auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
     proto::schema::BoolArray arr;
@@ -71,7 +71,7 @@ inline ScalarIndexCreator<std::string>::ScalarIndexCreator(const char* type_para
 
 template <>
 inline void
-ScalarIndexCreator<std::string>::Build(const milvus::knowhere::DatasetPtr& dataset) {
+ScalarIndexCreator<std::string>::Build(const knowhere::DatasetPtr& dataset) {
     auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
     auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
     proto::schema::StringArray arr;

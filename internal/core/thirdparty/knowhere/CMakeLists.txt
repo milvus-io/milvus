@@ -11,8 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION v1.0.1 )
-set( KNOWHERE_SOURCE_MD5 "0ac8a0802f94c2370f13a40527c57ced" )
+set( KNOWHERE_VERSION v1.1.0 )
+set( KNOWHERE_SOURCE_MD5 "9c326d3ba94184f4f646903f1ad36d49" )
 
 if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
     set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
@@ -34,7 +34,7 @@ macro(build_knowhere)
 
     set(KNOWHERE_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
-            -DCMAKE_BUILD_TYPE={BUILD_TYPE}
+            -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}
             )
 

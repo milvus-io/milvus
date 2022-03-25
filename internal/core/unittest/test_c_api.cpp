@@ -34,7 +34,7 @@ namespace chrono = std::chrono;
 
 using namespace milvus;
 using namespace milvus::segcore;
-using namespace milvus::knowhere;
+using namespace knowhere;
 
 namespace {
 const int DIM = 16;
@@ -187,10 +187,10 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
 
 VecIndexPtr
 generate_index(
-    void* raw_data, milvus::knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, std::string index_type) {
+    void* raw_data, knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, std::string index_type) {
     auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, knowhere::IndexMode::MODE_CPU);
 
-    auto database = milvus::knowhere::GenDataset(N, dim, raw_data);
+    auto database = knowhere::GenDataset(N, dim, raw_data);
     indexing->Train(database, conf);
     indexing->AddWithoutIds(database, conf);
     EXPECT_EQ(indexing->Count(), N);
@@ -1005,17 +1005,17 @@ TEST(CApiTest, LoadIndexInfo) {
 
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = std::make_shared<milvus::knowhere::IVFPQ>();
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 4},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto indexing = std::make_shared<knowhere::IVFPQ>();
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 4},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
-    auto database = milvus::knowhere::GenDataset(N, DIM, raw_data.data());
+    auto database = knowhere::GenDataset(N, DIM, raw_data.data());
     indexing->Train(database, conf);
     indexing->AddWithoutIds(database, conf);
     EXPECT_EQ(indexing->Count(), N);
@@ -1048,17 +1048,17 @@ TEST(CApiTest, LoadIndex_Search) {
     auto N = 1024 * 1024;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = std::make_shared<milvus::knowhere::IVFPQ>();
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 4},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto indexing = std::make_shared<knowhere::IVFPQ>();
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 4},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
-    auto database = milvus::knowhere::GenDataset(N, DIM, raw_data.data());
+    auto database = knowhere::GenDataset(N, DIM, raw_data.data());
     indexing->Train(database, conf);
     indexing->AddWithoutIds(database, conf);
 
@@ -1073,18 +1073,18 @@ TEST(CApiTest, LoadIndex_Search) {
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = "IVF_PQ";
     index_params["index_mode"] = "CPU";
-    auto mode = milvus::knowhere::IndexMode::MODE_CPU;
+    auto mode = knowhere::IndexMode::MODE_CPU;
     load_index_info.index =
-        milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
+        knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
     load_index_info.index->Load(binary_set);
 
     // search
-    auto query_dataset = milvus::knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
+    auto query_dataset = knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
 
     auto result = indexing->Query(query_dataset, conf, nullptr);
 
-    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
     // for (int i = 0; i < std::min(num_query * K, 100); ++i) {
     //    std::cout << ids[i] << "->" << dis[i] << std::endl;
     //}
@@ -1150,21 +1150,21 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -1269,21 +1269,21 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -1405,22 +1405,22 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -1556,22 +1556,22 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -1691,22 +1691,22 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -1835,22 +1835,22 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -1971,23 +1971,23 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{
-        {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, TOPK},
-        {milvus::knowhere::IndexParams::nprobe, 10},
-        {milvus::knowhere::IndexParams::nlist, 100},
-        {milvus::knowhere::IndexParams::m, 4},
-        {milvus::knowhere::IndexParams::nbits, 8},
-        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+    auto conf = knowhere::Config{
+        {knowhere::meta::DIM, DIM},
+        {knowhere::meta::TOPK, TOPK},
+        {knowhere::IndexParams::nprobe, 10},
+        {knowhere::IndexParams::nlist, 100},
+        {knowhere::IndexParams::m, 4},
+        {knowhere::IndexParams::nbits, 8},
+        {knowhere::Metric::TYPE, knowhere::Metric::JACCARD},
     };
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2121,23 +2121,23 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     ASSERT_TRUE(res_before_load_index.error_code == Success) << res_before_load_index.error_msg;
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{
-        {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, TOPK},
-        {milvus::knowhere::IndexParams::nprobe, 10},
-        {milvus::knowhere::IndexParams::nlist, 100},
-        {milvus::knowhere::IndexParams::m, 4},
-        {milvus::knowhere::IndexParams::nbits, 8},
-        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+    auto conf = knowhere::Config{
+        {knowhere::meta::DIM, DIM},
+        {knowhere::meta::TOPK, TOPK},
+        {knowhere::IndexParams::nprobe, 10},
+        {knowhere::IndexParams::nlist, 100},
+        {knowhere::IndexParams::m, 4},
+        {knowhere::IndexParams::nbits, 8},
+        {knowhere::Metric::TYPE, knowhere::Metric::JACCARD},
     };
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2257,23 +2257,23 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{
-        {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, TOPK},
-        {milvus::knowhere::IndexParams::nprobe, 10},
-        {milvus::knowhere::IndexParams::nlist, 100},
-        {milvus::knowhere::IndexParams::m, 4},
-        {milvus::knowhere::IndexParams::nbits, 8},
-        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+    auto conf = knowhere::Config{
+        {knowhere::meta::DIM, DIM},
+        {knowhere::meta::TOPK, TOPK},
+        {knowhere::IndexParams::nprobe, 10},
+        {knowhere::IndexParams::nlist, 100},
+        {knowhere::IndexParams::m, 4},
+        {knowhere::IndexParams::nbits, 8},
+        {knowhere::Metric::TYPE, knowhere::Metric::JACCARD},
     };
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2406,23 +2406,23 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     assert(res_before_load_index.error_code == Success);
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{
-        {milvus::knowhere::meta::DIM, DIM},
-        {milvus::knowhere::meta::TOPK, TOPK},
-        {milvus::knowhere::IndexParams::nprobe, 10},
-        {milvus::knowhere::IndexParams::nlist, 100},
-        {milvus::knowhere::IndexParams::m, 4},
-        {milvus::knowhere::IndexParams::nbits, 8},
-        {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::JACCARD},
+    auto conf = knowhere::Config{
+        {knowhere::meta::DIM, DIM},
+        {knowhere::meta::TOPK, TOPK},
+        {knowhere::IndexParams::nprobe, 10},
+        {knowhere::IndexParams::nlist, 100},
+        {knowhere::IndexParams::m, 4},
+        {knowhere::IndexParams::nbits, 8},
+        {knowhere::Metric::TYPE, knowhere::Metric::JACCARD},
     };
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_BIN_IVFFLAT);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2585,22 +2585,22 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2625,11 +2625,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     auto load_index_info = (LoadIndexInfo*)c_load_index_info;
-    auto query_dataset2 = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset2 = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto fuck2 = load_index_info->index;
     auto result_on_index2 = fuck2->Query(query_dataset2, conf, nullptr);
-    auto ids2 = result_on_index2->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis2 = result_on_index2->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids2 = result_on_index2->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis2 = result_on_index2->Get<float*>(knowhere::meta::DISTANCE);
     int i = 1 + 1;
     ++i;
 
@@ -2844,22 +2844,22 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     Timestamp time = 10000000;
 
     // load index to segment
-    auto conf = milvus::knowhere::Config{{milvus::knowhere::meta::DIM, DIM},
-                                         {milvus::knowhere::meta::TOPK, TOPK},
-                                         {milvus::knowhere::IndexParams::nlist, 100},
-                                         {milvus::knowhere::IndexParams::nprobe, 10},
-                                         {milvus::knowhere::IndexParams::m, 4},
-                                         {milvus::knowhere::IndexParams::nbits, 8},
-                                         {milvus::knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
-                                         {milvus::knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::IndexParams::m, 4},
+                                 {knowhere::IndexParams::nbits, 8},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
 
     auto indexing = generate_index(vec_col.data(), conf, DIM, TOPK, N, IndexEnum::INDEX_FAISS_IVFPQ);
 
     // gen query dataset
-    auto query_dataset = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto result_on_index = indexing->Query(query_dataset, conf, nullptr);
-    auto ids = result_on_index->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result_on_index->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids = result_on_index->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result_on_index->Get<float*>(knowhere::meta::DISTANCE);
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
     std::vector<float> vec_dis;
     for (int j = 0; j < TOPK * num_queries; ++j) {
@@ -2884,11 +2884,11 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
     auto load_index_info = (LoadIndexInfo*)c_load_index_info;
-    auto query_dataset2 = milvus::knowhere::GenDataset(num_queries, DIM, query_ptr);
+    auto query_dataset2 = knowhere::GenDataset(num_queries, DIM, query_ptr);
     auto fuck2 = load_index_info->index;
     auto result_on_index2 = fuck2->Query(query_dataset2, conf, nullptr);
-    auto ids2 = result_on_index2->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis2 = result_on_index2->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto ids2 = result_on_index2->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis2 = result_on_index2->Get<float*>(knowhere::meta::DISTANCE);
     int i = 1 + 1;
     ++i;
 

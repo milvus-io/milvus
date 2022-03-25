@@ -80,7 +80,7 @@ TEST(Sealed, without_predicate) {
                                  {knowhere::meta::TOPK, topK},
                                  {knowhere::IndexParams::nlist, 100},
                                  {knowhere::IndexParams::nprobe, 10},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
 
     auto database = knowhere::GenDataset(N, dim, vec_col.data() + 1000 * dim);
@@ -94,8 +94,8 @@ TEST(Sealed, without_predicate) {
 
     auto result = indexing->Query(query_dataset, conf, nullptr);
 
-    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);     // for comparison
-    auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);  // for comparison
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);     // for comparison
+    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);  // for comparison
     std::vector<int64_t> vec_ids(ids, ids + topK * num_queries);
     std::vector<float> vec_dis(dis, dis + topK * num_queries);
 
@@ -180,7 +180,7 @@ TEST(Sealed, with_predicate) {
                                  {knowhere::meta::TOPK, topK},
                                  {knowhere::IndexParams::nlist, 100},
                                  {knowhere::IndexParams::nprobe, 10},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
 
     auto database = knowhere::GenDataset(N, dim, vec_col.data());
@@ -273,7 +273,7 @@ TEST(Sealed, LoadFieldData) {
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
     vec_info.index = indexing;
-    vec_info.index_params["metric_type"] = milvus::knowhere::Metric::L2;
+    vec_info.index_params["metric_type"] = knowhere::Metric::L2;
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(), 1);

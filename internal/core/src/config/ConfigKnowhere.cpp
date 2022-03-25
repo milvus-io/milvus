@@ -22,19 +22,17 @@
 #include "log/Log.h"
 #include "knowhere/archive/KnowhereConfig.h"
 
-namespace milvus {
-namespace config {
+namespace milvus::config {
 
 std::once_flag init_knowhere_once_;
 
 void
 KnowhereInitImpl() {
     auto init = []() {
-        namespace eg = milvus::engine;
-        eg::KnowhereConfig::SetBlasThreshold(16384);
-        eg::KnowhereConfig::SetEarlyStopThreshold(0);
-        eg::KnowhereConfig::SetLogHandler();
-        eg::KnowhereConfig::SetStatisticsLevel(0);
+        knowhere::KnowhereConfig::SetBlasThreshold(16384);
+        knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
+        knowhere::KnowhereConfig::SetLogHandler();
+        knowhere::KnowhereConfig::SetStatisticsLevel(0);
         el::Configurations el_conf;
         el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
     };
@@ -44,25 +42,24 @@ KnowhereInitImpl() {
 
 std::string
 KnowhereSetSimdType(const char* value) {
-    milvus::engine::KnowhereConfig::SimdType simd_type;
+    knowhere::KnowhereConfig::SimdType simd_type;
     if (strcmp(value, "auto") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::AUTO;
+        simd_type = knowhere::KnowhereConfig::SimdType::AUTO;
     } else if (strcmp(value, "avx512") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::AVX512;
+        simd_type = knowhere::KnowhereConfig::SimdType::AVX512;
     } else if (strcmp(value, "avx2") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::AVX2;
+        simd_type = knowhere::KnowhereConfig::SimdType::AVX2;
     } else if (strcmp(value, "avx") == 0 || strcmp(value, "sse4_2") == 0) {
-        simd_type = milvus::engine::KnowhereConfig::SimdType::SSE4_2;
+        simd_type = knowhere::KnowhereConfig::SimdType::SSE4_2;
     } else {
         PanicInfo("invalid SIMD type: " + std::string(value));
     }
     try {
-        return milvus::engine::KnowhereConfig::SetSimdType(simd_type);
+        return knowhere::KnowhereConfig::SetSimdType(simd_type);
     } catch (std::exception& e) {
         LOG_SERVER_ERROR_ << e.what();
         PanicInfo(e.what());
     }
 }
 
-}  // namespace config
-}  // namespace milvus
+}  // namespace milvus::config

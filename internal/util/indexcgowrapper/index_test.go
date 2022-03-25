@@ -72,8 +72,8 @@ func generateFloatVectorTestCases() []vecTestCase {
 		{IndexFaissIVFSQ8, IP, false, schemapb.DataType_FloatVector},
 		//{IndexFaissIVFSQ8H, L2, false, schemapb.DataType_FloatVector}, // TODO: enable gpu
 		//{IndexFaissIVFSQ8H, IP, false, schemapb.DataType_FloatVector},
-		{IndexNsg, L2, false, schemapb.DataType_FloatVector},
-		{IndexNsg, IP, false, schemapb.DataType_FloatVector},
+		//{IndexNsg, L2, false, schemapb.DataType_FloatVector},
+		//{IndexNsg, IP, false, schemapb.DataType_FloatVector},
 		{IndexHNSW, L2, false, schemapb.DataType_FloatVector},
 		{IndexHNSW, IP, false, schemapb.DataType_FloatVector},
 		{IndexRHNSWFlat, L2, false, schemapb.DataType_FloatVector},
@@ -84,10 +84,10 @@ func generateFloatVectorTestCases() []vecTestCase {
 		{IndexRHNSWSQ, IP, false, schemapb.DataType_FloatVector},
 		{IndexANNOY, L2, false, schemapb.DataType_FloatVector},
 		{IndexANNOY, IP, false, schemapb.DataType_FloatVector},
-		{IndexNGTPANNG, L2, false, schemapb.DataType_FloatVector},
-		{IndexNGTPANNG, IP, false, schemapb.DataType_FloatVector},
-		{IndexNGTONNG, L2, false, schemapb.DataType_FloatVector},
-		{IndexNGTONNG, IP, false, schemapb.DataType_FloatVector},
+		//{IndexNGTPANNG, L2, false, schemapb.DataType_FloatVector},
+		//{IndexNGTPANNG, IP, false, schemapb.DataType_FloatVector},
+		//{IndexNGTONNG, L2, false, schemapb.DataType_FloatVector},
+		//{IndexNGTONNG, IP, false, schemapb.DataType_FloatVector},
 	}
 }
 

@@ -83,10 +83,10 @@ SearchOnSealed(const Schema& schema,
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
 
         auto conf = search_info.search_params_;
-        conf[milvus::knowhere::meta::TOPK] = search_info.topk_;
-        conf[milvus::knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
+        conf[knowhere::meta::TOPK] = search_info.topk_;
+        conf[knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
         auto index_type = field_indexing->indexing_->index_type();
-        auto adapter = milvus::knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
+        auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
         AssertInfo(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()),
                    "[SearchOnSealed]Search params check failed");
         return field_indexing->indexing_->Query(ds, conf, bitset);

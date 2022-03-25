@@ -28,13 +28,13 @@
 constexpr int64_t NB = 1000;
 namespace indexcgo = milvus::proto::indexcgo;
 
-using Param = std::pair<milvus::knowhere::IndexType, milvus::knowhere::MetricType>;
+using Param = std::pair<knowhere::IndexType, knowhere::MetricType>;
 
 class IndexWrapperTest : public ::testing::TestWithParam<Param> {
  protected:
     void
     SetUp() override {
-        milvus::engine::KnowhereConfig::SetStatisticsLevel(3);
+        knowhere::KnowhereConfig::SetStatisticsLevel(3);
 
         auto param = GetParam();
         index_type = param.first;
@@ -42,24 +42,28 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
         std::tie(type_params, index_params) = generate_params(index_type, metric_type);
 
         std::map<std::string, bool> is_binary_map = {
-            {milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP, false},
-            {milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, false},
-            {milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, false},
-            {milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, false},
-            {milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, true},
-            {milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, true},
+            {knowhere::IndexEnum::INDEX_FAISS_IDMAP, false},
+            {knowhere::IndexEnum::INDEX_FAISS_IVFPQ, false},
+            {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, false},
+            {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, false},
+            {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, true},
+            {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, true},
 #ifdef MILVUS_SUPPORT_SPTAG
-            {milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, false},
-            {milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, false},
+            {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, false},
+            {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, false},
 #endif
-            {milvus::knowhere::IndexEnum::INDEX_HNSW, false},
-            {milvus::knowhere::IndexEnum::INDEX_ANNOY, false},
-            {milvus::knowhere::IndexEnum::INDEX_RHNSWFlat, false},
-            {milvus::knowhere::IndexEnum::INDEX_RHNSWPQ, false},
-            {milvus::knowhere::IndexEnum::INDEX_RHNSWSQ, false},
-            {milvus::knowhere::IndexEnum::INDEX_NGTPANNG, false},
-            {milvus::knowhere::IndexEnum::INDEX_NGTONNG, false},
-            {milvus::knowhere::IndexEnum::INDEX_NSG, false},
+            {knowhere::IndexEnum::INDEX_HNSW, false},
+            {knowhere::IndexEnum::INDEX_ANNOY, false},
+            {knowhere::IndexEnum::INDEX_RHNSWFlat, false},
+            {knowhere::IndexEnum::INDEX_RHNSWPQ, false},
+            {knowhere::IndexEnum::INDEX_RHNSWSQ, false},
+#ifdef MILVUS_SUPPORT_NGT
+            {knowhere::IndexEnum::INDEX_NGTPANNG, false},
+            {knowhere::IndexEnum::INDEX_NGTONNG, false},
+#endif
+#ifdef MILVUS_SUPPORT_NSG
+            {knowhere::IndexEnum::INDEX_NSG, false},
+#endif
         };
 
         is_binary = is_binary_map[index_type];
@@ -73,14 +77,14 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
         auto dataset = GenDataset(NB, metric_type, is_binary);
         if (!is_binary) {
             xb_data = dataset.get_col<float>(0);
-            xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+            xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
             xq_data = dataset.get_col<float>(0);
-            xq_dataset = milvus::knowhere::GenDataset(NQ, DIM, xq_data.data());
+            xq_dataset = knowhere::GenDataset(NQ, DIM, xq_data.data());
         } else {
             xb_bin_data = dataset.get_col<uint8_t>(0);
-            xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_bin_data.data());
+            xb_dataset = knowhere::GenDataset(NB, DIM, xb_bin_data.data());
             xq_bin_data = dataset.get_col<uint8_t>(0);
-            xq_dataset = milvus::knowhere::GenDataset(NQ, DIM, xq_bin_data.data());
+            xq_dataset = knowhere::GenDataset(NQ, DIM, xq_bin_data.data());
         }
     }
 
@@ -94,59 +98,59 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     indexcgo::IndexParams index_params;
     std::string type_params_str, index_params_str;
     bool is_binary;
-    milvus::knowhere::DatasetPtr xb_dataset;
+    knowhere::DatasetPtr xb_dataset;
     std::vector<float> xb_data;
     std::vector<uint8_t> xb_bin_data;
-    std::vector<milvus::knowhere::IDType> ids;
-    milvus::knowhere::DatasetPtr xq_dataset;
+    std::vector<knowhere::IDType> ids;
+    knowhere::DatasetPtr xq_dataset;
     std::vector<float> xq_data;
     std::vector<uint8_t> xq_bin_data;
 };
 
 TEST(PQ, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
+    auto metric_type = knowhere::Metric::L2;
     auto conf = generate_conf(index_type, metric_type);
-    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->Train(xb_dataset, conf));
     ASSERT_NO_THROW(index->AddWithoutIds(xb_dataset, conf));
 }
 
 TEST(IVFFLATNM, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    auto metric_type = knowhere::Metric::L2;
     auto conf = generate_conf(index_type, metric_type);
-    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->Train(xb_dataset, conf));
     ASSERT_NO_THROW(index->AddWithoutIds(xb_dataset, conf));
 }
 
 TEST(IVFFLATNM, Query) {
-    milvus::engine::KnowhereConfig::SetStatisticsLevel(3);
+    knowhere::KnowhereConfig::SetStatisticsLevel(3);
 
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    auto metric_type = knowhere::Metric::L2;
     auto conf = generate_conf(index_type, metric_type);
-    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->Train(xb_dataset, conf));
     ASSERT_NO_THROW(index->AddWithoutIds(xb_dataset, conf));
     auto bs = index->Serialize(conf);
-    auto bptr = std::make_shared<milvus::knowhere::Binary>();
+    auto bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)xb_data.data(), [&](uint8_t*) {});
     bptr->size = DIM * NB * sizeof(float);
     bs.Append(RAW_DATA, bptr);
     index->Load(bs);
     auto xq_data = dataset.get_col<float>(0);
-    auto xq_dataset = milvus::knowhere::GenDataset(NQ, DIM, xq_data.data());
+    auto xq_dataset = knowhere::GenDataset(NQ, DIM, xq_data.data());
     auto result = index->Query(xq_dataset, conf, nullptr);
 
     index->UpdateIndexSize();
@@ -157,36 +161,38 @@ TEST(IVFFLATNM, Query) {
     index->ClearStatistics();
 }
 
+#ifdef MILVUS_SUPPORT_NSG
 TEST(NSG, Query) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_NSG;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_NSG;
+    auto metric_type = knowhere::Metric::L2;
     auto conf = generate_conf(index_type, metric_type);
-    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     index->BuildAll(xb_dataset, conf);
     auto bs = index->Serialize(conf);
-    auto bptr = std::make_shared<milvus::knowhere::Binary>();
+    auto bptr = std::make_shared<knowhere::Binary>();
     bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)xb_data.data(), [&](uint8_t*) {});
     bptr->size = DIM * NB * sizeof(float);
     bs.Append(RAW_DATA, bptr);
     index->Load(bs);
     auto xq_data = dataset.get_col<float>(0);
-    auto xq_dataset = milvus::knowhere::GenDataset(NQ, DIM, xq_data.data());
+    auto xq_dataset = knowhere::GenDataset(NQ, DIM, xq_data.data());
     auto result = index->Query(xq_dataset, conf, nullptr);
 }
+#endif
 
 TEST(BINFLAT, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::JACCARD;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+    auto metric_type = knowhere::Metric::JACCARD;
     auto conf = generate_conf(index_type, metric_type);
-    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, true);
     auto xb_data = dataset.get_col<uint8_t>(0);
-    std::vector<milvus::knowhere::IDType> ids(NB, 0);
+    std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->BuildAll(xb_dataset, conf));
 }
 
@@ -203,30 +209,30 @@ print_query_result(const std::unique_ptr<milvus::indexbuilder::VecIndexCreator::
 
 // test for: https://github.com/milvus-io/milvus/issues/6569
 TEST(BinIVFFlat, Build_and_Query) {
-    milvus::engine::KnowhereConfig::SetStatisticsLevel(2);
+    knowhere::KnowhereConfig::SetStatisticsLevel(2);
 
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::TANIMOTO;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+    auto metric_type = knowhere::Metric::TANIMOTO;
     auto conf = generate_conf(index_type, metric_type);
     auto topk = 10;
-    conf[milvus::knowhere::meta::TOPK] = topk;
-    conf[milvus::knowhere::IndexParams::nlist] = 1;
-    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    conf[knowhere::meta::TOPK] = topk;
+    conf[knowhere::IndexParams::nlist] = 1;
+    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto nb = 2;
     auto dim = 128;
     auto nq = 10;
     auto dataset = GenDataset(std::max(nq, nb), metric_type, true);
     auto xb_data = dataset.get_col<uint8_t>(0);
-    std::vector<milvus::knowhere::IDType> ids(nb, 0);
+    std::vector<knowhere::IDType> ids(nb, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDataset(nb, dim, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(nb, dim, xb_data.data());
     index->BuildAll(xb_dataset, conf);
     auto xq_data = dataset.get_col<float>(0);
-    auto xq_dataset = milvus::knowhere::GenDataset(nq, dim, xq_data.data());
+    auto xq_dataset = knowhere::GenDataset(nq, dim, xq_data.data());
     auto result = index->Query(xq_dataset, conf, nullptr);
 
-    auto hit_ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto distances = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
+    auto hit_ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto distances = result->Get<float*>(knowhere::meta::DISTANCE);
 
     auto query_res = std::make_unique<milvus::indexbuilder::VecIndexCreator::QueryResult>();
     query_res->nq = nq;
@@ -247,21 +253,21 @@ TEST(BinIVFFlat, Build_and_Query) {
 }
 
 TEST(BINIDMAP, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
-    auto metric_type = milvus::knowhere::Metric::JACCARD;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
+    auto metric_type = knowhere::Metric::JACCARD;
     auto conf = generate_conf(index_type, metric_type);
-    auto index = milvus::knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
+    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, true);
     auto xb_data = dataset.get_col<uint8_t>(0);
-    std::vector<milvus::knowhere::IDType> ids(NB, 0);
+    std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->BuildAll(xb_dataset, conf));
 }
 
 TEST(PQWrapper, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
+    auto metric_type = knowhere::Metric::L2;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -273,15 +279,15 @@ TEST(PQWrapper, Build) {
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
 }
 
 TEST(IVFFLATNMWrapper, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    auto metric_type = knowhere::Metric::L2;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -293,7 +299,7 @@ TEST(IVFFLATNMWrapper, Build) {
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
@@ -301,8 +307,8 @@ TEST(IVFFLATNMWrapper, Build) {
 
 TEST(IVFFLATNMWrapper, Codec) {
     int64_t flat_nb = 100000;
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::L2;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    auto metric_type = knowhere::Metric::L2;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -314,7 +320,7 @@ TEST(IVFFLATNMWrapper, Codec) {
     assert(ok);
     auto dataset = GenDataset(flat_nb, metric_type, false);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(flat_nb, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(flat_nb, DIM, xb_data.data());
     auto index_wrapper =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index_wrapper->BuildWithoutIds(xb_dataset));
@@ -335,8 +341,8 @@ TEST(IVFFLATNMWrapper, Codec) {
 }
 
 TEST(BinFlatWrapper, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    auto metric_type = milvus::knowhere::Metric::JACCARD;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
+    auto metric_type = knowhere::Metric::JACCARD;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -348,9 +354,9 @@ TEST(BinFlatWrapper, Build) {
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, true);
     auto xb_data = dataset.get_col<uint8_t>(0);
-    std::vector<milvus::knowhere::IDType> ids(NB, 0);
+    std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
@@ -358,8 +364,8 @@ TEST(BinFlatWrapper, Build) {
 }
 
 TEST(BinIdMapWrapper, Build) {
-    auto index_type = milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
-    auto metric_type = milvus::knowhere::Metric::JACCARD;
+    auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
+    auto metric_type = knowhere::Metric::JACCARD;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -371,9 +377,9 @@ TEST(BinIdMapWrapper, Build) {
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, true);
     auto xb_data = dataset.get_col<uint8_t>(0);
-    std::vector<milvus::knowhere::IDType> ids(NB, 0);
+    std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
     ASSERT_NO_THROW(index->BuildWithoutIds(xb_dataset));
@@ -384,25 +390,30 @@ INSTANTIATE_TEST_CASE_P(
     IndexTypeParameters,
     IndexWrapperTest,
     ::testing::Values(
-        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, milvus::knowhere::Metric::JACCARD),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, milvus::knowhere::Metric::TANIMOTO),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, milvus::knowhere::Metric::JACCARD),
+        std::pair(knowhere::IndexEnum::INDEX_FAISS_IDMAP, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFPQ, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::Metric::JACCARD),
+        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::Metric::TANIMOTO),
+        std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, knowhere::Metric::JACCARD),
 #ifdef MILVUS_SUPPORT_SPTAG
-        std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, milvus::knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, knowhere::Metric::L2),
 #endif
-        std::pair(milvus::knowhere::IndexEnum::INDEX_HNSW, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_ANNOY, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWFlat, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWPQ, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_RHNSWSQ, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_NGTPANNG, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_NGTONNG, milvus::knowhere::Metric::L2),
-        std::pair(milvus::knowhere::IndexEnum::INDEX_NSG, milvus::knowhere::Metric::L2)));
+        std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_ANNOY, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_RHNSWFlat, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_RHNSWPQ, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_RHNSWSQ, knowhere::Metric::L2)
+#ifdef MILVUS_SUPPORT_NGT
+        std::pair(knowhere::IndexEnum::INDEX_NGTPANNG, knowhere::Metric::L2),
+        std::pair(knowhere::IndexEnum::INDEX_NGTONNG, knowhere::Metric::L2),
+#endif
+#ifdef MILVUS_SUPPORT_NSG
+        std::pair(knowhere::IndexEnum::INDEX_NSG, knowhere::Metric::L2)
+#endif
+        ));
 
 TEST_P(IndexWrapperTest, Constructor) {
     auto index =
