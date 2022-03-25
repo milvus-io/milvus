@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"math/rand"
 	"testing"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -50,7 +50,7 @@ type mockDataCM struct {
 }
 
 func (kv *mockDataCM) MultiRead(keys []string) ([][]byte, error) {
-	stats := &storage.Int64Stats{
+	stats := &storage.PrimaryKeyStats{
 		FieldID: common.RowIDField,
 		Min:     0,
 		Max:     10,
@@ -65,7 +65,7 @@ type mockPkfilterMergeError struct {
 }
 
 func (kv *mockPkfilterMergeError) MultiRead(keys []string) ([][]byte, error) {
-	stats := &storage.Int64Stats{
+	stats := &storage.PrimaryKeyStats{
 		FieldID: common.RowIDField,
 		Min:     0,
 		Max:     10,
@@ -170,7 +170,9 @@ func TestSegmentReplica_getCollectionAndPartitionID(te *testing.T) {
 }
 
 func TestSegmentReplica(t *testing.T) {
-	rc := &RootCoordFactory{}
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
 	collID := UniqueID(1)
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
 	defer cm.RemoveWithPrefix("")
@@ -252,7 +254,9 @@ func TestSegmentReplica(t *testing.T) {
 }
 
 func TestSegmentReplica_InterfaceMethod(t *testing.T) {
-	rc := &RootCoordFactory{}
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
 	defer cm.RemoveWithPrefix("")
 
@@ -268,17 +272,20 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 			{false, 1, 2, "invalid input collection with replica collection"},
 		}
 
+		primaryKeyData := &storage.Int64FieldData{
+			Data: []int64{9},
+		}
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				replica, err := newReplica(context.TODO(), rc, cm, test.replicaCollID)
 				require.NoError(t, err)
 				if test.isvalid {
-					replica.addFlushedSegmentWithPKs(100, test.incollID, 10, "a", 1, []int64{9})
+					replica.addFlushedSegmentWithPKs(100, test.incollID, 10, "a", 1, primaryKeyData)
 
 					assert.True(t, replica.hasSegment(100, true))
 					assert.False(t, replica.hasSegment(100, false))
 				} else {
-					replica.addFlushedSegmentWithPKs(100, test.incollID, 10, "a", 1, []int64{9})
+					replica.addFlushedSegmentWithPKs(100, test.incollID, 10, "a", 1, primaryKeyData)
 					assert.False(t, replica.hasSegment(100, true))
 					assert.False(t, replica.hasSegment(100, false))
 				}
@@ -572,6 +579,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 				}
 			})
 		}
+		rc.setCollectionID(1)
 	})
 
 	t.Run("Test listAllSegmentIDs", func(t *testing.T) {
@@ -628,8 +636,11 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		sr, err := newReplica(context.Background(), rc, cm, 1)
 		assert.Nil(t, err)
 
-		sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, []UniqueID{1})
-		sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, []UniqueID{1})
+		primaryKeyData := &storage.Int64FieldData{
+			Data: []UniqueID{1},
+		}
+		sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, primaryKeyData)
+		sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, primaryKeyData)
 		require.True(t, sr.hasSegment(1, true))
 		require.True(t, sr.hasSegment(2, true))
 
@@ -648,7 +659,9 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 }
 func TestInnerFunctionSegment(t *testing.T) {
-	rc := &RootCoordFactory{}
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
 	collID := UniqueID(1)
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
 	defer cm.RemoveWithPrefix("")
@@ -747,8 +760,6 @@ func TestInnerFunctionSegment(t *testing.T) {
 func TestSegmentReplica_UpdatePKRange(t *testing.T) {
 	seg := &Segment{
 		pkFilter: bloom.NewWithEstimates(100000, 0.005),
-		maxPK:    math.MinInt64,
-		minPK:    math.MaxInt64,
 	}
 
 	cases := make([]int64, 0, 100)
@@ -757,10 +768,16 @@ func TestSegmentReplica_UpdatePKRange(t *testing.T) {
 	}
 	buf := make([]byte, 8)
 	for _, c := range cases {
-		seg.updatePKRange([]int64{c})
+		seg.updatePKRange(&storage.Int64FieldData{
+			Data: []int64{c},
+		})
 
-		assert.LessOrEqual(t, seg.minPK, c)
-		assert.GreaterOrEqual(t, seg.maxPK, c)
+		pk := &Int64PrimaryKey{
+			Value: c,
+		}
+
+		assert.Equal(t, true, seg.minPK.LE(pk))
+		assert.Equal(t, true, seg.maxPK.GE(pk))
 
 		common.Endian.PutUint64(buf, uint64(c))
 		assert.True(t, seg.pkFilter.Test(buf))
@@ -768,7 +785,9 @@ func TestSegmentReplica_UpdatePKRange(t *testing.T) {
 }
 
 func TestReplica_UpdatePKRange(t *testing.T) {
-	rc := &RootCoordFactory{}
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
 	collID := UniqueID(1)
 	partID := UniqueID(2)
 	chanName := "insert-02"
@@ -797,14 +816,19 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 	}
 	buf := make([]byte, 8)
 	for _, c := range cases {
-		replica.updateSegmentPKRange(1, []int64{c}) // new segment
-		replica.updateSegmentPKRange(2, []int64{c}) // normal segment
-		replica.updateSegmentPKRange(3, []int64{c}) // non-exist segment
+		replica.updateSegmentPKRange(1, &storage.Int64FieldData{Data: []int64{c}}) // new segment
+		replica.updateSegmentPKRange(2, &storage.Int64FieldData{Data: []int64{c}}) // normal segment
+		replica.updateSegmentPKRange(3, &storage.Int64FieldData{Data: []int64{c}}) // non-exist segment
 
-		assert.LessOrEqual(t, segNew.minPK, c)
-		assert.GreaterOrEqual(t, segNew.maxPK, c)
-		assert.LessOrEqual(t, segNormal.minPK, c)
-		assert.GreaterOrEqual(t, segNormal.maxPK, c)
+		pk := &Int64PrimaryKey{
+			Value: c,
+		}
+
+		assert.Equal(t, true, segNew.minPK.LE(pk))
+		assert.Equal(t, true, segNew.maxPK.GE(pk))
+
+		assert.Equal(t, true, segNormal.minPK.LE(pk))
+		assert.Equal(t, true, segNormal.maxPK.GE(pk))
 
 		common.Endian.PutUint64(buf, uint64(c))
 		assert.True(t, segNew.pkFilter.Test(buf))

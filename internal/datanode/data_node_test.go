@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -68,7 +69,7 @@ func TestDataNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node := newIDLEDataNodeMock(ctx)
+	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
@@ -141,7 +142,7 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test FlushSegments", func(t *testing.T) {
 		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
 
-		node1 := newIDLEDataNodeMock(context.TODO())
+		node1 := newIDLEDataNodeMock(context.TODO(), schemapb.DataType_Int64)
 		node1.SetEtcdClient(etcdCli)
 		err = node1.Init()
 		assert.Nil(t, err)
@@ -326,7 +327,7 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test BackGroundGC", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		node := newIDLEDataNodeMock(ctx)
+		node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 
 		vchanNameCh := make(chan string)
 		node.clearSignal = vchanNameCh
@@ -355,7 +356,7 @@ func TestDataNode(t *testing.T) {
 
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	node := newIDLEDataNodeMock(ctx)
+	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()

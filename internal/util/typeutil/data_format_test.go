@@ -24,13 +24,75 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
+	fieldSchema := []*schemapb.FieldSchema{
+		{
+			FieldID:  100,
+			Name:     "bool_field",
+			DataType: schemapb.DataType_Bool,
+		},
+		{
+			FieldID:  101,
+			Name:     "int8_field",
+			DataType: schemapb.DataType_Int8,
+		},
+		{
+			FieldID:  102,
+			Name:     "int16_field",
+			DataType: schemapb.DataType_Int16,
+		},
+		{
+			FieldID:  103,
+			Name:     "int32_field",
+			DataType: schemapb.DataType_Int32,
+		},
+		{
+			FieldID:  104,
+			Name:     "int64_field",
+			DataType: schemapb.DataType_Int64,
+		},
+		{
+			FieldID:  105,
+			Name:     "float32_field",
+			DataType: schemapb.DataType_Float,
+		},
+		{
+			FieldID:  106,
+			Name:     "float64_field",
+			DataType: schemapb.DataType_Double,
+		},
+		{
+			FieldID:  107,
+			Name:     "float_vector_field",
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "1",
+				},
+			},
+		},
+		{
+			FieldID:  108,
+			Name:     "binary_vector_field",
+			DataType: schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "8",
+				},
+			},
+		},
+	}
+
 	columns := []*schemapb.FieldData{
 		{
-			Type: schemapb.DataType_Bool,
+			FieldId: 100,
+			Type:    schemapb.DataType_Bool,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_BoolData{
@@ -42,7 +104,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_Int8,
+			FieldId: 101,
+			Type:    schemapb.DataType_Int8,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_IntData{
@@ -54,7 +117,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_Int16,
+			FieldId: 102,
+			Type:    schemapb.DataType_Int16,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_IntData{
@@ -66,7 +130,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_Int32,
+			FieldId: 103,
+			Type:    schemapb.DataType_Int32,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_IntData{
@@ -78,7 +143,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_Int64,
+			FieldId: 104,
+			Type:    schemapb.DataType_Int64,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_LongData{
@@ -90,7 +156,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_Float,
+			FieldId: 105,
+			Type:    schemapb.DataType_Float,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_FloatData{
@@ -102,7 +169,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_Double,
+			FieldId: 106,
+			Type:    schemapb.DataType_Double,
 			Field: &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_DoubleData{
@@ -114,7 +182,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_FloatVector,
+			FieldId: 107,
+			Type:    schemapb.DataType_FloatVector,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
 					Dim: 1,
@@ -127,7 +196,8 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 		{
-			Type: schemapb.DataType_BinaryVector,
+			FieldId: 108,
+			Type:    schemapb.DataType_BinaryVector,
 			Field: &schemapb.FieldData_Vectors{
 				Vectors: &schemapb.VectorField{
 					Dim: 8,
@@ -138,7 +208,7 @@ func TestTransferColumnBasedDataToRowBasedData(t *testing.T) {
 			},
 		},
 	}
-	rows, err := TransferColumnBasedDataToRowBasedData(columns)
+	rows, err := TransferColumnBasedDataToRowBasedData(&schemapb.CollectionSchema{Fields: fieldSchema}, columns)
 	assert.NoError(t, err)
 	assert.Equal(t, 3, len(rows))
 	if common.Endian == binary.LittleEndian {

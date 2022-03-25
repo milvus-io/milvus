@@ -395,6 +395,99 @@ func newSimpleMockMsgStreamFactory() *simpleMockMsgStreamFactory {
 	return &simpleMockMsgStreamFactory{}
 }
 
+func generateFieldData(dataType schemapb.DataType, fieldName string, fieldID int64, numRows int) *schemapb.FieldData {
+	fieldData := &schemapb.FieldData{
+		Type:      dataType,
+		FieldName: fieldName,
+		FieldId:   fieldID,
+	}
+	switch dataType {
+	case schemapb.DataType_Bool:
+		fieldData.FieldName = testBoolField
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{
+						Data: generateBoolArray(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Int32:
+		fieldData.FieldName = testInt32Field
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: generateInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Int64:
+		fieldData.FieldName = testInt64Field
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: generateInt64Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Float:
+		fieldData.FieldName = testFloatField
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: generateFloat32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Double:
+		fieldData.FieldName = testDoubleField
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: generateFloat64Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_VarChar:
+		//TODO::
+	case schemapb.DataType_FloatVector:
+		fieldData.FieldName = testFloatVecField
+		fieldData.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(testVecDim),
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: generateFloatVectors(numRows, testVecDim),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_BinaryVector:
+		fieldData.FieldName = testBinaryVecField
+		fieldData.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(testVecDim),
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: generateBinaryVectors(numRows, testVecDim),
+				},
+			},
+		}
+	default:
+		//TODO::
+	}
+
+	return fieldData
+}
+
 func generateBoolArray(numRows int) []bool {
 	ret := make([]bool, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -435,6 +528,14 @@ func generateInt64Array(numRows int) []int64 {
 	return ret
 }
 
+func generateUint64Array(numRows int) []uint64 {
+	ret := make([]uint64, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, rand.Uint64())
+	}
+	return ret
+}
+
 func generateFloat32Array(numRows int) []float32 {
 	ret := make([]float32, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -470,14 +571,23 @@ func generateBinaryVectors(numRows, dim int) []byte {
 	return ret
 }
 
-func newScalarFieldData(dType schemapb.DataType, fieldName string, numRows int) *schemapb.FieldData {
+func generateVarCharArray(numRows int, maxLen int) []string {
+	ret := make([]string, numRows)
+	for i := 0; i < numRows; i++ {
+		ret[i] = funcutil.RandomString(rand.Intn(maxLen))
+	}
+
+	return ret
+}
+
+func newScalarFieldData(fieldSchema *schemapb.FieldSchema, fieldName string, numRows int) *schemapb.FieldData {
 	ret := &schemapb.FieldData{
-		Type:      dType,
+		Type:      fieldSchema.DataType,
 		FieldName: fieldName,
 		Field:     nil,
 	}
 
-	switch dType {
+	switch fieldSchema.DataType {
 	case schemapb.DataType_Bool:
 		ret.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
@@ -544,6 +654,16 @@ func newScalarFieldData(dType schemapb.DataType, fieldName string, numRows int) 
 				Data: &schemapb.ScalarField_DoubleData{
 					DoubleData: &schemapb.DoubleArray{
 						Data: generateFloat64Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_VarChar:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: generateVarCharArray(numRows, testMaxVarCharLength),
 					},
 				},
 			},

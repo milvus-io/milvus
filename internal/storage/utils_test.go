@@ -1423,7 +1423,7 @@ func TestGetPkFromInsertData(t *testing.T) {
 	}
 	d, err := GetPkFromInsertData(pfSchema, realInt64Data)
 	assert.NoError(t, err)
-	assert.Equal(t, []int64{1, 2, 3}, d)
+	assert.Equal(t, []int64{1, 2, 3}, d.(*Int64FieldData).Data)
 }
 
 func Test_boolFieldDataToBytes(t *testing.T) {

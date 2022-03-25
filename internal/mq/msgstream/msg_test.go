@@ -191,14 +191,26 @@ func TestInsertMsg_CheckAligned(t *testing.T) {
 			Version:    internalpb.InsertDataVersion_RowBased,
 		},
 	}
-	assert.True(t, msg1.CheckAligned())
+	msg1.InsertRequest.NumRows = 1
+	assert.NoError(t, msg1.CheckAligned())
 	msg1.InsertRequest.RowData = nil
 	msg1.InsertRequest.FieldsData = []*schemapb.FieldData{
-		{},
+		{
+			Type: schemapb.DataType_Int64,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: []int64{1},
+						},
+					},
+				},
+			},
+		},
 	}
-	msg1.InsertRequest.NumRows = 1
+
 	msg1.Version = internalpb.InsertDataVersion_ColumnBased
-	assert.True(t, msg1.CheckAligned())
+	assert.NoError(t, msg1.CheckAligned())
 }
 
 func TestInsertMsg_IndexMsg(t *testing.T) {

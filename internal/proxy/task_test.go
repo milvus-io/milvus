@@ -51,6 +51,20 @@ import (
 
 // TODO(dragondriver): add more test cases
 
+const (
+	maxTestStringLen     = 100
+	testBoolField        = "bool"
+	testInt32Field       = "int32"
+	testInt64Field       = "int64"
+	testFloatField       = "float"
+	testDoubleField      = "double"
+	testStringField      = "stringField"
+	testFloatVecField    = "fvec"
+	testBinaryVecField   = "bvec"
+	testVecDim           = 128
+	testMaxVarCharLength = 100
+)
+
 func constructCollectionSchema(
 	int64Field, floatVecField string,
 	dim int,
@@ -90,6 +104,36 @@ func constructCollectionSchema(
 			pk,
 			fVec,
 		},
+	}
+}
+
+func constructCollectionSchemaByDataType(collectionName string, fieldName2DataType map[string]schemapb.DataType, primaryFieldName string, autoID bool) *schemapb.CollectionSchema {
+	fieldsSchema := make([]*schemapb.FieldSchema, 0)
+
+	for fieldName, dataType := range fieldName2DataType {
+		fieldSchema := &schemapb.FieldSchema{
+			Name:     fieldName,
+			DataType: dataType,
+		}
+		if dataType == schemapb.DataType_FloatVector || dataType == schemapb.DataType_BinaryVector {
+			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: strconv.Itoa(testVecDim),
+				},
+			}
+		}
+		if fieldName == primaryFieldName {
+			fieldSchema.IsPrimaryKey = true
+			fieldSchema.AutoID = autoID
+		}
+
+		fieldsSchema = append(fieldsSchema, fieldSchema)
+	}
+
+	return &schemapb.CollectionSchema{
+		Name:   collectionName,
+		Fields: fieldsSchema,
 	}
 }
 
@@ -297,91 +341,6 @@ func constructSearchRequest(
 	}
 }
 
-func TestGetNumRowsOfScalarField(t *testing.T) {
-	cases := []struct {
-		datas interface{}
-		want  uint32
-	}{
-		{[]bool{}, 0},
-		{[]bool{true, false}, 2},
-		{[]int32{}, 0},
-		{[]int32{1, 2}, 2},
-		{[]int64{}, 0},
-		{[]int64{1, 2}, 2},
-		{[]float32{}, 0},
-		{[]float32{1.0, 2.0}, 2},
-		{[]float64{}, 0},
-		{[]float64{1.0, 2.0}, 2},
-	}
-
-	for _, test := range cases {
-		if got := getNumRowsOfScalarField(test.datas); got != test.want {
-			t.Errorf("getNumRowsOfScalarField(%v) = %v", test.datas, test.want)
-		}
-	}
-}
-
-func TestGetNumRowsOfFloatVectorField(t *testing.T) {
-	cases := []struct {
-		fDatas   []float32
-		dim      int64
-		want     uint32
-		errIsNil bool
-	}{
-		{[]float32{}, -1, 0, false},     // dim <= 0
-		{[]float32{}, 0, 0, false},      // dim <= 0
-		{[]float32{1.0}, 128, 0, false}, // length % dim != 0
-		{[]float32{}, 128, 0, true},
-		{[]float32{1.0, 2.0}, 2, 1, true},
-		{[]float32{1.0, 2.0, 3.0, 4.0}, 2, 2, true},
-	}
-
-	for _, test := range cases {
-		got, err := getNumRowsOfFloatVectorField(test.fDatas, test.dim)
-		if test.errIsNil {
-			assert.Equal(t, nil, err)
-			if got != test.want {
-				t.Errorf("getNumRowsOfFloatVectorField(%v, %v) = %v, %v", test.fDatas, test.dim, test.want, nil)
-			}
-		} else {
-			assert.NotEqual(t, nil, err)
-		}
-	}
-}
-
-func TestGetNumRowsOfBinaryVectorField(t *testing.T) {
-	cases := []struct {
-		bDatas   []byte
-		dim      int64
-		want     uint32
-		errIsNil bool
-	}{
-		{[]byte{}, -1, 0, false},     // dim <= 0
-		{[]byte{}, 0, 0, false},      // dim <= 0
-		{[]byte{1.0}, 128, 0, false}, // length % dim != 0
-		{[]byte{}, 128, 0, true},
-		{[]byte{1.0}, 1, 0, false}, // dim % 8 != 0
-		{[]byte{1.0}, 4, 0, false}, // dim % 8 != 0
-		{[]byte{1.0, 2.0}, 8, 2, true},
-		{[]byte{1.0, 2.0}, 16, 1, true},
-		{[]byte{1.0, 2.0, 3.0, 4.0}, 8, 4, true},
-		{[]byte{1.0, 2.0, 3.0, 4.0}, 16, 2, true},
-		{[]byte{1.0}, 128, 0, false}, // (8*l) % dim != 0
-	}
-
-	for _, test := range cases {
-		got, err := getNumRowsOfBinaryVectorField(test.bDatas, test.dim)
-		if test.errIsNil {
-			assert.Equal(t, nil, err)
-			if got != test.want {
-				t.Errorf("getNumRowsOfBinaryVectorField(%v, %v) = %v, %v", test.bDatas, test.dim, test.want, nil)
-			}
-		} else {
-			assert.NotEqual(t, nil, err)
-		}
-	}
-}
-
 func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	var err error
 
@@ -393,13 +352,18 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 			AutoID:      false,
 			Fields:      []*schemapb.FieldSchema{},
 		},
-		req: &milvuspb.InsertRequest{
-			DbName:         "TestInsertTask_checkLengthOfFieldsData",
-			CollectionName: "TestInsertTask_checkLengthOfFieldsData",
-			PartitionName:  "TestInsertTask_checkLengthOfFieldsData",
-			FieldsData:     nil,
+		BaseInsertTask: BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				DbName:         "TestInsertTask_checkLengthOfFieldsData",
+				CollectionName: "TestInsertTask_checkLengthOfFieldsData",
+				PartitionName:  "TestInsertTask_checkLengthOfFieldsData",
+			},
 		},
 	}
+
 	err = case1.checkLengthOfFieldsData()
 	assert.Equal(t, nil, err)
 
@@ -422,28 +386,32 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 		},
 	}
 	// passed fields is empty
-	case2.req = &milvuspb.InsertRequest{}
+	// case2.BaseInsertTask = BaseInsertTask{
+	// 	InsertRequest: internalpb.InsertRequest{
+	// 		Base: &commonpb.MsgBase{
+	// 			MsgType:  commonpb.MsgType_Insert,
+	// 			MsgID:    0,
+	// 			SourceID: Params.ProxyCfg.ProxyID,
+	// 		},
+	// 	},
+	// }
 	err = case2.checkLengthOfFieldsData()
 	assert.NotEqual(t, nil, err)
 	// the num of passed fields is less than needed
-	case2.req = &milvuspb.InsertRequest{
-		FieldsData: []*schemapb.FieldData{
-			{
-				Type: schemapb.DataType_Int64,
-			},
+	case2.FieldsData = []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
 		},
 	}
 	err = case2.checkLengthOfFieldsData()
 	assert.NotEqual(t, nil, err)
 	// satisfied
-	case2.req = &milvuspb.InsertRequest{
-		FieldsData: []*schemapb.FieldData{
-			{
-				Type: schemapb.DataType_Int64,
-			},
-			{
-				Type: schemapb.DataType_Int64,
-			},
+	case2.FieldsData = []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+		},
+		{
+			Type: schemapb.DataType_Int64,
 		},
 	}
 	err = case2.checkLengthOfFieldsData()
@@ -468,15 +436,13 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 		},
 	}
 	// passed fields is empty
-	case3.req = &milvuspb.InsertRequest{}
+	// case3.req = &milvuspb.InsertRequest{}
 	err = case3.checkLengthOfFieldsData()
 	assert.NotEqual(t, nil, err)
 	// satisfied
-	case3.req = &milvuspb.InsertRequest{
-		FieldsData: []*schemapb.FieldData{
-			{
-				Type: schemapb.DataType_Int64,
-			},
+	case3.FieldsData = []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
 		},
 	}
 	err = case3.checkLengthOfFieldsData()
@@ -498,180 +464,219 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	}
 	// passed fields is empty
 	// satisfied
-	case4.req = &milvuspb.InsertRequest{}
+	// case4.req = &milvuspb.InsertRequest{}
 	err = case4.checkLengthOfFieldsData()
 	assert.Equal(t, nil, err)
 }
 
-func TestInsertTask_checkRowNums(t *testing.T) {
+func TestInsertTask_CheckAligned(t *testing.T) {
 	var err error
 
 	// passed NumRows is less than 0
 	case1 := insertTask{
-		req: &milvuspb.InsertRequest{
-			NumRows: 0,
+		BaseInsertTask: BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				NumRows: 0,
+			},
 		},
 	}
-	err = case1.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	err = case1.CheckAligned()
+	assert.NoError(t, err)
 
 	// checkLengthOfFieldsData was already checked by TestInsertTask_checkLengthOfFieldsData
+
+	boolFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Bool}
+	int8FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int8}
+	int16FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int16}
+	int32FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int32}
+	int64FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int64}
+	floatFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Float}
+	doubleFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Double}
+	floatVectorFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
+	binaryVectorFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_BinaryVector}
+	varCharFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_VarChar}
 
 	numRows := 20
 	dim := 128
 	case2 := insertTask{
+		BaseInsertTask: BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				Version:    internalpb.InsertDataVersion_ColumnBased,
+				RowIDs:     generateInt64Array(numRows),
+				Timestamps: generateUint64Array(numRows),
+			},
+		},
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestInsertTask_checkRowNums",
 			Description: "TestInsertTask_checkRowNums",
 			AutoID:      false,
 			Fields: []*schemapb.FieldSchema{
-				{DataType: schemapb.DataType_Bool},
-				{DataType: schemapb.DataType_Int8},
-				{DataType: schemapb.DataType_Int16},
-				{DataType: schemapb.DataType_Int32},
-				{DataType: schemapb.DataType_Int64},
-				{DataType: schemapb.DataType_Float},
-				{DataType: schemapb.DataType_Double},
-				{DataType: schemapb.DataType_FloatVector},
-				{DataType: schemapb.DataType_BinaryVector},
+				boolFieldSchema,
+				int8FieldSchema,
+				int16FieldSchema,
+				int32FieldSchema,
+				int64FieldSchema,
+				floatFieldSchema,
+				doubleFieldSchema,
+				floatVectorFieldSchema,
+				binaryVectorFieldSchema,
+				varCharFieldSchema,
 			},
 		},
 	}
 
 	// satisfied
-	case2.req = &milvuspb.InsertRequest{
-		NumRows: uint32(numRows),
-		FieldsData: []*schemapb.FieldData{
-			newScalarFieldData(schemapb.DataType_Bool, "Bool", numRows),
-			newScalarFieldData(schemapb.DataType_Int8, "Int8", numRows),
-			newScalarFieldData(schemapb.DataType_Int16, "Int16", numRows),
-			newScalarFieldData(schemapb.DataType_Int32, "Int32", numRows),
-			newScalarFieldData(schemapb.DataType_Int64, "Int64", numRows),
-			newScalarFieldData(schemapb.DataType_Float, "Float", numRows),
-			newScalarFieldData(schemapb.DataType_Double, "Double", numRows),
-			newFloatVectorFieldData("FloatVector", numRows, dim),
-			newBinaryVectorFieldData("BinaryVector", numRows, dim),
-		},
+	case2.NumRows = uint64(numRows)
+	case2.FieldsData = []*schemapb.FieldData{
+		newScalarFieldData(boolFieldSchema, "Bool", numRows),
+		newScalarFieldData(int8FieldSchema, "Int8", numRows),
+		newScalarFieldData(int16FieldSchema, "Int16", numRows),
+		newScalarFieldData(int32FieldSchema, "Int32", numRows),
+		newScalarFieldData(int64FieldSchema, "Int64", numRows),
+		newScalarFieldData(floatFieldSchema, "Float", numRows),
+		newScalarFieldData(doubleFieldSchema, "Double", numRows),
+		newFloatVectorFieldData("FloatVector", numRows, dim),
+		newBinaryVectorFieldData("BinaryVector", numRows, dim),
+		newScalarFieldData(varCharFieldSchema, "VarChar", numRows),
 	}
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 
 	// less bool data
-	case2.req.FieldsData[0] = newScalarFieldData(schemapb.DataType_Bool, "Bool", numRows/2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more bool data
-	case2.req.FieldsData[0] = newScalarFieldData(schemapb.DataType_Bool, "Bool", numRows*2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[0] = newScalarFieldData(schemapb.DataType_Bool, "Bool", numRows)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 
 	// less int8 data
-	case2.req.FieldsData[1] = newScalarFieldData(schemapb.DataType_Int8, "Int8", numRows/2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more int8 data
-	case2.req.FieldsData[1] = newScalarFieldData(schemapb.DataType_Int8, "Int8", numRows*2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[1] = newScalarFieldData(schemapb.DataType_Int8, "Int8", numRows)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 
 	// less int16 data
-	case2.req.FieldsData[2] = newScalarFieldData(schemapb.DataType_Int16, "Int16", numRows/2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more int16 data
-	case2.req.FieldsData[2] = newScalarFieldData(schemapb.DataType_Int16, "Int16", numRows*2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[2] = newScalarFieldData(schemapb.DataType_Int16, "Int16", numRows)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 
 	// less int32 data
-	case2.req.FieldsData[3] = newScalarFieldData(schemapb.DataType_Int32, "Int32", numRows/2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more int32 data
-	case2.req.FieldsData[3] = newScalarFieldData(schemapb.DataType_Int32, "Int32", numRows*2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[3] = newScalarFieldData(schemapb.DataType_Int32, "Int32", numRows)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 
 	// less int64 data
-	case2.req.FieldsData[4] = newScalarFieldData(schemapb.DataType_Int64, "Int64", numRows/2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more int64 data
-	case2.req.FieldsData[4] = newScalarFieldData(schemapb.DataType_Int64, "Int64", numRows*2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[4] = newScalarFieldData(schemapb.DataType_Int64, "Int64", numRows)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 
 	// less float data
-	case2.req.FieldsData[5] = newScalarFieldData(schemapb.DataType_Float, "Float", numRows/2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more float data
-	case2.req.FieldsData[5] = newScalarFieldData(schemapb.DataType_Float, "Float", numRows*2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[5] = newScalarFieldData(schemapb.DataType_Float, "Float", numRows)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, nil, err)
 
 	// less double data
-	case2.req.FieldsData[6] = newScalarFieldData(schemapb.DataType_Double, "Double", numRows/2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more double data
-	case2.req.FieldsData[6] = newScalarFieldData(schemapb.DataType_Double, "Double", numRows*2)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[6] = newScalarFieldData(schemapb.DataType_Double, "Double", numRows)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, nil, err)
 
 	// less float vectors
-	case2.req.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows/2, dim)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows/2, dim)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more float vectors
-	case2.req.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows*2, dim)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows*2, dim)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows, dim)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows, dim)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 
 	// less binary vectors
-	case2.req.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows/2, dim)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows/2, dim)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// more binary vectors
-	case2.req.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows*2, dim)
-	err = case2.checkRowNums()
-	assert.NotEqual(t, nil, err)
+	case2.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows*2, dim)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
 	// revert
-	case2.req.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows, dim)
-	err = case2.checkRowNums()
-	assert.Equal(t, nil, err)
+	case2.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows, dim)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
+
+	// less double data
+	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// more double data
+	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// revert
+	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
 }
 
 func TestTranslateOutputFields(t *testing.T) {
@@ -1731,24 +1736,27 @@ func TestSearchTask_all(t *testing.T) {
 	prefix := "TestSearchTask_all"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	boolField := "bool"
-	int32Field := "int32"
-	int64Field := "int64"
-	floatField := "float"
-	doubleField := "double"
-	floatVecField := "fvec"
-	binaryVecField := "bvec"
-	fieldsLen := len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField, binaryVecField})
+
 	dim := 128
-	expr := fmt.Sprintf("%s > 0", int64Field)
+	expr := fmt.Sprintf("%s > 0", testInt64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := 3
 	nprobe := 10
 
-	schema := constructCollectionSchemaWithAllType(
-		boolField, int32Field, int64Field, floatField, doubleField,
-		floatVecField, binaryVecField, dim, collectionName)
+	fieldName2Types := map[string]schemapb.DataType{
+		testBoolField:     schemapb.DataType_Bool,
+		testInt32Field:    schemapb.DataType_Int32,
+		testInt64Field:    schemapb.DataType_Int64,
+		testFloatField:    schemapb.DataType_Float,
+		testDoubleField:   schemapb.DataType_Double,
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
+	if enableMultipleVectorFields {
+		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
+	}
+
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
@@ -1801,7 +1809,7 @@ func TestSearchTask_all(t *testing.T) {
 
 	req := constructSearchRequest(dbName, collectionName,
 		expr,
-		floatVecField,
+		testFloatVecField,
 		nq, dim, nprobe, topk, roundDecimal)
 
 	task := &searchTask{
@@ -1866,7 +1874,6 @@ func TestSearchTask_all(t *testing.T) {
 						resultData := &schemapb.SearchResultData{
 							NumQueries: int64(nq),
 							TopK:       int64(topk),
-							FieldsData: make([]*schemapb.FieldData, fieldsLen),
 							Scores:     make([]float32, nq*topk),
 							Ids: &schemapb.IDs{
 								IdField: &schemapb.IDs_IntId{
@@ -1878,109 +1885,10 @@ func TestSearchTask_all(t *testing.T) {
 							Topks: make([]int64, nq),
 						}
 
-						resultData.FieldsData[0] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Bool,
-							FieldName: boolField,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_BoolData{
-										BoolData: &schemapb.BoolArray{
-											Data: generateBoolArray(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 0,
-						}
-
-						resultData.FieldsData[1] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Int32,
-							FieldName: int32Field,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_IntData{
-										IntData: &schemapb.IntArray{
-											Data: generateInt32Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 1,
-						}
-
-						resultData.FieldsData[2] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Int64,
-							FieldName: int64Field,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_LongData{
-										LongData: &schemapb.LongArray{
-											Data: generateInt64Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 2,
-						}
-
-						resultData.FieldsData[3] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Float,
-							FieldName: floatField,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_FloatData{
-										FloatData: &schemapb.FloatArray{
-											Data: generateFloat32Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 3,
-						}
-
-						resultData.FieldsData[4] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Double,
-							FieldName: doubleField,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_DoubleData{
-										DoubleData: &schemapb.DoubleArray{
-											Data: generateFloat64Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 4,
-						}
-
-						resultData.FieldsData[5] = &schemapb.FieldData{
-							Type:      schemapb.DataType_FloatVector,
-							FieldName: doubleField,
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: int64(dim),
-									Data: &schemapb.VectorField_FloatVector{
-										FloatVector: &schemapb.FloatArray{
-											Data: generateFloatVectors(nq*topk, dim),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 5,
-						}
-
-						resultData.FieldsData[6] = &schemapb.FieldData{
-							Type:      schemapb.DataType_BinaryVector,
-							FieldName: doubleField,
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: int64(dim),
-									Data: &schemapb.VectorField_BinaryVector{
-										BinaryVector: generateBinaryVectors(nq*topk, dim),
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 6,
+						fieldID := common.StartOfUserFieldID
+						for fieldName, dataType := range fieldName2Types {
+							resultData.FieldsData = append(resultData.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), nq*topk))
+							fieldID++
 						}
 
 						for i := 0; i < nq; i++ {
@@ -2083,24 +1991,26 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	prefix := "TestSearchTask_all"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	boolField := "bool"
-	int32Field := "int32"
-	int64Field := "int64"
-	floatField := "float"
-	doubleField := "double"
-	floatVecField := "fvec"
-	binaryVecField := "bvec"
-	fieldsLen := len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField, binaryVecField})
+
 	dim := 128
-	expr := fmt.Sprintf("%s > 0", int64Field)
+	expr := fmt.Sprintf("%s > 0", testInt64Field)
 	nq := 10
 	topk := 10
 	roundDecimal := 7
 	nprobe := 10
 
-	schema := constructCollectionSchemaWithAllType(
-		boolField, int32Field, int64Field, floatField, doubleField,
-		floatVecField, binaryVecField, dim, collectionName)
+	fieldName2Types := map[string]schemapb.DataType{
+		testBoolField:     schemapb.DataType_Bool,
+		testInt32Field:    schemapb.DataType_Int32,
+		testInt64Field:    schemapb.DataType_Int64,
+		testFloatField:    schemapb.DataType_Float,
+		testDoubleField:   schemapb.DataType_Double,
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
+	if enableMultipleVectorFields {
+		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
+	}
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
@@ -2153,7 +2063,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 
 	req := constructSearchRequest(dbName, collectionName,
 		expr,
-		floatVecField,
+		testFloatVecField,
 		nq, dim, nprobe, topk, roundDecimal)
 
 	task := &searchTask{
@@ -2218,7 +2128,6 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 						resultData := &schemapb.SearchResultData{
 							NumQueries: int64(nq),
 							TopK:       int64(topk),
-							FieldsData: make([]*schemapb.FieldData, fieldsLen),
 							Scores:     make([]float32, nq*topk),
 							Ids: &schemapb.IDs{
 								IdField: &schemapb.IDs_IntId{
@@ -2230,109 +2139,10 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 							Topks: make([]int64, nq),
 						}
 
-						resultData.FieldsData[0] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Bool,
-							FieldName: boolField,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_BoolData{
-										BoolData: &schemapb.BoolArray{
-											Data: generateBoolArray(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 0,
-						}
-
-						resultData.FieldsData[1] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Int32,
-							FieldName: int32Field,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_IntData{
-										IntData: &schemapb.IntArray{
-											Data: generateInt32Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 1,
-						}
-
-						resultData.FieldsData[2] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Int64,
-							FieldName: int64Field,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_LongData{
-										LongData: &schemapb.LongArray{
-											Data: generateInt64Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 2,
-						}
-
-						resultData.FieldsData[3] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Float,
-							FieldName: floatField,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_FloatData{
-										FloatData: &schemapb.FloatArray{
-											Data: generateFloat32Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 3,
-						}
-
-						resultData.FieldsData[4] = &schemapb.FieldData{
-							Type:      schemapb.DataType_Double,
-							FieldName: doubleField,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_DoubleData{
-										DoubleData: &schemapb.DoubleArray{
-											Data: generateFloat64Array(nq * topk),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 4,
-						}
-
-						resultData.FieldsData[5] = &schemapb.FieldData{
-							Type:      schemapb.DataType_FloatVector,
-							FieldName: doubleField,
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: int64(dim),
-									Data: &schemapb.VectorField_FloatVector{
-										FloatVector: &schemapb.FloatArray{
-											Data: generateFloatVectors(nq*topk, dim),
-										},
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 5,
-						}
-
-						resultData.FieldsData[6] = &schemapb.FieldData{
-							Type:      schemapb.DataType_BinaryVector,
-							FieldName: doubleField,
-							Field: &schemapb.FieldData_Vectors{
-								Vectors: &schemapb.VectorField{
-									Dim: int64(dim),
-									Data: &schemapb.VectorField_BinaryVector{
-										BinaryVector: generateBinaryVectors(nq*topk, dim),
-									},
-								},
-							},
-							FieldId: common.StartOfUserFieldID + 6,
+						fieldID := common.StartOfUserFieldID
+						for fieldName, dataType := range fieldName2Types {
+							resultData.FieldsData = append(resultData.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), nq*topk))
+							fieldID++
 						}
 
 						for i := 0; i < nq; i++ {
@@ -3231,21 +3041,23 @@ func TestQueryTask_all(t *testing.T) {
 	prefix := "TestQueryTask_all"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
-	boolField := "bool"
-	int32Field := "int32"
-	int64Field := "int64"
-	floatField := "float"
-	doubleField := "double"
-	floatVecField := "fvec"
-	binaryVecField := "bvec"
-	fieldsLen := len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField, binaryVecField})
-	dim := 128
-	expr := fmt.Sprintf("%s > 0", int64Field)
+
+	fieldName2Types := map[string]schemapb.DataType{
+		testBoolField:     schemapb.DataType_Bool,
+		testInt32Field:    schemapb.DataType_Int32,
+		testInt64Field:    schemapb.DataType_Int64,
+		testFloatField:    schemapb.DataType_Float,
+		testDoubleField:   schemapb.DataType_Double,
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
+	if enableMultipleVectorFields {
+		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
+	}
+
+	expr := fmt.Sprintf("%s > 0", testInt64Field)
 	hitNum := 10
 
-	schema := constructCollectionSchemaWithAllType(
-		boolField, int32Field, int64Field, floatField, doubleField,
-		floatVecField, binaryVecField, dim, collectionName)
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
@@ -3310,7 +3122,7 @@ func TestQueryTask_all(t *testing.T) {
 			CollectionID:       collectionID,
 			PartitionIDs:       nil,
 			SerializedExprPlan: nil,
-			OutputFieldsId:     make([]int64, fieldsLen),
+			OutputFieldsId:     make([]int64, len(fieldName2Types)),
 			TravelTimestamp:    0,
 			GuaranteeTimestamp: 0,
 		},
@@ -3341,7 +3153,7 @@ func TestQueryTask_all(t *testing.T) {
 		qc:    qc,
 		ids:   nil,
 	}
-	for i := 0; i < fieldsLen; i++ {
+	for i := 0; i < len(fieldName2Types); i++ {
 		task.RetrieveRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
 	}
 
@@ -3393,115 +3205,15 @@ func TestQueryTask_all(t *testing.T) {
 								},
 							},
 						},
-						FieldsData:                make([]*schemapb.FieldData, fieldsLen),
 						SealedSegmentIDsRetrieved: nil,
 						ChannelIDsRetrieved:       nil,
 						GlobalSealedSegmentIDs:    nil,
 					}
 
-					result1.FieldsData[0] = &schemapb.FieldData{
-						Type:      schemapb.DataType_Bool,
-						FieldName: boolField,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_BoolData{
-									BoolData: &schemapb.BoolArray{
-										Data: generateBoolArray(hitNum),
-									},
-								},
-							},
-						},
-						FieldId: common.StartOfUserFieldID + 0,
-					}
-
-					result1.FieldsData[1] = &schemapb.FieldData{
-						Type:      schemapb.DataType_Int32,
-						FieldName: int32Field,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_IntData{
-									IntData: &schemapb.IntArray{
-										Data: generateInt32Array(hitNum),
-									},
-								},
-							},
-						},
-						FieldId: common.StartOfUserFieldID + 1,
-					}
-
-					result1.FieldsData[2] = &schemapb.FieldData{
-						Type:      schemapb.DataType_Int64,
-						FieldName: int64Field,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_LongData{
-									LongData: &schemapb.LongArray{
-										Data: generateInt64Array(hitNum),
-									},
-								},
-							},
-						},
-						FieldId: common.StartOfUserFieldID + 2,
-					}
-
-					result1.FieldsData[3] = &schemapb.FieldData{
-						Type:      schemapb.DataType_Float,
-						FieldName: floatField,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_FloatData{
-									FloatData: &schemapb.FloatArray{
-										Data: generateFloat32Array(hitNum),
-									},
-								},
-							},
-						},
-						FieldId: common.StartOfUserFieldID + 3,
-					}
-
-					result1.FieldsData[4] = &schemapb.FieldData{
-						Type:      schemapb.DataType_Double,
-						FieldName: doubleField,
-						Field: &schemapb.FieldData_Scalars{
-							Scalars: &schemapb.ScalarField{
-								Data: &schemapb.ScalarField_DoubleData{
-									DoubleData: &schemapb.DoubleArray{
-										Data: generateFloat64Array(hitNum),
-									},
-								},
-							},
-						},
-						FieldId: common.StartOfUserFieldID + 4,
-					}
-
-					result1.FieldsData[5] = &schemapb.FieldData{
-						Type:      schemapb.DataType_FloatVector,
-						FieldName: doubleField,
-						Field: &schemapb.FieldData_Vectors{
-							Vectors: &schemapb.VectorField{
-								Dim: int64(dim),
-								Data: &schemapb.VectorField_FloatVector{
-									FloatVector: &schemapb.FloatArray{
-										Data: generateFloatVectors(hitNum, dim),
-									},
-								},
-							},
-						},
-						FieldId: common.StartOfUserFieldID + 5,
-					}
-
-					result1.FieldsData[6] = &schemapb.FieldData{
-						Type:      schemapb.DataType_BinaryVector,
-						FieldName: doubleField,
-						Field: &schemapb.FieldData_Vectors{
-							Vectors: &schemapb.VectorField{
-								Dim: int64(dim),
-								Data: &schemapb.VectorField_BinaryVector{
-									BinaryVector: generateBinaryVectors(hitNum, dim),
-								},
-							},
-						},
-						FieldId: common.StartOfUserFieldID + 6,
+					fieldID := common.StartOfUserFieldID
+					for fieldName, dataType := range fieldName2Types {
+						result1.FieldsData = append(result1.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), hitNum))
+						fieldID++
 					}
 
 					// send search result
@@ -3551,25 +3263,22 @@ func TestTask_all(t *testing.T) {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	partitionName := prefix + funcutil.GenRandomStr()
-	boolField := "bool"
-	int32Field := "int32"
-	int64Field := "int64"
-	floatField := "float"
-	doubleField := "double"
-	floatVecField := "fvec"
-	binaryVecField := "bvec"
-	var fieldsLen int
-	fieldsLen = len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField})
+
+	fieldName2Types := map[string]schemapb.DataType{
+		testBoolField:   schemapb.DataType_Bool,
+		testInt32Field:  schemapb.DataType_Int32,
+		testInt64Field:  schemapb.DataType_Int64,
+		testFloatField:  schemapb.DataType_Float,
+		testDoubleField: schemapb.DataType_Double,
+		//testStringField:   schemapb.DataType_String,
+		testFloatVecField: schemapb.DataType_FloatVector}
 	if enableMultipleVectorFields {
-		fieldsLen = len([]string{boolField, int32Field, int64Field, floatField, doubleField, floatVecField, binaryVecField})
+		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
 	}
-	dim := 128
 	nb := 10
 
 	t.Run("create collection", func(t *testing.T) {
-		schema := constructCollectionSchemaWithAllType(
-			boolField, int32Field, int64Field, floatField, doubleField,
-			floatVecField, binaryVecField, dim, collectionName)
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
@@ -3648,27 +3357,18 @@ func TestTask_all(t *testing.T) {
 				},
 				InsertRequest: internalpb.InsertRequest{
 					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-						MsgID:   0,
+						MsgType:  commonpb.MsgType_Insert,
+						MsgID:    0,
+						SourceID: Params.ProxyCfg.ProxyID,
 					},
+					DbName:         dbName,
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
+					NumRows:        uint64(nb),
+					Version:        internalpb.InsertDataVersion_ColumnBased,
 				},
 			},
-			req: &milvuspb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Insert,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  Params.ProxyCfg.ProxyID,
-				},
-				DbName:         dbName,
-				CollectionName: collectionName,
-				PartitionName:  partitionName,
-				FieldsData:     make([]*schemapb.FieldData, fieldsLen),
-				HashKeys:       hash,
-				NumRows:        uint32(nb),
-			},
+
 			Condition: NewTaskCondition(ctx),
 			ctx:       ctx,
 			result: &milvuspb.MutationResult{
@@ -3694,111 +3394,10 @@ func TestTask_all(t *testing.T) {
 			schema:         nil,
 		}
 
-		task.req.FieldsData[0] = &schemapb.FieldData{
-			Type:      schemapb.DataType_Bool,
-			FieldName: boolField,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_BoolData{
-						BoolData: &schemapb.BoolArray{
-							Data: generateBoolArray(nb),
-						},
-					},
-				},
-			},
-			FieldId: common.StartOfUserFieldID + 0,
-		}
-
-		task.req.FieldsData[1] = &schemapb.FieldData{
-			Type:      schemapb.DataType_Int32,
-			FieldName: int32Field,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{
-						IntData: &schemapb.IntArray{
-							Data: generateInt32Array(nb),
-						},
-					},
-				},
-			},
-			FieldId: common.StartOfUserFieldID + 1,
-		}
-
-		task.req.FieldsData[2] = &schemapb.FieldData{
-			Type:      schemapb.DataType_Int64,
-			FieldName: int64Field,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{
-						LongData: &schemapb.LongArray{
-							Data: generateInt64Array(nb),
-						},
-					},
-				},
-			},
-			FieldId: common.StartOfUserFieldID + 2,
-		}
-
-		task.req.FieldsData[3] = &schemapb.FieldData{
-			Type:      schemapb.DataType_Float,
-			FieldName: floatField,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_FloatData{
-						FloatData: &schemapb.FloatArray{
-							Data: generateFloat32Array(nb),
-						},
-					},
-				},
-			},
-			FieldId: common.StartOfUserFieldID + 3,
-		}
-
-		task.req.FieldsData[4] = &schemapb.FieldData{
-			Type:      schemapb.DataType_Double,
-			FieldName: doubleField,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_DoubleData{
-						DoubleData: &schemapb.DoubleArray{
-							Data: generateFloat64Array(nb),
-						},
-					},
-				},
-			},
-			FieldId: common.StartOfUserFieldID + 4,
-		}
-
-		task.req.FieldsData[5] = &schemapb.FieldData{
-			Type:      schemapb.DataType_FloatVector,
-			FieldName: floatVecField,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: int64(dim),
-					Data: &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: generateFloatVectors(nb, dim),
-						},
-					},
-				},
-			},
-			FieldId: common.StartOfUserFieldID + 5,
-		}
-
-		if enableMultipleVectorFields {
-			task.req.FieldsData[6] = &schemapb.FieldData{
-				Type:      schemapb.DataType_BinaryVector,
-				FieldName: binaryVecField,
-				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{
-						Dim: int64(dim),
-						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: generateBinaryVectors(nb, dim),
-						},
-					},
-				},
-				FieldId: common.StartOfUserFieldID + 6,
-			}
+		fieldID := common.StartOfUserFieldID
+		for fieldName, dataType := range fieldName2Types {
+			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), nb))
+			fieldID++
 		}
 
 		assert.NoError(t, task.OnEnqueue())

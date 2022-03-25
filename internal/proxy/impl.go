@@ -2241,18 +2241,22 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		req:       request,
+		// req:       request,
 		BaseInsertTask: BaseInsertTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
 			},
 			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-					MsgID:   0,
+					MsgType:  commonpb.MsgType_Insert,
+					MsgID:    0,
+					SourceID: Params.ProxyCfg.ProxyID,
 				},
 				CollectionName: request.CollectionName,
 				PartitionName:  request.PartitionName,
+				FieldsData:     request.FieldsData,
+				NumRows:        uint64(request.NumRows),
+				Version:        internalpb.InsertDataVersion_ColumnBased,
 				// RowData: transfer column based request to this
 			},
 		},
@@ -2267,7 +2271,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
-		numRows := it.req.NumRows
+		numRows := request.NumRows
 		errIndex := make([]uint32, numRows)
 		for i := uint32(0); i < numRows; i++ {
 			errIndex[i] = i
@@ -2320,7 +2324,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	if it.result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		setErrorIndex := func() {
-			numRows := it.req.NumRows
+			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
 			for i := uint32(0); i < numRows; i++ {
 				errIndex[i] = i
@@ -2332,7 +2336,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	// InsertCnt always equals to the number of entities in the request
-	it.result.InsertCnt = int64(it.req.NumRows)
+	it.result.InsertCnt = int64(request.NumRows)
 
 	metrics.ProxyInsertCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
 		metrics.SuccessLabel).Inc()

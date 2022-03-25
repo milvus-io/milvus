@@ -145,7 +145,7 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 				return errors.New("incorrect data type")
 			}
 			return w.AddDoubleToPayload(val)
-		case schemapb.DataType_String:
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			val, ok := msgs.(string)
 			if !ok {
 				return errors.New("incorrect data type")
@@ -387,7 +387,7 @@ func (r *PayloadReader) GetDataFromPayload(idx ...int) (interface{}, int, error)
 	switch len(idx) {
 	case 1:
 		switch r.colType {
-		case schemapb.DataType_String:
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			val, err := r.GetOneStringFromPayload(idx[0])
 			return val, 0, err
 		default:
@@ -573,7 +573,7 @@ func (r *PayloadReader) GetDoubleFromPayload() ([]float64, error) {
 }
 
 func (r *PayloadReader) GetOneStringFromPayload(idx int) (string, error) {
-	if r.colType != schemapb.DataType_String {
+	if r.colType != schemapb.DataType_String && r.colType != schemapb.DataType_VarChar {
 		return "", errors.New("incorrect data type")
 	}
 

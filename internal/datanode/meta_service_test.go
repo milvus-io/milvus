@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,7 +38,9 @@ func TestMetaService_All(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mFactory := &RootCoordFactory{}
+	mFactory := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
 	mFactory.setCollectionID(collectionID0)
 	mFactory.setCollectionName(collectionName0)
 	ms := newMetaService(mFactory, collectionID0)
@@ -52,7 +55,7 @@ func TestMetaService_All(t *testing.T) {
 
 	t.Run("Test printCollectionStruct", func(t *testing.T) {
 		mf := &MetaFactory{}
-		collectionMeta := mf.GetCollectionMeta(collectionID0, collectionName0)
+		collectionMeta := mf.GetCollectionMeta(collectionID0, collectionName0, schemapb.DataType_Int64)
 		printCollectionStruct(collectionMeta)
 	})
 }

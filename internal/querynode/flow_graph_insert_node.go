@@ -102,15 +102,6 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 1. hash insertMessages to insertData
 	for _, insertMsg := range iMsg.insertMessages {
-		if insertMsg.IsColumnBased() {
-			var err error
-			insertMsg.RowData, err = typeutil.TransferColumnBasedDataToRowBasedData(insertMsg.FieldsData)
-			if err != nil {
-				log.Error("failed to transfer column-based data to row-based data", zap.Error(err))
-				return []Msg{}
-			}
-		}
-
 		// if loadType is loadCollection, check if partition exists, if not, create partition
 		col, err := iNode.streamingReplica.getCollectionByID(insertMsg.CollectionID)
 		if err != nil {
@@ -131,6 +122,15 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				log.Warn(err.Error())
 				continue
+			}
+		}
+
+		// trans column field data to row data
+		if insertMsg.IsColumnBased() {
+			insertMsg.RowData, err = typeutil.TransferColumnBasedDataToRowBasedData(col.schema, insertMsg.FieldsData)
+			if err != nil {
+				log.Error("failed to transfer column-based data to row-based data", zap.Error(err))
+				return []Msg{}
 			}
 		}
 
@@ -345,7 +345,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 // TODO: remove this function to proper file
 // getPrimaryKeys would get primary keys by insert messages
 func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) ([]int64, error) {
-	if !msg.CheckAligned() {
+	if err := msg.CheckAligned(); err != nil {
 		log.Warn("misaligned messages detected")
 		return nil, errors.New("misaligned messages detected")
 	}

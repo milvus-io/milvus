@@ -429,7 +429,7 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	for i := range schema.Fields {
 		name := schema.Fields[i].Name
 		dType := schema.Fields[i].DataType
-		isVec := (dType == schemapb.DataType_BinaryVector || dType == schemapb.DataType_FloatVector)
+		isVec := dType == schemapb.DataType_BinaryVector || dType == schemapb.DataType_FloatVector
 		if isVec && vecExist && !enableMultipleVectorFields {
 			return fmt.Errorf(
 				"multiple vector fields is not supported, fields name: %s, %s",
@@ -439,6 +439,101 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 		} else if isVec {
 			vecExist = true
 			vecName = name
+		}
+	}
+
+	return nil
+}
+
+// getPrimaryFieldData get primary field data from all field data inserted from sdk
+func getPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
+	primaryFieldName := primaryFieldSchema.Name
+
+	var primaryFieldData *schemapb.FieldData
+	for _, field := range datas {
+		if field.FieldName == primaryFieldName {
+			if primaryFieldSchema.AutoID {
+				return nil, fmt.Errorf("autoID field %v does not require data", primaryFieldName)
+			}
+			primaryFieldData = field
+		}
+	}
+
+	if primaryFieldData == nil {
+		return nil, fmt.Errorf("can't find data for primary field %v", primaryFieldName)
+	}
+
+	return primaryFieldData, nil
+}
+
+// parsePrimaryFieldData2IDs get IDs to fill grpc result, for example insert request, delete request etc.
+func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, error) {
+	primaryData := &schemapb.IDs{}
+	switch fieldData.Field.(type) {
+	case *schemapb.FieldData_Scalars:
+		scalarField := fieldData.GetScalars()
+		switch scalarField.Data.(type) {
+		case *schemapb.ScalarField_LongData:
+			primaryData.IdField = &schemapb.IDs_IntId{
+				IntId: scalarField.GetLongData(),
+			}
+		case *schemapb.ScalarField_StringData:
+			primaryData.IdField = &schemapb.IDs_StrId{
+				StrId: scalarField.GetStringData(),
+			}
+		default:
+			return nil, errors.New("currently only support DataType Int64 or VarChar as PrimaryField")
+		}
+	default:
+		return nil, errors.New("currently only support vector field as PrimaryField")
+	}
+
+	return primaryData, nil
+}
+
+// autoGenPrimaryFieldData generate primary data when autoID == true
+func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}) (*schemapb.FieldData, error) {
+	var fieldData schemapb.FieldData
+	fieldData.FieldName = fieldSchema.Name
+	fieldData.Type = fieldSchema.DataType
+	switch data := data.(type) {
+	case []int64:
+		if fieldSchema.DataType != schemapb.DataType_Int64 {
+			return nil, errors.New("the data type of the data and the schema do not match")
+		}
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: data,
+					},
+				},
+			},
+		}
+	default:
+		return nil, errors.New("currently only support autoID for int64 PrimaryField")
+	}
+
+	return &fieldData, nil
+}
+
+// fillFieldIDBySchema set fieldID to fieldData according FieldSchemas
+func fillFieldIDBySchema(columns []*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
+	if len(columns) != len(schema.GetFields()) {
+		return fmt.Errorf("len(columns) mismatch the len(fields), len(columns): %d, len(fields): %d",
+			len(columns), len(schema.GetFields()))
+	}
+	fieldName2Schema := make(map[string]*schemapb.FieldSchema)
+	for _, field := range schema.GetFields() {
+		fieldName2Schema[field.Name] = field
+	}
+
+	for _, fieldData := range columns {
+		if fieldSchema, ok := fieldName2Schema[fieldData.FieldName]; ok {
+			fieldData.FieldId = fieldSchema.FieldID
+			fieldData.Type = fieldSchema.DataType
+		} else {
+			return fmt.Errorf("fieldName %v not exist in collection schema", fieldData.FieldName)
 		}
 	}
 

@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"sync/atomic"
 
@@ -42,6 +41,10 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
+type PrimaryKey = storage.PrimaryKey
+type Int64PrimaryKey = storage.Int64PrimaryKey
+type StringPrimaryKey = storage.StringPrimaryKey
+
 // Replica is DataNode unique replication
 type Replica interface {
 	getCollectionID() UniqueID
@@ -57,8 +60,8 @@ type Replica interface {
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
 	updateSegmentCheckPoint(segID UniqueID)
-	updateSegmentPKRange(segID UniqueID, rowIDs []int64)
-	mergeFlushedSegments(segID, collID, partID, planID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64)
+	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
+	mergeFlushedSegments(segID, collID, partID, planID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64) error
 	hasSegment(segID UniqueID, countFlushed bool) bool
 	removeSegments(segID ...UniqueID)
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
@@ -87,8 +90,8 @@ type Segment struct {
 
 	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 	// TODO silverxia, needs to change to interface to support `string` type PK
-	minPK int64 //	minimal pk value, shortcut for checking whether a pk is inside this segment
-	maxPK int64 //  maximal pk value, same above
+	minPK PrimaryKey //	minimal pk value, shortcut for checking whether a pk is inside this segment
+	maxPK PrimaryKey //  maximal pk value, same above
 }
 
 // SegmentReplica is the data replication of persistent data in datanode.
@@ -107,23 +110,58 @@ type SegmentReplica struct {
 	chunkManager storage.ChunkManager
 }
 
-func (s *Segment) updatePKRange(pks []int64) {
-	buf := make([]byte, 8)
-	for _, pk := range pks {
-		common.Endian.PutUint64(buf, uint64(pk))
-		s.pkFilter.Add(buf)
-		if pk > s.maxPK {
-			s.maxPK = pk
+func (s *Segment) updatePk(pk PrimaryKey) error {
+	if s.minPK == nil {
+		s.minPK = pk
+	} else if s.minPK.GT(pk) {
+		s.minPK = pk
+	}
+
+	if s.maxPK == nil {
+		s.maxPK = pk
+	} else if s.maxPK.LT(pk) {
+		s.maxPK = pk
+	}
+
+	return nil
+}
+
+func (s *Segment) updatePKRange(ids storage.FieldData) error {
+	switch pks := ids.(type) {
+	case *storage.Int64FieldData:
+		buf := make([]byte, 8)
+		for _, pk := range pks.Data {
+			id := &Int64PrimaryKey{
+				Value: pk,
+			}
+			err := s.updatePk(id)
+			if err != nil {
+				return err
+			}
+			common.Endian.PutUint64(buf, uint64(pk))
+			s.pkFilter.Add(buf)
 		}
-		if pk < s.minPK {
-			s.minPK = pk
+	case *storage.StringFieldData:
+		for _, pk := range pks.Data {
+			id := &StringPrimaryKey{
+				Value: pk,
+			}
+			err := s.updatePk(id)
+			if err != nil {
+				return err
+			}
+			s.pkFilter.Add([]byte(pk))
 		}
+	default:
+		//TODO::
 	}
 
 	log.Info("update pk range",
 		zap.Int64("collectionID", s.collectionID), zap.Int64("partitionID", s.partitionID), zap.Int64("segmentID", s.segmentID),
 		zap.String("channel", s.channelName),
-		zap.Int64("num_rows", s.numRows), zap.Int64("minPK", s.minPK), zap.Int64("maxPK", s.maxPK))
+		zap.Int64("num_rows", s.numRows), zap.Any("minPK", s.minPK), zap.Any("maxPK", s.maxPK))
+
+	return nil
 }
 
 var _ Replica = &SegmentReplica{}
@@ -241,8 +279,6 @@ func (replica *SegmentReplica) addNewSegment(segID, collID, partitionID UniqueID
 		endPos:     endPos,
 
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
-		minPK:    math.MaxInt64, // use max value, represents no value
-		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
 	seg.isNew.Store(true)
@@ -328,9 +364,8 @@ func (replica *SegmentReplica) addNormalSegment(segID, collID, partitionID Uniqu
 		numRows:      numOfRows,
 
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
-		minPK:    math.MaxInt64, // use max value, represents no value
-		maxPK:    math.MinInt64, // use min value represents no value
 	}
+
 	if cp != nil {
 		seg.checkPoint = *cp
 		seg.endPos = &cp.pos
@@ -378,8 +413,6 @@ func (replica *SegmentReplica) addFlushedSegment(segID, collID, partitionID Uniq
 
 		//TODO silverxia, normal segments bloom filter and pk range should be loaded from serialized files
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
-		minPK:    math.MaxInt64, // use max value, represents no value
-		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
 	err := replica.initPKBloomFilter(seg, statsBinlogs, recoverTs)
@@ -444,13 +477,8 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 		if err != nil {
 			return err
 		}
-		if s.minPK > stat.Min {
-			s.minPK = stat.Min
-		}
-
-		if s.maxPK < stat.Max {
-			s.maxPK = stat.Max
-		}
+		s.updatePk(stat.MinPk)
+		s.updatePk(stat.MaxPk)
 	}
 	return nil
 }
@@ -513,25 +541,25 @@ func (replica *SegmentReplica) updateSegmentEndPosition(segID UniqueID, endPos *
 	log.Warn("No match segment", zap.Int64("ID", segID))
 }
 
-func (replica *SegmentReplica) updateSegmentPKRange(segID UniqueID, pks []int64) {
+func (replica *SegmentReplica) updateSegmentPKRange(segID UniqueID, ids storage.FieldData) {
 	replica.segMu.Lock()
 	defer replica.segMu.Unlock()
 
 	seg, ok := replica.newSegments[segID]
 	if ok {
-		seg.updatePKRange(pks)
+		seg.updatePKRange(ids)
 		return
 	}
 
 	seg, ok = replica.normalSegments[segID]
 	if ok {
-		seg.updatePKRange(pks)
+		seg.updatePKRange(ids)
 		return
 	}
 
 	seg, ok = replica.flushedSegments[segID]
 	if ok {
-		seg.updatePKRange(pks)
+		seg.updatePKRange(ids)
 		return
 	}
 
@@ -684,12 +712,12 @@ func (replica *SegmentReplica) updateSegmentCheckPoint(segID UniqueID) {
 	log.Warn("There's no segment", zap.Int64("ID", segID))
 }
 
-func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID, planID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64) {
+func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID, planID UniqueID, compactedFrom []UniqueID, channelName string, numOfRows int64) error {
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
 			zap.Int64("expected ID", replica.collectionID))
-		return
+		return fmt.Errorf("mismatch collection, ID=%d", collID)
 	}
 
 	log.Info("merge flushed segments",
@@ -708,8 +736,6 @@ func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID, planI
 		numRows:      numOfRows,
 
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
-		minPK:    math.MaxInt64, // use max value, represents no value
-		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
 	replica.segMu.Lock()
@@ -735,15 +761,17 @@ func (replica *SegmentReplica) mergeFlushedSegments(segID, collID, partID, planI
 	replica.segMu.Lock()
 	replica.flushedSegments[segID] = seg
 	replica.segMu.Unlock()
+
+	return nil
 }
 
 // for tests only
-func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, channelName string, numOfRows int64, pks []UniqueID) {
+func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, channelName string, numOfRows int64, ids storage.FieldData) error {
 	if collID != replica.collectionID {
 		log.Warn("Mismatch collection",
 			zap.Int64("input ID", collID),
 			zap.Int64("expected ID", replica.collectionID))
-		return
+		return fmt.Errorf("mismatch collection, ID=%d", collID)
 	}
 
 	log.Info("Add Flushed segment",
@@ -761,11 +789,9 @@ func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID Un
 		numRows:      numOfRows,
 
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
-		minPK:    math.MaxInt64, // use max value, represents no value
-		maxPK:    math.MinInt64, // use min value represents no value
 	}
 
-	seg.updatePKRange(pks)
+	seg.updatePKRange(ids)
 
 	seg.isNew.Store(false)
 	seg.isFlushed.Store(true)
@@ -773,6 +799,8 @@ func (replica *SegmentReplica) addFlushedSegmentWithPKs(segID, collID, partID Un
 	replica.segMu.Lock()
 	replica.flushedSegments[segID] = seg
 	replica.segMu.Unlock()
+
+	return nil
 }
 
 func (replica *SegmentReplica) listAllSegmentIDs() []UniqueID {

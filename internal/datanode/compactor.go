@@ -527,7 +527,11 @@ func (t *compactionTask) compact() error {
 		}
 		// no need to shorten the PK range of a segment, deleting dup PKs is valid
 	} else {
-		t.mergeFlushedSegments(targetSegID, collID, partID, t.plan.GetPlanID(), segIDs, t.plan.GetChannel(), numRows)
+		err = t.mergeFlushedSegments(targetSegID, collID, partID, t.plan.GetPlanID(), segIDs, t.plan.GetChannel(), numRows)
+		if err != nil {
+			log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
+			return err
+		}
 	}
 
 	uninjectStart := time.Now()
@@ -653,6 +657,21 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 		for _, c := range content {
 			r, ok := c.(float64)
+			if !ok {
+				return nil, errTransferType
+			}
+			data.Data = append(data.Data, r)
+		}
+		rst = data
+
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		var data = &storage.StringFieldData{
+			NumRows: numOfRows,
+			Data:    make([]string, 0, len(content)),
+		}
+
+		for _, c := range content {
+			r, ok := c.(string)
 			if !ok {
 				return nil, errTransferType
 			}

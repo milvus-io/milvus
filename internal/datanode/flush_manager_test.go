@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
@@ -516,7 +517,9 @@ func TestRendezvousFlushManager_close(t *testing.T) {
 
 func TestFlushNotifyFunc(t *testing.T) {
 	ctx := context.Background()
-	rcf := &RootCoordFactory{}
+	rcf := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 
 	replica, err := newReplica(ctx, rcf, cm, 1)
@@ -568,7 +571,10 @@ func TestFlushNotifyFunc(t *testing.T) {
 
 func TestDropVirtualChannelFunc(t *testing.T) {
 	ctx := context.Background()
-	rcf := &RootCoordFactory{}
+	rcf := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 	replica, err := newReplica(ctx, rcf, cm, 1)
 	require.NoError(t, err)
