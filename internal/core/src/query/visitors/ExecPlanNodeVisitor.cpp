@@ -131,7 +131,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
     BitsetView final_view = bitset_holder;
-    auto seg_offsets = std::move(segment->search_ids(final_view, timestamp_));
+    auto seg_offsets = segment->search_ids(final_view, timestamp_);
     retrieve_result.result_offsets_.assign((int64_t*)seg_offsets.data(),
                                            (int64_t*)seg_offsets.data() + seg_offsets.size());
     retrieve_result_opt_ = std::move(retrieve_result);

@@ -198,7 +198,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
     }
     //    std::shuffle(res.row_ids_.begin(), res.row_ids_.end(), er);
     res.generate_rows(N, schema);
-    return std::move(res);
+    return res;
 }
 
 inline auto

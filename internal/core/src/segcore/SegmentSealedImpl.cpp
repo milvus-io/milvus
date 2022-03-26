@@ -571,7 +571,7 @@ SegmentSealedImpl::search_ids(const BitsetType& bitset, Timestamp timestamp) con
             dst_offset.emplace_back(SegOffset(i));
         }
     }
-    return std::move(dst_offset);
+    return dst_offset;
 }
 
 std::vector<SegOffset>
@@ -582,7 +582,7 @@ SegmentSealedImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) con
             dst_offset.emplace_back(SegOffset(i));
         }
     }
-    return std::move(dst_offset);
+    return dst_offset;
 }
 
 std::string
