@@ -522,6 +522,53 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	return nil
 }
 
+func (s *Segment) segmentInsertColumnData(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp, columns *[]*schemapb.FieldData, schema *schemapb.CollectionSchema) error {
+	/*
+		CStatus
+		InsertColumnData(CSegmentInterface c_segment,
+						 int64_t reserved_offset,
+						 int64_t size,
+						 const int64_t* row_ids,
+						 const uint64_t* timestamps,
+						 void* raw_data,
+						 int64_t count);
+	*/
+	s.segPtrMu.RLock()
+	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
+	if s.segmentType != segmentTypeGrowing {
+		return nil
+	}
+
+	if s.segmentPtr == nil {
+		return errors.New("null seg core pointer")
+	}
+
+	rawData, err := typeutil.TransferColumnBasedDataToByteSlice(schema, *columns)
+	if err != nil {
+		return err
+	}
+
+	var cOffset = C.int64_t(offset)
+	var cNumOfRows = C.int64_t(len(*entityIDs))
+	var cEntityIdsPtr = (*C.int64_t)(&(*entityIDs)[0])
+	var cTimestampsPtr = (*C.uint64_t)(&(*timestamps)[0])
+	var cRawDataVoidPtr = unsafe.Pointer(&rawData[0])
+
+	status := C.InsertColumnData(s.segmentPtr,
+		cOffset,
+		cNumOfRows,
+		cEntityIdsPtr,
+		cTimestampsPtr,
+		cRawDataVoidPtr,
+		cNumOfRows)
+	if err := HandleCStatus(&status, "InsertColumnData failed"); err != nil {
+		return err
+	}
+
+	s.setRecentlyModified(true)
+	return nil
+}
+
 func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp) error {
 	/*
 		CStatus

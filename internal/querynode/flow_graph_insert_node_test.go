@@ -26,7 +26,9 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func genFlowGraphInsertData() (*insertData, error) {
@@ -34,6 +36,10 @@ func genFlowGraphInsertData() (*insertData, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// complete the column data
+	schema := genSimpleSegCoreSchema()
+	ColumnData, _ := typeutil.TransferRowBasedDataToColumnBasedData(schema, insertMsg.RowData)
 
 	iData := &insertData{
 		insertIDs: map[UniqueID][]UniqueID{
@@ -44,6 +50,9 @@ func genFlowGraphInsertData() (*insertData, error) {
 		},
 		insertRecords: map[UniqueID][]*commonpb.Blob{
 			defaultSegmentID: insertMsg.RowData,
+		},
+		insertColumns: map[UniqueID][]*schemapb.FieldData{
+			defaultSegmentID: ColumnData,
 		},
 		insertOffset: map[UniqueID]int64{
 			defaultSegmentID: 0,

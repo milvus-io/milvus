@@ -410,6 +410,66 @@ func TestSegment_segmentInsert(t *testing.T) {
 	})
 }
 
+func TestSegment_segmentInsertColumnData(t *testing.T) {
+	collectionID := UniqueID(0)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
+
+	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	assert.Equal(t, collection.ID(), collectionID)
+	segmentID := UniqueID(0)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	assert.Equal(t, segmentID, segment.segmentID)
+	assert.Nil(t, err)
+
+	columns := []*schemapb.FieldData{
+		{
+			Type:    schemapb.DataType_FloatVector,
+			FieldId: UniqueID(100),
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 16,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{
+								0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+								0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+								0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:    schemapb.DataType_Int32,
+			FieldId: UniqueID(101),
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: []int32{0, 0xffff, 0x1fffffff},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ids := []int64{1, 2, 3}
+	timestamps := []uint64{0, 0, 0}
+	N := len(ids)
+
+	offset, err := segment.segmentPreInsert(N)
+	assert.Nil(t, err)
+	assert.GreaterOrEqual(t, offset, int64(0))
+
+	err = segment.segmentInsertColumnData(offset, &ids, &timestamps, &columns, collectionMeta.Schema)
+	assert.NoError(t, err)
+	assert.Equal(t, N, int(segment.getRowCount()))
+	deleteSegment(segment)
+	deleteCollection(collection)
+}
+
 func TestSegment_segmentDelete(t *testing.T) {
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionID, false)

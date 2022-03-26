@@ -25,8 +25,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -37,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // insertNode is one of the nodes in query flow graph
@@ -50,6 +49,7 @@ type insertData struct {
 	insertIDs        map[UniqueID][]int64
 	insertTimestamps map[UniqueID][]Timestamp
 	insertRecords    map[UniqueID][]*commonpb.Blob
+	insertColumns    map[UniqueID][]*schemapb.FieldData
 	insertOffset     map[UniqueID]int64
 	insertPKs        map[UniqueID][]int64
 }
@@ -66,10 +66,8 @@ func (iNode *insertNode) Name() string {
 	return "iNode"
 }
 
-// Operate handles input messages, to execute insert operations
+// Operate handles input messages, to execute insert operations for each segment
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	//log.Debug("Do insertNode operation")
-
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in insertNode", zap.Int("input length", len(in)))
 		return []Msg{}
@@ -81,16 +79,17 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		return []Msg{}
 	}
 
-	iData := insertData{
-		insertIDs:        make(map[UniqueID][]int64),
-		insertTimestamps: make(map[UniqueID][]Timestamp),
-		insertRecords:    make(map[UniqueID][]*commonpb.Blob),
-		insertOffset:     make(map[UniqueID]int64),
-		insertPKs:        make(map[UniqueID][]int64),
-	}
-
 	if iMsg == nil {
 		return []Msg{}
+	}
+
+	// segmentId -> data
+	iData := insertData{
+		insertIDs:        make(map[UniqueID][]int64), // segmentId -> rowId
+		insertTimestamps: make(map[UniqueID][]Timestamp),
+		insertColumns:    make(map[UniqueID][]*schemapb.FieldData),
+		insertOffset:     make(map[UniqueID]int64),
+		insertPKs:        make(map[UniqueID][]int64),
 	}
 
 	var spans []opentracing.Span
@@ -125,19 +124,19 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 		}
 
-		// trans column field data to row data
-		if insertMsg.IsColumnBased() {
-			insertMsg.RowData, err = typeutil.TransferColumnBasedDataToRowBasedData(col.schema, insertMsg.FieldsData)
+		// if the message is row-based, transform it to be column-based
+		if insertMsg.IsRowBased() {
+			insertMsg.FieldsData, err = typeutil.TransferRowBasedDataToColumnBasedData(col.Schema(), insertMsg.RowData)
 			if err != nil {
-				log.Error("failed to transfer column-based data to row-based data", zap.Error(err))
+				log.Error("failed to transfer row-based data to column-based data", zap.Error(err))
 				return []Msg{}
 			}
 		}
 
 		iData.insertIDs[insertMsg.SegmentID] = append(iData.insertIDs[insertMsg.SegmentID], insertMsg.RowIDs...)
 		iData.insertTimestamps[insertMsg.SegmentID] = append(iData.insertTimestamps[insertMsg.SegmentID], insertMsg.Timestamps...)
-		// using insertMsg.RowData is valid here, since we have already transferred the column-based data.
-		iData.insertRecords[insertMsg.SegmentID] = append(iData.insertRecords[insertMsg.SegmentID], insertMsg.RowData...)
+		// using insertMsg.FieldsData is valid here, since we have already transferred the row-based data.
+		iData.insertColumns[insertMsg.SegmentID] = append(iData.insertColumns[insertMsg.SegmentID], insertMsg.FieldsData...)
 		pks, err := getPrimaryKeys(insertMsg, iNode.streamingReplica)
 		if err != nil {
 			log.Warn(err.Error())
@@ -147,14 +146,14 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// 2. do preInsert
-	for segmentID := range iData.insertRecords {
+	for segmentID := range iData.insertIDs {
 		var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 		if err != nil {
 			log.Warn(err.Error())
 			continue
 		}
 
-		var numOfRecords = len(iData.insertRecords[segmentID])
+		var numOfRecords = len(iData.insertIDs[segmentID])
 		if targetSegment != nil {
 			offset, err := targetSegment.segmentPreInsert(numOfRecords)
 			if err != nil {
@@ -169,7 +168,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 3. do insert
 	wg := sync.WaitGroup{}
-	for segmentID := range iData.insertRecords {
+	for segmentID := range iData.insertIDs {
 		wg.Add(1)
 		go iNode.insert(&iData, segmentID, &wg)
 	}
@@ -284,6 +283,7 @@ func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
 
 // insert would execute insert operations for specific growing segment
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {
+	// TODO: defer wg.Done()
 	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
 	var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
@@ -300,10 +300,12 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 
 	ids := iData.insertIDs[segmentID]
 	timestamps := iData.insertTimestamps[segmentID]
-	records := iData.insertRecords[segmentID]
+	columns := iData.insertColumns[segmentID]
 	offsets := iData.insertOffset[segmentID]
 
-	err = targetSegment.segmentInsert(offsets, &ids, &timestamps, &records)
+	col, _ := iNode.streamingReplica.getCollectionByID(targetSegment.collectionID)
+	// schema is needed to ensure correct order of columns
+	err = targetSegment.segmentInsertColumnData(offsets, &ids, &timestamps, &columns, col.Schema())
 	if err != nil {
 		log.Debug("QueryNode: targetSegmentInsert failed", zap.Error(err))
 		// TODO: add error handling

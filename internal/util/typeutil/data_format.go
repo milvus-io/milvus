@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -101,6 +102,157 @@ func appendBinaryVectorField(datas *rowsHelper, rowNum *int, bDatas []byte, dim 
 
 func writeToBuffer(w io.Writer, endian binary.ByteOrder, d interface{}) error {
 	return binary.Write(w, endian, d)
+}
+
+func TransferRowBasedDataToColumnBasedData(schema *schemapb.CollectionSchema, rows []*commonpb.Blob) (columns []*schemapb.FieldData, err error) {
+	numRows := len(rows)
+
+	// construct bytes reader for each row
+	var readers []*bytes.Reader
+	for _, row := range rows {
+		reader := bytes.NewReader(row.Value)
+		readers = append(readers, reader)
+	}
+
+	// for each column, fetch data from each row
+	for fieldID, fieldSchema := range schema.GetFields() {
+		column := new(schemapb.FieldData)
+		column.Type = fieldSchema.GetDataType()
+		column.FieldId = int64(fieldID)
+		column.FieldName = fieldSchema.GetName()
+
+		var err error
+		switch column.Type {
+		case schemapb.DataType_Bool:
+			data := make([]bool, numRows)
+			for i, reader := range readers {
+				err = binary.Read(reader, binary.LittleEndian, &data[i])
+			}
+			column.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_BoolData{
+						BoolData: &schemapb.BoolArray{
+							Data: data,
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Int32:
+			data := make([]int32, numRows)
+			for i, reader := range readers {
+				err = binary.Read(reader, binary.LittleEndian, &data[i])
+			}
+			column.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_IntData{
+						IntData: &schemapb.IntArray{
+							Data: data,
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Int64:
+			data := make([]int64, numRows)
+			for i, reader := range readers {
+				err = binary.Read(reader, binary.LittleEndian, &data[i])
+			}
+			column.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: data,
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Float:
+			data := make([]float32, numRows)
+			for i, reader := range readers {
+				err = binary.Read(reader, binary.LittleEndian, &data[i])
+			}
+			column.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_FloatData{
+						FloatData: &schemapb.FloatArray{
+							Data: data,
+						},
+					},
+				},
+			}
+		case schemapb.DataType_Double:
+			data := make([]float64, numRows)
+			for i, reader := range readers {
+				err = binary.Read(reader, binary.LittleEndian, &data[i])
+			}
+			column.Field = &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_DoubleData{
+						DoubleData: &schemapb.DoubleArray{
+							Data: data,
+						},
+					},
+				},
+			}
+		case schemapb.DataType_FloatVector:
+			var dim int
+			for _, p := range fieldSchema.TypeParams {
+				if p.Key == "dim" {
+					var err error
+					dim, err = strconv.Atoi(p.Value)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+			data := make([]float32, numRows*dim)
+			for i, reader := range readers {
+				for j := 0; j < dim; j++ {
+					err = binary.Read(reader, binary.LittleEndian, &data[i])
+				}
+			}
+			column.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: data,
+						},
+					},
+				},
+			}
+		case schemapb.DataType_BinaryVector:
+			var dim int
+			for _, p := range fieldSchema.TypeParams {
+				if p.Key == "dim" {
+					var err error
+					dim, err = strconv.Atoi(p.Value)
+					if err != nil {
+						return nil, err
+					}
+				}
+			}
+			data := make([]byte, numRows*dim/8)
+			for i, reader := range readers {
+				for j := 0; j < dim/8; j++ {
+					err = binary.Read(reader, binary.LittleEndian, &data[i])
+				}
+			}
+			column.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: int64(dim),
+					Data: &schemapb.VectorField_BinaryVector{
+						BinaryVector: data,
+					},
+				},
+			}
+		}
+
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, column)
+	}
+	return columns, nil
 }
 
 func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, columns []*schemapb.FieldData) (rows []*commonpb.Blob, err error) {
@@ -255,4 +407,61 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 	}
 
 	return rows, nil
+}
+
+func TransferColumnBasedDataToByteSlice(schema *schemapb.CollectionSchema, columns []*schemapb.FieldData) ([]byte, error) {
+	fieldID2FieldData := make(map[int64][]*schemapb.FieldData)
+	for _, column := range columns {
+		fieldID2FieldData[column.FieldId] = append(fieldID2FieldData[column.FieldId], column)
+	}
+
+	buf := new(bytes.Buffer)
+	endian := common.Endian
+	var err error
+
+	for _, field := range schema.Fields {
+		if field.FieldID == common.RowIDField || field.FieldID == common.TimeStampField {
+			continue
+		}
+		fieldData, ok := fieldID2FieldData[field.FieldID]
+		if !ok {
+			return nil, fmt.Errorf("field %s data not exist", field.Name)
+		}
+		for _, data := range fieldData {
+			switch data.Field.(type) {
+			case *schemapb.FieldData_Scalars:
+				scalarField := data.GetScalars()
+				switch scalarField.Data.(type) {
+				case *schemapb.ScalarField_BoolData:
+					err = binary.Write(buf, endian, scalarField.GetBoolData().Data)
+				case *schemapb.ScalarField_IntData:
+					err = binary.Write(buf, endian, scalarField.GetIntData().Data)
+				case *schemapb.ScalarField_LongData:
+					err = binary.Write(buf, endian, scalarField.GetLongData().Data)
+				case *schemapb.ScalarField_FloatData:
+					err = binary.Write(buf, endian, scalarField.GetFloatData().Data)
+				case *schemapb.ScalarField_DoubleData:
+					err = binary.Write(buf, endian, scalarField.GetDoubleData().Data)
+				default:
+					log.Warn("unsupported data type", zap.String("type", data.Type.String()))
+				}
+			case *schemapb.FieldData_Vectors:
+				vectorField := data.GetVectors()
+				switch vectorField.Data.(type) {
+				case *schemapb.VectorField_FloatVector:
+					err = binary.Write(buf, endian, vectorField.GetFloatVector().Data)
+				case *schemapb.VectorField_BinaryVector:
+					err = binary.Write(buf, endian, vectorField.GetBinaryVector())
+				default:
+					log.Warn("unsupported data type", zap.String("type", data.Type.String()))
+				}
+			default:
+				log.Warn("unsupported data type", zap.String("type", data.Type.String()))
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return buf.Bytes(), nil
 }
