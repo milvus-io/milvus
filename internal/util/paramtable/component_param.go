@@ -597,6 +597,9 @@ type queryNodeConfig struct {
 
 	// memory limit
 	OverloadedMemoryThresholdPercentage float64
+
+	// cache limit
+	LocalFileCacheLimit int64
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -617,6 +620,8 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initSegcoreChunkRows()
 
 	p.initOverloadedMemoryThresholdPercentage()
+
+	p.initLocalFileCacheLimit()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -689,6 +694,15 @@ func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {
 		panic(err)
 	}
 	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
+}
+
+func (p *queryNodeConfig) initLocalFileCacheLimit() {
+	overloadedMemoryThresholdPercentage := p.Base.LoadWithDefault("querynoe.chunkManager.localFileCacheLimit", "90")
+	localFileCacheLimit, err := strconv.ParseInt(overloadedMemoryThresholdPercentage, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.LocalFileCacheLimit = localFileCacheLimit
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -143,6 +143,9 @@ queryNode:
   segcore:
     chunkRows: 32768 # The number of vectors in a chunk.
 
+  chunkManager:
+    localFileCacheLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
+
 
 indexCoord:
   address: localhost

@@ -691,10 +691,13 @@ func genVectorChunkManager(ctx context.Context) (*storage.VectorChunkManager, er
 	}
 
 	schema := genSimpleInsertDataSchema()
-	vcm := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
+	vcm, err := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
 		ID:     defaultCollectionID,
 		Schema: schema,
-	}, false)
+	}, Params.QueryNodeCfg.LocalFileCacheLimit, false)
+	if err != nil {
+		return nil, err
+	}
 	return vcm, nil
 }
 

@@ -91,6 +91,7 @@ type queryCollection struct {
 	remoteChunkManager storage.ChunkManager
 	vectorChunkManager *storage.VectorChunkManager
 	localCacheEnabled  bool
+	localCacheSize     int64
 
 	globalSegmentManager *globalSealedSegmentManager
 }
@@ -142,6 +143,7 @@ func newQueryCollection(releaseCtx context.Context,
 		localChunkManager:    localChunkManager,
 		remoteChunkManager:   remoteChunkManager,
 		localCacheEnabled:    localCacheEnabled,
+		localCacheSize:       Params.QueryNodeCfg.LocalFileCacheLimit,
 		globalSegmentManager: newGlobalSealedSegmentManager(collectionID),
 	}
 
@@ -172,10 +174,7 @@ func (q *queryCollection) close() {
 	// }
 	q.globalSegmentManager.close()
 	if q.vectorChunkManager != nil {
-		err := q.vectorChunkManager.Close()
-		if err != nil {
-			log.Warn("close vector chunk manager error occurs", zap.Error(err))
-		}
+		q.vectorChunkManager.Close()
 	}
 }
 
@@ -1300,11 +1299,14 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 		if q.remoteChunkManager == nil {
 			return fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil, msgID = %d", retrieveMsg.ID())
 		}
-		q.vectorChunkManager = storage.NewVectorChunkManager(q.localChunkManager, q.remoteChunkManager,
+		q.vectorChunkManager, err = storage.NewVectorChunkManager(q.localChunkManager, q.remoteChunkManager,
 			&etcdpb.CollectionMeta{
 				ID:     collection.id,
 				Schema: collection.schema,
-			}, q.localCacheEnabled)
+			}, q.localCacheSize, q.localCacheEnabled)
+		if err != nil {
+			return err
+		}
 	}
 
 	// historical retrieve

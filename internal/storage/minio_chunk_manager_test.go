@@ -381,25 +381,48 @@ func TestMinIOCM(t *testing.T) {
 	})
 
 	t.Run("test GetPath", func(t *testing.T) {
-		testGetSizeRoot := "get_path"
+		testGetPathRoot := path.Join(testMinIOKVRoot, "get_path")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testGetSizeRoot)
+		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		require.NoError(t, err)
+		defer testCM.RemoveWithPrefix(testGetPathRoot)
 
-		key := path.Join(testGetSizeRoot, "TestMinIOKV_GetPath_key")
-		value := []byte("TestMinIOKV_GetPath_value")
+		key := path.Join(testGetPathRoot, "TestMinIOKV_GetSize_key")
+		value := []byte("TestMinIOKV_GetSize_value")
 
-		err := testCM.Write(key, value)
+		err = testCM.Write(key, value)
 		assert.NoError(t, err)
 
 		p, err := testCM.GetPath(key)
 		assert.NoError(t, err)
-		assert.Equal(t, p, path.Join(localPath, key))
+		assert.Equal(t, p, key)
 
-		key2 := path.Join(testGetSizeRoot, "TestMemoryKV_GetSize_key2")
+		key2 := path.Join(testGetPathRoot, "TestMemoryKV_GetSize_key2")
 
 		p, err = testCM.GetPath(key2)
 		assert.Error(t, err)
 		assert.Equal(t, p, "")
+	})
+	t.Run("test Mmap", func(t *testing.T) {
+		testMmapRoot := path.Join(testMinIOKVRoot, "mmap")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		require.NoError(t, err)
+		defer testCM.RemoveWithPrefix(testMmapRoot)
+
+		key := path.Join(testMmapRoot, "TestMinIOKV_GetSize_key")
+		value := []byte("TestMinIOKV_GetSize_value")
+
+		err = testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		r, err := testCM.Mmap(key)
+		assert.Error(t, err)
+		assert.Nil(t, r)
+
 	})
 }
