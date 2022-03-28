@@ -25,7 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPayload_ReaderandWriter(t *testing.T) {
+// TODO Cgo test can not go through on mac, fix it
+func TestPayload_CGO_ReaderandWriter(t *testing.T) {
 
 	t.Run("TestBool", func(t *testing.T) {
 		w, err := NewPayloadWriter(schemapb.DataType_Bool)
@@ -47,7 +48,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Bool, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Bool, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -83,7 +84,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int8, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int8, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -121,7 +122,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int16, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int16, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -157,7 +158,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int32, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int32, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -194,7 +195,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int64, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int64, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -231,7 +232,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Float, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Float, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -268,7 +269,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Double, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Double, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -306,7 +307,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_String, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_String, buffer)
 		assert.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -360,7 +361,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_BinaryVector, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_BinaryVector, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -400,7 +401,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_FloatVector, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_FloatVector, buffer)
 		require.Nil(t, err)
 		length, err = r.GetPayloadLengthFromReader()
 		assert.Nil(t, err)
@@ -620,7 +621,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 
 	t.Run("TestNewReadError", func(t *testing.T) {
 		buffer := []byte{0}
-		r, err := NewPayloadReader(999, buffer)
+		r, err := NewPayloadReaderGgo(999, buffer)
 		assert.NotNil(t, err)
 		assert.Nil(t, r)
 	})
@@ -645,7 +646,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Bool, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Bool, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetBoolFromPayload()
@@ -669,7 +670,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int8, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int8, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetInt8FromPayload()
@@ -693,7 +694,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int16, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int16, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetInt16FromPayload()
@@ -717,7 +718,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int32, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int32, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetInt32FromPayload()
@@ -741,7 +742,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Int64, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Int64, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetInt64FromPayload()
@@ -765,7 +766,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Float, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Float, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetFloatFromPayload()
@@ -789,7 +790,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_Double, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_Double, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetDoubleFromPayload()
@@ -813,7 +814,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_String, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_String, buffer)
 		assert.Nil(t, err)
 
 		_, err = r.GetStringFromPayload()
@@ -837,7 +838,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_BinaryVector, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_BinaryVector, buffer)
 		assert.Nil(t, err)
 
 		_, _, err = r.GetBinaryVectorFromPayload()
@@ -861,7 +862,7 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		buffer, err := w.GetPayloadBufferFromWriter()
 		assert.Nil(t, err)
 
-		r, err := NewPayloadReader(schemapb.DataType_FloatVector, buffer)
+		r, err := NewPayloadReaderGgo(schemapb.DataType_FloatVector, buffer)
 		assert.Nil(t, err)
 
 		_, _, err = r.GetFloatVectorFromPayload()
