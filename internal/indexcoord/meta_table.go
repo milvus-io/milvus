@@ -326,7 +326,7 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	ret.SerializedSize = meta.indexMeta.GetSerializeSize()
 
 	log.Debug("IndexCoord get index file path successfully", zap.Int64("indexBuildID", indexBuildID),
-		zap.Strings("index file path", ret.IndexFilePaths))
+		zap.Int("index files num", len(ret.IndexFilePaths)))
 	return ret, nil
 }
 
