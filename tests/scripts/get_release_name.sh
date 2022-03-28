@@ -25,9 +25,12 @@ set -x
 function milvus_ci_release_name(){
     # Rules for helm release name 
     local name="m"
-    if [[ "${MILVUS_SERVER_TYPE:-}" == "distributed" ]]; then
-        # Distributed mode
-       name+="d"
+    if [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-kafka" ]]; then
+        # Distributed mode with kafka
+       name+="dk"
+    else if [[ "${MILVUS_SERVER_TYPE:-}" == "distributed-pulsar" ]]; then
+       # Distributed mode with pulsar
+       name+="dp"
     else 
        # Standalone mode      
         name+="s"

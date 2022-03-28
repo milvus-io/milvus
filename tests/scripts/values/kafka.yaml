@@ -1,0 +1,4 @@
+kafka:
+  enabled: true
+pulsar:
+  enabled: false
