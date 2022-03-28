@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -75,8 +76,7 @@ type Cluster interface {
 	allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
 	allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error
 
-	assignNodesToReplicas(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, replicaIds []int64) error
-	assignSegmentsToReplica(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, replicaID int64, wait bool) error
+	assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo) error
 
 	getSessionVersion() int64
 
@@ -704,12 +704,16 @@ func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs
 	return c.channelAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs)
 }
 
-func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, replicaIds []int64) error {
-	// todo(yah01)
-	return nil
-}
+func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo) error {
+	nodes := c.onlineNodeIDs()
+	if len(nodes) < len(replicas) {
+		return errors.New("no enough nodes to create replicas")
+	}
 
-func (c *queryNodeCluster) assignSegmentsToReplica(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, replicaID int64, wait bool) error {
-	// todo(yah01)
+	for _, node := range nodes {
+		idx := rand.Int() % len(replicas)
+		replicas[idx].NodeIds = append(replicas[idx].NodeIds, node)
+	}
+
 	return nil
 }
