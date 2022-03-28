@@ -12,7 +12,10 @@
 package paramtable
 
 import (
+	"io/ioutil"
 	"os"
+	"path"
+	"syscall"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -77,5 +80,42 @@ func TestServiceParam(t *testing.T) {
 		t.Logf("Minio BucketName = %s", Params.BucketName)
 
 		t.Logf("Minio rootpath = %s", Params.RootPath)
+	})
+
+	t.Run("test minioConfig without port", func(t *testing.T) {
+		var withoutPortMinioConfig = `
+minio:
+  address: localhost # Address of MinIO/S3
+  port: # empty port
+  accessKeyID: minioadmin # accessKeyID of MinIO/S3
+  secretAccessKey: minioadmin # MinIO/S3 encryption string
+  useSSL: false # Access to MinIO/S3 with SSL
+  bucketName: "a-bucket" # Bucket name in MinIO/S3
+  rootPath: files # The root path where the message is stored in MinIO/S3
+log:
+  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  file:
+    rootPath: "" # default to stdout, stderr
+    maxSize: 300 # MB
+    maxAge: 10 # Maximum time for log retention in day.
+    maxBackups: 20
+  format: text # text/json
+`
+		var sParams ServiceParam
+
+		tmpDir := os.TempDir()
+
+		syscall.Setenv("MILVUSCONF", tmpDir)
+		defer syscall.Unsetenv("MILVUSCONF")
+
+		ioutil.WriteFile(path.Join(tmpDir, "milvus.yaml"), []byte(withoutPortMinioConfig), 0600)
+
+		sParams.BaseTable.Init()
+		sParams.MinioCfg.init(&sParams.BaseTable)
+
+		Params := sParams.MinioCfg
+		assert.Equal(t, Params.Address, "localhost")
+
+		t.Logf("Minio Address = %s", Params.Address)
 	})
 }

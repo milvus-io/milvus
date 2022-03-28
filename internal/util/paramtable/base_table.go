@@ -181,7 +181,7 @@ func (gp *BaseTable) LoadRange(key, endKey string, limit int) ([]string, []strin
 
 func (gp *BaseTable) LoadYaml(fileName string) error {
 	config := viper.New()
-	configFile := gp.configDir + fileName
+	configFile := path.Join(gp.configDir, fileName)
 	if _, err := os.Stat(configFile); err != nil {
 		panic("cannot access config file: " + configFile)
 	}
@@ -449,7 +449,10 @@ func (gp *BaseTable) loadMinioConfig() {
 	if minioAddress == "" {
 		minioHost := gp.LoadWithDefault("minio.address", DefaultMinioHost)
 		port := gp.LoadWithDefault("minio.port", DefaultMinioPort)
-		minioAddress = minioHost + ":" + port
+		minioAddress = minioHost
+		if port != "" {
+			minioAddress = minioHost + ":" + port
+		}
 	}
 	gp.Save("_MinioAddress", minioAddress)
 
