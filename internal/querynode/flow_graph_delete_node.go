@@ -77,7 +77,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("delete in historical replica",
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
-				zap.Any("pks", delMsg.PrimaryKeys),
+				zap.Int("numPKs", len(delMsg.PrimaryKeys)),
 				zap.Any("timestamp", delMsg.Timestamps),
 				zap.Any("timestampBegin", delMsg.BeginTs()),
 				zap.Any("timestampEnd", delMsg.EndTs()),
