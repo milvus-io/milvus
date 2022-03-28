@@ -304,7 +304,6 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 
 func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 	switch e.eventType {
-
 	case putEventType:
 		watchInfo, err := parsePutEventData(data)
 		if err != nil {
@@ -319,11 +318,10 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 
 		e.info = watchInfo
 		e.vChanName = watchInfo.GetVchan().GetChannelName()
-		log.Info("DataNode is handling watchInfo put event", zap.String("key", key), zap.String("state", watchInfo.GetState().String()))
-
+		log.Info("DataNode is handling watchInfo PUT event", zap.String("key", key), zap.Any("watch state", watchInfo.GetState().String()))
 	case deleteEventType:
-		log.Info("DataNode is handling watchInfo delete event", zap.String("key", key))
 		e.vChanName = parseDeleteEventKey(key)
+		log.Info("DataNode is handling watchInfo DELETE event", zap.String("key", key))
 	}
 
 	actualManager, loaded := node.eventManagerMap.LoadOrStore(e.vChanName, newChannelEventManager(
