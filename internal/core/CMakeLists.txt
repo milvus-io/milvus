@@ -97,7 +97,6 @@ set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 # This will set RPATH to all excutable TARGET
 # self-installed dynamic libraries will be correctly linked by excutable
 set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" )
-set( CMAKE_INSTALL_RPATH "/usr/lib64" "${CMAKE_INSTALL_PREFIX}/lib64" )
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
 
 # **************************** Dependencies ****************************
