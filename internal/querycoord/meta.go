@@ -95,6 +95,7 @@ type Meta interface {
 	setReplicaInfo(replicaID int64, info *querypb.ReplicaInfo) error
 	getReplicaByID(replicaID int64) (*querypb.ReplicaInfo, error)
 	getReplicasByNodeID(nodeID int64, collectionID int64) (*querypb.ReplicaInfo, error)
+	getReplicasByCollectionID(collectionID int64) ([]*querypb.ReplicaInfo, error)
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -1065,6 +1066,11 @@ func (m *MetaReplica) getReplicaByID(replicaID int64) (*querypb.ReplicaInfo, err
 func (m *MetaReplica) getReplicasByNodeID(nodeID int64, collectionID int64) (*querypb.ReplicaInfo, error) {
 	return nil, nil
 	// todo(yah01)
+}
+
+func (m *MetaReplica) getReplicasByCollectionID(collectionID int64) ([]*querypb.ReplicaInfo, error) {
+	return nil, nil
+	// todo(sunby)
 }
 
 //func (m *MetaReplica) printMeta() {
