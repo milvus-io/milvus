@@ -448,3 +448,23 @@ func (s *Server) GetImportState(ctx context.Context, in *milvuspb.GetImportState
 func (s *Server) ReportImport(ctx context.Context, in *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	return s.rootCoord.ReportImport(ctx, in)
 }
+
+func (s *Server) CreateCredential(ctx context.Context, request *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	return s.rootCoord.CreateCredential(ctx, request)
+}
+
+func (s *Server) GetCredential(ctx context.Context, request *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	return s.rootCoord.GetCredential(ctx, request)
+}
+
+func (s *Server) UpdateCredential(ctx context.Context, request *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	return s.rootCoord.UpdateCredential(ctx, request)
+}
+
+func (s *Server) DeleteCredential(ctx context.Context, request *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	return s.rootCoord.DeleteCredential(ctx, request)
+}
+
+func (s *Server) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	return s.rootCoord.ListCredUsers(ctx, request)
+}

@@ -16,6 +16,8 @@
 
 package typeutil
 
+import "strings"
+
 // AddOne add one to last byte in string, on empty string return empty
 // it helps with key iteration upper bound
 func AddOne(data string) string {
@@ -29,4 +31,17 @@ func AddOne(data string) string {
 		datab = append(datab, byte(0))
 	}
 	return string(datab)
+}
+
+// After get substring after sub string.
+func After(str string, sub string) string {
+	pos := strings.LastIndex(str, sub)
+	if pos == -1 {
+		return ""
+	}
+	adjustedPos := pos + len(sub)
+	if adjustedPos >= len(str) {
+		return ""
+	}
+	return str[adjustedPos:len(str)]
 }

@@ -19,9 +19,12 @@ package rootcoord
 import (
 	"bytes"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"path"
 	"strconv"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/util/crypto"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -65,6 +68,10 @@ const (
 	// DDMsgSendPrefix prefix to indicate whether DD msg has been send
 	DDMsgSendPrefix = ComponentPrefix + "/dd-msg-send"
 
+	CredentialSubPrefix = "/credential/user"
+	// CredentialPrefix prefix for credential
+	CredentialPrefix = ComponentPrefix + CredentialSubPrefix
+
 	// CreateCollectionDDType name of DD type for create collection
 	CreateCollectionDDType = "CreateCollection"
 
@@ -94,6 +101,7 @@ type MetaTable struct {
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
 	ddLock     sync.RWMutex
+	credLock   sync.RWMutex
 }
 
 // NewMetaTable creates meta table for rootcoord, which stores all in-memory information
@@ -105,6 +113,7 @@ func NewMetaTable(txn kv.TxnKV, snap kv.SnapShotKV) (*MetaTable, error) {
 		tenantLock: sync.RWMutex{},
 		proxyLock:  sync.RWMutex{},
 		ddLock:     sync.RWMutex{},
+		credLock:   sync.RWMutex{},
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -1327,4 +1336,104 @@ func (mt *MetaTable) IsAlias(collectionAlias string) bool {
 	defer mt.ddLock.RUnlock()
 	_, ok := mt.collAlias2ID[collectionAlias]
 	return ok
+}
+
+// AddCredential add credential
+func (mt *MetaTable) AddCredential(credInfo *pb.CredentialInfo) error {
+	mt.credLock.Lock()
+	defer mt.credLock.Unlock()
+
+	k := fmt.Sprintf("%s/%s", CredentialPrefix, credInfo.Username)
+
+	// client sends ciphertext password (using base64)
+	rawPassword, err := crypto.Base64Decode(credInfo.Password)
+	if err != nil {
+		log.Error("MetaTable AddCredential decode password fail",
+			zap.String("key", credInfo.Username), zap.Error(err))
+		return fmt.Errorf("MetaTable AddCredential decode password fail key:%s, err:%w", credInfo.Username, err)
+	}
+	// server:
+	// 1. decode ciphertext password to raw password
+	// 2. encrypt raw password
+	// 3. save in to etcd
+	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
+	if err != nil {
+		log.Error("MetaTable AddCredential encrypt password fail",
+			zap.String("key", credInfo.Username), zap.Error(err))
+		return fmt.Errorf("MetaTable AddCredential encrypt password fail key:%s, err:%w", credInfo.Username, err)
+	}
+	err = mt.txn.Save(k, encryptedPassword)
+	if err != nil {
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
+	}
+	return nil
+}
+
+// GetCredential get credential by username
+func (mt *MetaTable) getCredential(username string) (*pb.CredentialInfo, error) {
+	mt.credLock.RLock()
+	defer mt.credLock.RUnlock()
+
+	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	v, err := mt.txn.Load(k)
+	if err != nil {
+		log.Error("MetaTable GetCredential fail",
+			zap.String("key", k), zap.Error(err))
+		return nil, err
+	}
+	return &pb.CredentialInfo{Username: username, Password: v}, nil
+}
+
+// DeleteCredential delete credential
+func (mt *MetaTable) DeleteCredential(username string) error {
+	mt.credLock.Lock()
+	defer mt.credLock.Unlock()
+
+	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+
+	err := mt.txn.Remove(k)
+	if err != nil {
+		log.Error("SnapShotKV Delete fail", zap.Error(err))
+		panic("SnapShotKV Delete fail")
+	}
+	return nil
+}
+
+// UpdateCredential update credential
+func (mt *MetaTable) UpdateCredential(credInfo *pb.CredentialInfo) error {
+	mt.credLock.Lock()
+	defer mt.credLock.Unlock()
+
+	k := fmt.Sprintf("%s/%s", CredentialPrefix, credInfo.Username)
+
+	err := mt.txn.Save(k, credInfo.Password)
+	if err != nil {
+		log.Error("SnapShotKV Update fail", zap.Error(err))
+		panic("SnapShotKV Update fail")
+	}
+	return nil
+}
+
+// ListCredentialUsernames list credential usernames
+func (mt *MetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse, error) {
+	mt.credLock.RLock()
+	defer mt.credLock.RUnlock()
+
+	keys, _, err := mt.txn.LoadWithPrefix(CredentialPrefix)
+	if err != nil {
+		log.Error("MetaTable list all credential usernames fail", zap.Error(err))
+		return nil, err
+	}
+
+	var usernames []string
+	for _, path := range keys {
+		username := typeutil.After(path, CredentialSubPrefix)
+		if len(username) == 0 {
+			log.Warn("no username extract from path:", zap.String("path", path))
+			continue
+		}
+		usernames = append(usernames, username)
+	}
+	return &milvuspb.ListCredUsersResponse{Usernames: usernames}, nil
 }

@@ -154,6 +154,13 @@ enum MsgType {
     SegmentFlushDone = 1207;
 
     DataNodeTt = 1208;
+
+    /* Credential */
+    CreateCredential = 1500;
+    GetCredential = 1501;
+    DeleteCredential = 1502;
+    UpdateCredential = 1503;
+    ListCredUsernames = 1504;
 }
 
 message MsgBase {

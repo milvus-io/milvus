@@ -260,6 +260,37 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 	return nil
 }
 
+func validateUsername(username string) error {
+	username = strings.TrimSpace(username)
+
+	if username == "" {
+		return errors.New("username should not be empty")
+	}
+
+	invalidMsg := "Invalid username: " + username + ". "
+	if int64(len(username)) > Params.ProxyCfg.MaxUsernameLength {
+		msg := invalidMsg + "The length of username must be less than " +
+			strconv.FormatInt(Params.ProxyCfg.MaxUsernameLength, 10) + " characters."
+		return errors.New(msg)
+	}
+
+	firstChar := username[0]
+	if !isAlpha(firstChar) {
+		msg := invalidMsg + "The first character of username must be a letter."
+		return errors.New(msg)
+	}
+
+	usernameSize := len(username)
+	for i := 1; i < usernameSize; i++ {
+		c := username[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			msg := invalidMsg + "Username should only contain numbers, letters, and underscores."
+			return errors.New(msg)
+		}
+	}
+	return nil
+}
+
 // RepeatedKeyValToMap transfer the kv pairs to map.
 func RepeatedKeyValToMap(kvPairs []*commonpb.KeyValuePair) (map[string]string, error) {
 	resMap := make(map[string]string)

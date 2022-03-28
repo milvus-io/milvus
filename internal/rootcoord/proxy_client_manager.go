@@ -32,6 +32,7 @@ import (
 type proxyClientManager struct {
 	core        *Core
 	lock        sync.RWMutex
+	credLock    sync.RWMutex
 	proxyClient map[int64]types.Proxy
 	helper      proxyClientManagerHelper
 }
@@ -47,6 +48,7 @@ var defaultClientManagerHelper = proxyClientManagerHelper{
 func newProxyClientManager(c *Core) *proxyClientManager {
 	return &proxyClientManager{
 		core:        c,
+		credLock:    sync.RWMutex{},
 		proxyClient: make(map[int64]types.Proxy),
 		helper:      defaultClientManagerHelper,
 	}
@@ -134,6 +136,72 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 			log.Debug("send invalidate collection meta cache to proxy node", zap.Int64("node id", k))
 		}
 
+	}
+}
+
+func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) {
+	p.credLock.Lock()
+	defer p.credLock.Unlock()
+
+	if len(p.proxyClient) == 0 {
+		log.Debug("proxy client is empty, InvalidateCredentialCache will not send to any client")
+		return
+	}
+
+	for k, f := range p.proxyClient {
+		err := func() error {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Debug("call InvalidateCredentialCache panic", zap.Int64("proxy id", k), zap.Any("msg", err))
+				}
+			}()
+			sta, err := f.InvalidateCredentialCache(ctx, request)
+			if err != nil {
+				return fmt.Errorf("grpc fail, error=%w", err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("message = %s", sta.Reason)
+			}
+			return nil
+		}()
+		if err != nil {
+			log.Error("Failed to call invalidate credential cache", zap.Int64("proxy id", k), zap.Error(err))
+		} else {
+			log.Debug("send invalidate credential cache to proxy node", zap.Int64("node id", k))
+		}
+	}
+}
+
+func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) {
+	p.credLock.Lock()
+	defer p.credLock.Unlock()
+
+	if len(p.proxyClient) == 0 {
+		log.Debug("proxy client is empty, UpdateCredentialCache will not send to any client")
+		return
+	}
+
+	for k, f := range p.proxyClient {
+		err := func() error {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Debug("call UpdateCredentialCache panic", zap.Int64("proxy id", k), zap.Any("msg", err))
+				}
+			}()
+			sta, err := f.UpdateCredentialCache(ctx, request)
+			if err != nil {
+				return fmt.Errorf("grpc fail, error=%w", err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("message = %s", sta.Reason)
+			}
+			return nil
+		}()
+		if err != nil {
+			log.Error("Failed to call update credential cache", zap.Int64("proxy id", k), zap.Error(err))
+		} else {
+			log.Debug("send update credential cache to proxy node", zap.Int64("node id", k))
+		}
 	}
 }
 

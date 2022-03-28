@@ -64,6 +64,7 @@ const (
 	functionLabelName     = "function_name"
 	queryTypeLabelName    = "query_type"
 	segmentTypeLabelName  = "segment_type"
+	usernameLabelName     = "username"
 )
 
 var (

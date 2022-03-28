@@ -26,6 +26,10 @@ import (
 	"sync"
 	"time"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/gin-gonic/gin"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
@@ -56,6 +60,11 @@ import (
 
 var Params paramtable.GrpcServerConfig
 var HTTPParams paramtable.HTTPConfig
+
+var (
+	errMissingMetadata = status.Errorf(codes.InvalidArgument, "missing metadata")
+	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
+)
 
 // Server is the Proxy Server
 type Server struct {
@@ -154,8 +163,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
-		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(ot.UnaryServerInterceptor(opts...), proxy.AuthInterceptor)),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(ot.StreamServerInterceptor(opts...)))) // TODO: add stream interceptor
 	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcServer, s)
@@ -436,6 +445,14 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *pro
 	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
 }
 
+func (s *Server) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+	return s.proxy.InvalidateCredentialCache(ctx, request)
+}
+
+func (s *Server) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateCredentialCache(ctx, request)
+}
+
 // ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	return s.proxy.ReleaseDQLMessageStream(ctx, request)
@@ -645,6 +662,22 @@ func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milv
 
 func (s *Server) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	return s.proxy.GetImportState(ctx, req)
+}
+
+func (s *Server) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateCredential(ctx, req)
+}
+
+func (s *Server) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateCredential(ctx, req)
+}
+
+func (s *Server) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	return s.proxy.DeleteCredential(ctx, req)
+}
+
+func (s *Server) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	return s.proxy.ListCredUsers(ctx, req)
 }
 
 // Check is required by gRPC healthy checking

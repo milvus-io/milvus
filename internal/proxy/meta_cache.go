@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -56,6 +58,10 @@ type Cache interface {
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
+	// GetCredentialInfo operate credential cache
+	GetCredentialInfo(ctx context.Context, username string) (*credentialInfo, error)
+	RemoveCredentialCache(ctx context.Context, username string)
+	UpdateCredentialCache(ctx context.Context, credInfo *credentialInfo)
 }
 
 type collectionInfo struct {
@@ -72,6 +78,11 @@ type partitionInfo struct {
 	createdUtcTimestamp uint64
 }
 
+type credentialInfo struct {
+	username string
+	password string // hashed password
+}
+
 // make sure MetaCache implements Cache.
 var _ Cache = (*MetaCache)(nil)
 
@@ -80,7 +91,9 @@ type MetaCache struct {
 	client types.RootCoord
 
 	collInfo map[string]*collectionInfo
-	mu       sync.RWMutex
+	credMap  map[string]*credentialInfo
+	metaMut  sync.RWMutex
+	credMut  sync.RWMutex
 }
 
 // globalMetaCache is singleton instance of Cache
@@ -106,25 +119,25 @@ func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 
 // GetCollectionID returns the corresponding collection id for provided collection name
 func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-	m.mu.RLock()
+	m.metaMut.RLock()
 	collInfo, ok := m.collInfo[collectionName]
 
 	if !ok {
 		metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollection", metrics.CacheMissLabel).Inc()
-		m.mu.RUnlock()
+		m.metaMut.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
 			return 0, err
 		}
-		m.mu.Lock()
-		defer m.mu.Unlock()
+		m.metaMut.Lock()
+		defer m.metaMut.Unlock()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.updateCollection(coll, collectionName)
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		collInfo = m.collInfo[collectionName]
 		return collInfo.collID, nil
 	}
-	defer m.mu.RUnlock()
+	defer m.metaMut.RUnlock()
 	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollection", metrics.CacheHitLabel).Inc()
 
 	return collInfo.collID, nil
@@ -133,18 +146,18 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 // GetCollectionInfo returns the collection information related to provided collection name
 // If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error) {
-	m.mu.RLock()
+	m.metaMut.RLock()
 	var collInfo *collectionInfo
 	collInfo, ok := m.collInfo[collectionName]
-	m.mu.RUnlock()
+	m.metaMut.RUnlock()
 
 	if !ok {
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
 			return nil, err
 		}
-		m.mu.Lock()
-		defer m.mu.Unlock()
+		m.metaMut.Lock()
+		defer m.metaMut.Unlock()
 		m.updateCollection(coll, collectionName)
 		collInfo = m.collInfo[collectionName]
 	}
@@ -159,12 +172,12 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 }
 
 func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
-	m.mu.RLock()
+	m.metaMut.RLock()
 	collInfo, ok := m.collInfo[collectionName]
 
 	if !ok {
 		t0 := time.Now()
-		m.mu.RUnlock()
+		m.metaMut.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
 			log.Warn("Failed to load collection from rootcoord ",
@@ -172,8 +185,8 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 				zap.Error(err))
 			return nil, err
 		}
-		m.mu.Lock()
-		defer m.mu.Unlock()
+		m.metaMut.Lock()
+		defer m.metaMut.Unlock()
 		m.updateCollection(coll, collectionName)
 		collInfo = m.collInfo[collectionName]
 		log.Debug("Reload collection from rootcoord ",
@@ -181,7 +194,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 			zap.Any("time take ", time.Since(t0)))
 		return collInfo.schema, nil
 	}
-	defer m.mu.RUnlock()
+	defer m.metaMut.RUnlock()
 
 	return collInfo.schema, nil
 }
@@ -211,24 +224,24 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 		return nil, err
 	}
 
-	m.mu.RLock()
+	m.metaMut.RLock()
 
 	collInfo, ok := m.collInfo[collectionName]
 	if !ok {
-		m.mu.RUnlock()
+		m.metaMut.RUnlock()
 		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 
 	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
-		m.mu.RUnlock()
+		m.metaMut.RUnlock()
 
 		partitions, err := m.showPartitions(ctx, collectionName)
 		if err != nil {
 			return nil, err
 		}
 
-		m.mu.Lock()
-		defer m.mu.Unlock()
+		m.metaMut.Lock()
+		defer m.metaMut.Unlock()
 
 		err = m.updatePartitions(partitions, collectionName)
 		if err != nil {
@@ -243,7 +256,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 		return ret, nil
 
 	}
-	defer m.mu.RUnlock()
+	defer m.metaMut.RUnlock()
 
 	ret := make(map[string]typeutil.UniqueID)
 	partInfo := m.collInfo[collectionName].partInfo
@@ -260,17 +273,17 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 		return nil, err
 	}
 
-	m.mu.RLock()
+	m.metaMut.RLock()
 
 	collInfo, ok := m.collInfo[collectionName]
 	if !ok {
-		m.mu.RUnlock()
+		m.metaMut.RUnlock()
 		return nil, fmt.Errorf("can't find collection name:%s", collectionName)
 	}
 
 	var partInfo *partitionInfo
 	partInfo, ok = collInfo.partInfo[partitionName]
-	m.mu.RUnlock()
+	m.metaMut.RUnlock()
 
 	if !ok {
 		partitions, err := m.showPartitions(ctx, collectionName)
@@ -278,8 +291,8 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 			return nil, err
 		}
 
-		m.mu.Lock()
-		defer m.mu.Unlock()
+		m.metaMut.Lock()
+		defer m.metaMut.Unlock()
 		err = m.updatePartitions(partitions, collectionName)
 		if err != nil {
 			return nil, err
@@ -390,14 +403,14 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 }
 
 func (m *MetaCache) RemoveCollection(ctx context.Context, collectionName string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.metaMut.Lock()
+	defer m.metaMut.Unlock()
 	delete(m.collInfo, collectionName)
 }
 
 func (m *MetaCache) RemovePartition(ctx context.Context, collectionName, partitionName string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.metaMut.Lock()
+	defer m.metaMut.Unlock()
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		return
@@ -407,4 +420,56 @@ func (m *MetaCache) RemovePartition(ctx context.Context, collectionName, partiti
 		return
 	}
 	delete(partInfo, partitionName)
+}
+
+// GetCredentialInfo returns the credential related to provided username
+// If the cache missed, proxy will try to fetch from storage
+func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*credentialInfo, error) {
+	m.credMut.RLock()
+	var credInfo *credentialInfo
+	credInfo, ok := m.credMap[username]
+	m.credMut.RUnlock()
+
+	if !ok {
+		req := &rootcoordpb.GetCredentialRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_GetCredential,
+			},
+			Username: username,
+		}
+		resp, err := m.client.GetCredential(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		credInfo := &credentialInfo{
+			username: resp.Username,
+			password: resp.Password,
+		}
+		m.credMut.Lock()
+		defer m.credMut.Unlock()
+		m.UpdateCredentialCache(ctx, credInfo)
+		credInfo = m.credMap[username]
+	}
+
+	return &credentialInfo{
+		username: credInfo.username,
+		password: credInfo.password,
+	}, nil
+}
+
+func (m *MetaCache) RemoveCredentialCache(ctx context.Context, username string) {
+	m.credMut.Lock()
+	defer m.credMut.Unlock()
+	delete(m.credMap, username)
+}
+
+func (m *MetaCache) UpdateCredentialCache(ctx context.Context, credInfo *credentialInfo) {
+	username := credInfo.username
+	password := credInfo.password
+	_, ok := m.credMap[username]
+	if !ok {
+		m.credMap[username] = &credentialInfo{}
+	}
+	m.credMap[username].username = password
+	m.credMap[username].password = password
 }

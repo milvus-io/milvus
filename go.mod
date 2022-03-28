@@ -10,6 +10,7 @@ require (
 	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/containerd/cgroups v1.0.2
+	github.com/dvsekhvalnov/jose2go v0.0.0-20180829124132-7f401d37b68a // indirect
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
 	github.com/facebookgo/stack v0.0.0-20160209184415-751773369052 // indirect
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
@@ -45,6 +46,7 @@ require (
 	go.uber.org/atomic v1.7.0
 	go.uber.org/automaxprocs v1.4.0
 	go.uber.org/zap v1.17.0
+	golang.org/x/crypto v0.0.0-20201002170205-7f63de1d35b0 // indirect
 	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/tools v0.1.7 // indirect
@@ -60,3 +62,4 @@ replace (
 	google.golang.org/grpc => google.golang.org/grpc v1.38.0
 )
 
+replace github.com/tecbot/gorocksdb => github.com/soothing-rain/gorocksdb v0.0.1

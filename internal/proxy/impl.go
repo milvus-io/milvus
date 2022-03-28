@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"os"
 	"strconv"
 
@@ -110,6 +111,51 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+// InvalidateCredentialCache invalidate the credential cache of specified username.
+func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to invalidate credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
+
+	username := request.Username
+	if globalMetaCache != nil {
+		globalMetaCache.RemoveCredentialCache(ctx, username) // no need to return error, though credential may be not cached
+	}
+	logutil.Logger(ctx).Debug("complete to invalidate credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+// UpdateCredentialCache update the credential cache of specified username.
+func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to update credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
+
+	credInfo := &credentialInfo{
+		username: request.Username,
+		password: request.Password,
+	}
+	if globalMetaCache != nil {
+		globalMetaCache.UpdateCredentialCache(ctx, credInfo) // no need to return error, though credential may be not cached
+	}
+	logutil.Logger(ctx).Debug("complete to update credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -3962,4 +4008,94 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 	}
 
 	return resp, nil
+}
+
+func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	method := "CreateCredential"
+	tr := timerecord.NewTimeRecorder(method)
+	// validate params
+	username := req.Username
+	password := req.Password
+	if err := validateUsername(username); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, nil
+	}
+	_, err := crypto.Base64Decode(password)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, nil
+	}
+	// save to db
+	result, err := node.rootCoord.CreateCredential(ctx, req)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	// time record
+	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, req.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return result, nil
+}
+
+func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	method := "UpdateCredential"
+	tr := timerecord.NewTimeRecorder(method)
+	// validate params
+	password := req.Password
+	if _, err := crypto.Base64Decode(password); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, nil
+	}
+	// save to db
+	result, err := node.rootCoord.UpdateCredential(ctx, req)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	// time record
+	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, req.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return result, nil
+}
+
+func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	method := "DeleteCredential"
+	tr := timerecord.NewTimeRecorder(method)
+	// save to db
+	result, err := node.rootCoord.DeleteCredential(ctx, req)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	// time record
+	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, req.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return result, nil
+}
+
+func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	method := "ListCredUsers"
+	tr := timerecord.NewTimeRecorder(method)
+	// save to db
+	result, err := node.rootCoord.ListCredUsers(ctx, req)
+	if err != nil {
+		return &milvuspb.ListCredUsersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+	// time record
+	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, "ALL.API").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return result, nil
 }

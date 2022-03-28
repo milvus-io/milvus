@@ -18,6 +18,9 @@ service Proxy {
 
   rpc SendSearchResult(internal.SearchResults) returns (common.Status) {}
   rpc SendRetrieveResult(internal.RetrieveResults) returns (common.Status) {}
+
+  rpc InvalidateCredentialCache(InvalidateCredCacheRequest) returns (common.Status) {}
+  rpc UpdateCredentialCache(UpdateCredCacheRequest) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {
@@ -30,4 +33,15 @@ message ReleaseDQLMessageStreamRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
+}
+
+message InvalidateCredCacheRequest {
+  common.MsgBase base = 1;
+  string username = 2;
+}
+
+message UpdateCredCacheRequest {
+  common.MsgBase base = 1;
+  string username = 2;
+  string password = 3;
 }

@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -1059,6 +1060,152 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 	}
 
 	t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, ts)
+
+	return nil
+}
+
+// CreateCredentialReqTask create credential request task
+type CreateCredentialReqTask struct {
+	baseReqTask
+	Req *milvuspb.CreateCredentialRequest
+}
+
+func (t *CreateCredentialReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *CreateCredentialReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_CreateCredential {
+		return fmt.Errorf("create credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	credInfo := &etcdpb.CredentialInfo{
+		Username: t.Req.Username,
+		Password: t.Req.Password,
+	}
+
+	//ts, err := t.core.TSOAllocator(1)
+	//if err != nil {
+	//    return fmt.Errorf("TSO alloc fail, error = %w", err)
+	//}
+	err := t.core.MetaTable.AddCredential(credInfo)
+	if err != nil {
+		return fmt.Errorf("meta table add credential failed, error = %w", err)
+	}
+
+	return nil
+}
+
+// GetCredentialReqTask get credential request task
+type GetCredentialReqTask struct {
+	baseReqTask
+	Req *rootcoordpb.GetCredentialRequest
+	Rsp *rootcoordpb.GetCredentialResponse
+}
+
+// Type return msg type
+func (t *GetCredentialReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+// Execute task execution
+func (t *GetCredentialReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_GetCredential {
+		return fmt.Errorf("get credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	credInfo, err := t.core.MetaTable.getCredential(t.Req.Username)
+	if err != nil {
+		return err
+	}
+
+	t.Rsp.Username = credInfo.Username
+	t.Rsp.Password = credInfo.Password
+
+	return nil
+}
+
+// DeleteCredentialReqTask delete credential request task
+type DeleteCredentialReqTask struct {
+	baseReqTask
+	Req *milvuspb.DeleteCredentialRequest
+}
+
+func (t *DeleteCredentialReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *DeleteCredentialReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_DeleteCredential {
+		return fmt.Errorf("delete credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	// invalidate proxy's local cache
+	t.core.ExpireCredCache(ctx, t.Req.Username)
+	// delete data on storage
+	err := t.core.MetaTable.DeleteCredential(t.Req.Username)
+	if err != nil {
+		return fmt.Errorf("meta table delete credential failed, error = %w", err)
+	}
+
+	return nil
+}
+
+// UpdateCredentialReqTask update credential request task
+type UpdateCredentialReqTask struct {
+	baseReqTask
+	Req *milvuspb.CreateCredentialRequest
+}
+
+func (t *UpdateCredentialReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+func (t *UpdateCredentialReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_UpdateCredential {
+		return fmt.Errorf("delete credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	credInfo := &etcdpb.CredentialInfo{
+		Username: t.Req.Username,
+		Password: t.Req.Password,
+	}
+
+	// update proxy's local cache
+	t.core.UpdateCredCache(ctx, credInfo)
+	// update data on storage
+	err := t.core.MetaTable.UpdateCredential(credInfo)
+	if err != nil {
+		return fmt.Errorf("meta table delete credential failed, error = %w", err)
+	}
+
+	return nil
+}
+
+// ListCredUsersReqTask list credential usernames request task
+type ListCredUsersReqTask struct {
+	baseReqTask
+	Req *milvuspb.ListCredUsersRequest
+	Rsp *milvuspb.ListCredUsersResponse
+}
+
+// Type return msg type
+func (t *ListCredUsersReqTask) Type() commonpb.MsgType {
+	return t.Req.Base.MsgType
+}
+
+// Execute task execution
+func (t *ListCredUsersReqTask) Execute(ctx context.Context) error {
+	if t.Type() != commonpb.MsgType_ListCredUsernames {
+		return fmt.Errorf("list credential usernames, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+	}
+
+	credInfo, err := t.core.MetaTable.ListCredentialUsernames()
+	if err != nil {
+		return err
+	}
+
+	t.Rsp = credInfo
 
 	return nil
 }

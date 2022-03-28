@@ -62,3 +62,8 @@ message CollectionMeta {
   repeated string partition_tags=5;
   repeated int64 partitionIDs=6;
 }
+
+message CredentialInfo {
+  string username = 1;
+  string password = 2;
+}
