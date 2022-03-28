@@ -270,6 +270,14 @@ var (
 			Help:      "The latency for searching",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
+
+	ProxySQTaskLatency = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "sq_queue_latency",
+			Help:      "The latency of search or query task",
+		}, []string{nodeIDLabelName, queryTypeLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
@@ -305,4 +313,5 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyDDLReqLatency)
 	registry.MustRegister(ProxyDMLReqLatency)
 	registry.MustRegister(ProxyDQLReqLatency)
+	registry.MustRegister(ProxySQTaskLatency)
 }

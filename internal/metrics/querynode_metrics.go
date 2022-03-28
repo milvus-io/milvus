@@ -178,6 +178,17 @@ var (
 			nodeIDLabelName,
 		})
 
+	QueryNodeSQHistoricalLatency = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "sq_historical_latency",
+			Help:      "The search or query latency in historical.",
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+		})
+
 	QueryNodeServiceTime = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -217,4 +228,5 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
 	registry.MustRegister(QueryNodeServiceTime)
 	registry.MustRegister(QueryNodeNumFlowGraphs)
+	registry.MustRegister(QueryNodeSQHistoricalLatency)
 }

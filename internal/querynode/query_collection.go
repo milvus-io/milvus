@@ -1075,6 +1075,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 		deleteSearchResults(searchResults)
 	}()
 	// historical search
+	trHistoricalSearch := timerecord.NewTimeRecorder("historical_search")
 	log.Debug("historical search start", zap.Int64("msgID", searchMsg.ID()))
 	hisSearchResults, sealedSegmentSearched, sealedPartitionSearched, err := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err != nil {
@@ -1083,6 +1084,8 @@ func (q *queryCollection) search(msg queryMsg) error {
 	searchResults = append(searchResults, hisSearchResults...)
 	log.Debug("historical search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("searched partitionIDs", sealedPartitionSearched), zap.Int64s("searched segmentIDs", sealedSegmentSearched))
 	tr.Record(fmt.Sprintf("historical search done, msgID = %d", searchMsg.ID()))
+	metrics.QueryNodeSQHistoricalLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID),
+		metrics.SearchLabel).Set(float64(trHistoricalSearch.ElapseSpan().Milliseconds()))
 
 	log.Debug("streaming search start", zap.Int64("msgID", searchMsg.ID()))
 	for _, channel := range collection.getVChannels() {
@@ -1310,6 +1313,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	}
 
 	// historical retrieve
+	trHistorical := timerecord.NewTimeRecorder("historical_retrieve")
 	log.Debug("historical retrieve start", zap.Int64("msgID", retrieveMsg.ID()))
 	hisRetrieveResults, sealedSegmentRetrieved, sealedPartitionRetrieved, err := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
 	if err != nil {
@@ -1318,6 +1322,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	mergeList = append(mergeList, hisRetrieveResults...)
 	log.Debug("historical retrieve", zap.Int64("msgID", retrieveMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("retrieve partitionIDs", sealedPartitionRetrieved), zap.Int64s("retrieve segmentIDs", sealedSegmentRetrieved))
 	tr.Record(fmt.Sprintf("historical retrieve done, msgID = %d", retrieveMsg.ID()))
+	metrics.QueryNodeSQHistoricalLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.QueryLabel).Set(float64(trHistorical.ElapseSpan().Milliseconds()))
 
 	// streaming retrieve
 	log.Debug("streaming retrieve start", zap.Int64("msgID", retrieveMsg.ID()))

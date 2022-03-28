@@ -21,21 +21,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
+	"github.com/opentracing/opentracing-go"
+	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type taskQueue interface {
@@ -470,6 +471,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	}()
 	span.LogFields(oplog.Int64("scheduler process PreExecute", t.ID()))
 
+	tr := timerecord.NewTimeRecorder("processTask")
 	err := t.PreExecute(ctx)
 
 	defer func() {
@@ -499,6 +501,13 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 		log.Error("Failed to post-execute task: "+err.Error(),
 			zap.String("traceID", traceID))
 		return
+	}
+
+	if _, ok := t.(*searchTask); ok {
+		metrics.ProxySQTaskLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SearchLabel).Set(float64(tr.ElapseSpan().Milliseconds()))
+	}
+	if _, ok := t.(*queryTask); ok {
+		metrics.ProxySQTaskLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.QueryLabel).Set(float64(tr.ElapseSpan().Milliseconds()))
 	}
 }
 
