@@ -304,9 +304,8 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 
 func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 	switch e.eventType {
-	case putEventType:
-		log.Info("DataNode is handling watchInfo put event", zap.String("key", key))
 
+	case putEventType:
 		watchInfo, err := parsePutEventData(data)
 		if err != nil {
 			log.Warn("fail to handle watchInfo", zap.Int("event type", e.eventType), zap.String("key", key), zap.Error(err))
@@ -314,12 +313,13 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 		}
 
 		if isEndWatchState(watchInfo.State) {
-			log.Warn("DataNode received a PUT event with a end State", zap.String("state", watchInfo.State.String()))
+			log.Warn("DataNode received a PUT event with an end State", zap.String("state", watchInfo.State.String()))
 			return
 		}
 
 		e.info = watchInfo
 		e.vChanName = watchInfo.GetVchan().GetChannelName()
+		log.Info("DataNode is handling watchInfo put event", zap.String("key", key), zap.String("state", watchInfo.GetState().String()))
 
 	case deleteEventType:
 		log.Info("DataNode is handling watchInfo delete event", zap.String("key", key))
@@ -354,7 +354,6 @@ func parsePutEventData(data []byte) (*datapb.ChannelWatchInfo, error) {
 	if watchInfo.Vchan == nil {
 		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo")
 	}
-
 	return &watchInfo, nil
 }
 
@@ -366,6 +365,7 @@ func parseDeleteEventKey(key string) string {
 
 func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version int64) (err error) {
 	vChanName := watchInfo.GetVchan().GetChannelName()
+	log.Info("handle put event", zap.String("watch state", watchInfo.State.String()), zap.String("vChanName", vChanName))
 
 	switch watchInfo.State {
 	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
