@@ -126,10 +126,10 @@ func (c *ChannelManager) Startup(nodes []int64) error {
 	c.unwatchDroppedChannels()
 
 	log.Info("cluster start up",
-		zap.Any("nodes", nodes),
-		zap.Any("oNodes", oNodes),
-		zap.Int64s("new onlines", newOnLines),
-		zap.Int64s("offLines", offLines))
+		zap.Any("all nodes", nodes),
+		zap.Any("old nodes", oNodes),
+		zap.Int64s("new online nodes", newOnLines),
+		zap.Int64s("offline nodes", offLines))
 	return nil
 }
 
@@ -143,7 +143,7 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 			}
 			err := c.remove(nodeChannel.NodeID, ch)
 			if err != nil {
-				log.Warn("unable to remove channel", zap.String("channel", ch.Name), zap.Error(err))
+				log.Warn("unable to remove channel", zap.String("channel name", ch.Name), zap.Error(err))
 				continue
 			}
 			c.h.FinishDropChannel(ch.Name)
@@ -225,8 +225,8 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 	c.store.Add(nodeID)
 
 	updates := c.registerPolicy(c.store, nodeID)
-	log.Info("register node",
-		zap.Int64("registered node", nodeID),
+	log.Info("registering new node",
+		zap.Int64("node ID", nodeID),
 		zap.Array("updates", updates))
 
 	for _, op := range updates {
@@ -250,7 +250,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.unsubAttempt(nodeChannelInfo)
 
 	updates := c.deregisterPolicy(c.store, nodeID)
-	log.Warn("deregister node",
+	log.Warn("unregistering node",
 		zap.Int64("unregistered node", nodeID),
 		zap.Array("updates", updates))
 
@@ -323,12 +323,12 @@ func (c *ChannelManager) Watch(ch *channel) error {
 	}
 	err := c.store.Update(updates)
 	if err != nil {
-		log.Error("ChannelManager RWChannelStore update failed", zap.Int64("collectionID", ch.CollectionID),
-			zap.String("channelName", ch.Name), zap.Error(err))
+		log.Error("ChannelManager RWChannelStore update failed", zap.Int64("collection ID", ch.CollectionID),
+			zap.String("channel name", ch.Name), zap.Error(err))
 		return err
 	}
-	log.Info("ChannelManager RWChannelStore update success", zap.Int64("collectionID", ch.CollectionID),
-		zap.String("channelName", ch.Name))
+	log.Info("ChannelManager RWChannelStore update success", zap.Int64("collection ID", ch.CollectionID),
+		zap.String("channel name", ch.Name))
 	return nil
 }
 

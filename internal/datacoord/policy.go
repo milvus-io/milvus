@@ -29,7 +29,7 @@ import (
 	"stathat.com/c/consistent"
 )
 
-// RegisterPolicy decides the channels mapping after registering the nodeID
+// RegisterPolicy decides the channels mapping after registering the nodeID.
 type RegisterPolicy func(store ROChannelStore, nodeID int64) ChannelOpSet
 
 // EmptyRegister does nothing
@@ -37,7 +37,7 @@ func EmptyRegister(store ROChannelStore, nodeID int64) ChannelOpSet {
 	return nil
 }
 
-// BufferChannelAssignPolicy assigns buffer channels to new registered node
+// BufferChannelAssignPolicy assigns buffer channels to new registered node.
 func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	info := store.GetBufferChannelInfo()
 	if info == nil || len(info.Channels) == 0 {
@@ -137,7 +137,7 @@ func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolic
 				}
 				did, err := deformatNodeID(idStr)
 				if err != nil {
-					log.Warn("failed to deformat node id", zap.Int64("nodeID", did))
+					log.Warn("failed to deformat node id", zap.Int64("node ID", did))
 					return nil
 				}
 				if did != c.NodeID {
@@ -227,7 +227,7 @@ func ConsistentHashChannelAssignPolicy(hashRing *consistent.Consistent) ChannelA
 			}
 			did, err := deformatNodeID(idStr)
 			if err != nil {
-				log.Warn("failed to deformat node id", zap.Int64("nodeID", did))
+				log.Warn("failed to deformat node id", zap.Int64("node ID", did))
 				return nil
 			}
 			adds[did] = append(adds[did], c)
@@ -330,7 +330,7 @@ func ConsistentHashDeregisterPolicy(hashRing *consistent.Consistent) DeregisterP
 			}
 		}
 		if deletedInfo == nil {
-			log.Warn("failed to find node when applying deregister policy", zap.Int64("nodeID", nodeID))
+			log.Warn("failed to find node when applying deregister policy", zap.Int64("node ID", nodeID))
 			return nil
 		}
 
@@ -353,7 +353,7 @@ func ConsistentHashDeregisterPolicy(hashRing *consistent.Consistent) DeregisterP
 
 			did, err := deformatNodeID(idStr)
 			if err != nil {
-				log.Warn("failed to deformat id", zap.String("id", idStr))
+				log.Warn("failed to deformat ID", zap.String("id", idStr))
 			}
 
 			updates[did] = append(updates[did], c)
