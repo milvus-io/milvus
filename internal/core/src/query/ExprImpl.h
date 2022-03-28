@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <tuple>
 #include <vector>
 #include <boost/container/vector.hpp>
@@ -26,10 +27,11 @@ namespace milvus::query {
 
 template <typename T>
 struct TermExprImpl : TermExpr {
-    const std::vector<T> terms_;
+    std::vector<T> terms_;
 
     TermExprImpl(const FieldOffset field_offset, const DataType data_type, const std::vector<T>& terms)
         : TermExpr(field_offset, data_type), terms_(terms) {
+        std::sort(terms_.begin(), terms_.end());
     }
 };
 

@@ -11,7 +11,6 @@
 
 #include <deque>
 #include <optional>
-#include <unordered_set>
 #include <utility>
 #include <boost/variant.hpp>
 
@@ -467,14 +466,14 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> bitsets;
-    std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         Span<T> chunk = segment_.chunk_data<T>(field_offset, chunk_id);
-        auto chunk_data = chunk.data();
         auto size = (chunk_id == num_chunk - 1) ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
         BitsetType bitset(size);
         for (int i = 0; i < size; ++i) {
-            bitset[i] = (term_set.find(chunk_data[i]) != term_set.end());
+            auto value = chunk.data()[i];
+            bool is_in = std::binary_search(expr.terms_.begin(), expr.terms_.end(), value);
+            bitset[i] = is_in;
         }
         bitsets.emplace_back(std::move(bitset));
     }
