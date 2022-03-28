@@ -26,6 +26,7 @@ pytest-random-order
 
 # for customize config test
 python-benedict==0.24.3
+timeout-decorator==0.5.0
 
 # version need to be consistent with protobuf used in pymilvus
 protobuf==3.17.1

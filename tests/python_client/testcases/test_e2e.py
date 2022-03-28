@@ -17,7 +17,7 @@ class TestE2e(TestcaseBase):
         # create
         name = cf.gen_unique_str(prefix)
         t0 = time.time()
-        collection_w = self.init_collection_wrap(name=name)
+        collection_w = self.init_collection_wrap(name=name, active_trace=True)
         tt = time.time() - t0
         assert collection_w.name == name
         entities = collection_w.num_entities
@@ -33,7 +33,9 @@ class TestE2e(TestcaseBase):
 
         # flush
         t0 = time.time()
-        assert collection_w.num_entities == len(data[0]) + entities
+        num_entities, check_result = collection_w.flush(timeout=30)
+        assert check_result
+        assert num_entities == len(data[0]) + entities
         tt = time.time() - t0
         entities = collection_w.num_entities
         log.info(f"assert flush: {tt}, entities: {entities}")
