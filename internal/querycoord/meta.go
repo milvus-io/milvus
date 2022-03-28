@@ -45,6 +45,7 @@ const (
 	collectionMetaPrefix   = "queryCoord-collectionMeta"
 	dmChannelMetaPrefix    = "queryCoord-dmChannelWatchInfo"
 	deltaChannelMetaPrefix = "queryCoord-deltaChannel"
+	ReplicaMetaPrefix      = "queryCoord-ReplicaMeta"
 )
 
 type col2SegmentInfos = map[UniqueID][]*querypb.SegmentInfo
@@ -91,11 +92,12 @@ type Meta interface {
 
 	getWatchedChannelsByNodeID(nodeID int64) *querypb.UnsubscribeChannelInfo
 
-	addReplica(replicaNum int32, collectionID int64, partitionIds []int64) error
-	setReplicaInfo(replicaID int64, info *querypb.ReplicaInfo) error
+	generateReplica(collectionID int64, partitionIds []int64) (*querypb.ReplicaInfo, error)
+	addReplica(replica *querypb.ReplicaInfo) error
+	setReplicaInfo(info *querypb.ReplicaInfo) error
 	getReplicaByID(replicaID int64) (*querypb.ReplicaInfo, error)
-	getReplicasByNodeID(nodeID int64, collectionID int64) (*querypb.ReplicaInfo, error)
 	getReplicasByCollectionID(collectionID int64) ([]*querypb.ReplicaInfo, error)
+	getReplicasByNodeID(nodeID int64) ([]*querypb.ReplicaInfo, error)
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -120,7 +122,7 @@ type MetaReplica struct {
 
 	segmentsInfo *segmentsInfo
 	//partitionStates map[UniqueID]*querypb.PartitionStates
-	// replicas *ReplicaInfos
+	replicas *ReplicaInfos
 }
 
 func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
@@ -145,7 +147,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory msgstream.Factory, idAll
 		queryStreams:      queryMsgStream,
 
 		segmentsInfo: newSegmentsInfo(kv),
-		// replicas:     NewReplicaInfos(),
+		replicas:     NewReplicaInfos(),
 	}
 
 	err := m.reloadFromKV()
@@ -301,6 +303,7 @@ func (m *MetaReplica) addCollection(collectionID UniqueID, loadType querypb.Load
 			PartitionStates: partitionStates,
 			LoadType:        loadType,
 			Schema:          schema,
+			// ReplicaIds:      replicas,
 		}
 		err := saveGlobalCollectionInfo(collectionID, newCollection, m.client)
 		if err != nil {
@@ -1022,55 +1025,72 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 	return unsubscribeChannelInfo
 }
 
-func (m *MetaReplica) addReplica(replicaNum int32, collectionID int64, partitionIds []int64) error {
-	// collection, err := meta.getCollectionInfoByID(collectionId)
-	// if err != nil {
-	// 	return err
-	// }
+func (m *MetaReplica) generateReplica(collectionID int64, partitionIds []int64) (*querypb.ReplicaInfo, error) {
+	id, err := m.idAllocator()
+	if err != nil {
+		return nil, err
+	}
 
-	// replicas := make([]*querypb.ReplicaInfo, 0, replicaNum)
-
-	// for i := 0; i < int(replicaNum); i++ {
-	// 	replicaId, err := meta.idAllocator()
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	replicas = append(replicas, &querypb.ReplicaInfo{
-	// 		ReplicaId:     replicaId,
-	// 		CollectionId:  collectionId,
-	// 		PartitionIds:  partitionIds,
-	// 		ShardReplicas: make([]*querypb.ShardReplica, 0),
-	// 	})
-	// }
-
-	// for _, replica := range replicas {
-	// 	meta.replicas.Insert(replica.ReplicaId, replica)
-	// }
-
-	return nil
-	// todo(yah01)
+	return &querypb.ReplicaInfo{
+		ReplicaId:     id,
+		CollectionId:  collectionID,
+		PartitionIds:  partitionIds,
+		ShardReplicas: make([]*querypb.ShardReplica, 0),
+		NodeIds:       make([]int64, 0),
+	}, nil
 }
 
-func (m *MetaReplica) setReplicaInfo(replicaID int64, info *querypb.ReplicaInfo) error {
+func (m *MetaReplica) addReplica(replica *querypb.ReplicaInfo) error {
+	err := saveReplicaInfo(replica, m.client)
+	if err != nil {
+		return err
+	}
+
+	m.replicas.Insert(replica)
 	return nil
-	// todo(yah01)
+}
+
+func (m *MetaReplica) setReplicaInfo(info *querypb.ReplicaInfo) error {
+	err := saveReplicaInfo(info, m.client)
+	if err != nil {
+		return err
+	}
+
+	m.replicas.Insert(info)
+	return nil
 }
 
 func (m *MetaReplica) getReplicaByID(replicaID int64) (*querypb.ReplicaInfo, error) {
-	return nil, nil
-	// todo(yah01)
-	// return meta.replicas.Get(replicaID)
+	replica, ok := m.replicas.Get(replicaID)
+	if !ok {
+		return nil, errors.New("replica not found")
+	}
+
+	return replica, nil
 }
 
-func (m *MetaReplica) getReplicasByNodeID(nodeID int64, collectionID int64) (*querypb.ReplicaInfo, error) {
-	return nil, nil
-	// todo(yah01)
+func (m *MetaReplica) getReplicasByNodeID(nodeID int64) ([]*querypb.ReplicaInfo, error) {
+	replicas := m.replicas.GetReplicasByNodeID(nodeID)
+	return replicas, nil
 }
 
 func (m *MetaReplica) getReplicasByCollectionID(collectionID int64) ([]*querypb.ReplicaInfo, error) {
-	return nil, nil
-	// todo(sunby)
+	collection, err := m.getCollectionInfoByID(collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	replicas := make([]*querypb.ReplicaInfo, 0, len(collection.ReplicaIds))
+	for _, replicaID := range collection.ReplicaIds {
+		replica, err := m.getReplicaByID(replicaID)
+		if err != nil {
+			return nil, err
+		}
+
+		replicas = append(replicas, replica)
+	}
+
+	return replicas, nil
 }
 
 //func (m *MetaReplica) printMeta() {
@@ -1125,6 +1145,16 @@ func saveDmChannelWatchInfos(infos []*querypb.DmChannelWatchInfo, kv kv.MetaKv) 
 		kvs[key] = string(infoBytes)
 	}
 	return kv.MultiSave(kvs)
+}
+
+func saveReplicaInfo(info *querypb.ReplicaInfo, kv kv.MetaKv) error {
+	infoBytes, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
+
+	key := fmt.Sprintf("%s/%d", ReplicaMetaPrefix, info.ReplicaId)
+	return kv.Save(key, string(infoBytes))
 }
 
 func removeCollectionMeta(collectionID UniqueID, kv kv.MetaKv) error {

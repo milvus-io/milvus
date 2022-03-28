@@ -349,10 +349,10 @@ message ReplicaInfo {    // ReplicaGroup
   int64 collection_id = 2;
   repeated int64 partition_ids = 3;    // empty indicates to load collection
   repeated ShardReplica shard_replicas = 4;
+  repeated int64 node_ids = 5; // include leaders
 }
 
 message ShardReplica {
     int64 leader = 1;
     string dm_channel_name = 2;
-    repeated int64 node_ids = 3;    // include leader
 }
