@@ -1598,8 +1598,8 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	collectionName := qt.query.CollectionName
 
 	if err := validateCollectionName(qt.query.CollectionName); err != nil {
-		log.Debug("Invalid collection name.", zap.Any("collectionName", collectionName),
-			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
+		log.Warn("Invalid collection name.", zap.String("collectionName", collectionName),
+			zap.Int64("requestID", qt.Base.MsgID), zap.String("requestType", "query"))
 		return err
 	}
 	log.Info("Validate collection name.", zap.Any("collectionName", collectionName),
