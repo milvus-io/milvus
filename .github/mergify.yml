@@ -121,9 +121,9 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
-      - or:
-        - body~=\#[0-9]{1,6}(\s+|$)
-        - body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
+      - and:
+        - -body~=\#[0-9]{1,6}(\s+|$)
+        - -body~=https://github.com/milvus-io/milvus/issues/[0-9]{1,6}(\s+|$)
       - -label=kind/improvement
       - -title~=\[automated\]
     actions:
