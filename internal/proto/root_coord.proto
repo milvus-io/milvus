@@ -181,7 +181,6 @@ message DescribeSegmentsResponse {
   map<int64, SegmentInfos> segment_infos = 3; // segment_id -> segment infos
 }
 
-
 message GetCredentialRequest {
   // Not useful for now
   common.MsgBase base = 1;
