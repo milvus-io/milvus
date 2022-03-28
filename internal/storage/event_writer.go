@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package storage
 
@@ -15,13 +20,17 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
+// EventTypeCode represents event type by code
 type EventTypeCode int8
 
+// EventTypeCode definitions
 const (
 	DescriptorEventType EventTypeCode = iota
 	InsertEventType
@@ -30,9 +39,11 @@ const (
 	DropCollectionEventType
 	CreatePartitionEventType
 	DropPartitionEventType
+	IndexFileEventType
 	EventTypeEnd
 )
 
+// String returns the string representation
 func (code EventTypeCode) String() string {
 	codes := map[EventTypeCode]string{
 		DescriptorEventType:       "DescriptorEventType",
@@ -42,6 +53,7 @@ func (code EventTypeCode) String() string {
 		DropCollectionEventType:   "DropCollectionEventType",
 		CreatePartitionEventType:  "CreatePartitionEventType",
 		DropPartitionEventType:    "DropPartitionEventType",
+		IndexFileEventType:        "IndexFileEventType",
 	}
 	if eventTypeStr, ok := codes[code]; ok {
 		return eventTypeStr
@@ -54,11 +66,20 @@ type descriptorEvent struct {
 	descriptorEventData
 }
 
+// GetMemoryUsageInBytes returns descriptor Event memory usage in bytes
 func (event *descriptorEvent) GetMemoryUsageInBytes() int32 {
 	return event.descriptorEventHeader.GetMemoryUsageInBytes() + event.descriptorEventData.GetMemoryUsageInBytes()
 }
 
+// Write writes descriptor event into buffer
 func (event *descriptorEvent) Write(buffer io.Writer) error {
+	err := event.descriptorEventData.FinishExtra()
+	if err != nil {
+		return err
+	}
+	event.descriptorEventHeader.EventLength = event.descriptorEventHeader.GetMemoryUsageInBytes() + event.descriptorEventData.GetMemoryUsageInBytes()
+	event.descriptorEventHeader.NextPosition = int32(binary.Size(MagicNumber)) + event.descriptorEventHeader.EventLength
+
 	if err := event.descriptorEventHeader.Write(buffer); err != nil {
 		return err
 	}
@@ -68,6 +89,19 @@ func (event *descriptorEvent) Write(buffer io.Writer) error {
 	return nil
 }
 
+func readMagicNumber(buffer io.Reader) (int32, error) {
+	var magicNumber int32
+	if err := binary.Read(buffer, common.Endian, &magicNumber); err != nil {
+		return -1, err
+	}
+	if magicNumber != MagicNumber {
+		return -1, fmt.Errorf("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
+	}
+
+	return magicNumber, nil
+}
+
+// ReadDescriptorEvent reads a descriptorEvent from buffer
 func ReadDescriptorEvent(buffer io.Reader) (*descriptorEvent, error) {
 	header, err := readDescriptorEventHeader(buffer)
 	if err != nil {
@@ -83,12 +117,13 @@ func ReadDescriptorEvent(buffer io.Reader) (*descriptorEvent, error) {
 	}, nil
 }
 
+// EventWriter abstracts event writer
 type EventWriter interface {
 	PayloadWriterInterface
 	// Finish set meta in header and no data can be added to event writer
 	Finish() error
 	// Close release resources
-	Close() error
+	Close()
 	// Write serialize to buffer, should call Finish first
 	Write(buffer *bytes.Buffer) error
 	GetMemoryUsageInBytes() (int32, error)
@@ -125,7 +160,7 @@ func (writer *baseEventWriter) Write(buffer *bytes.Buffer) error {
 	if err != nil {
 		return err
 	}
-	if err := binary.Write(buffer, binary.LittleEndian, data); err != nil {
+	if err := binary.Write(buffer, common.Endian, data); err != nil {
 		return err
 	}
 	return nil
@@ -147,15 +182,12 @@ func (writer *baseEventWriter) Finish() error {
 	return nil
 }
 
-func (writer *baseEventWriter) Close() error {
+func (writer *baseEventWriter) Close() {
 	if !writer.isClosed {
 		writer.isFinish = true
 		writer.isClosed = true
-		if err := writer.ReleasePayloadWriter(); err != nil {
-			return err
-		}
+		writer.ReleasePayloadWriter()
 	}
-	return nil
 }
 
 func (writer *baseEventWriter) SetOffset(offset int32) {
@@ -192,12 +224,14 @@ type dropPartitionEventWriter struct {
 	dropPartitionEventData
 }
 
+type indexFileEventWriter struct {
+	baseEventWriter
+	indexFileEventData
+}
+
 func newDescriptorEvent() *descriptorEvent {
 	header := newDescriptorEventHeader()
 	data := newDescriptorEventData()
-	header.EventLength = header.GetMemoryUsageInBytes() + data.GetMemoryUsageInBytes()
-	header.NextPosition = int32(binary.Size(MagicNumber)) + header.EventLength
-	data.HeaderLength = int8(binary.Size(eventHeader{}))
 	return &descriptorEvent{
 		descriptorEventHeader: *header,
 		descriptorEventData:   *data,
@@ -349,5 +383,28 @@ func newDropPartitionEventWriter(dataType schemapb.DataType) (*dropPartitionEven
 	}
 	writer.baseEventWriter.getEventDataSize = writer.dropPartitionEventData.GetEventDataFixPartSize
 	writer.baseEventWriter.writeEventData = writer.dropPartitionEventData.WriteEventData
+	return writer, nil
+}
+
+func newIndexFileEventWriter() (*indexFileEventWriter, error) {
+	payloadWriter, err := NewPayloadWriter(schemapb.DataType_Int8)
+	if err != nil {
+		return nil, err
+	}
+	header := newEventHeader(IndexFileEventType)
+	data := newIndexFileEventData()
+
+	writer := &indexFileEventWriter{
+		baseEventWriter: baseEventWriter{
+			eventHeader:            *header,
+			PayloadWriterInterface: payloadWriter,
+			isClosed:               false,
+			isFinish:               false,
+		},
+		indexFileEventData: *data,
+	}
+	writer.baseEventWriter.getEventDataSize = writer.indexFileEventData.GetEventDataFixPartSize
+	writer.baseEventWriter.writeEventData = writer.indexFileEventData.WriteEventData
+
 	return writer, nil
 }

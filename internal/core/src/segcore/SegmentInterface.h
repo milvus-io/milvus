@@ -10,33 +10,38 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Types.h"
-#include "common/Schema.h"
-#include "query/Plan.h"
-#include "common/Span.h"
+
+#include <deque>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "FieldIndexing.h"
-#include <knowhere/index/vector_index/VecIndex.h>
+#include "common/Schema.h"
+#include "common/Span.h"
 #include "common/SystemProperty.h"
+#include "common/Types.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
-#include <memory>
-#include <deque>
-#include <vector>
-#include <utility>
-#include <string>
 
 namespace milvus::segcore {
 
-// common interface of SegmentSealed and SegmentGrowing
-// used by C API
+// common interface of SegmentSealed and SegmentGrowing used by C API
 class SegmentInterface {
  public:
-    // fill results according to target_entries in plan
+    virtual ~SegmentInterface() = default;
+
+    virtual void
+    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const = 0;
+
     virtual void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
 
-    virtual SearchResult
+    virtual std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan, const query::PlaceholderGroup& placeholder_group, Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
@@ -51,9 +56,11 @@ class SegmentInterface {
     virtual const Schema&
     get_schema() const = 0;
 
-    virtual ~SegmentInterface() = default;
+    virtual int64_t
+    PreDelete(int64_t size) = 0;
 
- protected:
+    virtual Status
+    Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 };
 
 // internal API for DSL calculation
@@ -77,10 +84,13 @@ class SegmentInternalInterface : public SegmentInterface {
         return *ptr;
     }
 
-    SearchResult
+    std::unique_ptr<SearchResult>
     Search(const query::Plan* Plan,
            const query::PlaceholderGroup& placeholder_group,
            Timestamp timestamp) const override;
+
+    void
+    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const override;
 
     void
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const override;
@@ -101,12 +111,15 @@ class SegmentInternalInterface : public SegmentInterface {
                   const BitsetView& bitset,
                   SearchResult& output) const = 0;
 
+    virtual BitsetView
+    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const = 0;
+
     // count of chunk that has index available
     virtual int64_t
     num_chunk_index(FieldOffset field_offset) const = 0;
 
     virtual void
-    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const = 0;
+    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const = 0;
 
     // count of chunks
     virtual int64_t
@@ -120,7 +133,10 @@ class SegmentInternalInterface : public SegmentInterface {
     get_active_count(Timestamp ts) const = 0;
 
     virtual std::vector<SegOffset>
-    search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const = 0;
+    search_ids(const BitsetType& view, Timestamp timestamp) const = 0;
+
+    virtual std::vector<SegOffset>
+    search_ids(const BitsetView& view, Timestamp timestamp) const = 0;
 
  protected:
     // internal API: return chunk_data in span

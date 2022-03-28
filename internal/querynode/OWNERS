@@ -8,8 +8,6 @@ reviewers:
   - XuanYang-cn
 
 approvers:
-  - pr-inspection
+  - maintainers
 
-labels:
-- component/querynode
 

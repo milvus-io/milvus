@@ -1,21 +1,30 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package storage
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -55,12 +64,16 @@ func TestPrintBinlogFilesInt64(t *testing.T) {
 
 	_, err = w.GetBuffer()
 	assert.NotNil(t, err)
-	err = w.Close()
+	sizeTotal := 20000000
+	w.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	err = w.Finish()
 	assert.Nil(t, err)
 	buf, err := w.GetBuffer()
 	assert.Nil(t, err)
+	w.Close()
 
-	fd, err := os.Create("/tmp/binlog_int64.db")
+	fd, err := ioutil.TempFile("", "binlog_int64.db")
+	defer os.RemoveAll(fd.Name())
 	assert.Nil(t, err)
 	num, err := fd.Write(buf)
 	assert.Nil(t, err)
@@ -310,6 +323,9 @@ func TestPrintBinlogFiles(t *testing.T) {
 	binlogFiles = append(binlogFiles, "test")
 
 	PrintBinlogFiles(binlogFiles)
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
 }
 
 func TestPrintDDFiles(t *testing.T) {
@@ -419,7 +435,63 @@ func TestPrintDDFiles(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, resultTs, ts)
 	assert.Equal(t, resultRequests, ddRequests)
-	assert.Nil(t, dataDefinitionCodec.Close())
 
 	PrintBinlogFiles(binlogFiles)
+
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
+}
+
+func TestPrintIndexFile(t *testing.T) {
+	indexBuildID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	version := int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	collectionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	partitionID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	segmentID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	fieldID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	indexName := funcutil.GenRandomStr()
+	indexID := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+	indexParams := make(map[string]string)
+	indexParams["index_type"] = "IVF_FLAT"
+	datas := []*Blob{
+		{
+			Key:   "ivf1",
+			Value: []byte{1, 2, 3},
+		},
+		{
+			Key:   "ivf2",
+			Value: []byte{4, 5, 6},
+		},
+		{
+			Key:   "SLICE_META",
+			Value: []byte(`"{"meta":[{"name":"IVF","slice_num":5,"total_len":20047555},{"name":"RAW_DATA","slice_num":20,"total_len":80025824}]}"`),
+		},
+	}
+
+	codec := NewIndexFileBinlogCodec()
+
+	serializedBlobs, err := codec.Serialize(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID, datas)
+	assert.Nil(t, err)
+
+	var binlogFiles []string
+	for index, blob := range serializedBlobs {
+		fileName := fmt.Sprintf("/tmp/index_blob_%d.binlog", index)
+		binlogFiles = append(binlogFiles, fileName)
+		fd, err := os.Create(fileName)
+		assert.Nil(t, err)
+		num, err := fd.Write(blob.GetValue())
+		assert.Nil(t, err)
+		assert.Equal(t, num, len(blob.GetValue()))
+		err = fd.Close()
+		assert.Nil(t, err)
+	}
+
+	err = PrintBinlogFiles(binlogFiles)
+	assert.Nil(t, err)
+
+	// remove tmp files
+	for _, file := range binlogFiles {
+		_ = os.RemoveAll(file)
+	}
 }

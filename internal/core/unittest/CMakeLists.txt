@@ -10,65 +10,90 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 include_directories(${CMAKE_HOME_DIRECTORY}/src)
-include_directories(${CMAKE_HOME_DIRECTORY}/src/index/knowhere)
 include_directories(${CMAKE_HOME_DIRECTORY}/src/thirdparty)
 
 add_definitions(-DMILVUS_TEST_SEGCORE_YAML_PATH="${CMAKE_SOURCE_DIR}/unittest/test_utils/test_segcore.yaml")
 
-set(MILVUS_TEST_FILES
-        init_gtest.cpp
-        test_binary.cpp
-        test_bitmap.cpp
-        test_common.cpp
-        test_concurrent_vector.cpp
-        test_c_api.cpp
-        test_expr.cpp
-        test_get_entity_by_ids.cpp
-        test_indexing.cpp
-        test_index_wrapper.cpp
-        test_init.cpp
-        test_interface.cpp
-        test_load.cpp
-        test_naive.cpp
-        test_plan_proto.cpp
-        test_query.cpp
-        test_reduce.cpp
-        test_sealed.cpp
-        test_segcore.cpp
-        test_span.cpp
-        test_timestamp_index.cpp
-        test_reduce_c.cpp
-        )
+if (LINUX)
+    # TODO: better to use ls/find pattern
+    set(MILVUS_TEST_FILES
+            init_gtest.cpp
+            test_binary.cpp
+            test_bitmap.cpp
+            test_common.cpp
+            test_concurrent_vector.cpp
+            test_c_api.cpp
+            test_expr.cpp
+            test_get_entity_by_ids.cpp
+            test_indexing.cpp
+            test_index_wrapper.cpp
+            test_init.cpp
+            test_plan_proto.cpp
+            test_query.cpp
+            test_reduce.cpp
+            test_sealed.cpp
+            test_segcore.cpp
+            test_span.cpp
+            test_timestamp_index.cpp
+            test_reduce_c.cpp
+            test_conf_adapter_mgr.cpp
+            test_similarity_corelation.cpp
+            test_utils.cpp
+            test_scalar_index_creator.cpp
+            test_index_c_api.cpp
+            test_index.cpp
+            )
+    # check if memory leak exists in index builder
+    set(INDEX_BUILDER_TEST_FILES
+            test_index_wrapper.cpp
+            test_scalar_index_creator.cpp
+            test_index_c_api.cpp
+            )
+
+    add_executable(index_builder_test
+            ${INDEX_BUILDER_TEST_FILES}
+            )
+
+    target_link_libraries(index_builder_test
+            gtest
+            gtest_main
+            milvus_segcore
+            milvus_indexbuilder
+            milvus_index
+            log
+            pthread
+            )
+    install(TARGETS index_builder_test DESTINATION unittest)
+endif()
+
+if ( APPLE )
+    set(MILVUS_TEST_FILES
+            init_gtest.cpp
+            test_common.cpp
+            test_concurrent_vector.cpp
+            test_conf_adapter_mgr.cpp
+            test_plan_proto.cpp
+            test_reduce.cpp
+            test_reduce_c.cpp
+            test_segcore.cpp
+            test_timestamp_index.cpp
+            test_similarity_corelation.cpp
+            test_utils.cpp
+            )
+endif ()
 
 add_executable(all_tests
         ${MILVUS_TEST_FILES}
-        )
-
-# check if memory leak exists in index builder
-set(INDEX_BUILDER_TEST_FILES
-        test_index_wrapper.cpp
-        )
-
-add_executable(index_builder_test
-        ${INDEX_BUILDER_TEST_FILES}
-        )
-
-target_link_libraries(index_builder_test
-        gtest
-        gtest_main
-        milvus_segcore
-        milvus_indexbuilder
-        log
-        pthread
         )
 
 target_link_libraries(all_tests
         gtest
         milvus_segcore
         milvus_indexbuilder
+        milvus_index
         log
         pthread
         )
 
 install(TARGETS all_tests DESTINATION unittest)
-install(TARGETS index_builder_test DESTINATION unittest)
+

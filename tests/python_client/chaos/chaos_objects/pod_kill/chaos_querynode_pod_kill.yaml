@@ -1,0 +1,25 @@
+kind: Schedule
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-querynode-pod-kill
+  namespace: chaos-testing
+  annotations:
+    experiment.chaos-mesh.org/pause: 'false'
+spec:
+  schedule: '*/5 * * * * *'
+  startingDeadlineSeconds: 60
+  concurrencyPolicy: Forbid
+  historyLimit: 1
+  type: PodChaos
+  podChaos:
+    selector:
+      namespaces:
+        - chaos-testing
+      labelSelectors:
+        app.kubernetes.io/instance: milvus-chaos
+        app.kubernetes.io/name: milvus
+        component: querynode
+    mode: fixed
+    value: "1"
+    action: pod-kill
+    gracePeriod: 0

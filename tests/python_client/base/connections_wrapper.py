@@ -3,8 +3,7 @@ from pymilvus import DefaultConfig
 import sys
 
 sys.path.append("..")
-from check.param_check import *
-from check.func_check import *
+from check.func_check import ResponseChecker
 from utils.api_request import api_request
 
 
@@ -36,11 +35,17 @@ class ApiConnectionsWrapper:
         check_result = ResponseChecker(response, func_name, check_task, check_items, succ, alias=alias, **kwargs).run()
         return response, check_result
 
-    def get_connection(self, alias=DefaultConfig.DEFAULT_USING, check_task=None, check_items=None):
+    def has_connection(self, alias=DefaultConfig.DEFAULT_USING, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name
-        response, is_succ = api_request([self.connection.get_connection, alias])
-        check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, alias=alias).run()
+        response, succ = api_request([self.connection.has_connection, alias])
+        check_result = ResponseChecker(response, func_name, check_task, check_items, succ, alias=alias).run()
         return response, check_result
+
+    #  def get_connection(self, alias=DefaultConfig.DEFAULT_USING, check_task=None, check_items=None):
+    #      func_name = sys._getframe().f_code.co_name
+    #      response, is_succ = api_request([self.connection.get_connection, alias])
+    #      check_result = ResponseChecker(response, func_name, check_task, check_items, is_succ, alias=alias).run()
+    #      return response, check_result
 
     def list_connections(self, check_task=None, check_items=None):
         func_name = sys._getframe().f_code.co_name

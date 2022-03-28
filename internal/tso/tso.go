@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 // Copyright 2016 TiKV Project Authors.
 //
@@ -25,7 +30,6 @@
 package tso
 
 import (
-	"log"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -33,6 +37,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/pkg/errors"
@@ -68,24 +73,25 @@ type timestampOracle struct {
 	lastSavedTime atomic.Value
 }
 
-//func (t *timestampOracle) loadTimestamp() (time.Time, error) {
-//	strData, err := t.txnKV.Load(t.key)
-//
-//	var binData []byte = []byte(strData)
-//
-//	if err != nil {
-//		return typeutil.ZeroTime, err
-//	}
-//	if len(binData) == 0 {
-//		return typeutil.ZeroTime, nil
-//	}
-//	return typeutil.ParseTimestamp(binData)
-//}
+func (t *timestampOracle) loadTimestamp() (time.Time, error) {
+	strData, err := t.txnKV.Load(t.key)
+	if err != nil {
+		// intend to return nil
+		return typeutil.ZeroTime, nil
+	}
+
+	var binData = []byte(strData)
+	if len(binData) == 0 {
+		return typeutil.ZeroTime, nil
+	}
+	return typeutil.ParseTimestamp(binData)
+}
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
+	//we use big endian here for compatibility issues
+	data := typeutil.Uint64ToBytesBigEndian(uint64(ts.UnixNano()))
 	err := t.txnKV.Save(t.key, string(data))
 	if err != nil {
 		return errors.WithStack(err)
@@ -95,28 +101,29 @@ func (t *timestampOracle) saveTimestamp(ts time.Time) error {
 }
 
 func (t *timestampOracle) InitTimestamp() error {
-	//last, err := t.loadTimestamp()
-	//if err != nil {
-	//	return err
-	//}
+	last, err := t.loadTimestamp()
+	if err != nil {
+		return err
+	}
 	next := time.Now()
 
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
-	//if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
-	//	next = last.Add(updateTimestampGuard)
-	//}
+	if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
+		next = last.Add(updateTimestampGuard)
+	}
 
 	save := next.Add(t.saveInterval)
 	if err := t.saveTimestamp(save); err != nil {
 		return err
 	}
 
-	//log.Print("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
-
+	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 	current := &atomicObject{
 		physical: next,
 	}
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
 
 	return nil
@@ -144,6 +151,8 @@ func (t *timestampOracle) ResetUserTimestamp(tso uint64) error {
 	update := &atomicObject{
 		physical: next,
 	}
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.CompareAndSwapPointer(&t.TSO, unsafe.Pointer(prev), unsafe.Pointer(update))
 	return nil
 }
@@ -165,7 +174,8 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	jetLag := typeutil.SubTimeByWallClock(now, prev.physical)
 	if jetLag > 3*UpdateTimestampStep {
-		log.Print("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prev.physical), zap.Time("now", now))
+		log.RatedWarn(60.0, "clock offset is huge, check network latency and clock skew", zap.Duration("jet-lag", jetLag),
+			zap.Time("prev-physical", prev.physical), zap.Time("now", now))
 	}
 
 	var next time.Time
@@ -176,7 +186,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	} else if prevLogical > maxLogical/2 {
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
 		// Because there is enough timestamp can be allocated before next update.
-		log.Print("the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
+		log.Warn("the logical time may be not enough", zap.Int64("prev-logical", prevLogical))
 		next = prev.physical.Add(time.Millisecond)
 	} else {
 		// It will still use the previous physical time to alloc the timestamp.
@@ -196,7 +206,8 @@ func (t *timestampOracle) UpdateTimestamp() error {
 		physical: next,
 		logical:  0,
 	}
-
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(current))
 
 	return nil
@@ -207,5 +218,7 @@ func (t *timestampOracle) ResetTimestamp() {
 	zero := &atomicObject{
 		physical: time.Now(),
 	}
+	// atomic unsafe pointer
+	/* #nosec G103 */
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(zero))
 }

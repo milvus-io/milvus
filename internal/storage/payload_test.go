@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package storage
 
@@ -339,10 +344,8 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, str3, "hello3")
 
-		err = r.ReleasePayloadReader()
-		assert.Nil(t, err)
-		err = w.ReleasePayloadWriter()
-		assert.Nil(t, err)
+		r.ReleasePayloadReader()
+		w.ReleasePayloadWriter()
 	})
 
 	t.Run("TestBinaryVector", func(t *testing.T) {
@@ -890,5 +893,28 @@ func TestPayload_ReaderandWriter(t *testing.T) {
 		r.colType = 999
 		_, _, err = r.GetFloatVectorFromPayload()
 		assert.NotNil(t, err)
+	})
+
+	t.Run("TestWriteLargeSizeData", func(t *testing.T) {
+		t.Skip("Large data skip for online ut")
+		size := 1 << 29 // 512M
+		var vec []float32
+		for i := 0; i < size/4; i++ {
+			vec = append(vec, 1)
+		}
+
+		w, err := NewPayloadWriter(schemapb.DataType_FloatVector)
+		assert.Nil(t, err)
+
+		err = w.AddFloatVectorToPayload(vec, 128)
+		assert.Nil(t, err)
+
+		err = w.FinishPayloadWriter()
+		assert.Nil(t, err)
+
+		_, err = w.GetPayloadBufferFromWriter()
+		assert.Nil(t, err)
+
+		w.ReleasePayloadWriter()
 	})
 }

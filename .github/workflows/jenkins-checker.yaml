@@ -1,0 +1,57 @@
+name: Jenkins Checker
+# Lint Jenkinsfile  and related groovy files
+
+
+on:
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'build/ci/jenkins/**'
+      - '.github/workflows/jenkins-checker.yaml'
+jobs:
+  check-jenkinsfile:
+    name: Jenkinsfile Checker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Validate Jenkinsfile
+        shell: bash
+        run: |
+          JENKINS_URL=https://jenkins.milvus.io:18080
+          # JENKINS_CRUMB is needed if your Jenkins controller has CRSF protection enabled as it should
+          JENKINS_CRUMB=`curl "$JENKINS_URL/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)"`
+
+          function validate(){
+            local file_path=${1:-Jenkinsfile}
+            response=$(curl --max-time 10 --retry 5 --retry-delay 0 --retry-max-time 40  -X POST -H $JENKINS_CRUMB -F "jenkinsfile=<${file_path}" $JENKINS_URL/pipeline-model-converter/validate)
+            
+            if [[ ${response} =~ "Error"  ]]
+            then
+                echo " ${response}"
+                echo "Validate ${file_path} failed !"
+                
+                exit 1  
+            fi
+          }
+
+          for file in build/ci/jenkins/*
+          do
+              if [ -f "$file"  ] 
+              then 
+                  echo "$file"
+                  file_name=$(basename "$file")
+
+                  if echo "${file_name}" | grep -q -E '\.groovy$'
+                  then 
+                      echo "Validate groovy file ${file_name}"
+                      validate $file
+                  elif [[ "${file_name}" == "Jenkinsfile" ]]
+                  then
+                      echo "Validate Jenkinsfile"
+                      validate $file    
+                  fi
+              fi
+          done
+          
+    

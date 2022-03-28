@@ -9,32 +9,58 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <cmath>  // std::isnan
-#include <common/Types.h>
+#include <limits>
+
+#include "common/Consts.h"
+#include "common/Types.h"
 #include "segcore/Reduce.h"
 
+using milvus::SearchResult;
+
 struct SearchResultPair {
+    int64_t primary_key_;
     float distance_;
     milvus::SearchResult* search_result_;
-    int64_t offset_;
     int64_t index_;
+    int64_t offset_;
+    int64_t offset_rb_;  // right bound
 
-    SearchResultPair(float distance, milvus::SearchResult* search_result, int64_t offset, int64_t index)
-        : distance_(distance), search_result_(search_result), offset_(offset), index_(index) {
+    SearchResultPair(int64_t primary_key, float distance, SearchResult* result, int64_t index, int64_t lb, int64_t rb)
+        : primary_key_(primary_key),
+          distance_(distance),
+          search_result_(result),
+          index_(index),
+          offset_(lb),
+          offset_rb_(rb) {
     }
 
     bool
-    operator<(const SearchResultPair& pair) const {
-        return std::isnan(pair.distance_) || (!std::isnan(distance_) && (distance_ < pair.distance_));
-    }
-
-    bool
-    operator>(const SearchResultPair& pair) const {
-        return std::isnan(pair.distance_) || (!std::isnan(distance_) && (distance_ > pair.distance_));
+    operator>(const SearchResultPair& other) const {
+        if (this->primary_key_ == INVALID_ID) {
+            return false;
+        } else {
+            if (other.primary_key_ == INVALID_ID) {
+                return true;
+            } else {
+                return (distance_ > other.distance_);
+            }
+        }
     }
 
     void
-    reset_distance() {
-        distance_ = search_result_->result_distances_[offset_];
+    reset() {
+        if (offset_ < offset_rb_) {
+            offset_++;
+            if (offset_ < offset_rb_) {
+                primary_key_ = search_result_->primary_keys_.at(offset_);
+                distance_ = search_result_->distances_.at(offset_);
+            } else {
+                primary_key_ = INVALID_ID;
+                distance_ = std::numeric_limits<float>::max();
+            }
+        } else {
+            primary_key_ = INVALID_ID;
+            distance_ = std::numeric_limits<float>::max();
+        }
     }
 };

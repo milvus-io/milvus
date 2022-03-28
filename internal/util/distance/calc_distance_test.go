@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package distance
 
@@ -47,7 +52,7 @@ func TestValidateFloatArrayLength(t *testing.T) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func CreateFloatArray(n int64, dim int64) []float32 {
+func CreateFloatArray(n, dim int64) []float32 {
 	rand.Seed(time.Now().UnixNano())
 	num := n * dim
 	array := make([]float32, num)
@@ -58,11 +63,11 @@ func CreateFloatArray(n int64, dim int64) []float32 {
 	return array
 }
 
-func DistanceL2(left []float32, right []float32) float32 {
+func DistanceL2(left, right []float32) float32 {
 	if len(left) != len(right) {
 		panic("array dimension not equal")
 	}
-	var sum float32 = 0.0
+	var sum float32
 	for i := 0; i < len(left); i++ {
 		gap := left[i] - right[i]
 		sum += gap * gap
@@ -71,11 +76,11 @@ func DistanceL2(left []float32, right []float32) float32 {
 	return sum
 }
 
-func DistanceIP(left []float32, right []float32) float32 {
+func DistanceIP(left, right []float32) float32 {
 	if len(left) != len(right) {
 		panic("array dimension not equal")
 	}
-	var sum float32 = 0.0
+	var sum float32
 	for i := 0; i < len(left); i++ {
 		sum += left[i] * right[i]
 	}
@@ -122,6 +127,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 	left := CreateFloatArray(leftNum, dim)
 	right := CreateFloatArray(rightNum, dim)
 
+	// Verify illegal cases
 	_, err := CalcFloatDistance(dim, left, right, "HAMMIN")
 	assert.Error(t, err)
 
@@ -137,6 +143,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 	distances, err := CalcFloatDistance(dim, left, right, "L2")
 	assert.Nil(t, err)
 
+	// Verify the L2 distance algorithm is correct
 	invalid := CreateFloatArray(rightNum, 10)
 	_, err = CalcFloatDistance(dim, left, invalid, "L2")
 	assert.Error(t, err)
@@ -150,6 +157,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 		}
 	}
 
+	// Verify the IP distance algorithm is correct
 	distances, err = CalcFloatDistance(dim, left, right, "IP")
 	assert.Nil(t, err)
 
@@ -164,7 +172,7 @@ func Test_CalcFloatDistance(t *testing.T) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-func CreateBinaryArray(n int64, dim int64) []byte {
+func CreateBinaryArray(n, dim int64) []byte {
 	rand.Seed(time.Now().UnixNano())
 	num := n * dim / 8
 	if num*8 < n*dim {

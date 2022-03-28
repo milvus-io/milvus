@@ -1,30 +1,43 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
+	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
 	"go.uber.org/zap"
 )
 
+// channelsMgr manages the pchans, vchans and related message stream of collections.
 type channelsMgr interface {
 	getChannels(collectionID UniqueID) ([]pChan, error)
 	getVChannels(collectionID UniqueID) ([]vChan, error)
@@ -38,9 +51,86 @@ type channelsMgr interface {
 	removeAllDMLStream() error
 }
 
+// getChannelsFuncType returns the channel information according to the collection id.
 type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
+
+// repackFuncType repacks message into message pack.
 type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
 
+// getDmlChannelsFunc returns a function about how to get dml channels of a collection.
+func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFuncType {
+	return func(collectionID UniqueID) (map[vChan]pChan, error) {
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     0, // todo
+				Timestamp: 0, // todo
+				SourceID:  0, // todo
+			},
+			DbName:         "", // todo
+			CollectionName: "", // todo
+			CollectionID:   collectionID,
+			TimeStamp:      0, // todo
+		}
+		resp, err := rc.DescribeCollection(ctx, req)
+		if err != nil {
+			log.Warn("DescribeCollection", zap.Error(err))
+			return nil, err
+		}
+		if resp.Status.ErrorCode != 0 {
+			log.Warn("DescribeCollection",
+				zap.Any("ErrorCode", resp.Status.ErrorCode),
+				zap.Any("Reason", resp.Status.Reason))
+			return nil, err
+		}
+		if len(resp.VirtualChannelNames) != len(resp.PhysicalChannelNames) {
+			err := fmt.Errorf(
+				"len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v",
+				len(resp.VirtualChannelNames),
+				len(resp.PhysicalChannelNames))
+			log.Warn("GetDmlChannels", zap.Error(err))
+			return nil, err
+		}
+
+		ret := make(map[vChan]pChan)
+		for idx, name := range resp.VirtualChannelNames {
+			if _, ok := ret[name]; ok {
+				err := fmt.Errorf(
+					"duplicated virtual channel found, vchan: %v, pchan: %v",
+					name,
+					resp.PhysicalChannelNames[idx])
+				return nil, err
+			}
+			ret[name] = resp.PhysicalChannelNames[idx]
+		}
+
+		return ret, nil
+	}
+}
+
+// getDqlChannelsFunc returns a function about how to get query channels of a collection.
+func getDqlChannelsFunc(ctx context.Context, proxyID int64, qc createQueryChannelInterface) getChannelsFuncType {
+	return func(collectionID UniqueID) (map[vChan]pChan, error) {
+		req := &querypb.CreateQueryChannelRequest{
+			CollectionID: collectionID,
+			ProxyID:      proxyID,
+		}
+		resp, err := qc.CreateQueryChannel(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return nil, errors.New(resp.Status.Reason)
+		}
+
+		m := make(map[vChan]pChan)
+		m[resp.QueryChannel] = resp.QueryChannel
+
+		return m, nil
+	}
+}
+
+// streamType indicates which type of message stream should be created.
 type streamType int
 
 const (
@@ -123,11 +213,12 @@ func (mgr *singleTypeChannelsMgr) getVChansByVID(vid int) ([]vChan, error) {
 	return vchans, nil
 }
 
+// getPChansByVChans converts virtual channel names to physical channel names
 func (mgr *singleTypeChannelsMgr) getPChansByVChans(vchans []vChan) ([]pChan, error) {
 	mgr.vchans2pchansMtx.RLock()
 	defer mgr.vchans2pchansMtx.RUnlock()
 
-	pchans := make([]pChan, 0)
+	pchans := make([]pChan, 0, len(vchans))
 	for _, vchan := range vchans {
 		pchan, ok := mgr.vchans2pchans[vchan]
 		if !ok {
@@ -308,7 +399,9 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	mgr.addStream(id, stream)
 
 	mgr.updateCollection(collectionID, id)
-
+	for _, pc := range pchans {
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), pc).Inc()
+	}
 	return nil
 }
 
@@ -330,14 +423,20 @@ func (mgr *singleTypeChannelsMgr) getStream(collectionID UniqueID) (msgstream.Ms
 }
 
 func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) error {
-	ids, err := mgr.getAllVIDs(collectionID)
+	channels, err := mgr.getChannels(collectionID)
 	if err != nil {
 		return err
+	}
+	ids, err2 := mgr.getAllVIDs(collectionID)
+	if err2 != nil {
+		return err2
 	}
 
 	mgr.deleteVChansByVIDs(ids)
 	mgr.deleteStreamByVIDs(ids)
-
+	for _, pc := range channels {
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), pc).Dec()
+	}
 	return nil
 }
 
@@ -369,6 +468,10 @@ func newSingleTypeChannelsMgr(
 	}
 }
 
+// implementation assertion
+var _ channelsMgr = (*channelsMgrImpl)(nil)
+
+// channelsMgrImpl implements channelsMgr.
 type channelsMgrImpl struct {
 	dmlChannelsMgr *singleTypeChannelsMgr
 	dqlChannelsMgr *singleTypeChannelsMgr
@@ -383,6 +486,7 @@ func (mgr *channelsMgrImpl) getVChannels(collectionID UniqueID) ([]vChan, error)
 }
 
 func (mgr *channelsMgrImpl) createDQLStream(collectionID UniqueID) error {
+	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "query").Inc()
 	return mgr.dqlChannelsMgr.createMsgStream(collectionID)
 }
 
@@ -391,6 +495,7 @@ func (mgr *channelsMgrImpl) getDQLStream(collectionID UniqueID) (msgstream.MsgSt
 }
 
 func (mgr *channelsMgrImpl) removeDQLStream(collectionID UniqueID) error {
+	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "query").Dec()
 	return mgr.dqlChannelsMgr.removeStream(collectionID)
 }
 
@@ -414,6 +519,7 @@ func (mgr *channelsMgrImpl) removeAllDMLStream() error {
 	return mgr.dmlChannelsMgr.removeAllStream()
 }
 
+// newChannelsMgrImpl constructs a channels manager.
 func newChannelsMgrImpl(
 	getDmlChannelsFunc getChannelsFuncType,
 	dmlRepackFunc repackFuncType,

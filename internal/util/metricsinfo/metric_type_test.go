@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestParseMetricType(t *testing.T) {
+func Test_ParseMetricType(t *testing.T) {
 	m1 := make(map[string]interface{})
 	b1, err := json.Marshal(m1)
 	assert.Equal(t, nil, err)
@@ -61,7 +61,7 @@ func TestParseMetricType(t *testing.T) {
 
 }
 
-func TestConstructRequestByMetricType(t *testing.T) {
+func Test_ConstructRequestByMetricType(t *testing.T) {
 	cases := []struct {
 		metricType string
 		errIsNil   bool

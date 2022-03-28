@@ -10,13 +10,8 @@ from pymilvus import DataType
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
 from utils.util_log import test_log as log
-import threading
-import traceback
 
 """" Methods of processing data """
-
-
-# l2 = lambda x, y: np.linalg.norm(np.array(x) - np.array(y))
 
 
 def gen_unique_str(str_value=None):
@@ -26,6 +21,10 @@ def gen_unique_str(str_value=None):
 
 def gen_str_by_length(length=8):
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+
+
+def gen_digits_by_length(length=8):
+    return "".join(random.choice(string.digits) for _ in range(length))
 
 
 def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc, is_primary=False, **kwargs):
@@ -490,7 +489,7 @@ def gen_partitions(collection_w, partition_num=1):
 
 
 def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
-                auto_id=False, dim=ct.default_dim):
+                auto_id=False, dim=ct.default_dim, insert_offset=0):
     """
     target: insert non-binary/binary data
     method: insert non-binary/binary data into partitions if any
@@ -501,23 +500,24 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
     vectors = []
     binary_raw_vectors = []
     insert_ids = []
+    start = insert_offset
     log.info("insert_data: inserting data into collection %s (num_entities: %s)"
              % (collection_w.name, nb))
     for i in range(num):
-        default_data = gen_default_dataframe_data(nb // num, dim=dim)
+        default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start)
         if is_binary:
-            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim)
+            default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start)
             binary_raw_vectors.extend(binary_raw_data)
         if is_all_data_type:
-            default_data = gen_dataframe_all_data_type(nb // num, dim=dim)
+            default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start)
         if auto_id:
             default_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
         insert_res = collection_w.insert(default_data, par[i].name)[0]
+        time_stamp = insert_res.timestamp
         insert_ids.extend(insert_res.primary_keys)
         vectors.append(default_data)
-    log.info("insert_data: inserted data into collection %s (num_entities: %s)"
-             % (collection_w.name, nb))
-    return collection_w, vectors, binary_raw_vectors, insert_ids
+        start += nb // num
+    return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
 
 def _check_primary_keys(primary_keys, nb):
@@ -528,3 +528,23 @@ def _check_primary_keys(primary_keys, nb):
         if primary_keys[i] >= primary_keys[i + 1]:
             return False
     return True
+
+
+def get_segment_distribution(res):
+    """
+    Get segment distribution
+    """
+    from collections import defaultdict
+    segment_distribution = defaultdict(lambda: {"growing": [], "sealed": []})
+    for r in res:
+        if r.nodeID not in segment_distribution:
+            segment_distribution[r.nodeID] = {
+                "growing": [],
+                "sealed": []
+            }
+        if r.state == 3:
+            segment_distribution[r.nodeID]["sealed"].append(r.segmentID)
+        if r.state == 2:
+            segment_distribution[r.nodeID]["growing"].append(r.segmentID)
+
+    return segment_distribution

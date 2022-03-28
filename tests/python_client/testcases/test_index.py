@@ -9,7 +9,7 @@ from common.common_type import CaseLabel, CheckTasks
 from common.code_mapping import CollectionErrorMessage as clem
 from common.code_mapping import IndexErrorMessage as iem
 
-from utils.utils import *
+from utils.util_pymilvus import *
 from common.constants import *
 
 prefix = "index"
@@ -19,10 +19,10 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 # copied from pymilvus
 uid = "test_index"
-BUILD_TIMEOUT = 300
+# BUILD_TIMEOUT = 300
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
-query, query_vecs = gen_query_vectors(field_name, default_entities, default_top_k, 1)
+# query = gen_search_vectors_params(field_name, default_entities, default_top_k, 1)
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
 
@@ -53,12 +53,11 @@ class TestIndexParams(TestcaseBase):
 
         collection_w = self.init_collection_wrap(name=collection_name)
 
-        log.error(iem.WrongFieldName % (str(field_name), type(field_name)))
+        log.error(iem.WrongFieldName % str(field_name))
         self.index_wrap.init_index(collection_w.collection, field_name, default_index_params,
                                    check_task=CheckTasks.err_res,
                                    check_items={ct.err_code: 1,
-                                                ct.err_msg: iem.WrongFieldName % (str(field_name),
-                                                                                  type(field_name).__name__)})
+                                                ct.err_msg: iem.WrongFieldName % str(field_name)})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_field_name_not_existed(self):
@@ -71,9 +70,10 @@ class TestIndexParams(TestcaseBase):
         f_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
+                                   check_items={ct.err_code: 1,
+                                                ct.err_msg: f"cannot create index on non-existed field: {f_name}"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L0)
     # TODO (reason="pymilvus issue #677", raises=TypeError)
     @pytest.mark.parametrize("index_type", ct.get_invalid_strs)
     def test_index_type_invalid(self, index_type):
@@ -144,6 +144,21 @@ class TestIndexOperation(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_index_create_with_different_indexes(self):
+        """
+        target: test create index on one field, with two different type of index
+        method: create two different indexes
+        expected: only latest index can be created for a collection
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index)
+
+        assert len(collection_w.indexes) == 1
+        assert collection_w.indexes[0].params["index_type"] == default_index["index_type"]
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
         """
         target: test index with empty collection
@@ -166,7 +181,7 @@ class TestIndexOperation(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data()
         collection_w.insert(data=data)
         index_params = index_param
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, index_params)
@@ -182,9 +197,10 @@ class TestIndexOperation(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        data = cf.gen_default_list_data(ct.default_nb)
+        data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        self._connect().flush([collection_w.name])
+        # flush
+        collection_w.num_entities
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         # TODO: assert index
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
@@ -366,7 +382,7 @@ class TestIndexBase:
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        logging.getLogger().info(request.param)
+        log.info(request.param)
         # if str(connect._cmd("mode")) == "CPU":
         #     if request.param["index_type"] in index_cpu_not_support():
         #         pytest.skip("sq8h not support in CPU mode")
@@ -390,14 +406,14 @@ class TestIndexBase:
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        result = connect.insert(collection, default_entities)
+        connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, get_simple_index)
         if get_simple_index["index_type"] != "FLAT":
             index = connect.describe_index(collection, "")
@@ -430,7 +446,7 @@ class TestIndexBase:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -444,7 +460,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -460,7 +476,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -484,10 +500,10 @@ class TestIndexBase:
         expected: raise exception
         """
         with pytest.raises(Exception) as e:
-            dis_connect.create_index(collection, field_name, get_simple_index)
+            dis_connect.create_index(collection, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, collection, get_simple_index, get_nq):
         """
         target: test create index interface, search with more query vectors
@@ -497,16 +513,17 @@ class TestIndexBase:
         result = connect.insert(collection, default_entities)
         connect.flush([collection])
         connect.create_index(collection, field_name, get_simple_index)
-        logging.getLogger().info(connect.describe_index(collection, ""))
+        log.info(connect.describe_index(collection, ""))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, search_params=search_param)
+        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq,
+                                              search_params=search_param)
         connect.load_collection(collection)
-        res = connect.search(collection, query)
+        res = connect.search(collection, **params)
         assert len(res) == nq
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_multithread(self, connect, collection, args):
         """
@@ -538,8 +555,8 @@ class TestIndexBase:
     def test_create_index_collection_not_existed(self, connect):
         """
         target: test create index interface when collection name not existed
-        method: create collection and add entities in it, create index
-            , make sure the collection name not in index
+        method: create collection and add entities in it, create index,
+                make sure the collection name not in index
         expected: create index failed
         """
         collection_name = gen_unique_str(uid)
@@ -547,7 +564,7 @@ class TestIndexBase:
             connect.create_index(collection_name, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_insert_flush(self, connect, collection, get_simple_index):
         """
         target: test create index
@@ -565,7 +582,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly(self, connect, collection, get_simple_index):
         """
         target: check if index can be created repeatedly, with the same create_index params
@@ -580,7 +597,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -589,17 +606,16 @@ class TestIndexBase:
         """
         result = connect.insert(collection, default_entities)
         connect.flush([collection])
-        indexs = [default_index, {"metric_type":"L2", "index_type": "FLAT", "params":{"nlist": 1024}}]
+        indexs = [default_index, {"metric_type": "L2", "index_type": "FLAT", "params": {"nlist": 1024}}]
         for index in indexs:
             connect.create_index(collection, field_name, index)
             connect.release_collection(collection)
             connect.load_collection(collection)
         index = connect.describe_index(collection, "")
-        # assert index == indexs[-1]
-        assert not index    # FLAT is the last index_type, drop all indexes in server
+        assert not index  # FLAT is the last index_type, drop all indexes in server
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_B(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -619,7 +635,7 @@ class TestIndexBase:
         # assert not index  # FLAT is the last index_type, drop all indexes in server
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -635,7 +651,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -650,7 +666,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -667,7 +683,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition_flush_ip(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -685,7 +701,7 @@ class TestIndexBase:
             assert index == get_simple_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors_ip(self, connect, collection, get_simple_index, get_nq):
         """
         target: test create index interface, search with more query vectors
@@ -698,15 +714,16 @@ class TestIndexBase:
         get_simple_index["metric_type"] = metric_type
         connect.create_index(collection, field_name, get_simple_index)
         connect.load_collection(collection)
-        logging.getLogger().info(connect.describe_index(collection, ""))
+        log.info(connect.describe_index(collection, ""))
         nq = get_nq
         index_type = get_simple_index["index_type"]
         search_param = get_search_param(index_type)
-        query, vecs = gen_query_vectors(field_name, default_entities, default_top_k, nq, metric_type=metric_type, search_params=search_param)
-        res = connect.search(collection, query)
+        params, _ = gen_search_vectors_params(field_name, default_entities, default_top_k, nq,
+                                              metric_type=metric_type, search_params=search_param)
+        res = connect.search(collection, **params)
         assert len(res) == nq
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_multithread_ip(self, connect, collection, args):
         """
@@ -739,8 +756,8 @@ class TestIndexBase:
     def test_create_index_collection_not_existed_ip(self, connect, collection):
         """
         target: test create index interface when collection name not existed
-        method: create collection and add entities in it, create index
-            , make sure the collection name not in index
+        method: create collection and add entities in it, create index,
+                make sure the collection name not in index
         expected: return code not equals to 0, create index failed
         """
         collection_name = gen_unique_str(uid)
@@ -749,11 +766,13 @@ class TestIndexBase:
             connect.create_index(collection_name, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_no_vectors_insert_ip(self, connect, collection):
         """
-        target: test create index interface when there is no vectors in collection, and does not affect the subsequent process
-        method: create collection and add no vectors in it, and then create index, add entities in it
+        target: test create index interface when there is no vectors in collection,
+                and does not affect the subsequent process
+        method: create collection and add no vectors in it, and then create index,
+                add entities in it
         expected: return code equals to 0
         """
         default_index["metric_type"] = "IP"
@@ -768,7 +787,7 @@ class TestIndexBase:
             assert index == default_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_same_index_repeatedly_ip(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the same create_index params
@@ -784,7 +803,7 @@ class TestIndexBase:
             assert index == default_index
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_ip(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -811,6 +830,7 @@ class TestIndexBase:
       The following cases are used to test `drop_index` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_index(self, connect, collection, get_simple_index):
         """
@@ -818,7 +838,6 @@ class TestIndexBase:
         method: create collection and add entities in it, create index, call drop index
         expected: return code 0, and default index param
         """
-        # result = connect.insert(collection, entities)
         connect.create_index(collection, field_name, get_simple_index)
         connect.drop_index(collection, field_name)
         index = connect.describe_index(collection, "")
@@ -852,8 +871,8 @@ class TestIndexBase:
     def test_drop_index_collection_not_existed(self, connect):
         """
         target: test drop index interface when collection name not existed
-        method: create collection and add entities in it, create index
-            , make sure the collection name not in index, and then drop it
+        method: create collection and add entities in it, create index,
+                make sure the collection name not in index, and then drop it
         expected: return code not equals to 0, drop index failed
         """
         collection_name = gen_unique_str(uid)
@@ -944,6 +963,11 @@ class TestIndexBase:
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_PQ_without_nbits(self, connect, collection):
+        """
+        target: test create PQ index
+        method: create PQ index without nbits
+        expected: create successfully
+        """
         PQ_index = {"index_type": "IVF_PQ", "params": {"nlist": 128, "m": 16}, "metric_type": "L2"}
         result = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, PQ_index)
@@ -998,8 +1022,9 @@ class TestIndexBinary:
       The following cases are used to test `create_index` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, binary_collection, get_jaccard_index):
         """
         target: test create index interface
@@ -1013,7 +1038,7 @@ class TestIndexBinary:
         assert binary_index == get_jaccard_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_partition(self, connect, binary_collection, get_jaccard_index):
         """
         target: test create index interface
@@ -1028,7 +1053,7 @@ class TestIndexBinary:
         assert binary_index == get_jaccard_index
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_search_with_query_vectors(self, connect, binary_collection, get_jaccard_index, get_nq):
         """
         target: test create index interface, search with more query vectors
@@ -1040,18 +1065,19 @@ class TestIndexBinary:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         connect.load_collection(binary_collection)
-        query, vecs = gen_query_vectors(binary_field_name, default_binary_entities, default_top_k, nq, metric_type="JACCARD")
         search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
-        logging.getLogger().info(search_param)
-        res = connect.search(binary_collection, query, search_params=search_param)
+        params, _ = gen_search_vectors_params(binary_field_name, default_binary_entities, default_top_k, nq,
+                                              search_params=search_param, metric_type="JACCARD")
+        log.info(params)
+        res = connect.search(binary_collection, **params)
         assert len(res) == nq
 
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
         """
         target: test create index interface with invalid metric type
-        method: add entitys into binary connection, flash, create index with L2 metric type.
+        method: add entities into binary collection, flush, create index with L2 metric type.
         expected: return create_index failure
         """
         # insert 6000 vectors
@@ -1065,6 +1091,7 @@ class TestIndexBinary:
       The following cases are used to test `describe_index` function
     ***************************************************************
     """
+
     @pytest.mark.skip("repeat with test_create_index binary")
     def _test_get_index_info(self, connect, binary_collection, get_jaccard_index):
         """
@@ -1097,7 +1124,7 @@ class TestIndexBinary:
         connect.flush([binary_collection])
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         assert stats["row_count"] == default_nb
         assert len(stats["partitions"]) == 2
         for partition in stats["partitions"]:
@@ -1113,6 +1140,7 @@ class TestIndexBinary:
       The following cases are used to test `drop_index` function
     ******************************************************************
     """
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index(self, connect, binary_collection, get_jaccard_index):
         """
@@ -1122,7 +1150,7 @@ class TestIndexBinary:
         """
         connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
         stats = connect.get_collection_stats(binary_collection)
-        logging.getLogger().info(stats)
+        log.info(stats)
         connect.drop_index(binary_collection, binary_field_name)
         binary_index = connect.describe_index(binary_collection, "")
         assert not binary_index
@@ -1131,7 +1159,8 @@ class TestIndexBinary:
     def test_drop_index_partition(self, connect, binary_collection, get_jaccard_index):
         """
         target: test drop index interface
-        method: create collection, create partition and add entities in it, create index on collection, call drop collection index
+        method: create collection, create partition and add entities in it,
+                create index on collection, call drop collection index
         expected: return code 0, and default index param
         """
         connect.create_partition(binary_collection, default_tag)
@@ -1157,12 +1186,22 @@ class TestIndexInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_index_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test create index interface for invalid scenario
+        method: create index with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.create_index(collection_name, field_name, default_index)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_with_invalid_collection_name(self, connect, get_collection_name):
+        """
+        target: test drop index interface for invalid scenario
+        method: drop index with invalid collection name
+        expected: raise exception
+        """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
             connect.drop_index(collection_name)
@@ -1176,7 +1215,12 @@ class TestIndexInvalid(object):
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_invalid_index_params(self, connect, collection, get_index):
-        logging.getLogger().info(get_index)
+        """
+        target: test create index interface for invalid scenario
+        method: create index with invalid index params
+        expected: raise exception
+        """
+        log.info(get_index)
         with pytest.raises(Exception) as e:
             connect.create_index(collection, field_name, get_index)
 
@@ -1204,15 +1248,16 @@ class TestIndexAsync:
         return copy.deepcopy(request.param)
 
     def check_result(self, res):
-        logging.getLogger().info("In callback check search result")
-        logging.getLogger().info(res)
+        log.info("In callback check search result")
+        log.info(res)
 
     """
     ******************************************************************
       The following cases are used to test `create_index` function
     ******************************************************************
     """
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -1220,15 +1265,15 @@ class TestIndexAsync:
         expected: return search success
         """
         result = connect.insert(collection, default_entities)
-        logging.getLogger().info("start index")
+        log.info("start index")
         future = connect.create_index(collection, field_name, get_simple_index, _async=True)
-        logging.getLogger().info("before result")
+        log.info("before result")
         res = future.result()
         # TODO:
-        logging.getLogger().info(res)
+        log.info(res)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_drop(self, connect, collection):
         """
         target: test create index interface
@@ -1238,7 +1283,7 @@ class TestIndexAsync:
         result = connect.insert(collection, default_entities)
         connect.create_index(collection, field_name, default_index, _async=True)
         connect.drop_collection(collection)
-        with pytest.raises(Exception, match=f'DescribeIndex failed, error = collection {collection} not found'):
+        with pytest.raises(Exception, match=f'DescribeIndex failed: collection {collection} not found'):
             connect.describe_index(collection, "")
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1249,7 +1294,7 @@ class TestIndexAsync:
             res = future.result()
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.timeout(BUILD_TIMEOUT)
+    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_index_callback(self, connect, collection, get_simple_index):
         """
         target: test create index interface
@@ -1257,10 +1302,10 @@ class TestIndexAsync:
         expected: return search success
         """
         result = connect.insert(collection, default_entities)
-        logging.getLogger().info("start index")
+        log.info("start index")
         future = connect.create_index(collection, field_name, get_simple_index, _async=True,
                                       _callback=self.check_result)
-        logging.getLogger().info("before result")
+        log.info("before result")
         res = future.result()
         # TODO:
-        logging.getLogger().info(res)
+        log.info(res)

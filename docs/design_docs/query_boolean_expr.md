@@ -1,44 +1,44 @@
 ```haskell
-Expr := 
+Expr :=
     LogicalExpr | NIL
 
-LogicalExpr := 
-    LogicalExpr BinaryLogicalOp LogicalExpr 
+LogicalExpr :=
+    LogicalExpr BinaryLogicalOp LogicalExpr
   | UnaryLogicalOp LogicalExpr
   | "(" LogicalExpr ")"
   | SingleExpr
 
-BinaryLogicalOp := 
-    "&&" | "and" 
+BinaryLogicalOp :=
+    "&&" | "and"
   | "||" | "or"
 
 UnaryLogicalOp :=
     "not"
 
-SingleExpr := 
+SingleExpr :=
     TermExpr
   | CompareExpr
 
-TermExpr := 
+TermExpr :=
     IDENTIFIER "in" ConstantArray
 
-ConstantArray := 
+ConstantArray :=
     "[" ConstantExpr { "," ConstantExpr } "]"
-    
-ConstantExpr := 
+
+ConstantExpr :=
     Constant
   | ConstantExpr BinaryArithOp ConstantExpr
   | UnaryArithOp ConstantExpr
 
-Constant := 
+Constant :=
     INTERGER
   | FLOAT_NUMBER
-  
-UnaryArithOp := 
+
+UnaryArithOp :=
     "+"
   | "-"
 
-BinaryArithOp := 
+BinaryArithOp :=
     "+"
   | "-"
   | "*"
@@ -46,17 +46,17 @@ BinaryArithOp :=
   | "%"
   | "**"
 
-CompareExpr := 
+CompareExpr :=
     IDENTIFIER CmpOp IDENTIFIER
   | IDENTIFIER CmpOp ConstantExpr
   | ConstantExpr CmpOp IDENTIFIER
   | ConstantExpr CmpOpRestricted IDENTIFIER CmpOpRestricted ConstantExpr
-  
-CmpOpRestricted := 
+
+CmpOpRestricted :=
     "<"
   | "<="
 
-CmpOp := 
+CmpOp :=
     ">"
   | ">="
   | "<"
@@ -71,19 +71,19 @@ IDENTIFIER := 列名
 
 Tips:
 
-1. NIL represent a empty string, which means there is no Predicate for Expr.
-2. Gramma is described by EBNF syntax，expressions that may be omitted or repeated are represented through curly braces `{...}`.
+1. NIL represents an empty string, which means there is no Predicate for Expr.
+2. Gramma is described by EBNF syntax, expressions that may be omitted or repeated are represented through curly braces `{...}`.
 
-After syntax analysis, following rules will be applied:
+After syntax analysis, the following rules will be applied:
 
-1. non-vector column must exist in Schema.
+1. Non-vector column must exist in Schema.
 2. CompareExpr/TermExpr requires operand type matching.
-3. CompareExpr between non-vector columns of different types is available
+3. CompareExpr between non-vector columns of different types is available.
 4. The modulo operation requires all operands to be integers.
-5. Integer columns can only match integer operands. But float columns can match both integer and float operands.
-6. In BinaryOp, the `and`/`&&` operator has higher priority than the `or`/`||` operator
+5. Integer columns can only match integer operands. While float columns can match both integer and float operands.
+6. In BinaryOp, the `and`/`&&` operator has a higher priority than the `or`/`||` operator.
 
-example：
+Example：
 
 ```python
 A > 3 && A < 4 && (C > 5 || D < 6)

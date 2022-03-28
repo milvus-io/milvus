@@ -9,23 +9,28 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "segcore/FieldIndexing.h"
-#include <thread>
-#include <knowhere/index/vector_index/IndexIVF.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <string>
+#include <thread>
+
 #include "common/SystemProperty.h"
+#if defined(__linux__) || defined(__MINGW64__)
+#include "knowhere/index/vector_index/IndexIVF.h"
+#endif
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "segcore/FieldIndexing.h"
 
 namespace milvus::segcore {
+
 void
 VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
-    assert(field_meta_.get_data_type() == DataType::VECTOR_FLOAT);
+#if defined(__linux__) || defined(__MINGW64__)
+    AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT, "Data type of vector field is not VECTOR_FLOAT");
     auto dim = field_meta_.get_dim();
 
     auto source = dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
-    Assert(source);
+    AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
     auto num_chunk = source->num_chunk();
-    assert(ack_end <= num_chunk);
+    AssertInfo(ack_end <= num_chunk, "ack_end is bigger than num_chunk");
     auto conf = get_build_params();
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
@@ -37,19 +42,22 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
         indexing->AddWithoutIds(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }
+#else
+    throw std::runtime_error("Unsupported BuildIndexRange on current platform!");
+#endif
 }
 
 knowhere::Config
 VectorFieldIndexing::get_build_params() const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
-    Assert(type_opt.has_value());
+    AssertInfo(type_opt.has_value(), "Metric type of field meta doesn't have value");
     auto metric_type = type_opt.value();
     auto type_name = MetricTypeToName(metric_type);
     auto& config = segcore_config_.at(metric_type);
     auto base_params = config.build_params;
 
-    Assert(base_params.count("nlist"));
+    AssertInfo(base_params.count("nlist"), "Can't get nlist from index params");
     base_params[knowhere::meta::DIM] = field_meta_.get_dim();
     base_params[knowhere::Metric::TYPE] = type_name;
 
@@ -60,13 +68,13 @@ knowhere::Config
 VectorFieldIndexing::get_search_params(int top_K) const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
-    Assert(type_opt.has_value());
+    AssertInfo(type_opt.has_value(), "Metric type of field meta doesn't have value");
     auto metric_type = type_opt.value();
     auto type_name = MetricTypeToName(metric_type);
     auto& config = segcore_config_.at(metric_type);
 
     auto base_params = config.search_params;
-    Assert(base_params.count("nprobe"));
+    AssertInfo(base_params.count("nprobe"), "Can't get nprobe from base params");
     base_params[knowhere::meta::TOPK] = top_K;
     base_params[knowhere::Metric::TYPE] = type_name;
 
@@ -100,9 +108,9 @@ template <typename T>
 void
 ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
     auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
-    Assert(source);
+    AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
     auto num_chunk = source->num_chunk();
-    assert(ack_end <= num_chunk);
+    AssertInfo(ack_end <= num_chunk, "Ack_end is bigger than num_chunk");
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);

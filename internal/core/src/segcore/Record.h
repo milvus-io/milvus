@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Schema.h"
 
 namespace milvus::segcore {
+
 template <typename RecordType>
 inline int64_t
 get_barrier(const RecordType& record, Timestamp timestamp) {
@@ -29,4 +29,5 @@ get_barrier(const RecordType& record, Timestamp timestamp) {
     }
     return beg;
 }
+
 }  // namespace milvus::segcore

@@ -1,5 +1,4 @@
 import time
-import pdb
 import copy
 import json
 import logging
@@ -24,6 +23,7 @@ class SearchRunner(BaseRunner):
         top_ks = collection["top_ks"]
         nqs = collection["nqs"]
         filters = collection["filters"] if "filters" in collection else []
+        guarantee_timestamp = collection["guarantee_timestamp"] if "guarantee_timestamp" in collection else None
         
         search_params = collection["search_params"]
         # TODO: get fields by describe_index
@@ -74,7 +74,8 @@ class SearchRunner(BaseRunner):
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param,
-                            "filter": filter_param
+                            "filter": filter_param,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         vector_query = {"vector": {index_field_name: search_info}}
                         case = {
@@ -83,6 +84,7 @@ class SearchRunner(BaseRunner):
                             "run_count": run_count,
                             "filter_query": filter_query,
                             "vector_query": vector_query,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         cases.append(case)
                         case_metrics.append(case_metric)
@@ -109,7 +111,8 @@ class SearchRunner(BaseRunner):
         for i in range(run_count):
             logger.debug("Start run query, run %d of %s" % (i+1, run_count))
             start_time = time.time()
-            _query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+            _query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                                           guarantee_timestamp=case_param["guarantee_timestamp"])
             interval_time = time.time() - start_time
             total_query_time += interval_time
             if (i == 0) or (min_query_time > interval_time):
@@ -137,6 +140,7 @@ class InsertSearchRunner(BaseRunner):
         run_count = collection["run_count"]
         top_ks = collection["top_ks"]
         nqs = collection["nqs"]
+        guarantee_timestamp = collection["guarantee_timestamp"] if "guarantee_timestamp" in collection else None
         other_fields = collection["other_fields"] if "other_fields" in collection else None
         filters = collection["filters"] if "filters" in collection else []
         filter_query = []
@@ -158,6 +162,7 @@ class InsertSearchRunner(BaseRunner):
         }
         vector_type = utils.get_vector_type(data_type)
         index_field_name = utils.get_default_field_name(vector_type)
+        # Get the path of the query.npy file stored on the NAS and get its data
         base_query_vectors = utils.get_vectors_from_binary(utils.MAX_NQ, dimension, data_type)
         cases = list()
         case_metrics = list()
@@ -175,8 +180,8 @@ class InsertSearchRunner(BaseRunner):
                 if isinstance(filter, dict) and "term" in filter:
                     filter_query.append(eval(filter["term"]))
                     # filter_param.append(filter["term"])
-                # logger.info("filter param: %s" % json.dumps(filter_param))
                 for nq in nqs:
+                    # Take nq groups of data for query
                     query_vectors = base_query_vectors[0:nq]
                     for top_k in top_ks:
                         search_info = {
@@ -186,12 +191,14 @@ class InsertSearchRunner(BaseRunner):
                             "params": search_param}
                         # TODO: only update search_info
                         case_metric = copy.deepcopy(self.metric)
+                        # set metric type as case
                         case_metric.set_case_metric_type()
                         case_metric.search = {
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param,
-                            "filter": filter_query
+                            "filter": filter_query,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         vector_query = {"vector": {index_field_name: search_info}}
                         case = {
@@ -210,6 +217,7 @@ class InsertSearchRunner(BaseRunner):
                             "run_count": run_count,
                             "filter_query": filter_query,
                             "vector_query": vector_query,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         cases.append(case)
                         case_metrics.append(case_metric)
@@ -257,6 +265,7 @@ class InsertSearchRunner(BaseRunner):
             start_time = time.time()
             self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
             build_time = round(time.time()-start_time, 2)
+        # build_time includes flush and index time
         logger.debug({"flush_time": flush_time, "build_time": build_time})
         self.build_time = build_time
         logger.info(self.milvus.count())
@@ -267,20 +276,22 @@ class InsertSearchRunner(BaseRunner):
         
     def run_case(self, case_metric, **case_param):
         run_count = case_param["run_count"]
-        avg_query_time = 0.0
         min_query_time = 0.0
         total_query_time = 0.0        
         for i in range(run_count):
+            # Number of successive queries
             logger.debug("Start run query, run %d of %s" % (i+1, run_count))
             logger.info(case_metric.search)
             start_time = time.time()
-            _query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+            _query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                                           guarantee_timestamp=case_param["guarantee_timestamp"])
             interval_time = time.time() - start_time
             total_query_time += interval_time
             if (i == 0) or (min_query_time > interval_time):
                 min_query_time = round(interval_time, 2)
         avg_query_time = round(total_query_time/run_count, 2)
         logger.info("Min query time: %.2f, avg query time: %.2f" % (min_query_time, avg_query_time))
+        # insert_result: "total_time", "rps", "ni_time"
         tmp_result = {"insert": self.insert_result, "build_time": self.build_time, "search_time": min_query_time, "avc_search_time": avg_query_time}
         # 
         # logger.info("Start load collection")

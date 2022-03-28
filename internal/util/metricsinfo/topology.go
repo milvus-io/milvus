@@ -47,20 +47,25 @@ type QueryClusterTopology struct {
 	ConnectedNodes []QueryNodeInfos `json:"connected_nodes"`
 }
 
+// ConnectionType is the type of connection between nodes
 type ConnectionType = string
 
+// ConnectionType definitions
 const (
 	CoordConnectToNode ConnectionType = "manage"
 	Forward            ConnectionType = "forward"
 )
 
+// ConnectionTargetType is the type of connection target
 type ConnectionTargetType = string
 
+// ConnectionInfo contains info of connection target
 type ConnectionInfo struct {
 	TargetName string               `json:"target_name"`
 	TargetType ConnectionTargetType `json:"target_type"`
 }
 
+// ConnTopology contains connection topology
 // TODO(dragondriver)
 // necessary to show all connection edge in topology graph?
 // for example, in system, Proxy connects to RootCoord and RootCoord also connects to Proxy,
@@ -107,12 +112,14 @@ type RootCoordTopology struct {
 	Connections ConnTopology   `json:"connections"`
 }
 
+// ConnectionEdge contains connection's id, type and target type
 type ConnectionEdge struct {
 	ConnectedIdentifier int                  `json:"connected_identifier"`
 	Type                ConnectionType       `json:"type"`
 	TargetType          ConnectionTargetType `json:"target_type"` // RootCoord, DataCoord ...
 }
 
+// SystemTopologyNode is a node in system topology graph.
 type SystemTopologyNode struct {
 	Identifier int              `json:"identifier"` // unique in the SystemTopology graph
 	Connected  []ConnectionEdge `json:"connected"`

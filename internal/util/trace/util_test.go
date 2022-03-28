@@ -13,10 +13,10 @@ package trace
 
 import (
 	"context"
-	"fmt"
-	"testing"
-
 	"errors"
+	"fmt"
+	"os"
+	"testing"
 
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
@@ -28,16 +28,18 @@ type simpleStruct struct {
 	value string
 }
 
+func TestMain(m *testing.M) {
+	closer := InitTracing("test")
+	defer closer.Close()
+	os.Exit(m.Run())
+}
+
 func TestInit(t *testing.T) {
-	cfg := InitFromEnv("test")
+	cfg := initFromEnv("test")
 	assert.NotNil(t, cfg)
 }
 
 func TestTracing(t *testing.T) {
-	//Already Init in each framework, this can be ignored in debug
-	closer := InitTracing("test")
-	defer closer.Close()
-
 	// context normally can be propagated through func params
 	ctx := context.Background()
 
@@ -78,8 +80,9 @@ func caller(ctx context.Context) error {
 		}
 
 		if err != nil {
+			LogError(sp, err)
 			sp.Finish()
-			return LogError(sp, err)
+			return nil
 		}
 
 		sp.Finish()
@@ -88,10 +91,6 @@ func caller(ctx context.Context) error {
 }
 
 func TestInject(t *testing.T) {
-	//Already Init in each framework, this can be ignored in debug
-	closer := InitTracing("test")
-	defer closer.Close()
-
 	// context normally can be propagated through func params
 	ctx := context.Background()
 
@@ -109,10 +108,6 @@ func TestInject(t *testing.T) {
 }
 
 func TestTraceError(t *testing.T) {
-	//Already Init in each framework, this can be ignored in debug
-	closer := InitTracing("test")
-	defer closer.Close()
-
 	// context normally can be propagated through func params
 	sp, ctx := StartSpanFromContext(nil)
 	assert.Nil(t, ctx)
@@ -137,5 +132,4 @@ func TestTraceError(t *testing.T) {
 	assert.Equal(t, id, "")
 	assert.Equal(t, sampled, false)
 	assert.Equal(t, found, false)
-
 }

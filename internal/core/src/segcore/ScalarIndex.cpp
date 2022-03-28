@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "exceptions/EasyAssert.h"
 #include "ScalarIndex.h"
 
 namespace milvus::segcore {
@@ -17,7 +18,7 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
     auto res_ids = std::make_unique<IdArray>();
     // TODO: support string array
     static_assert(std::is_same_v<T, int64_t>);
-    Assert(ids.has_int_id());
+    AssertInfo(ids.has_int_id(), "ids doesn't have int_id field");
     auto src_ids = ids.int_id();
     auto dst_ids = res_ids->mutable_int_id();
     std::vector<SegOffset> dst_offsets;
@@ -39,7 +40,7 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
         }
         // TODO: for repeated key, decide the final offset with Timestamp
         // no repeated key, simplified logic
-        Assert(iter_beg + 1 == iter_end);
+        // AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
         auto [entry_id, entry_offset] = *iter_beg;
 
         dst_ids->add_data(entry_id);
@@ -47,6 +48,33 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
     }
     return {std::move(res_ids), std::move(dst_offsets)};
 }
+
+std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+ScalarIndexVector::do_search_ids(const std::vector<idx_t>& ids) const {
+    std::vector<SegOffset> dst_offsets;
+    std::vector<idx_t> dst_ids;
+
+    for (auto id : ids) {
+        using Pair = std::pair<T, SegOffset>;
+        auto [iter_beg, iter_end] =
+            std::equal_range(mapping_.begin(), mapping_.end(), std::make_pair(id, SegOffset(0)),
+                             [](const Pair& left, const Pair& right) { return left.first < right.first; });
+
+        if (iter_beg == iter_end) {
+            // no data
+            continue;
+        }
+        // TODO: for repeated key, decide the final offset with Timestamp
+        // no repeated key, simplified logic
+        // AssertInfo(iter_beg + 1 == iter_end, "There are no repeated keys in more than one results");
+        auto [entry_id, entry_offset] = *iter_beg;
+
+        dst_ids.push_back(entry_id);
+        dst_offsets.push_back(entry_offset);
+    }
+    return {std::move(dst_ids), std::move(dst_offsets)};
+}
+
 void
 ScalarIndexVector::append_data(const ScalarIndexVector::T* ids, int64_t count, SegOffset base) {
     for (int64_t i = 0; i < count; ++i) {

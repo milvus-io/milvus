@@ -1,3 +1,5 @@
+from pymilvus.client.types import CompactionPlans
+
 from utils.util_log import test_log as log
 from common import common_type as ct
 from common import common_func as cf
@@ -57,9 +59,18 @@ class ResponseChecker:
             # Query interface of collection and partition that response check
             result = self.check_query_results(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_query_empty:
+            result = self.check_query_empty(self.response, self.func_name)
+
         elif self.check_task == CheckTasks.check_distance:
             # Calculate distance interface that response check
             result = self.check_distance(self.response, self.func_name, self.check_items)
+
+        elif self.check_task == CheckTasks.check_delete_compact:
+            result = self.check_delete_compact_plan(self.response, self.func_name, self.check_items)
+
+        elif self.check_task == CheckTasks.check_merge_compact:
+            result = self.check_merge_compact_plan(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -105,18 +116,29 @@ class ResponseChecker:
 
         if func_name == "connect":
             class_obj = Connect_Object_Name
-            res_obj = type(res).__name__
-            assert res_obj == class_obj
+            #  res_obj = type(res).__name__
+            #  assert res_obj == class_obj
 
-        if func_name == "get_connection":
-            value_content = params.get(ct.value_content, None)
-            res_obj = type(res).__name__ if res is not None else None
+        if func_name == "has_connection":
+            value_content = params.get(ct.value_content, False)
+            res_obj = res if res is not None else False
             assert res_obj == value_content
 
         return True
 
     @staticmethod
     def check_collection_property(res, func_name, check_items):
+        """
+        According to the check_items to check collection properties of res, which return from func_name
+        :param res: actual response of init collection
+        :type res: Collection
+
+        :param func_name: init collection API
+        :type func_name: str
+
+        :param check_items: which items expected to be checked, including name, schema, num_entities, primary
+        :type check_items: dict, {check_key: expected_value}
+        """
         exp_func_name = "init_collection"
         exp_func_name_2 = "construct_from_dataframe"
         if func_name != exp_func_name and func_name != exp_func_name_2:
@@ -140,6 +162,8 @@ class ResponseChecker:
             assert collection.num_entities == check_items.get("num_entities")
         if check_items.get("primary", None):
             assert collection.primary_field.name == check_items.get("primary")
+        if check_items.get("shards_num", None):
+            assert collection._shards_num == check_items.get("shards_num")
         return True
 
     @staticmethod
@@ -206,6 +230,20 @@ class ResponseChecker:
 
     @staticmethod
     def check_query_results(query_res, func_name, check_items):
+        """
+        According to the check_items to check actual query result, which return from func_name.
+
+        :param: query_res: A list that contains all results
+        :type: list
+
+        :param func_name: Query API name
+        :type func_name: str
+
+        :param check_items: The items expected to be checked, including exp_res, with_vec
+                            The type of exp_res value is as same as query_res
+                            The type of with_vec value is bool, True value means check vector field, False otherwise
+        :type check_items: dict
+        """
         if func_name != 'query':
             log.warning("The function name is {} rather than {}".format(func_name, "query"))
         if not isinstance(query_res, list):
@@ -214,11 +252,31 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         exp_res = check_items.get("exp_res", None)
         with_vec = check_items.get("with_vec", False)
-        if exp_res and isinstance(query_res, list):
-            assert pc.equal_entities_list(exp=exp_res, actual=query_res, with_vec=with_vec)
-            # assert len(exp_res) == len(query_res)
-            # for i in range(len(exp_res)):
-            #     assert_entity_equal(exp=exp_res[i], actual=query_res[i])
+        if exp_res is not None:
+            if isinstance(query_res, list):
+                assert pc.equal_entities_list(exp=exp_res, actual=query_res, with_vec=with_vec)
+                return True
+            else:
+                log.error(f"Query result {query_res} is not list")
+                return False
+        log.warning(f'Expected query result is {exp_res}')
+
+    @staticmethod
+    def check_query_empty(query_res, func_name):
+        """
+        Verify that the query result is empty
+
+        :param: query_res: A list that contains all results
+        :type: list
+
+        :param func_name: Query API name
+        :type func_name: str
+        """
+        if func_name != 'query':
+            log.warning("The function name is {} rather than {}".format(func_name, "query"))
+        if not isinstance(query_res, list):
+            raise Exception("The query result to check isn't list type object")
+        assert len(query_res) == 0, "Query result is not empty"
 
     @staticmethod
     def check_distance(distance_res, func_name, check_items):
@@ -237,3 +295,56 @@ class ResponseChecker:
                                       metric, sqrt)
 
         return True
+
+    @staticmethod
+    def check_delete_compact_plan(compaction_plans, func_name, check_items):
+        """
+        Verify that the delete type compaction plan
+
+        :param: compaction_plans: A compaction plan
+        :type: CompactionPlans
+
+        :param func_name: get_compaction_plans API name
+        :type func_name: str
+
+        :param check_items: which items you wish to check
+                            plans_num represent the delete compact plans number
+        :type: dict
+        """
+        to_check_func = 'get_compaction_plans'
+        if func_name != to_check_func:
+            log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
+        if not isinstance(compaction_plans, CompactionPlans):
+            raise Exception("The compaction_plans result to check isn't CompactionPlans type object")
+
+        plans_num = check_items.get("plans_num", 1)
+        assert len(compaction_plans.plans) == plans_num
+        for plan in compaction_plans.plans:
+            assert len(plan.sources) == 1
+            assert plan.sources[0] != plan.target
+
+    @staticmethod
+    def check_merge_compact_plan(compaction_plans, func_name, check_items):
+        """
+        Verify that the merge type compaction plan
+
+        :param: compaction_plans: A compaction plan
+        :type: CompactionPlans
+
+        :param func_name: get_compaction_plans API name
+        :type func_name: str
+
+        :param check_items: which items you wish to check
+                            segment_num represent how many segments are expected to be merged, default is 2
+        :type: dict
+        """
+        to_check_func = 'get_compaction_plans'
+        if func_name != to_check_func:
+            log.warning("The function name is {} rather than {}".format(func_name, to_check_func))
+        if not isinstance(compaction_plans, CompactionPlans):
+            raise Exception("The compaction_plans result to check isn't CompactionPlans type object")
+
+        segment_num = check_items.get("segment_num", 2)
+        assert len(compaction_plans.plans) == 1
+        assert len(compaction_plans.plans[0].sources) == segment_num
+        assert compaction_plans.plans[0].target not in compaction_plans.plans[0].sources

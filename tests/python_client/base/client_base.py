@@ -1,3 +1,4 @@
+from numpy.core.fromnumeric import _partition_dispatcher
 import pytest
 import sys
 from pymilvus import DefaultConfig
@@ -63,7 +64,7 @@ class Base:
 
         try:
             """ Drop collection before disconnect """
-            if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
+            if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
                 self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
                                              port=param_info.param_port)
 
@@ -94,22 +95,22 @@ class Base:
 class TestcaseBase(Base):
     """
     Additional methods;
-    Public methods that can be used to add cases.
+    Public methods that can be used for test cases.
     """
 
     def _connect(self):
-        """ Add an connection and create the connect """
+        """ Add a connection and create the connect """
         res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
                                                     port=param_info.param_port)
         return res
 
-    def init_collection_wrap(self, name=None, schema=None, check_task=None, check_items=None, **kwargs):
+    def init_collection_wrap(self, name=None, schema=None, shards_num=2, check_task=None, check_items=None, **kwargs):
         name = cf.gen_unique_str('coll_') if name is None else name
         schema = cf.gen_default_collection_schema() if schema is None else schema
-        if self.connection_wrap.get_connection(alias=DefaultConfig.DEFAULT_USING)[0] is None:
+        if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, schema=schema, check_task=check_task, check_items=check_items, **kwargs)
+        collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task, check_items=check_items, **kwargs)
         self.collection_object_list.append(collection_w)
         return collection_w
 
@@ -138,11 +139,12 @@ class TestcaseBase(Base):
                                 auto_id=False, dim=ct.default_dim, is_index=False):
         """
         target: create specified collections
-        method: 1. create collections (binary/non-binary)
+        method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
                 2. create partitions if specified
-                3. insert specified binary/non-binary data
+                3. insert specified (binary/non-binary, default/all data type) data
                    into each partition if any
-        expected: return collection and raw data
+                4. not load if specifying is_index as True
+        expected: return collection and raw data, insert ids
         """
         log.info("Test case of search interface: initialize before test case")
         self._connect()
@@ -150,6 +152,7 @@ class TestcaseBase(Base):
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
+        time_stamp = 0
         # 1 create collection
         default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim)
         if is_binary:
@@ -164,16 +167,17 @@ class TestcaseBase(Base):
             cf.gen_partitions(collection_w, partition_num)
         # 3 insert data if specified
         if insert_data:
-            collection_w, vectors, binary_raw_vectors, insert_ids = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type,
-                               auto_id=auto_id, dim=dim)
+            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
             assert collection_w.is_empty is False
             assert collection_w.num_entities == nb
+            log.info("insert_data: inserted data into collection %s (num_entities: %s)"
+                     % (collection_w.name, nb))
             # This condition will be removed after auto index feature
             if not is_index:
                 collection_w.load()
 
-        return collection_w, vectors, binary_raw_vectors, insert_ids
+        return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
     def insert_entities_into_two_partitions_in_half(self, half, prefix='query'):
         """
@@ -181,7 +185,7 @@ class TestcaseBase(Base):
         :param half: half of nb
         :return: collection wrap and partition wrap
         """
-        conn = self._connect()
+        self._connect()
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
         # insert [0, half) into partition_w
@@ -190,6 +194,26 @@ class TestcaseBase(Base):
         # insert [half, nb) into _default
         df_default = cf.gen_default_dataframe_data(nb=half, start=half)
         collection_w.insert(df_default)
-        conn.flush([collection_w.name])
-        collection_w.load()
+        # flush
+        collection_w.num_entities
+        collection_w.load(partition_names=[partition_w.name, "_default"])
         return collection_w, partition_w, df_partition, df_default
+
+    def collection_insert_multi_segments_one_shard(self, collection_prefix, num_of_segment=2, nb_of_segment=1,
+                                                   is_dup=True):
+        """
+        init collection with one shard, insert data into two segments on one shard (they can be merged)
+        :param collection_prefix: collection name prefix
+        :param num_of_segment: number of segments
+        :param nb_of_segment: number of entities per segment
+        :param is_dup: whether the primary keys of each segment is duplicated
+        :return: collection wrap and partition wrap
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(collection_prefix), shards_num=1)
+
+        for i in range(num_of_segment):
+            start = 0 if is_dup else i * nb_of_segment
+            df = cf.gen_default_dataframe_data(nb_of_segment, start=start)
+            collection_w.insert(df)
+            assert collection_w.num_entities == nb_of_segment * (i + 1)
+        return collection_w

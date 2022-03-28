@@ -13,11 +13,11 @@
 #include <tuple>
 #include <map>
 #include <google/protobuf/text_format.h>
+#include <knowhere/index/vector_index/helpers/IndexParameter.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 
 #include "pb/index_cgo_msg.pb.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "indexbuilder/IndexWrapper.h"
+#include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
@@ -27,15 +27,15 @@ constexpr int64_t NB = 1000000;
 namespace indexcgo = milvus::proto::indexcgo;
 
 auto index_type_collections = [] {
-    static std::map<int, milvus::knowhere::IndexType> collections{
-        {0, milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
+    static std::map<int, knowhere::IndexType> collections{
+        {0, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT},
     };
     return collections;
 }();
 
 auto metric_type_collections = [] {
-    static std::map<int, milvus::knowhere::MetricType> collections{
-        {0, milvus::knowhere::Metric::L2},
+    static std::map<int, knowhere::MetricType> collections{
+        {0, knowhere::Metric::L2},
     };
     return collections;
 }();
@@ -60,11 +60,11 @@ IndexBuilder_build(benchmark::State& state) {
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
 
     for (auto _ : state) {
         auto index =
-            std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+            std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
         index->BuildWithoutIds(xb_dataset);
     }
 }
@@ -89,11 +89,11 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
     auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = milvus::knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
 
     for (auto _ : state) {
         auto index =
-            std::make_unique<milvus::indexbuilder::IndexWrapper>(type_params_str.c_str(), index_params_str.c_str());
+            std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
 
         index->BuildWithoutIds(xb_dataset);
         index->Serialize();

@@ -1,0 +1,21 @@
+kind: StressChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-datanode-memory-stress
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      release: milvus-chaos
+      app: pulsar
+  mode: one
+  stressors:
+    cpu:
+      workers: 4
+      load: 80
+    memory:
+      workers: 4
+      size: 2048Mi
+  duration: 5m

@@ -11,4 +11,38 @@ filters:
       - yanliang567
       - zwd1208
     approvers:
-      - pr-inspection
+      - maintainers
+
+  "Makefile$":
+    labels:
+      - area/compilation
+
+  "CMakeLists\\.txt$":
+    labels:
+      - area/compilation
+
+  # markdown files should be reviewed by authors
+  "*\\.md$":
+    required_reviewers:
+      - scsven
+      - XuanYang-cn
+      - xiaofan-luan
+    approvers:
+      - maintainers
+
+  # codecov.yml is the config file for CodeCov, changes should be reviewed by @wangting0128 or @yanliang567
+  "codecov.yml$":
+    required_reviewers:
+      - wangting0128
+      - yanliang567
+    approvers:
+      - maintainers
+
+  # go.{mod,sum} files relate to go dependencies, and should be reviewed by @congqixia
+  "go\\.(mod|sum)$":
+    required_reviewers:
+      - congqixia
+    approvers:
+      - maintainers
+    labels:
+      - area/dependency

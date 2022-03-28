@@ -6,7 +6,7 @@ pipeline {
     }
 
     parameters{
-        string defaultValue: 'registry.zilliz.com', description: 'Local Docker registry URL', name: 'LOCAL_DOKCER_REGISTRY_URL', trim: true
+        string defaultValue: 'registry.milvus.io', description: 'Local Docker registry URL', name: 'LOCAL_DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'registry-1.docker.io', description: 'Remote Docker registry URL', name: 'REMOTE_DOKCER_REGISTRY_URL', trim: true
         string defaultValue: 'milvus-docker-access-token', description: 'Remote Docker credentials id', name: 'REMOTE_DOCKER_CREDENTIALS_ID', trim: true
         string(defaultValue: "master", description: 'Milvus server version', name: 'BRANCH')
@@ -61,7 +61,7 @@ metadata:
 spec:
   containers:
   - name: publish-images
-    image: registry.zilliz.com/library/docker:v1.0.0
+    image: registry.milvus.io/library/docker:v1.0.0
     securityContext:
       privileged: true
     command:

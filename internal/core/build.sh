@@ -2,7 +2,17 @@
 
 # Compile jobs variable; Usage: $ jobs=12 ./build.sh ...
 if [[ ! ${jobs+1} ]]; then
-    jobs=$(nproc)
+    if command -v nproc &> /dev/null
+    # For linux
+    then
+        jobs=$(nproc)
+    elif command -v sysctl &> /dev/null
+    # For macOS
+    then
+        jobs=$(sysctl -n hw.logicalcpu)
+    else
+        jobs=4
+    fi
 fi
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -13,14 +23,12 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
-
-BUILD_OUTPUT_DIR="${SCRIPTS_DIR}/../../cmake_build"
+BUILD_OUTPUT_DIR="./cmake_build"
 BUILD_TYPE="Release"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="${SCRIPTS_DIR}/output"
 MAKE_CLEAN="OFF"
 BUILD_COVERAGE="OFF"
-DB_PATH="/tmp/milvus"
 PROFILING="OFF"
 RUN_CPPLINT="OFF"
 CUDA_COMPILER=/usr/local/cuda/bin/nvcc
@@ -29,7 +37,7 @@ WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 
-while getopts "p:d:t:s:f:o:ulrcghzme" arg; do
+while getopts "p:t:s:f:o:ulrcghzme" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -39,9 +47,6 @@ while getopts "p:d:t:s:f:o:ulrcghzme" arg; do
     ;;
   o)
     BUILD_OUTPUT_DIR=$OPTARG
-    ;;
-  d)
-    DB_PATH=$OPTARG
     ;;
   t)
     BUILD_TYPE=$OPTARG # BUILD_TYPE
@@ -120,6 +125,19 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
   exit 0
 fi
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Darwin*)
+        llvm_prefix="$(brew --prefix llvm)"
+        export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
+        export CC="${llvm_prefix}/bin/clang"
+        export CXX="${llvm_prefix}/bin/clang++"
+        export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
+        export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
+        ;;
+          *)   echo "==System:${unameOut}";
+esac
+
 CMAKE_CMD="cmake \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
@@ -127,12 +145,12 @@ CMAKE_CMD="cmake \
 -DOpenBLAS_SOURCE=AUTO \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
--DMILVUS_DB_PATH=${DB_PATH} \
 -DENABLE_CPU_PROFILING=${PROFILING} \
 -DMILVUS_GPU_VERSION=${GPU_VERSION} \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
+-DKNOWHERE_GPU_VERSION=${SUPPORT_GPU} \
 ${SCRIPTS_DIR}"
 echo ${CMAKE_CMD}
 ${CMAKE_CMD}

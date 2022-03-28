@@ -7,8 +7,6 @@ reviewers:
   - scsven
 
 approvers:
-  - pr-inspection
+  - maintainers
 
-labels:
-- component/indexnode
 

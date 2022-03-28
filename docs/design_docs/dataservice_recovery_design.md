@@ -4,15 +4,15 @@ Datanode 发送 timetick msg 需要有 channel 的信息，DataCoord 根据 chan
 
 ### 服务发现
 
-DataCoord 启动时检查是否有新的或重启过的 DataNode，如果有重启过的，重新注册 channel，并 seek 到上次记录的位置
+DataCoord 启动时检查是否有新的或重启过的 DataNode，如果有重启过的，重新注册 channel，并 seek 到上次记录的位置。
 
-通过 watch 机制监听 DataNode 的状态，如果 DataNode 下线，其注册的 channel 重新分配到其他 node，并 seek 到上次的位置（重新分配不一定现在做）
+通过 watch 机制监听 DataNode 的状态，如果 DataNode 下线，其注册的 channel 重新分配到其他 node，并 seek 到上次的位置（重新分配不一定现在做）。
 
-如果监听到 DataNode 重新上线，向其注册 channel，并 seek 到上次记录的位置
+如果监听到 DataNode 重新上线，向其注册 channel，并 seek 到上次记录的位置。
 
-如果监听到有新的 DataNode 注册，记录其状态，后续向其注册 channel 或进行 load balance（load balance 不一定现在做）
+如果监听到有新的 DataNode 注册，记录其状态，后续向其注册 channel 或进行 load balance（load balance 不一定现在做）。
 
-DataNode 如果由于网络原因与 etcd 断开，应该重启服务发现，DataCoord 会去重新注册 channel，DataNode 不能重复监听相同 channel
+DataNode 如果由于网络原因与 etcd 断开，应该重启服务发现，DataCoord 会去重新注册 channel，DataNode 不能重复监听相同 channel 。
 
 ### 需要记录的信息
 

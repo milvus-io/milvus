@@ -11,10 +11,39 @@
 
 package storage
 
+import (
+	"golang.org/x/exp/mmap"
+)
+
+// ChunkManager is to manager chunks.
+// Include Read, Write, Remove chunks.
 type ChunkManager interface {
-	GetPath(key string) (string, error)
-	Write(key string, content []byte) error
-	Exist(key string) bool
-	Read(key string) ([]byte, error)
-	ReadAt(key string, p []byte, off int64) (n int, err error)
+	// GetPath returns path of @filePath.
+	GetPath(filePath string) (string, error)
+	// GetSize returns path of @filePath.
+	GetSize(filePath string) (int64, error)
+	// Write writes @content to @filePath.
+	Write(filePath string, content []byte) error
+	// MultiWrite writes multi @content to @filePath.
+	MultiWrite(contents map[string][]byte) error
+	// Exist returns true if @filePath exists.
+	Exist(filePath string) bool
+	// Read reads @filePath and returns content.
+	Read(filePath string) ([]byte, error)
+	// MultiRead reads @filePath and returns content.
+	MultiRead(filePaths []string) ([][]byte, error)
+	ListWithPrefix(prefix string) ([]string, error)
+	// ReadWithPrefix reads files with same @prefix and returns contents.
+	ReadWithPrefix(prefix string) ([]string, [][]byte, error)
+	Mmap(filePath string) (*mmap.ReaderAt, error)
+	// ReadAt reads @filePath by offset @off, content stored in @p, return @n as the number of bytes read.
+	// if all bytes are read, @err is io.EOF.
+	// return other error if read failed.
+	ReadAt(filePath string, off int64, length int64) (p []byte, err error)
+	// Remove delete @filePath.
+	Remove(filePath string) error
+	// MultiRemove delete @filePaths.
+	MultiRemove(filePaths []string) error
+	// RemoveWithPrefix remove files with same @prefix.
+	RemoveWithPrefix(prefix string) error
 }

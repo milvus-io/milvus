@@ -1,21 +1,69 @@
-#-------------------------------------------------------------------------------
-# Copyright (C) 2019-2020 Zilliz. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
 # with the License. You may obtain a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software distributed under the License
-# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-# or implied. See the License for the specific language governing permissions and limitations under the License.
-#-------------------------------------------------------------------------------
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-cmake_minimum_required( VERSION 3.14 )
+cmake_minimum_required( VERSION 3.18 )
+
+if ( APPLE )
+    set( CMAKE_CROSSCOMPILING TRUE )
+    set( RUN_HAVE_GNU_POSIX_REGEX 0 )
+    set( CMAKE_C_COMPILER "/usr/local/opt/llvm/bin/clang" )
+    set( CMAKE_CXX_COMPILER "/usr/local/opt/llvm/bin/clang++" )
+endif ()
 
 add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
+
+project(core)
+include(CheckCXXCompilerFlag)
+if ( APPLE )
+    message(STATUS "==============Darwin Environment==============")
+    check_cxx_compiler_flag(-std=c++11 HAS_STD_CPP11_FLAG)
+    if(HAS_STD_CPP11_FLAG)
+        add_compile_options(-std=c++11)
+    endif()
+    if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        set(OpenMP_C "${CMAKE_C_COMPILER}" CACHE STRING "" FORCE)
+        set(OpenMP_C_FLAGS "-fopenmp=libomp -Wno-unused-command-line-argument" CACHE STRING "" FORCE)
+        set(OpenMP_C_LIB_NAMES "libomp" "libgomp" "libiomp5" CACHE STRING "" FORCE)
+        set(OpenMP_libomp_LIBRARY ${OpenMP_C_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libgomp_LIBRARY ${OpenMP_C_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libiomp5_LIBRARY ${OpenMP_C_LIB_NAMES} CACHE STRING "" FORCE)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(OpenMP_CXX "${CMAKE_CXX_COMPILER}" CACHE STRING "" FORCE)
+        set(OpenMP_CXX_FLAGS "-fopenmp=libomp -Wno-unused-command-line-argument" CACHE STRING "" FORCE)
+        set(OpenMP_CXX_LIB_NAMES "libomp" "libgomp" "libiomp5" CACHE STRING "" FORCE)
+        set(OpenMP_libomp_LIBRARY ${OpenMP_CXX_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libgomp_LIBRARY ${OpenMP_CXX_LIB_NAMES} CACHE STRING "" FORCE)
+        set(OpenMP_libiomp5_LIBRARY ${OpenMP_CXX_LIB_NAMES} CACHE STRING "" FORCE)
+    endif()
+elseif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    message(STATUS "==============Linux Environment===============")
+    set(LINUX TRUE)
+elseif ( MSYS )
+    message( STATUS "==============MSYS Environment===============" )
+else ()
+    message(FATAL_ERROR "Unsupported platform!" )
+endif ()
+
+find_package(OpenMP REQUIRED)
+if (OPENMP_FOUND)
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
 
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
@@ -24,12 +72,10 @@ include( Utils )
 get_current_time( BUILD_TIME )
 message( STATUS "Build time = ${BUILD_TIME}" )
 
-get_build_type( TARGET  BUILD_TYPE
-                        DEFAULT "Release" )
+get_build_type( TARGET BUILD_TYPE DEFAULT "Release" )
 message( STATUS "Build type = ${BUILD_TYPE}" )
 
-get_milvus_version( TARGET  MILVUS_VERSION
-                            DEFAULT "2.0" )
+get_milvus_version( TARGET MILVUS_VERSION DEFAULT "2.0" )
 message( STATUS "Build version = ${MILVUS_VERSION}" )
 
 get_last_commit_id( LAST_COMMIT_ID )
@@ -52,6 +98,7 @@ set( MILVUS_THIRDPARTY_SRC  ${PROJECT_SOURCE_DIR}/thirdparty )
 # self-installed dynamic libraries will be correctly linked by excutable
 set( CMAKE_INSTALL_RPATH "/usr/lib" "${CMAKE_INSTALL_PREFIX}/lib" )
 set( CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE )
+
 # **************************** Dependencies ****************************
 include( CTest )
 include( BuildUtils )
@@ -59,25 +106,43 @@ include( DefineOptions )
 using_ccache_if_defined(MILVUS_USE_CCACHE)
 
 include( ExternalProject )
+include( GNUInstallDirs )
 include( FetchContent )
 include_directories(thirdparty)
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
 set(FETCHCONTENT_QUIET OFF)
 include( ThirdPartyPackages )
-find_package(OpenMP REQUIRED)
-if (OPENMP_FOUND)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-endif()
+
 # **************************** Compiler arguments ****************************
 message( STATUS "Building Milvus CPU version" )
 
+if (LINUX OR MSYS)
 append_flags( CMAKE_CXX_FLAGS
               FLAGS
-                    "-fPIC"
-                    "-DELPP_THREAD_SAFE"
-                    "-fopenmp"
-                    "-Werror"
-                    )
+              "-fPIC"
+              "-DELPP_THREAD_SAFE"
+              "-fopenmp"
+              "-Werror"
+              )
+endif ()
+
+if ( APPLE )
+    append_flags( CMAKE_CXX_FLAGS
+            FLAGS
+            "-fPIC"
+            "-DELPP_THREAD_SAFE"
+            "-fopenmp"
+            "-Wno-error"
+            "-Wsign-compare"
+            "-Wall"
+            "-pedantic"
+            "-Wno-unused-command-line-argument"
+            "-Wextra"
+            "-Wno-unused-parameter"
+            "-Wno-deprecated"
+            "-DBOOST_STACKTRACE_GNU_SOURCE_NOT_REQUIRED=1"
+            )
+endif ()
 
 # **************************** Coding style check tools ****************************
 find_package( ClangTools )
@@ -104,19 +169,17 @@ if ( NOT LINT_EXCLUSIONS_FILE )
     set( LINT_EXCLUSIONS_FILE ${BUILD_SUPPORT_DIR}/lint_exclusions.txt )
 endif ()
 
-find_program( CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR} )
-message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
-
-#
-# "make lint" targets
-#
-add_custom_target( lint
+add_custom_target(lint
     ${PYTHON_EXECUTABLE}    ${BUILD_SUPPORT_DIR}/run_cpplint.py
                             --cpplint_binary    ${CPPLINT_BIN}
                             --exclude_globs     ${LINT_EXCLUSIONS_FILE}
-                            --source_dir        ${CMAKE_CURRENT_SOURCE_DIR}
+                            --source_dir            ${CMAKE_CURRENT_SOURCE_DIR}/src
                             ${MILVUS_LINT_QUIET}
                             )
+
+
+find_program( CPPLINT_BIN NAMES cpplint cpplint.py HINTS ${BUILD_SUPPORT_DIR} )
+message( STATUS "Found cpplint executable at ${CPPLINT_BIN}" )
 
 #
 # "make clang-format" and "make check-clang-format" targets
@@ -167,59 +230,48 @@ endif ()
 #
 # Validate and print out Milvus configuration options
 #
-
 config_summary()
 
 # **************************** Source files ****************************
+if ( BUILD_UNIT_TEST STREQUAL "ON" AND BUILD_COVERAGE STREQUAL "ON" )
+    append_flags( CMAKE_CXX_FLAGS
+                  FLAGS
+                        "-fprofile-arcs"
+                        "-ftest-coverage"
+                        )
+endif ()
 
+# Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),
+# otherwise cpp code coverage tool will miss src folder
 add_subdirectory( thirdparty )
 add_subdirectory( src )
 
 # Unittest lib
 if ( BUILD_UNIT_TEST STREQUAL "ON" )
-    if ( BUILD_COVERAGE STREQUAL "ON" )
-        append_flags(  CMAKE_CXX_FLAGS
-                       FLAGS
-                            "-fprofile-arcs"
-                            "-ftest-coverage"
-                            )
-    endif ()
     append_flags( CMAKE_CXX_FLAGS FLAGS "-DELPP_DISABLE_LOGS")
-
     add_subdirectory(unittest)
-    add_subdirectory(bench)
+    if (LINUX)
+        add_subdirectory(bench)
+    endif ()
 endif ()
 
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 # **************************** Install ****************************
-
-if ( NOT MILVUS_DB_PATH )
-    set( MILVUS_DB_PATH "${CMAKE_INSTALL_PREFIX}" )
-endif ()
-
-set( GPU_ENABLE "false" )
-
-install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
-        DESTINATION include/segcore/
+# Install segcore
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
+        DESTINATION include/segcore
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(FILES ${CMAKE_BINARY_DIR}/src/segcore/libmilvus_segcore.so
-        DESTINATION lib)
-
-install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
-        DESTINATION include/indexbuilder/
+# Install indexbuilder
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/indexbuilder/
+        DESTINATION include/indexbuilder
         FILES_MATCHING PATTERN "*_c.h"
 )
 
-install(FILES ${CMAKE_BINARY_DIR}/src/indexbuilder/libmilvus_indexbuilder.so
-        DESTINATION lib)
-
-install(
-        DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
-        DESTINATION include/common/
+# Install common
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
+        DESTINATION include/common
         FILES_MATCHING PATTERN "*_c.h"
 )

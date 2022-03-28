@@ -14,11 +14,13 @@ package metricsinfo
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
-func TestGetCPUCoreCount(t *testing.T) {
+func Test_GetCPUCoreCount(t *testing.T) {
 	log.Info("TestGetCPUCoreCount",
 		zap.Int("physical CPUCoreCount", GetCPUCoreCount(false)))
 
@@ -26,27 +28,29 @@ func TestGetCPUCoreCount(t *testing.T) {
 		zap.Int("logical CPUCoreCount", GetCPUCoreCount(true)))
 }
 
-func TestGetCPUUsage(t *testing.T) {
+func Test_GetCPUUsage(t *testing.T) {
 	log.Info("TestGetCPUUsage",
 		zap.Float64("CPUUsage", GetCPUUsage()))
 }
 
-func TestGetMemoryCount(t *testing.T) {
+func Test_GetMemoryCount(t *testing.T) {
 	log.Info("TestGetMemoryCount",
 		zap.Uint64("MemoryCount", GetMemoryCount()))
+
+	assert.NotZero(t, GetMemoryCount())
 }
 
-func TestGetUsedMemoryCount(t *testing.T) {
+func Test_GetUsedMemoryCount(t *testing.T) {
 	log.Info("TestGetUsedMemoryCount",
 		zap.Uint64("UsedMemoryCount", GetUsedMemoryCount()))
 }
 
-func TestGetDiskCount(t *testing.T) {
+func Test_GetDiskCount(t *testing.T) {
 	log.Info("TestGetDiskCount",
 		zap.Uint64("DiskCount", GetDiskCount()))
 }
 
-func TestGetDiskUsage(t *testing.T) {
+func Test_GetDiskUsage(t *testing.T) {
 	log.Info("TestGetDiskUsage",
 		zap.Uint64("DiskUsage", GetDiskUsage()))
 }

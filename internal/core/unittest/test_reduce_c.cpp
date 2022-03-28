@@ -10,98 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+
+#include "common/Consts.h"
 #include "segcore/ReduceStructure.h"
 
-TEST(SearchResultPair, Less) {
-    auto pair1 = SearchResultPair(1.0, nullptr, 0, 0);
-    auto pair2 = SearchResultPair(1.0, nullptr, 0, 0);
-    ASSERT_EQ(pair1 < pair2, false);
-    ASSERT_EQ(pair1.operator<(pair2), false);
-
-    pair1.distance_ = 1.0;
-    pair2.distance_ = 2.0;
-    ASSERT_EQ(pair1 < pair2, true);
-    ASSERT_EQ(pair1.operator<(pair2), true);
-
-    pair1.distance_ = 1.0;
-    pair2.distance_ = NAN;
-    ASSERT_EQ(pair1 < pair2, true);
-    ASSERT_EQ(pair1.operator<(pair2), true);
-
-    pair1.distance_ = 2.0;
-    pair2.distance_ = 1.0;
-    ASSERT_EQ(pair1 < pair2, false);
-    ASSERT_EQ(pair1.operator<(pair2), false);
-
-    pair1.distance_ = 2.0;
-    pair2.distance_ = 2.0;
-    ASSERT_EQ(pair1 < pair2, false);
-    ASSERT_EQ(pair1.operator<(pair2), false);
-
-    pair1.distance_ = 2.0;
-    pair2.distance_ = NAN;
-    ASSERT_EQ(pair1 < pair2, true);
-    ASSERT_EQ(pair1.operator<(pair2), true);
-
-    pair1.distance_ = NAN;
-    pair2.distance_ = 1.0;
-    ASSERT_EQ(pair1 < pair2, false);
-    ASSERT_EQ(pair1.operator<(pair2), false);
-
-    pair1.distance_ = NAN;
-    pair2.distance_ = 2.0;
-    ASSERT_EQ(pair1 < pair2, false);
-    ASSERT_EQ(pair1.operator<(pair2), false);
-
-    pair1.distance_ = NAN;
-    pair2.distance_ = NAN;
-    ASSERT_EQ(pair1 < pair2, true);
-    ASSERT_EQ(pair1.operator<(pair2), true);
-}
-
 TEST(SearchResultPair, Greater) {
-    auto pair1 = SearchResultPair(1.0, nullptr, 0, 0);
-    auto pair2 = SearchResultPair(1.0, nullptr, 0, 0);
+    auto pair1 = SearchResultPair(0, 1.0, nullptr, 0, 0, 10);
+    auto pair2 = SearchResultPair(1, 2.0, nullptr, 1, 0, 10);
     ASSERT_EQ(pair1 > pair2, false);
-    ASSERT_EQ(pair1.operator>(pair2), false);
 
-    pair1.distance_ = 1.0;
-    pair2.distance_ = 2.0;
+    pair1.primary_key_ = INVALID_ID;
+    pair2.primary_key_ = 1;
     ASSERT_EQ(pair1 > pair2, false);
-    ASSERT_EQ(pair1.operator>(pair2), false);
 
-    pair1.distance_ = 1.0;
-    pair2.distance_ = NAN;
+    pair1.primary_key_ = 0;
+    pair2.primary_key_ = INVALID_ID;
     ASSERT_EQ(pair1 > pair2, true);
-    ASSERT_EQ(pair1.operator>(pair2), true);
 
-    pair1.distance_ = 2.0;
-    pair2.distance_ = 1.0;
-    ASSERT_EQ(pair1 > pair2, true);
-    ASSERT_EQ(pair1.operator>(pair2), true);
-
-    pair1.distance_ = 2.0;
-    pair2.distance_ = 2.0;
+    pair1.primary_key_ = INVALID_ID;
+    pair2.primary_key_ = INVALID_ID;
     ASSERT_EQ(pair1 > pair2, false);
-    ASSERT_EQ(pair1.operator>(pair2), false);
-
-    pair1.distance_ = 2.0;
-    pair2.distance_ = NAN;
-    ASSERT_EQ(pair1 > pair2, true);
-    ASSERT_EQ(pair1.operator>(pair2), true);
-
-    pair1.distance_ = NAN;
-    pair2.distance_ = 1.0;
-    ASSERT_EQ(pair1 > pair2, false);
-    ASSERT_EQ(pair1.operator>(pair2), false);
-
-    pair1.distance_ = NAN;
-    pair2.distance_ = 2.0;
-    ASSERT_EQ(pair1 > pair2, false);
-    ASSERT_EQ(pair1.operator>(pair2), false);
-
-    pair1.distance_ = NAN;
-    pair2.distance_ = NAN;
-    ASSERT_EQ(pair1 > pair2, true);
-    ASSERT_EQ(pair1.operator>(pair2), true);
 }

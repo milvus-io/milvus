@@ -1,4 +1,3 @@
-
 """ Initialized parameters """
 port = 19530
 epsilon = 0.000001
@@ -7,13 +6,14 @@ default_flush_interval = 1
 big_flush_interval = 1000
 default_drop_interval = 3
 default_dim = 128
-default_nb = 1200
+default_nb = 3000
 default_nb_medium = 5000
 default_top_k = 10
 default_nq = 2
 default_limit = 10
 default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
 default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_binary_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
 max_top_k = 16384
 max_partition_num = 4096  # 256
 default_segment_row_limit = 1000
@@ -45,9 +45,14 @@ binary_vec_field_desc = "binary vector type field"
 max_dim = 32768
 gracefulTime = 1
 default_nlist = 128
+compact_segment_num_threshold = 10
+compact_delta_ratio_reciprocal = 5  # compact_delta_binlog_ratio is 0.2
+compact_retention_duration = 40  # compaction travel time retention range 20s
+max_compaction_interval = 60  # the max time interval (s) from the last compaction
+max_field_num = 256  # Maximum number of fields in a collection
 
 Not_Exist = "Not_Exist"
-Connect_Object_Name = "Milvus"
+Connect_Object_Name = True
 list_content = "list_content"
 dict_content = "dict_content"
 value_content = "value_content"
@@ -72,12 +77,11 @@ get_invalid_strs = [
     "%$#",
     "a".join("a" for i in range(256))]
 
-
 get_not_string = [
     [],
     {},
     None,
-    (1, ),
+    (1,),
     1,
     1.0,
     [1, "2", 3]
@@ -145,14 +149,13 @@ get_wrong_format_dict = [
     {"host": 0, "port": 19520}
 ]
 
-
 """ Specially defined list """
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ",
                    "BIN_FLAT", "BIN_IVF_FLAT"]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                         {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {"M": 48, "efConstruction": 500},
-                        {"M": 48, "efConstruction": 500, "PQM": 64}, {"M": 48, "efConstruction": 500}, {"nlist": 128},
+                        {"M": 48, "efConstruction": 500, "PQM": 8}, {"M": 48, "efConstruction": 500}, {"nlist": 128},
                         {"nlist": 128}]
 
 Handler_type = ["GRPC", "HTTP"]
@@ -174,7 +177,10 @@ class CheckTasks:
     check_partition_property = "check_partition_property"
     check_search_results = "check_search_results"
     check_query_results = "check_query_results"
+    check_query_empty = "check_query_empty"  # verify that query result is empty
     check_distance = "check_distance"
+    check_delete_compact = "check_delete_compact"
+    check_merge_compact = "check_merge_compact"
 
 
 class CaseLabel:
@@ -205,3 +211,4 @@ class CaseLabel:
     L1 = "L1"
     L2 = "L2"
     L3 = "L3"
+    Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi querynodes

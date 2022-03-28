@@ -16,11 +16,10 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewMetricsCacheManager(t *testing.T) {
+func Test_NewMetricsCacheManager(t *testing.T) {
 	manager := NewMetricsCacheManager()
 	assert.NotNil(t, manager)
 }

@@ -1,11 +1,18 @@
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package datacoord
 
@@ -45,60 +52,62 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.NotNil(t, err)
 
 	// nil client node
-	_, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{})
+	_, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, nil))
 	assert.NotNil(t, err)
 
-	client, err := newMockDataNodeClient(100, nil)
-	assert.Nil(t, err)
+	creator := func(ctx context.Context, addr string) (types.DataNode, error) {
+		return newMockDataNodeClient(100, nil)
+	}
+
 	// mock datanode client
-	info, err := svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: client,
-	})
+	session := NewSession(&NodeInfo{}, creator)
+	info, err := svr.getDataNodeMetrics(ctx, req, session)
 	assert.Nil(t, err)
 	assert.False(t, info.HasError)
-	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, client.id), info.BaseComponentInfos.Name)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.DataNodeRole, 100), info.BaseComponentInfos.Name)
 
-	// mock grpc return error
-	mock := &mockMetricDataNodeClient{DataNode: client}
-	mock.mock = func() (*milvuspb.GetMetricsResponse, error) {
-		return nil, errors.New("mocked fail")
+	getMockFailedClientCreator := func(mockFunc func() (*milvuspb.GetMetricsResponse, error)) dataNodeCreatorFunc {
+		return func(ctx context.Context, addr string) (types.DataNode, error) {
+			cli, err := creator(ctx, addr)
+			assert.Nil(t, err)
+			return &mockMetricDataNodeClient{DataNode: cli, mock: mockFunc}, nil
+		}
 	}
-	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: mock,
+
+	mockFailClientCreator := getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
+		return nil, errors.New("mocked fail")
 	})
+
+	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 
 	// mock status not success
-	mock.mock = func() (*milvuspb.GetMetricsResponse, error) {
+	mockFailClientCreator = getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "mocked error",
 			},
 		}, nil
-	}
-
-	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: mock,
 	})
+
+	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 	assert.Equal(t, "mocked error", info.ErrorReason)
 
 	// mock parse error
-	mock.mock = func() (*milvuspb.GetMetricsResponse, error) {
+	mockFailClientCreator = getMockFailedClientCreator(func() (*milvuspb.GetMetricsResponse, error) {
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
 			Response: `{"error_reason": 1}`,
 		}, nil
-	}
-
-	info, err = svr.getDataNodeMetrics(ctx, req, &NodeInfo{
-		client: mock,
 	})
+
+	info, err = svr.getDataNodeMetrics(ctx, req, NewSession(&NodeInfo{}, mockFailClientCreator))
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 

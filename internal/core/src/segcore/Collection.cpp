@@ -9,13 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "segcore/Collection.h"
-#include "pb/common.pb.h"
-#include "pb/schema.pb.h"
-#include "pb/etcd_meta.pb.h"
-
 #include <google/protobuf/text_format.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+
+#include "pb/schema.pb.h"
+#include "segcore/Collection.h"
 
 namespace milvus::segcore {
 
@@ -46,7 +43,6 @@ Collection::parse() {
 
     collection_name_ = collection_schema.name();
     schema_ = Schema::ParseFrom(collection_schema);
-    int i = 1 + 1;
 }
 
 }  // namespace milvus::segcore

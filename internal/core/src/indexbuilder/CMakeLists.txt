@@ -11,16 +11,29 @@
 
 
 set(INDEXBUILDER_FILES
-        IndexWrapper.cpp
-        index_c.cpp)
+        VecIndexCreator.cpp
+        index_c.cpp
+        init_c.cpp
+        utils.cpp
+        StringIndexImpl.cpp
+        )
 add_library(milvus_indexbuilder SHARED
         ${INDEXBUILDER_FILES}
         )
 
+find_library(TBB NAMES tbb)
+set(PLATFORM_LIBS dl)
+if (MSYS)
+set(PLATFORM_LIBS -Wl,--allow-multiple-definition)
+endif ()
+
+# link order matters
 target_link_libraries(milvus_indexbuilder
-        tbb milvus_utils pthread knowhere log milvus_proto
-        dl
         milvus_common
-        milvus_query
+        knowhere
+        ${TBB}
+        ${PLATFORM_LIBS}
+        pthread
         )
 
+install(TARGETS milvus_indexbuilder DESTINATION lib)

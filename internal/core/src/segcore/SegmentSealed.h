@@ -8,13 +8,15 @@
 // Unless required by applicable law or agreed to in writing, software distributed under the License
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
-#pragma once
-#include <memory>
 
-#include "segcore/SegmentInterface.h"
-#include "pb/segcore.pb.h"
-#include "common/LoadInfo.h"
+#pragma once
+
+#include <memory>
 #include <utility>
+
+#include "common/LoadInfo.h"
+#include "pb/segcore.pb.h"
+#include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {
 
@@ -27,6 +29,8 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadFieldData(const LoadFieldDataInfo& info) = 0;
     virtual void
+    LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
+    virtual void
     DropIndex(const FieldId field_id) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;
@@ -37,8 +41,5 @@ class SegmentSealed : public SegmentInternalInterface {
 };
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;
-
-SegmentSealedPtr
-CreateSealedSegment(SchemaPtr schema);
 
 }  // namespace milvus::segcore

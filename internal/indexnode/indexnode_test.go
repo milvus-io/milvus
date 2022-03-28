@@ -1,13 +1,21 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build linux
+// +build linux
 
 package indexnode
 
@@ -19,25 +27,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
 	"github.com/golang/protobuf/proto"
-
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -63,17 +67,22 @@ func TestIndexNode(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	err = in.Register()
-	assert.Nil(t, err)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+
 	err = in.Init()
 	assert.Nil(t, err)
 
 	err = in.Start()
 	assert.Nil(t, err)
 
+	err = in.Register()
+	assert.Nil(t, err)
+
 	t.Run("CreateIndex FloatVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -112,14 +121,14 @@ func TestIndexNode(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -128,8 +137,9 @@ func TestIndexNode(t *testing.T) {
 			Version:      1,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath1, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath1, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID1,
@@ -160,29 +170,27 @@ func TestIndexNode(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath1)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath1)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
-		if indexMetaTmp.State != commonpb.IndexState_Finished {
-			time.Sleep(10 * time.Second)
-			value, err = in.etcdKV.Load(metaPath1)
+		for indexMetaTmp.State != commonpb.IndexState_Finished {
+			time.Sleep(100 * time.Millisecond)
+			strValue, err := in.etcdKV.Load(metaPath1)
 			assert.Nil(t, err)
-			indexMetaTmp2 := indexpb.IndexMeta{}
-			err = proto.UnmarshalText(value, &indexMetaTmp2)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
-			assert.Equal(t, commonpb.IndexState_Finished, indexMetaTmp2.State)
-			defer in.kv.MultiRemove(indexMetaTmp2.IndexFilePaths)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 
@@ -190,7 +198,6 @@ func TestIndexNode(t *testing.T) {
 	})
 	t.Run("CreateIndex BinaryVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -229,14 +236,14 @@ func TestIndexNode(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(binaryVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -245,8 +252,9 @@ func TestIndexNode(t *testing.T) {
 			Version:      1,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath2, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath2, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID2,
@@ -273,38 +281,35 @@ func TestIndexNode(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath2)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath2)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
-		if indexMetaTmp.State != commonpb.IndexState_Finished {
-			time.Sleep(10 * time.Second)
-			value, err = in.etcdKV.Load(metaPath2)
+		for indexMetaTmp.State != commonpb.IndexState_Finished {
+			time.Sleep(100 * time.Millisecond)
+			strValue, err = in.etcdKV.Load(metaPath2)
 			assert.Nil(t, err)
-			indexMetaTmp2 := indexpb.IndexMeta{}
-			err = proto.UnmarshalText(value, &indexMetaTmp2)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
-			assert.Equal(t, commonpb.IndexState_Finished, indexMetaTmp2.State)
-			defer in.kv.MultiRemove(indexMetaTmp2.IndexFilePaths)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 
 		defer in.etcdKV.RemoveWithPrefix(metaPath2)
 	})
 
-	t.Run("Create Deleted_Index", func(t *testing.T) {
+	t.Run("Create DeletedIndex", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -343,14 +348,14 @@ func TestIndexNode(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -360,8 +365,9 @@ func TestIndexNode(t *testing.T) {
 			MarkDeleted:  true,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath3, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath3, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID1,
@@ -392,29 +398,29 @@ func TestIndexNode(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
-		value, err = in.etcdKV.Load(metaPath3)
-		assert.Nil(t, err)
+		time.Sleep(100 * time.Millisecond)
+		strValue, err3 := in.etcdKV.Load(metaPath3)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
-		if indexMetaTmp.State != commonpb.IndexState_Finished {
-			time.Sleep(10 * time.Second)
-			value, err = in.etcdKV.Load(metaPath3)
-			assert.Nil(t, err)
-			indexMetaTmp2 := indexpb.IndexMeta{}
-			err = proto.UnmarshalText(value, &indexMetaTmp2)
-			assert.Nil(t, err)
-			assert.Equal(t, commonpb.IndexState_Finished, indexMetaTmp2.State)
-			defer in.kv.MultiRemove(indexMetaTmp2.IndexFilePaths)
-		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		assert.Equal(t, true, indexMetaTmp.MarkDeleted)
+		assert.Equal(t, int64(1), indexMetaTmp.Version)
+		//for indexMetaTmp.State != commonpb.IndexState_Finished {
+		//	time.Sleep(100 * time.Millisecond)
+		//	strValue, err := in.etcdKV.Load(metaPath3)
+		//	assert.Nil(t, err)
+		//	err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
+		//	assert.Nil(t, err)
+		//}
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 
@@ -449,6 +455,8 @@ func TestIndexNode(t *testing.T) {
 			zap.String("resp", resp.Response),
 			zap.String("name", resp.ComponentName))
 	})
+	err = in.etcdKV.RemoveWithPrefix("session/IndexNode")
+	assert.Nil(t, err)
 
 	err = in.Stop()
 	assert.Nil(t, err)
@@ -472,17 +480,22 @@ func TestCreateIndexFailed(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	err = in.Register()
-	assert.Nil(t, err)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+
 	err = in.Init()
 	assert.Nil(t, err)
 
 	err = in.Start()
 	assert.Nil(t, err)
 
+	err = in.Register()
+	assert.Nil(t, err)
+
 	t.Run("CreateIndex error", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
-		defer insertCodec.Close()
 
 		insertCodec.Schema = &etcdpb.CollectionMeta{
 			ID: collectionID,
@@ -521,14 +534,14 @@ func TestCreateIndexFailed(t *testing.T) {
 		}
 		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
 		assert.Nil(t, err)
-		kvs := make(map[string]string, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
 		paths := make([]string, 0, len(binLogs))
 		for i, blob := range binLogs {
 			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
 			paths = append(paths, key)
-			kvs[key] = string(blob.Value[:])
+			kvs[key] = blob.Value[:]
 		}
-		err = in.kv.MultiSave(kvs)
+		err = in.chunkManager.MultiWrite(kvs)
 		assert.Nil(t, err)
 
 		indexMeta := &indexpb.IndexMeta{
@@ -537,8 +550,9 @@ func TestCreateIndexFailed(t *testing.T) {
 			Version:      1,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err = in.etcdKV.Save(metaPath1, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath1, string(value))
 		assert.Nil(t, err)
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: indexBuildID1,
@@ -573,31 +587,80 @@ func TestCreateIndexFailed(t *testing.T) {
 			},
 		}
 
-		status, err := in.CreateIndex(ctx, req)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath1)
-		assert.Nil(t, err)
+		strValue, err3 := in.etcdKV.Load(metaPath1)
+		assert.Nil(t, err3)
 		indexMetaTmp := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp)
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
-		if indexMetaTmp.State != commonpb.IndexState_Failed {
-			time.Sleep(10 * time.Second)
-			value, err = in.etcdKV.Load(metaPath1)
+		for indexMetaTmp.State != commonpb.IndexState_Failed {
+			time.Sleep(100 * time.Millisecond)
+			strValue, err = in.etcdKV.Load(metaPath1)
 			assert.Nil(t, err)
-			indexMetaTmp2 := indexpb.IndexMeta{}
-			err = proto.UnmarshalText(value, &indexMetaTmp2)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
-			assert.Equal(t, commonpb.IndexState_Failed, indexMetaTmp2.State)
-			defer in.kv.MultiRemove(indexMetaTmp2.IndexFilePaths)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
+	})
+
+	t.Run("Invalid Param", func(t *testing.T) {
+		var insertCodec storage.InsertCodec
+
+		insertCodec.Schema = &etcdpb.CollectionMeta{
+			ID: collectionID,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      floatVectorFieldID,
+						Name:         floatVectorFieldName,
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_FloatVector,
+					},
+				},
+			},
+		}
+		data := make(map[UniqueID]storage.FieldData)
+		tsData := make([]int64, nb)
+		for i := 0; i < nb; i++ {
+			tsData[i] = int64(i + 100)
+		}
+		data[tsFieldID] = &storage.Int64FieldData{
+			NumRows: []int64{nb},
+			Data:    tsData,
+		}
+		data[floatVectorFieldID] = &storage.FloatVectorFieldData{
+			NumRows: []int64{nb},
+			Data:    generateFloatVectors(),
+			Dim:     dim,
+		}
+		insertData := storage.InsertData{
+			Data: data,
+			Infos: []storage.BlobInfo{
+				{
+					Length: 10,
+				},
+			},
+		}
+		binLogs, _, err := insertCodec.Serialize(999, 888, &insertData)
+		assert.Nil(t, err)
+		kvs := make(map[string][]byte, len(binLogs))
+		paths := make([]string, 0, len(binLogs))
+		for i, blob := range binLogs {
+			key := path.Join(floatVectorBinlogPath, strconv.Itoa(i))
+			paths = append(paths, key)
+			kvs[key] = blob.Value[:]
+		}
+		err = in.chunkManager.MultiWrite(kvs)
+		assert.Nil(t, err)
 
 		indexMeta2 := &indexpb.IndexMeta{
 			IndexBuildID: indexBuildID2,
@@ -605,8 +668,9 @@ func TestCreateIndexFailed(t *testing.T) {
 			Version:      1,
 		}
 
-		value2 := proto.MarshalTextString(indexMeta2)
-		err = in.etcdKV.Save(metaPath2, value2)
+		value2, err := proto.Marshal(indexMeta2)
+		assert.Nil(t, err)
+		err = in.etcdKV.Save(metaPath2, string(value2))
 		assert.Nil(t, err)
 
 		req2 := &indexpb.CreateIndexRequest{
@@ -642,29 +706,27 @@ func TestCreateIndexFailed(t *testing.T) {
 			},
 		}
 
-		status, err = in.CreateIndex(ctx, req2)
-		assert.Nil(t, err)
+		status, err2 := in.CreateIndex(ctx, req2)
+		assert.Nil(t, err2)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		value, err = in.etcdKV.Load(metaPath2)
+		strValue, err3 := in.etcdKV.Load(metaPath2)
+		assert.Nil(t, err3)
+		indexMetaTmp := indexpb.IndexMeta{}
+		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
-		indexMetaTmp2 := indexpb.IndexMeta{}
-		err = proto.UnmarshalText(value, &indexMetaTmp2)
-		assert.Nil(t, err)
-		if indexMetaTmp.State != commonpb.IndexState_Failed {
-			time.Sleep(10 * time.Second)
-			value, err = in.etcdKV.Load(metaPath2)
+		for indexMetaTmp.State != commonpb.IndexState_Failed {
+			time.Sleep(100 * time.Millisecond)
+			strValue, err = in.etcdKV.Load(metaPath2)
 			assert.Nil(t, err)
-			indexMetaTmp2 := indexpb.IndexMeta{}
-			err = proto.UnmarshalText(value, &indexMetaTmp2)
+			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 			assert.Nil(t, err)
-			assert.Equal(t, commonpb.IndexState_Failed, indexMetaTmp2.State)
-			defer in.kv.MultiRemove(indexMetaTmp2.IndexFilePaths)
 		}
-		defer in.kv.MultiRemove(indexMetaTmp2.IndexFilePaths)
+		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
 		defer func() {
 			for k := range kvs {
-				in.kv.Remove(k)
+				err = in.chunkManager.Remove(k)
+				assert.Nil(t, err)
 			}
 		}()
 	})
@@ -675,6 +737,9 @@ func TestCreateIndexFailed(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
+
+	err = in.etcdKV.RemoveWithPrefix("session/IndexNode")
+	assert.Nil(t, err)
 
 	err = in.Stop()
 	assert.Nil(t, err)
@@ -687,12 +752,18 @@ func TestIndexNode_Error(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	err = in.Register()
-	assert.Nil(t, err)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	in.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+
 	err = in.Init()
 	assert.Nil(t, err)
 
 	err = in.Start()
+	assert.Nil(t, err)
+
+	err = in.Register()
 	assert.Nil(t, err)
 
 	in.UpdateStateCode(internalpb.StateCode_Initializing)
@@ -725,6 +796,9 @@ func TestIndexNode_Error(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
+	err = in.etcdKV.RemoveWithPrefix("session/IndexNode")
+	assert.Nil(t, err)
+
 	err = in.Stop()
 	assert.Nil(t, err)
 }
@@ -750,4 +824,18 @@ func TestIndexNode_InitError(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
+}
+
+func TestIndexNode_GetComponentStates(t *testing.T) {
+	n := &IndexNode{}
+	n.stateCode.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }

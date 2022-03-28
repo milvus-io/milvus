@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package funcutil
 
@@ -15,10 +20,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/jarcoal/httpmock"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -94,15 +102,6 @@ func Test_CheckGrpcReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Millisecond)
 	CheckGrpcReady(ctx, errChan)
 	cancel()
-}
-
-func Test_CheckPortAvailable(t *testing.T) {
-	num := 10
-
-	for i := 0; i < num; i++ {
-		port := GetAvailablePort()
-		assert.Equal(t, CheckPortAvailable(port), true)
-	}
 }
 
 func Test_GetLocalIP(t *testing.T) {
@@ -196,4 +195,207 @@ func Test_ParseIndexParamsMap(t *testing.T) {
 	invalidStr := "invalid string"
 	_, err = ParseIndexParamsMap(invalidStr)
 	assert.NotEqual(t, err, nil)
+}
+
+func TestGetPulsarConfig(t *testing.T) {
+	httpmock.Activate()
+	defer httpmock.DeactivateAndReset()
+
+	runtimeConfig := make(map[string]interface{})
+	runtimeConfig[PulsarMaxMessageSizeKey] = strconv.FormatInt(5*1024*1024, 10)
+
+	protocol := "http"
+	ip := "pulsar"
+	port := "18080"
+	url := "/admin/v2/brokers/configuration/runtime"
+	httpmock.RegisterResponder("GET", protocol+"://"+ip+":"+port+url,
+		func(req *http.Request) (*http.Response, error) {
+			return httpmock.NewJsonResponse(200, runtimeConfig)
+		},
+	)
+
+	ret, err := GetPulsarConfig(protocol, ip, port, url)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, len(ret), len(runtimeConfig))
+	assert.Equal(t, len(ret), 1)
+	for key, value := range ret {
+		assert.Equal(t, fmt.Sprintf("%v", value), fmt.Sprintf("%v", runtimeConfig[key]))
+	}
+}
+
+func TestGetPulsarConfig_Error(t *testing.T) {
+	protocol := "http"
+	ip := "pulsar"
+	port := "17777"
+	url := "/admin/v2/brokers/configuration/runtime"
+
+	ret, err := GetPulsarConfig(protocol, ip, port, url, 1, 1)
+	assert.NotNil(t, err)
+	assert.Nil(t, ret)
+}
+
+func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {
+	kvs := []*commonpb.KeyValuePair{
+		{Key: "Key1", Value: "Value1"},
+		{Key: "Key2", Value: "Value2"},
+		{Key: "Key3", Value: "Value3"},
+	}
+
+	cases := []struct {
+		key      string
+		kvs      []*commonpb.KeyValuePair
+		value    string
+		errIsNil bool
+	}{
+		{"Key1", kvs, "Value1", true},
+		{"Key2", kvs, "Value2", true},
+		{"Key3", kvs, "Value3", true},
+		{"other", kvs, "", false},
+	}
+
+	for _, test := range cases {
+		value, err := GetAttrByKeyFromRepeatedKV(test.key, test.kvs)
+		assert.Equal(t, test.value, value)
+		assert.Equal(t, test.errIsNil, err == nil)
+	}
+}
+
+func TestCheckCtxValid(t *testing.T) {
+	bgCtx := context.Background()
+	timeout := 20 * time.Millisecond
+	deltaTime := 5 * time.Millisecond
+	ctx1, cancel1 := context.WithTimeout(bgCtx, timeout)
+	defer cancel1()
+	assert.True(t, CheckCtxValid(ctx1))
+	time.Sleep(timeout + deltaTime)
+	assert.False(t, CheckCtxValid(ctx1))
+
+	ctx2, cancel2 := context.WithTimeout(bgCtx, timeout)
+	assert.True(t, CheckCtxValid(ctx2))
+	cancel2()
+	assert.False(t, CheckCtxValid(ctx2))
+
+	futureTime := time.Now().Add(timeout)
+	ctx3, cancel3 := context.WithDeadline(bgCtx, futureTime)
+	defer cancel3()
+	assert.True(t, CheckCtxValid(ctx3))
+	time.Sleep(timeout + deltaTime)
+	assert.False(t, CheckCtxValid(ctx3))
+}
+
+func TestCheckPortAvailable(t *testing.T) {
+	num := 10
+	for i := 0; i < num; i++ {
+		port := GetAvailablePort()
+		assert.Equal(t, CheckPortAvailable(port), true)
+	}
+}
+
+func Test_ToPhysicalChannel(t *testing.T) {
+	assert.Equal(t, "abc", ToPhysicalChannel("abc_"))
+	assert.Equal(t, "abc", ToPhysicalChannel("abc_123"))
+	assert.Equal(t, "abc", ToPhysicalChannel("abc_defgsg"))
+	assert.Equal(t, "abc__", ToPhysicalChannel("abc___defgsg"))
+	assert.Equal(t, "abcdef", ToPhysicalChannel("abcdef"))
+}
+
+func Test_ConvertChannelName(t *testing.T) {
+	const (
+		chanName      = "by-dev_rootcoord-dml_123v0"
+		deltaChanName = "by-dev_rootcoord-delta_123v0"
+		tFrom         = "rootcoord-dml"
+		tTo           = "rootcoord-delta"
+	)
+	_, err := ConvertChannelName("by-dev", tFrom, tTo)
+	assert.NotNil(t, err)
+	_, err = ConvertChannelName("by-dev_rootcoord-delta_123v0", tFrom, tTo)
+	assert.NotNil(t, err)
+	str, err := ConvertChannelName(chanName, tFrom, tTo)
+	assert.Nil(t, err)
+	assert.Equal(t, deltaChanName, str)
+}
+
+func TestGetNumRowsOfScalarField(t *testing.T) {
+	cases := []struct {
+		datas interface{}
+		want  uint64
+	}{
+		{[]bool{}, 0},
+		{[]bool{true, false}, 2},
+		{[]int32{}, 0},
+		{[]int32{1, 2}, 2},
+		{[]int64{}, 0},
+		{[]int64{1, 2}, 2},
+		{[]float32{}, 0},
+		{[]float32{1.0, 2.0}, 2},
+		{[]float64{}, 0},
+		{[]float64{1.0, 2.0}, 2},
+	}
+
+	for _, test := range cases {
+		if got := getNumRowsOfScalarField(test.datas); got != test.want {
+			t.Errorf("getNumRowsOfScalarField(%v) = %v", test.datas, test.want)
+		}
+	}
+}
+
+func TestGetNumRowsOfFloatVectorField(t *testing.T) {
+	cases := []struct {
+		fDatas   []float32
+		dim      int64
+		want     uint64
+		errIsNil bool
+	}{
+		{[]float32{}, -1, 0, false},     // dim <= 0
+		{[]float32{}, 0, 0, false},      // dim <= 0
+		{[]float32{1.0}, 128, 0, false}, // length % dim != 0
+		{[]float32{}, 128, 0, true},
+		{[]float32{1.0, 2.0}, 2, 1, true},
+		{[]float32{1.0, 2.0, 3.0, 4.0}, 2, 2, true},
+	}
+
+	for _, test := range cases {
+		got, err := getNumRowsOfFloatVectorField(test.fDatas, test.dim)
+		if test.errIsNil {
+			assert.Equal(t, nil, err)
+			if got != test.want {
+				t.Errorf("getNumRowsOfFloatVectorField(%v, %v) = %v, %v", test.fDatas, test.dim, test.want, nil)
+			}
+		} else {
+			assert.NotEqual(t, nil, err)
+		}
+	}
+}
+
+func TestGetNumRowsOfBinaryVectorField(t *testing.T) {
+	cases := []struct {
+		bDatas   []byte
+		dim      int64
+		want     uint64
+		errIsNil bool
+	}{
+		{[]byte{}, -1, 0, false},     // dim <= 0
+		{[]byte{}, 0, 0, false},      // dim <= 0
+		{[]byte{1.0}, 128, 0, false}, // length % dim != 0
+		{[]byte{}, 128, 0, true},
+		{[]byte{1.0}, 1, 0, false}, // dim % 8 != 0
+		{[]byte{1.0}, 4, 0, false}, // dim % 8 != 0
+		{[]byte{1.0, 2.0}, 8, 2, true},
+		{[]byte{1.0, 2.0}, 16, 1, true},
+		{[]byte{1.0, 2.0, 3.0, 4.0}, 8, 4, true},
+		{[]byte{1.0, 2.0, 3.0, 4.0}, 16, 2, true},
+		{[]byte{1.0}, 128, 0, false}, // (8*l) % dim != 0
+	}
+
+	for _, test := range cases {
+		got, err := getNumRowsOfBinaryVectorField(test.bDatas, test.dim)
+		if test.errIsNil {
+			assert.Equal(t, nil, err)
+			if got != test.want {
+				t.Errorf("getNumRowsOfBinaryVectorField(%v, %v) = %v, %v", test.bDatas, test.dim, test.want, nil)
+			}
+		} else {
+			assert.NotEqual(t, nil, err)
+		}
+	}
 }

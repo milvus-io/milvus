@@ -13,32 +13,37 @@ package retry
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 )
 
+// Do will run function with retry mechanism.
+// fn is the func to run.
+// Option can control the retry times and timeout.
 func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
-	c := NewDefaultConfig()
+	c := newDefaultConfig()
 
 	for _, opt := range opts {
 		opt(c)
 	}
-	el := make(ErrorList, c.attempts)
+	var el errorutil.ErrorList
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
-			if s, ok := err.(InterruptError); ok {
-				return s.error
+
+			el = append(el, err)
+
+			if ok := IsUnRecoverable(err); ok {
+				return el
 			}
-			// TODO early termination if this is unretriable error?
-			el[i] = err
 
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				return ctx.Err()
+				el = append(el, ctx.Err())
+				return el
 			}
 
 			c.sleep *= 2
@@ -52,26 +57,18 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	return el
 }
 
-type ErrorList []error
-
-// TODO shouldn't print all retries, might be too much
-func (el ErrorList) Error() string {
-	var builder strings.Builder
-	builder.WriteString("All attempts results:\n")
-	for index, err := range el {
-		// if early termination happens
-		if err == nil {
-			break
-		}
-		builder.WriteString(fmt.Sprintf("attempt #%d:%s\n", index+1, err.Error()))
-	}
-	return builder.String()
-}
-
-type InterruptError struct {
+type unrecoverableError struct {
 	error
 }
 
-func NoRetryError(err error) InterruptError {
-	return InterruptError{err}
+// Unrecoverable method wrap an error to unrecoverableError. This will make retry
+// quick return.
+func Unrecoverable(err error) error {
+	return unrecoverableError{err}
+}
+
+// IsUnRecoverable is used to judge whether the error is wrapped by unrecoverableError.
+func IsUnRecoverable(err error) bool {
+	_, isUnrecoverable := err.(unrecoverableError)
+	return isUnrecoverable
 }

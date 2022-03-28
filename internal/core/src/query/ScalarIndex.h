@@ -10,10 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "knowhere/index/structured_index_simple/StructuredIndexSort.h"
-#include "common/Span.h"
-#include "common/FieldMeta.h"
+
 #include <memory>
+
+#include "common/FieldMeta.h"
+#include "common/Span.h"
+#include "knowhere/index/structured_index_simple/StructuredIndexSort.h"
 
 namespace milvus::query {
 

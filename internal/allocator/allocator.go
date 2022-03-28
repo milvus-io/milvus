@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package allocator
 
@@ -26,35 +31,42 @@ const (
 	maxConcurrentRequests = 10000
 )
 
+// Request defines an interface which has Wait and Notify methods.
 type Request interface {
 	Wait() error
 	Notify(error)
 }
 
+// BaseRequest implements Request interface.
 type BaseRequest struct {
 	Done  chan error
 	Valid bool
 }
 
+// Wait is blocked until the request is allocated or an error occurs.
 func (req *BaseRequest) Wait() error {
 	err := <-req.Done
 	return err
 }
 
+// Notify is used to send error to the requester.
 func (req *BaseRequest) Notify(err error) {
 	req.Done <- err
 }
 
+// IDRequest implements Request and is used to get global unique Identities.
 type IDRequest struct {
 	BaseRequest
 	id    UniqueID
 	count uint32
 }
 
+// SyncRequest embeds BaseRequest and is used to force synchronize from RootCoordinator.
 type SyncRequest struct {
 	BaseRequest
 }
 
+// TickerChan defines an interface.
 type TickerChan interface {
 	Chan() <-chan time.Time
 	Close()
@@ -62,44 +74,56 @@ type TickerChan interface {
 	Reset()
 }
 
+// EmptyTicker implements TickerChan, but it will never issue a signal in Chan.
 type EmptyTicker struct {
 	tChan <-chan time.Time
 }
 
+// Chan returns a read-only channel from which you can only receive time.Time type data.
+// As for EmptyTicker, you will never read data from Chan.
 func (t *EmptyTicker) Chan() <-chan time.Time {
 	return t.tChan
 }
 
+// Init does nothing.
 func (t *EmptyTicker) Init() {
 }
 
+// Reset does nothing.
 func (t *EmptyTicker) Reset() {
 }
 
+// Close does nothing.
 func (t *EmptyTicker) Close() {
 }
 
+// Ticker implements TickerChan and is a simple wrapper for time.TimeTicker.
 type Ticker struct {
 	ticker         *time.Ticker
 	UpdateInterval time.Duration
 }
 
+// Init initialize the inner member `ticker` whose type is a pointer to time.Ticker.
 func (t *Ticker) Init() {
 	t.ticker = time.NewTicker(t.UpdateInterval)
 }
 
+// Reset resets the inner member `ticker`.
 func (t *Ticker) Reset() {
 	t.ticker.Reset(t.UpdateInterval)
 }
 
+// Close closes the inner member `ticker`.
 func (t *Ticker) Close() {
 	t.ticker.Stop()
 }
 
+// Chan return a read-only channel from which you can only receive time.Time type data
 func (t *Ticker) Chan() <-chan time.Time {
 	return t.ticker.C
 }
 
+// Allocator allocates from a global allocator by its given member functions
 type Allocator struct {
 	Ctx        context.Context
 	CancelFunc context.CancelFunc
@@ -123,6 +147,7 @@ type Allocator struct {
 	Role          string
 }
 
+// Start starts the loop of checking whether to synchronize with the global allocator.
 func (ta *Allocator) Start() error {
 	ta.TChan.Init()
 	ta.wg.Add(1)
@@ -130,6 +155,7 @@ func (ta *Allocator) Start() error {
 	return nil
 }
 
+// Init mainly initialize internal members.
 func (ta *Allocator) Init() {
 	ta.ForceSyncChan = make(chan Request, maxConcurrentRequests)
 	ta.Reqs = make(chan Request, maxConcurrentRequests)
@@ -228,7 +254,7 @@ func (ta *Allocator) failRemainRequest() {
 		err = errors.New(errMsg)
 	}
 	if len(ta.ToDoReqs) > 0 {
-		log.Debug("Allocator has some reqs to fail",
+		log.Warn("Allocator has some reqs to fail",
 			zap.Any("Role", ta.Role),
 			zap.Any("reqLen", len(ta.ToDoReqs)))
 	}
@@ -258,6 +284,7 @@ func (ta *Allocator) revokeRequest(err error) {
 	}
 }
 
+// Close mainly stop the internal coroutine and recover resources.
 func (ta *Allocator) Close() {
 	ta.CancelFunc()
 	ta.wg.Wait()
@@ -266,6 +293,7 @@ func (ta *Allocator) Close() {
 	ta.revokeRequest(errors.New(errMsg))
 }
 
+// CleanCache is used to force synchronize with global allocator.
 func (ta *Allocator) CleanCache() {
 	req := &SyncRequest{
 		BaseRequest: BaseRequest{

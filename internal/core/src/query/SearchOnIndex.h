@@ -11,13 +11,12 @@
 
 #pragma once
 
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
-#include "knowhere/index/vector_index/VecIndex.h"
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include "utils/Json.h"
 
 namespace milvus::query {
+
 SubSearchResult
 SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const knowhere::VecIndex& indexing,

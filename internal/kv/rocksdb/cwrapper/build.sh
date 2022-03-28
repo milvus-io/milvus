@@ -1,5 +1,21 @@
 #!/bin/bash
 
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 SOURCE=${BASH_SOURCE[0]}
 while [ -h $SOURCE ]; do # resolve $SOURCE until the file is no longer a symlink
   DIR=$( cd -P $( dirname $SOURCE ) && pwd )
@@ -47,6 +63,24 @@ while getopts "t:h:" arg; do
 done
 echo "BUILD_TYPE: " $BUILD_TYPE
 
+unameOut="$(uname -s)"
+if [[ ! ${jobs+1} ]]; then
+  case "${unameOut}" in
+      Linux*)     jobs=$(nproc);;
+      Darwin*)
+        llvm_prefix="$(brew --prefix llvm)"
+        export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
+        export CC="${llvm_prefix}/bin/clang"
+        export CXX="${llvm_prefix}/bin/clang++"
+        export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
+        export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
+        jobs=$(sysctl -n hw.physicalcpu);;
+       *)
+          echo "Exit 0, System:${unameOut}";
+          exit 0;
+  esac
+fi
+
 pushd ${OUTPUT_LIB}
 CMAKE_CMD="cmake \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} .."
@@ -54,7 +88,4 @@ CMAKE_CMD="cmake \
 ${CMAKE_CMD}
 echo ${CMAKE_CMD}
 
-if [[ ! ${jobs+1} ]]; then
-    jobs=$(nproc)
-fi
 make -j ${jobs} VERBOSE=0

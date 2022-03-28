@@ -31,6 +31,9 @@
 #include <google/protobuf/message.h>
 #include <google/protobuf/repeated_field.h>  // IWYU pragma: export
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
+#include <google/protobuf/map.h>  // IWYU pragma: export
+#include <google/protobuf/map_entry.h>
+#include <google/protobuf/map_field_inl.h>
 #include <google/protobuf/unknown_field_set.h>
 #include "common.pb.h"
 // @@protoc_insertion_point(includes)
@@ -48,7 +51,7 @@ struct TableStruct_index_5fcgo_5fmsg_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[5]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[7]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -70,6 +73,12 @@ extern IndexParamsDefaultTypeInternal _IndexParams_default_instance_;
 class MapParams;
 class MapParamsDefaultTypeInternal;
 extern MapParamsDefaultTypeInternal _MapParams_default_instance_;
+class MapParamsV2;
+class MapParamsV2DefaultTypeInternal;
+extern MapParamsV2DefaultTypeInternal _MapParamsV2_default_instance_;
+class MapParamsV2_ParamsEntry_DoNotUse;
+class MapParamsV2_ParamsEntry_DoNotUseDefaultTypeInternal;
+extern MapParamsV2_ParamsEntry_DoNotUseDefaultTypeInternal _MapParamsV2_ParamsEntry_DoNotUse_default_instance_;
 class TypeParams;
 class TypeParamsDefaultTypeInternal;
 extern TypeParamsDefaultTypeInternal _TypeParams_default_instance_;
@@ -81,6 +90,8 @@ template<> ::milvus::proto::indexcgo::Binary* Arena::CreateMaybeMessage<::milvus
 template<> ::milvus::proto::indexcgo::BinarySet* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::BinarySet>(Arena*);
 template<> ::milvus::proto::indexcgo::IndexParams* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::IndexParams>(Arena*);
 template<> ::milvus::proto::indexcgo::MapParams* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::MapParams>(Arena*);
+template<> ::milvus::proto::indexcgo::MapParamsV2* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::MapParamsV2>(Arena*);
+template<> ::milvus::proto::indexcgo::MapParamsV2_ParamsEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::MapParamsV2_ParamsEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::indexcgo::TypeParams* Arena::CreateMaybeMessage<::milvus::proto::indexcgo::TypeParams>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -500,6 +511,180 @@ class MapParams :
 };
 // -------------------------------------------------------------------
 
+class MapParamsV2_ParamsEntry_DoNotUse : public ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<MapParamsV2_ParamsEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > {
+public:
+  typedef ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<MapParamsV2_ParamsEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > SuperType;
+  MapParamsV2_ParamsEntry_DoNotUse();
+  MapParamsV2_ParamsEntry_DoNotUse(::PROTOBUF_NAMESPACE_ID::Arena* arena);
+  void MergeFrom(const MapParamsV2_ParamsEntry_DoNotUse& other);
+  static const MapParamsV2_ParamsEntry_DoNotUse* internal_default_instance() { return reinterpret_cast<const MapParamsV2_ParamsEntry_DoNotUse*>(&_MapParamsV2_ParamsEntry_DoNotUse_default_instance_); }
+  static bool ValidateKey(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.indexcgo.MapParamsV2.ParamsEntry.key");
+ }
+  static bool ValidateValue(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.indexcgo.MapParamsV2.ParamsEntry.value");
+ }
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& other) final;
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_index_5fcgo_5fmsg_2eproto);
+    return ::descriptor_table_index_5fcgo_5fmsg_2eproto.file_level_metadata[3];
+  }
+
+  public:
+};
+
+// -------------------------------------------------------------------
+
+class MapParamsV2 :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.indexcgo.MapParamsV2) */ {
+ public:
+  MapParamsV2();
+  virtual ~MapParamsV2();
+
+  MapParamsV2(const MapParamsV2& from);
+  MapParamsV2(MapParamsV2&& from) noexcept
+    : MapParamsV2() {
+    *this = ::std::move(from);
+  }
+
+  inline MapParamsV2& operator=(const MapParamsV2& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline MapParamsV2& operator=(MapParamsV2&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const MapParamsV2& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const MapParamsV2* internal_default_instance() {
+    return reinterpret_cast<const MapParamsV2*>(
+               &_MapParamsV2_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    4;
+
+  friend void swap(MapParamsV2& a, MapParamsV2& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(MapParamsV2* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline MapParamsV2* New() const final {
+    return CreateMaybeMessage<MapParamsV2>(nullptr);
+  }
+
+  MapParamsV2* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<MapParamsV2>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const MapParamsV2& from);
+  void MergeFrom(const MapParamsV2& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(MapParamsV2* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.indexcgo.MapParamsV2";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_index_5fcgo_5fmsg_2eproto);
+    return ::descriptor_table_index_5fcgo_5fmsg_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kParamsFieldNumber = 1,
+  };
+  // map<string, string> params = 1;
+  int params_size() const;
+  void clear_params();
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      params() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      mutable_params();
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.indexcgo.MapParamsV2)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::internal::MapField<
+      MapParamsV2_ParamsEntry_DoNotUse,
+      std::string, std::string,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      0 > params_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_index_5fcgo_5fmsg_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Binary :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.indexcgo.Binary) */ {
  public:
@@ -542,7 +727,7 @@ class Binary :
                &_Binary_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    3;
+    5;
 
   friend void swap(Binary& a, Binary& b) {
     a.Swap(&b);
@@ -692,7 +877,7 @@ class BinarySet :
                &_BinarySet_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    4;
+    6;
 
   friend void swap(BinarySet& a, BinarySet& b) {
     a.Swap(&b);
@@ -887,6 +1072,30 @@ MapParams::params() const {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
+// MapParamsV2
+
+// map<string, string> params = 1;
+inline int MapParamsV2::params_size() const {
+  return params_.size();
+}
+inline void MapParamsV2::clear_params() {
+  params_.Clear();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+MapParamsV2::params() const {
+  // @@protoc_insertion_point(field_map:milvus.proto.indexcgo.MapParamsV2.params)
+  return params_.GetMap();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+MapParamsV2::mutable_params() {
+  // @@protoc_insertion_point(field_mutable_map:milvus.proto.indexcgo.MapParamsV2.params)
+  return params_.MutableMap();
+}
+
+// -------------------------------------------------------------------
+
 // Binary
 
 // string key = 1;
@@ -1028,6 +1237,10 @@ BinarySet::datas() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

@@ -10,15 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "AckResponder.h"
-#include <tbb/concurrent_vector.h>
-#include "common/Schema.h"
+
 #include <optional>
 #include <map>
 #include <memory>
+
+#include <tbb/concurrent_vector.h>
+
+#include "AckResponder.h"
 #include "InsertRecord.h"
-#include <knowhere/index/vector_index/IndexIVF.h>
-#include <knowhere/index/structured_index_simple/StructuredIndexSort.h>
+#include "common/Schema.h"
+#include "knowhere/index/structured_index_simple/StructuredIndexSort.h"
+#include "knowhere/index/vector_index/VecIndex.h"
 #include "segcore/SegcoreConfig.h"
 
 namespace milvus::segcore {
@@ -33,6 +36,7 @@ class FieldIndexing {
     FieldIndexing(const FieldIndexing&) = delete;
     FieldIndexing&
     operator=(const FieldIndexing&) = delete;
+    virtual ~FieldIndexing() = default;
 
     // Do this in parallel
     virtual void
@@ -45,7 +49,7 @@ class FieldIndexing {
 
     int64_t
     get_size_per_chunk() const {
-        return segcore_config_.get_size_per_chunk();
+        return segcore_config_.get_chunk_rows();
     }
 
     virtual knowhere::Index*
@@ -56,6 +60,7 @@ class FieldIndexing {
     const FieldMeta& field_meta_;
     const SegcoreConfig& segcore_config_;
 };
+
 template <typename T>
 class ScalarFieldIndexing : public FieldIndexing {
  public:

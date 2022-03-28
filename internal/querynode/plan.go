@@ -1,19 +1,26 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package querynode
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../core/output/include
-#cgo LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo windows LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
@@ -22,14 +29,21 @@ package querynode
 import "C"
 import (
 	"errors"
+	"fmt"
 	"unsafe"
 )
 
+// SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan
 type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
+// createSearchPlan returns a new SearchPlan and error
 func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
+	if col.collectionPtr == nil {
+		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+	}
+
 	cDsl := C.CString(dsl)
 	defer C.free(unsafe.Pointer(cDsl))
 	var cPlan C.CSearchPlan
@@ -45,6 +59,10 @@ func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 }
 
 func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
+	if col.collectionPtr == nil {
+		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+	}
+
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])), (C.int64_t)(len(expr)), &cPlan)
 
@@ -82,7 +100,7 @@ func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*searchRequ
 		return nil, errors.New("empty search request")
 	}
 	var blobPtr = unsafe.Pointer(&searchRequestBlob[0])
-	blobSize := C.long(len(searchRequestBlob))
+	blobSize := C.int64_t(len(searchRequestBlob))
 	var cPlaceholderGroup C.CPlaceholderGroup
 	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
 
@@ -103,9 +121,10 @@ func (pg *searchRequest) delete() {
 	C.DeletePlaceholderGroup(pg.cPlaceholderGroup)
 }
 
+// RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan
 type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
-	Timestamp     uint64
+	Timestamp     Timestamp
 }
 
 // func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
@@ -123,7 +142,7 @@ type RetrievePlan struct {
 // 	return plan, nil
 // }
 
-func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp uint64) (*RetrievePlan, error) {
+func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp) (*RetrievePlan, error) {
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])),
 		(C.int64_t)(len(expr)), &cPlan)

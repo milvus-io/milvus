@@ -1,18 +1,28 @@
-import pdb
 import logging
 
 logger = logging.getLogger("milvus_benchmark.parser")
 
 
 def operations_parser(operations):
+    """ Get the type and params of test """
     if not operations:
         raise Exception("No operations in suite defined")
     for run_type, run_params in operations.items():
         logger.debug(run_type)
-        return (run_type, run_params)
+        return run_type, run_params
+    return False, False
 
 
 def collection_parser(collection_name):
+    """
+    Resolve the collection name to obtain the corresponding configuration
+    e.g.:
+    sift_1m_128_l2
+    sift: type of data set
+    1m: size of the data inserted in the collection
+    128: vector dimension
+    l2: metric type
+    """
     tmp = collection_name.split("_")
     # if len(tmp) != 5:
     #     return None
@@ -27,27 +37,35 @@ def collection_parser(collection_name):
         collection_size = int(collection_size) * 1000000000
     dimension = int(tmp[2])
     metric_type = str(tmp[3])
-    return (data_type, collection_size, dimension, metric_type)
+    return data_type, collection_size, dimension, metric_type
 
 
 def parse_ann_collection_name(collection_name):
+    """
+    Analyze the collection name of the accuracy test and obtain the corresponding configuration
+    e.g.:
+    sift_128_euclidean
+    """
     data_type = collection_name.split("_")[0]
     dimension = int(collection_name.split("_")[1])
     metric = collection_name.split("_")[2]
     # metric = collection_name.attrs['distance']
     # dimension = len(collection_name["train"][0])
+    metric_type = ''
     if metric == "euclidean":
         metric_type = "l2"
-    elif metric  == "angular":
+    elif metric == "angular":
         metric_type = "ip"
-    elif metric  == "jaccard":
+    elif metric == "jaccard":
         metric_type = "jaccard"
     elif metric == "hamming":
         metric_type = "hamming"
-    return (data_type, dimension, metric_type)
+    return data_type, dimension, metric_type
 
 
 def search_params_parser(param):
+    """ Parser params of search interface and return top_ks, nqs, nprobes"""
+
     # parse top-k, set default value if top-k not in param
     if "top_ks" not in param:
         top_ks = [10]

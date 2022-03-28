@@ -12,6 +12,7 @@
 package indexparamcheck
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -219,4 +220,20 @@ func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*NGTONNGConfAdapter)
 	assert.Equal(t, true, ok)
+}
+
+func TestConfAdapterMgrImpl_GetAdapter_multiple_threads(t *testing.T) {
+	num := 4
+	mgr := newConfAdapterMgrImpl()
+	var wg sync.WaitGroup
+	for i := 0; i < num; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			adapter, err := mgr.GetAdapter(IndexHNSW)
+			assert.NoError(t, err)
+			assert.NotNil(t, adapter)
+		}()
+	}
+	wg.Wait()
 }

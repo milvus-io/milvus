@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package indexparamcheck
 
@@ -18,22 +23,39 @@ import (
 )
 
 const (
-	L2             = "L2"
-	IP             = "IP"
-	HAMMING        = "HAMMING"
-	JACCARD        = "JACCARD"
-	TANIMOTO       = "TANIMOTO"
-	SUBSTRUCTURE   = "SUBSTRUCTURE"
+	// L2 represents Euclidean distance
+	L2 = "L2"
+
+	// IP represents inner product distance
+	IP = "IP"
+
+	// HAMMING represents hamming distance
+	HAMMING = "HAMMING"
+
+	// JACCARD represents jaccard distance
+	JACCARD = "JACCARD"
+
+	// TANIMOTO represents tanimoto distance
+	TANIMOTO = "TANIMOTO"
+
+	// SUBSTRUCTURE represents substructure distance
+	SUBSTRUCTURE = "SUBSTRUCTURE"
+
+	// SUPERSTRUCTURE represents superstructure distance
 	SUPERSTRUCTURE = "SUPERSTRUCTURE"
 
 	MinNBits     = 1
 	MaxNBits     = 16
 	DefaultNBits = 8
 
+	// MinNList is the lower limit of nlist that used in Index IVFxxx
 	MinNList = 1
+	// MaxNList is the upper limit of nlist that used in Index IVFxxx
 	MaxNList = 65536
 
+	// DefaultMinDim is the smallest dimension supported in Milvus
 	DefaultMinDim = 1
+	// DefaultMaxDim is the largest dimension supported in Milvus
 	DefaultMaxDim = 32768
 
 	NgtMinEdgeSize = 1
@@ -57,11 +79,14 @@ const (
 	// too large of n_trees takes much time, if there is real requirement, change this threshold.
 	MaxNTrees = 1024
 
-	DIM    = "dim"
+	// DIM is a constant used to represent dimension
+	DIM = "dim"
+	// Metric is a constant used to metric type
 	Metric = "metric_type"
-	NLIST  = "nlist"
-	NBITS  = "nbits"
-	IVFM   = "m"
+	// NLIST is a constant used to nlist in Index IVFxxx
+	NLIST = "nlist"
+	NBITS = "nbits"
+	IVFM  = "m"
 
 	KNNG         = "knng"
 	SearchLength = "search_length"
@@ -86,19 +111,25 @@ const (
 	GPUMode   = "GPU"
 )
 
-var METRICS = []string{L2, IP}                                                             // const
+// METRICS is a set of all metrics types supported for float vector.
+var METRICS = []string{L2, IP} // const
+
+// BinIDMapMetrics is a set of all metric types supported for binary vector.
 var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE}   // const
 var BinIvfMetrics = []string{HAMMING, JACCARD, TANIMOTO}                                   // const
 var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}        // const
 var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
 
 type ConfAdapter interface {
+	// CheckTrain returns true if the index can be built with the specific index parameters.
 	CheckTrain(map[string]string) bool
 }
 
+// BaseConfAdapter checks if a `FLAT` index can be built.
 type BaseConfAdapter struct {
 }
 
+// CheckTrain check whether the params contains supported metrics types
 func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
@@ -112,10 +143,12 @@ func newBaseConfAdapter() *BaseConfAdapter {
 	return &BaseConfAdapter{}
 }
 
+// IVFConfAdapter checks if a IVF index can be built.
 type IVFConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain returns true if the index can be built with the specific index parameters.
 func (adapter *IVFConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {
 		return false
@@ -130,10 +163,12 @@ func newIVFConfAdapter() *IVFConfAdapter {
 	return &IVFConfAdapter{}
 }
 
+// IVFPQConfAdapter checks if a IVF_PQ index can be built.
 type IVFPQConfAdapter struct {
 	IVFConfAdapter
 }
 
+// CheckTrain checks if ivf-pq index can be built with the specific index parameters.
 func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !adapter.IVFConfAdapter.CheckTrain(params) {
 		return false
@@ -205,10 +240,12 @@ func newIVFPQConfAdapter() *IVFPQConfAdapter {
 	return &IVFPQConfAdapter{}
 }
 
+// IVFSQConfAdapter checks if a IVF_SQ index can be built.
 type IVFSQConfAdapter struct {
 	IVFConfAdapter
 }
 
+// CheckTrain returns true if the index can be built with the specific index parameters.
 func (adapter *IVFSQConfAdapter) CheckTrain(params map[string]string) bool {
 	params[NBITS] = strconv.Itoa(DefaultNBits)
 	return adapter.IVFConfAdapter.CheckTrain(params)
@@ -221,6 +258,7 @@ func newIVFSQConfAdapter() *IVFSQConfAdapter {
 type BinIDMAPConfAdapter struct {
 }
 
+// CheckTrain checks if a binary flat index can be built with the specific parameters.
 func (adapter *BinIDMAPConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
@@ -234,9 +272,11 @@ func newBinIDMAPConfAdapter() *BinIDMAPConfAdapter {
 	return &BinIDMAPConfAdapter{}
 }
 
+// BinIVFConfAdapter checks if a bin IFV index can be built.
 type BinIVFConfAdapter struct {
 }
 
+// CheckTrain checks if a binary ivf index can be built with specific parameters.
 func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) bool {
 	// dimension is specified when create collection
 	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
@@ -263,6 +303,7 @@ func newBinIVFConfAdapter() *BinIVFConfAdapter {
 type NSGConfAdapter struct {
 }
 
+// CheckTrain checks if a nsg index can be built with specific parameters.
 func (adapter *NSGConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckStrByValues(params, Metric, METRICS) {
 		return false
@@ -293,10 +334,12 @@ func newNSGConfAdapter() *NSGConfAdapter {
 	return &NSGConfAdapter{}
 }
 
+// HNSWConfAdapter checks if a hnsw index can be built.
 type HNSWConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a hnsw index can be built with specific parameters.
 func (adapter *HNSWConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false
@@ -313,10 +356,12 @@ func newHNSWConfAdapter() *HNSWConfAdapter {
 	return &HNSWConfAdapter{}
 }
 
+// ANNOYConfAdapter checks if an ANNOY index can be built.
 type ANNOYConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if an annoy index can be built with specific parameters.
 func (adapter *ANNOYConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, NTREES, MinNTrees, MaxNTrees) {
 		return false
@@ -329,10 +374,12 @@ func newANNOYConfAdapter() *ANNOYConfAdapter {
 	return &ANNOYConfAdapter{}
 }
 
+// RHNSWFlatConfAdapter checks if a rhnsw flat index can be built.
 type RHNSWFlatConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a rhnsw flat index can be built with specific parameters.
 func (adapter *RHNSWFlatConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false
@@ -349,11 +396,13 @@ func newRHNSWFlatConfAdapter() *RHNSWFlatConfAdapter {
 	return &RHNSWFlatConfAdapter{}
 }
 
+// RHNSWPQConfAdapter checks if a rhnsw pq index can be built.
 type RHNSWPQConfAdapter struct {
 	BaseConfAdapter
 	IVFPQConfAdapter
 }
 
+// CheckTrain checks if a rhnsw pq index can be built with specific parameters.
 func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !adapter.BaseConfAdapter.CheckTrain(params) {
 		return false
@@ -384,10 +433,12 @@ func newRHNSWPQConfAdapter() *RHNSWPQConfAdapter {
 	return &RHNSWPQConfAdapter{}
 }
 
+// RHNSWSQConfAdapter checks if a rhnsw sq index can be built.
 type RHNSWSQConfAdapter struct {
 	BaseConfAdapter
 }
 
+// CheckTrain checks if a rhnsw sq index can be built with specific parameters.
 func (adapter *RHNSWSQConfAdapter) CheckTrain(params map[string]string) bool {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
 		return false
@@ -404,6 +455,7 @@ func newRHNSWSQConfAdapter() *RHNSWSQConfAdapter {
 	return &RHNSWSQConfAdapter{}
 }
 
+// NGTPANNGConfAdapter checks if a NGT_PANNG index can be built.
 type NGTPANNGConfAdapter struct {
 	BaseConfAdapter
 }
@@ -434,6 +486,7 @@ func newNGTPANNGConfAdapter() *NGTPANNGConfAdapter {
 	return &NGTPANNGConfAdapter{}
 }
 
+// NGTONNGConfAdapter checks if a NGT_ONNG index can be built.
 type NGTONNGConfAdapter struct {
 	BaseConfAdapter
 }

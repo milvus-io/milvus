@@ -49,6 +49,10 @@ service RootCoord {
      */
     rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
 
+    rpc CreateAlias(milvus.CreateAliasRequest) returns (common.Status) {}
+    rpc DropAlias(milvus.DropAliasRequest) returns (common.Status) {}
+    rpc AlterAlias(milvus.AlterAliasRequest) returns (common.Status) {}
+
     /**
      * @brief This method is used to list all collections.
      *
@@ -101,6 +105,11 @@ service RootCoord {
 
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
     rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+    // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
+    rpc Import(milvus.ImportRequest) returns (milvus.ImportResponse) {}
+    rpc GetImportState(milvus.GetImportStateRequest) returns (milvus.GetImportStateResponse) {}
+    rpc ReportImport(ImportResult) returns (common.Status) {}
 }
 
 message AllocTimestampRequest {
@@ -123,4 +132,15 @@ message AllocIDResponse {
   common.Status status = 1;
   int64 ID = 2;
   uint32 count = 3;
+}
+
+message ImportResult {
+  common.Status status = 1;
+  int64 task_id = 2;                       // id of the task
+  int64 datanode_id = 3;                   // id of the datanode which takes this task
+  common.ImportState state = 4;            // state of the task
+  repeated int64 segments = 5;             // id array of new sealed segments
+  repeated int64 auto_ids = 6;             // auto-generated ids for auto-id primary key
+  int64 row_count = 7;                     // how many rows are imported by this task
+  repeated common.KeyValuePair infos = 8;  // more informations about the task, file path, failed reason, etc.
 }

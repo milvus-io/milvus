@@ -6,27 +6,26 @@ update: 6.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 ## What's DataNode?
 
-DataNode processes insert data and persists them.
+DataNode processes insert data and persists insert data into storage.
 
-DataNode is based on flowgraph, each flowgraph cares about only one vchannel. There're ddl messages, dml
+DataNode is based on flowgraph; each flowgraph cares about only one vchannel. There are data definition language (DDL) messages, data manipulation language (DML)
 messages, and timetick messages inside one vchannel, FIFO log stream.
 
-One vchannel only contains dml messages of one collection. A collection consists of many segments, hence
-a vchannel contains dml messsages of many segments. **Most importantly, the dml messages of the same segment 
-can appear in anywhere in vchannel.**
+One vchannel only contains DML messages of one collection. A collection consists of many segments, hence
+a vchannel contains DML messages of many segments. **Most importantly, the DML messages of the same segment can appear anywhere in vchannel.**
 
-## What does DataNode recovery really mean?
+## What is the real meaning of DataNode recovery?
 
-DataNode is stateless, but vchannel has states. DataNode's statelessness is guranteed by DataCoord, which
-means the vchannel's states is maintained by DataCoord. So DataNode recovery has no different as starting.
+DataNode is stateless, but vchannel has states. DataNode's statelessness is guaranteed by DataCoord, which
+means the vchannel's state is maintained by DataCoord. So DataNode recovery is no different from starting.
 
 So what's DataNode's starting procedure?
 
 ## Objectives
 
-### 1. Serveice Registration
+### 1. Service Registration
 
-DataNode registers itself to Etcd after grpc server started, in *INITIALIZING* state.
+DataNode registers itself to etcd after grpc server started, in *INITIALIZING* state.
 
 ### 2. Service Discovery
 
@@ -36,24 +35,24 @@ DataNode discovers DataCoord and RootCoord, in *HEALTHY* and *IDLE* state.
 
 The detailed design can be found at [datanode flowgraph recovery design](datanode_flowgraph_recovery_design_0604_2021.md).
 
-After DataNode subscribes to a stateful vchannel, DataNode starts to work, or more specifically, flowgraph starts to work. 
+After DataNode subscribes to a stateful vchannel, DataNode starts to work, or more specifically, flowgraph starts to work.
 
-Vchannel is stateful because we don't want to process twice what's already processed. And a "processed" message means its
-already persistant. In DataNode's terminology, a message is processed if it's been flushed.
+Vchannel is stateful because we don't want to process twice what's already processed, as a "processed" message means its
+already persistent. In DataNode's terminology, a message is processed if it's been flushed.
 
-DataCoord tells DataNode stateful vchannel infos through RPC `WatchDmChannels`, so that DataNode won't process
-the same messages over and over again. So flowgraph needs ability to consume messages in the middle of a vchannel.
+DataCoord tells DataNode stateful vchannel info through RPC `WatchDmChannels` so that DataNode won't process
+the same messages over and over again. So flowgraph needs the ability to consume messages in the middle of a vchannel.
 
 DataNode tells DataCoord vchannel states after each flush through RPC `SaveBinlogPaths`, so that DataCoord
-keep the vchannel states update.
+keeps the vchannel states updated.
 
 
-## Some of the following interface/proto designs are outdate, will be updated soon
+## Some interface/proto designs below are outdated, will be updated soon
 
-### 1. DataNode no longer interacts with Etcd except service registering
+### 1. DataNode no longer interacts with etcd except service registering
 
-#### DataCoord rather than DataNode saves binlog paths into Etcd
-    
+#### DataCoord rather than DataNode saves binlog paths into etcd
+
    ![datanode_design](graphs/datanode_design_01.jpg)
 
 
@@ -134,7 +133,7 @@ type dataSyncService struct {
 }
 ```
 
-DataNode Init -> Resigter to Etcd -> Discovery data service -> Discover master service -> IDLE
+DataNode Init -> Register to etcd -> Discovery data service -> Discover master service -> IDLE
 
 WatchDmChannels -> new dataSyncService -> HEALTH
 
@@ -148,7 +147,7 @@ WatchDmChannels -> new dataSyncService -> HEALTH
 
 #### The boring design
 
-• If collection:flowgraph = 1 : 1, datanode must have ability to scale flowgraph.
+• If collection:flowgraph = 1 : 1, datanode must have the ability to scale flowgraph.
 
 ![datanode_design](graphs/collection_flowgraph_1_1.jpg)
 
@@ -156,17 +155,10 @@ WatchDmChannels -> new dataSyncService -> HEALTH
 
 ![datanode_design](graphs/collection_flowgraph_1_n.png)
 
-• If collection:flowgraph = n : 1, in the blue cases, datanode must have ability to scale flowgraph. In the brown cases, flowgraph must be able to scale channels.
+• If collection:flowgraph = n : 1, in the blue cases, datanode must have the ability to scale flowgraph. In the brown cases, flowgraph must be able to scale channels.
 
 ![datanode_design](graphs/collection_flowgraph_n_1.jpg)
 
 • If collection:flowgraph = n : n  , load balancing on vchannels.
 
 ![datanode_design](graphs/collection_flowgraph_n_n.jpg)
-
-
-
-
-
-
-

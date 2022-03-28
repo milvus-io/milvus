@@ -13,9 +13,13 @@ set(COMMON_SRC
         Schema.cpp
         Types.cpp
         SystemProperty.cpp
+        vector_index_c.cpp
         )
 
-add_library(milvus_common
+add_library(milvus_common SHARED
         ${COMMON_SRC}
         )
-target_link_libraries(milvus_common milvus_proto yaml-cpp)
+
+target_link_libraries(milvus_common milvus_utils milvus_config log knowhere milvus_proto yaml-cpp )
+
+install(TARGETS milvus_common DESTINATION lib)

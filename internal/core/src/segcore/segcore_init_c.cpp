@@ -9,27 +9,45 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "index/thirdparty/faiss/FaissHook.h"
+#include "config/ConfigKnowhere.h"
+#include "log/Log.h"
+#include "segcore/SegcoreConfig.h"
 #include "segcore/segcore_init_c.h"
-#include "knowhere/archive/KnowhereConfig.h"
-#include <iostream>
-#include "utils/Log.h"
 
 namespace milvus::segcore {
-static void
-SegcoreInitImpl() {
-    namespace eg = milvus::engine;
-    eg::KnowhereConfig::SetSimdType(eg::KnowhereConfig::SimdType::AUTO);
-    eg::KnowhereConfig::SetBlasThreshold(16384);
-    eg::KnowhereConfig::SetEarlyStopThreshold(0);
-    eg::KnowhereConfig::SetLogHandler();
-    eg::KnowhereConfig::SetStatisticsLevel(0);
-    el::Configurations el_conf;
-    el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
-}
-}  // namespace milvus::segcore
-
 extern "C" void
 SegcoreInit() {
-    milvus::segcore::SegcoreInitImpl();
+    milvus::config::KnowhereInitImpl();
+#if defined(EMBEDDED_MILVUS)
+    el::Configurations defaultConf;
+    defaultConf.setToDefault();
+    // Disable all logs for embedded milvus.
+    defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
+    defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
+    defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
+    defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
+    defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
+    defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
+    el::Loggers::reconfigureLogger("default", defaultConf);
+#endif
 }
+
+extern "C" void
+SegcoreSetChunkRows(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
+    config.set_chunk_rows(value);
+    LOG_SEGCORE_DEBUG_ << "set config chunk_size: " << config.get_chunk_rows();
+}
+
+// return value must be freed by the caller
+extern "C" char*
+SegcoreSetSimdType(const char* value) {
+    LOG_SEGCORE_DEBUG_ << "set config simd_type: " << value;
+    auto real_type = milvus::config::KnowhereSetSimdType(value);
+    char* ret = reinterpret_cast<char*>(malloc(real_type.length() + 1));
+    memcpy(ret, real_type.c_str(), real_type.length());
+    ret[real_type.length()] = 0;
+    return ret;
+}
+
+}  // namespace milvus::segcore

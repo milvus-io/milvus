@@ -10,22 +10,24 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "query/deprecated/ParserDeprecated.h"
-#include "query/Expr.h"
-#include "query/PlanNode.h"
-#include "query/generated/ExprVisitor.h"
-#include "query/generated/PlanNodeVisitor.h"
-#include "test_utils/DataGen.h"
-#include "query/generated/ShowPlanNodeVisitor.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "query/PlanImpl.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "segcore/SegmentSealed.h"
+
 #include "pb/schema.pb.h"
+#include "query/Expr.h"
+#include "query/PlanImpl.h"
+#include "query/PlanNode.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
+#include "query/generated/ExprVisitor.h"
+#include "query/generated/ShowPlanNodeVisitor.h"
+#include "segcore/SegmentSealed.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
+namespace {
+const int64_t ROW_COUNT = 100 * 1000;
+}
 
 TEST(Query, ShowExecutor) {
     using namespace milvus::query;
@@ -65,7 +67,8 @@ TEST(Query, DSL) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 10
+                        "topk": 10,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -90,7 +93,8 @@ TEST(Query, DSL) {
                     "nprobe": 10
                 },
                 "query": "$0",
-                "topk": 10
+                "topk": 10,
+                "round_decimal": 3
             }
         }
     }
@@ -113,7 +117,8 @@ TEST(Query, ParsePlaceholderGroup) {
                     "nprobe": 10
                 },
                 "query": "$0",
-                "topk": 10
+                "topk": 10,
+                "round_decimal":3
             }
         }
     }
@@ -154,14 +159,15 @@ TEST(Query, ExecWithPredicateLoader) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -179,45 +185,15 @@ TEST(Query, ExecWithPredicateLoader) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     auto ref = json::parse(R"(
 [
   [
-    [
-      "982->0.000000",
-      "25315->4.741588",
-      "57893->4.758279",
-      "551029->5.078479",
-      "455002->5.134716"
-    ],
-    [
-      "528353->8.740297",
-      "659305->8.802286",
-      "935763->9.422906",
-      "794649->9.436665",
-      "192031->9.832053"
-    ],
-    [
-      "980439->3.342777",
-      "433044->3.424016",
-      "797884->3.663446",
-      "697705->3.944479",
-      "186546->4.404788"
-    ],
-    [
-      "642941->3.753775",
-      "967504->3.885163",
-      "764517->4.364819",
-      "332938->4.418214",
-      "232724->4.574215"
-    ],
-    [
-      "351788->4.453843",
-      "410227->4.699380",
-      "501497->4.805948",
-      "715061->5.166959",
-      "414882->5.179897"
-    ]
+    ["982->0.000000", "25315->4.742000", "57893->4.758000", "1499->6.066000", "48201->6.075000"],
+	["41772->10.111000", "80693->11.712000", "74859->11.790000", "79777->11.842000", "31878->12.308000"],
+	["65551->4.454000", "21617->5.144000", "50037->5.267000", "72204->5.332000", "96905->5.479000"],
+	["59219->5.458000", "21995->6.078000", "61367->7.029000", "44657->7.031000", "66957->7.174000"],
+	["66353->5.696000", "41087->5.917000", "97780->6.811000", "99239->7.562000", "86527->7.751000"]
   ]
 ])");
     std::cout << json.dump(2);
@@ -249,7 +225,8 @@ TEST(Query, ExecWithPredicateSmallN) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -271,7 +248,7 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
 }
 
@@ -300,14 +277,15 @@ TEST(Query, ExecWithPredicate) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -322,46 +300,16 @@ TEST(Query, ExecWithPredicate) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     auto ref = json::parse(R"(
 [
-  [
-    [
-      "982->0.000000",
-      "25315->4.741588",
-      "57893->4.758279",
-      "551029->5.078479",
-      "455002->5.134716"
-    ],
-    [
-      "528353->8.740297",
-      "659305->8.802286",
-      "935763->9.422906",
-      "794649->9.436665",
-      "192031->9.832053"
-    ],
-    [
-      "980439->3.342777",
-      "433044->3.424016",
-      "797884->3.663446",
-      "697705->3.944479",
-      "186546->4.404788"
-    ],
-    [
-      "642941->3.753775",
-      "967504->3.885163",
-      "764517->4.364819",
-      "332938->4.418214",
-      "232724->4.574215"
-    ],
-    [
-      "351788->4.453843",
-      "410227->4.699380",
-      "501497->4.805948",
-      "715061->5.166959",
-      "414882->5.179897"
-    ]
-  ]
+	[
+		["982->0.000000", "25315->4.742000", "57893->4.758000", "1499->6.066000", "48201->6.075000"],
+		["41772->10.111000", "80693->11.712000", "74859->11.790000", "79777->11.842000", "31878->12.308000"],
+		["65551->4.454000", "21617->5.144000", "50037->5.267000", "72204->5.332000", "96905->5.479000"],
+		["59219->5.458000", "21995->6.078000", "61367->7.029000", "44657->7.031000", "66957->7.174000"],
+		["66353->5.696000", "41087->5.917000", "97780->6.811000", "99239->7.562000", "86527->7.751000"]
+	]
 ])");
     std::cout << json.dump(2);
     ASSERT_EQ(json.dump(2), ref.dump(2));
@@ -391,14 +339,15 @@ TEST(Query, ExecTerm) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -408,15 +357,14 @@ TEST(Query, ExecTerm) {
     auto num_queries = 3;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = SearchResultToJson(sr);
-    ASSERT_EQ(sr.num_queries_, num_queries);
-    ASSERT_EQ(sr.topk_, topk);
+    auto json = SearchResultToJson(*sr);
+    ASSERT_EQ(sr->num_queries_, num_queries);
+    ASSERT_EQ(sr->topk_, topk);
     // for(auto x: )
 }
 
@@ -437,14 +385,15 @@ TEST(Query, ExecEmpty) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto segment = CreateGrowingSegment(schema);
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -453,13 +402,13 @@ TEST(Query, ExecEmpty) {
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), *ph_group, time);
-    std::cout << SearchResultToJson(sr);
+    std::cout << SearchResultToJson(*sr);
 
-    for (auto i : sr.internal_seg_offsets_) {
+    for (auto i : sr->ids_) {
         ASSERT_EQ(i, -1);
     }
 
-    for (auto v : sr.result_distances_) {
+    for (auto v : sr->distances_) {
         ASSERT_EQ(v, std::numeric_limits<float>::max());
     }
 }
@@ -481,7 +430,8 @@ TEST(Query, ExecWithoutPredicateFlat) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -489,7 +439,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
         }
     })";
     auto plan = CreatePlan(*schema, dsl);
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -498,13 +448,12 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = SearchResultToJson(sr);
+    auto json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
 }
 
@@ -525,7 +474,8 @@ TEST(Query, ExecWithoutPredicate) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal":3
                     }
                 }
             }
@@ -533,7 +483,7 @@ TEST(Query, ExecWithoutPredicate) {
         }
     })";
     auto plan = CreatePlan(*schema, dsl);
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -542,54 +492,22 @@ TEST(Query, ExecWithoutPredicate) {
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
-    auto json = SearchResultToJson(sr);
+    auto json = SearchResultToJson(*sr);
     auto ref = json::parse(R"(
 [
-  [
-    [
-      "982->0.000000",
-      "25315->4.741588",
-      "57893->4.758279",
-      "694663->4.980466",
-      "551029->5.078479"
-    ],
-    [
-      "559507->7.956653",
-      "871836->8.694542",
-      "528353->8.740297",
-      "659305->8.802286",
-      "516137->8.935913"
-    ],
-    [
-      "980439->3.342777",
-      "433044->3.424016",
-      "527556->3.487235",
-      "797884->3.663446",
-      "814805->3.782786"
-    ],
-    [
-      "642941->3.753775",
-      "967504->3.885163",
-      "177960->4.339530",
-      "764517->4.364819",
-      "841079->4.403300"
-    ],
-    [
-      "688614->4.259011",
-      "351788->4.453843",
-      "452698->4.473838",
-      "410227->4.699380",
-      "501497->4.805948"
-    ]
-  ]
-]
-)");
+	[
+		["982->0.000000", "25315->4.742000", "57893->4.758000", "1499->6.066000", "48201->6.075000"],
+		["41772->10.111000", "80693->11.712000", "74859->11.790000", "79777->11.842000", "31878->12.308000"],
+		["65551->4.454000", "21617->5.144000", "50037->5.267000", "98268->5.321000", "72204->5.332000"],
+		["33572->5.432000", "59219->5.458000", "21995->6.078000", "17913->6.831000", "86628->6.835000"],
+		["66353->5.696000", "41087->5.917000", "24554->6.195000", "68019->6.654000", "97780->6.811000"]
+	]
+])");
     std::cout << json.dump(2);
     ASSERT_EQ(json.dump(2), ref.dump(2));
 }
@@ -611,7 +529,8 @@ TEST(Indexing, InnerProduct) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal":3
                     }
                 }
             }
@@ -629,9 +548,8 @@ TEST(Indexing, InnerProduct) {
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp ts = N * 2;
-    SearchResult sr;
-    sr = segment->Search(plan.get(), *ph_group, ts);
-    std::cout << SearchResultToJson(sr).dump(2);
+    auto sr = segment->Search(plan.get(), *ph_group, ts);
+    std::cout << SearchResultToJson(*sr).dump(2);
 }
 
 TEST(Query, FillSegment) {
@@ -720,7 +638,8 @@ TEST(Query, FillSegment) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
@@ -738,12 +657,12 @@ TEST(Query, FillSegment) {
         plan->target_entries_.clear();
         plan->target_entries_.push_back(schema->get_offset(FieldName("fakevec")));
         plan->target_entries_.push_back(schema->get_offset(FieldName("the_value")));
-        SearchResult result = segment->Search(plan.get(), *ph, ts);
+        auto result = segment->Search(plan.get(), *ph, ts);
         // std::cout << SearchResultToJson(result).dump(2);
-        result.result_offsets_.resize(topk * num_queries);
-        segment->FillTargetEntry(plan.get(), result);
+        result->result_offsets_.resize(topk * num_queries);
+        segment->FillTargetEntry(plan.get(), *result);
 
-        auto ans = result.row_data_;
+        auto ans = result->row_data_;
         ASSERT_EQ(ans.size(), topk * num_queries);
         int64_t std_index = 0;
 
@@ -752,7 +671,7 @@ TEST(Query, FillSegment) {
             int64_t val;
             memcpy(&val, vec.data(), sizeof(int64_t));
 
-            auto internal_offset = result.internal_seg_offsets_[std_index];
+            auto internal_offset = result->ids_[std_index];
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
             std::vector<float> std_vfloat(dim);
@@ -797,14 +716,15 @@ TEST(Query, ExecWithPredicateBinary) {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": 3
                     }
                 }
             }
             ]
         }
     })";
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -815,13 +735,12 @@ TEST(Query, ExecWithPredicateBinary) {
     auto num_queries = 5;
     auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
-    SearchResult sr;
     Timestamp time = 1000000;
 
-    sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), *ph_group, time);
     int topk = 5;
 
-    Json json = SearchResultToJson(sr);
+    Json json = SearchResultToJson(*sr);
     std::cout << json.dump(2);
     // ASSERT_EQ(json.dump(2), ref.dump(2));
 }

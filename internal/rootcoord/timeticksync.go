@@ -1,42 +1,59 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package rootcoord
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
-type ddlTimetickInfo struct {
-	ddlMinTs typeutil.Timestamp
-	ddlTsSet map[typeutil.Timestamp]struct{}
-}
+var (
+	// TODO: better to be configurable
+	enableTtChecker        = true
+	timeTickSyncTtInterval = 2 * time.Minute
+	ttCheckerName          = "rootTtChecker"
+	ttCheckerWarnMsg       = fmt.Sprintf("RootCoord haven't synchronized the time tick for %f minutes", timeTickSyncTtInterval.Minutes())
+)
 
 type timetickSync struct {
-	core          *Core
-	lock          sync.Mutex
-	proxyTimeTick map[typeutil.UniqueID]*channelTimeTickMsg
-	sendChan      chan map[typeutil.UniqueID]*channelTimeTickMsg
+	ctx      context.Context
+	sourceID typeutil.UniqueID
+
+	dmlChannels   *dmlChannels // used for insert
+	deltaChannels *dmlChannels // used for delete
+
+	lock           sync.Mutex
+	sess2ChanTsMap map[typeutil.UniqueID]*chanTsMsg
+	sendChan       chan map[typeutil.UniqueID]*chanTsMsg
 
 	// record ddl timetick info
 	ddlLock  sync.RWMutex
@@ -44,36 +61,65 @@ type timetickSync struct {
 	ddlTsSet map[typeutil.Timestamp]struct{}
 }
 
-type channelTimeTickMsg struct {
-	in       *internalpb.ChannelTimeTickMsg
-	timeTick map[string]typeutil.Timestamp
+type chanTsMsg struct {
+	chanTsMap map[string]typeutil.Timestamp
+	defaultTs typeutil.Timestamp
+	cnt       int64
 }
 
-func newChannelTimeTickMsg(in *internalpb.ChannelTimeTickMsg) *channelTimeTickMsg {
-	msg := &channelTimeTickMsg{
-		in:       in,
-		timeTick: make(map[string]typeutil.Timestamp),
+func newChanTsMsg(in *internalpb.ChannelTimeTickMsg, cnt int64) *chanTsMsg {
+	msg := &chanTsMsg{
+		chanTsMap: make(map[string]typeutil.Timestamp),
+		defaultTs: in.DefaultTimestamp,
+		cnt:       cnt,
 	}
 	for idx := range in.ChannelNames {
-		msg.timeTick[in.ChannelNames[idx]] = in.Timestamps[idx]
+		msg.chanTsMap[in.ChannelNames[idx]] = in.Timestamps[idx]
 	}
 	return msg
 }
 
-func (c *channelTimeTickMsg) getTimetick(channelName string) typeutil.Timestamp {
-	tt, ok := c.timeTick[channelName]
-	if ok {
-		return tt
+func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
+	if ts, ok := c.chanTsMap[channelName]; ok {
+		return ts
 	}
-	return c.in.DefaultTimestamp
+	return c.defaultTs
 }
 
-func newTimeTickSync(core *Core) *timetickSync {
+func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
+	// initialize dml channels used for insert
+	dmlChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDml, Params.RootCoordCfg.DmlChannelNum)
+	// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels
+	deltaChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDelta, Params.RootCoordCfg.DmlChannelNum)
+
+	// recover physical channels for all collections
+	for collID, chanNames := range chanMap {
+		dmlChannels.addChannels(chanNames...)
+		log.Debug("recover physical channels", zap.Int64("collID", collID), zap.Any("physical channels", chanNames))
+
+		var err error
+		deltaChanNames := make([]string, len(chanNames))
+		for i, chanName := range chanNames {
+			deltaChanNames[i], err = funcutil.ConvertChannelName(chanName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+			if err != nil {
+				log.Error("failed to convert dml channel name to delta channel name", zap.String("chanName", chanName))
+				panic("invalid dml channel name " + chanName)
+			}
+		}
+		deltaChannels.addChannels(deltaChanNames...)
+		log.Debug("recover delta channels", zap.Int64("collID", collID), zap.Any("delta channels", deltaChanNames))
+	}
+
 	return &timetickSync{
-		lock:          sync.Mutex{},
-		core:          core,
-		proxyTimeTick: make(map[typeutil.UniqueID]*channelTimeTickMsg),
-		sendChan:      make(chan map[typeutil.UniqueID]*channelTimeTickMsg, 16),
+		ctx:      ctx,
+		sourceID: sourceID,
+
+		dmlChannels:   dmlChannels,
+		deltaChannels: deltaChannels,
+
+		lock:           sync.Mutex{},
+		sess2ChanTsMap: make(map[typeutil.UniqueID]*chanTsMsg),
+		sendChan:       make(chan map[typeutil.UniqueID]*chanTsMsg, 16),
 
 		ddlLock:  sync.RWMutex{},
 		ddlMinTs: typeutil.Timestamp(math.MaxUint64),
@@ -84,26 +130,44 @@ func newTimeTickSync(core *Core) *timetickSync {
 // sendToChannel send all channels' timetick to sendChan
 // lock is needed by the invoker
 func (t *timetickSync) sendToChannel() {
-	if len(t.proxyTimeTick) == 0 {
+	if len(t.sess2ChanTsMap) == 0 {
 		return
 	}
-	for _, v := range t.proxyTimeTick {
+
+	// detect whether rootcoord receives ttMsg from all source sessions
+	maxCnt := int64(0)
+	idleSessionList := make([]typeutil.UniqueID, 0, len(t.sess2ChanTsMap))
+	for id, v := range t.sess2ChanTsMap {
 		if v == nil {
-			return
+			idleSessionList = append(idleSessionList, id)
+		} else {
+			if maxCnt < v.cnt {
+				maxCnt = v.cnt
+			}
 		}
 	}
-	// clear proxyTimeTick and send a clone
-	ptt := make(map[typeutil.UniqueID]*channelTimeTickMsg)
-	for k, v := range t.proxyTimeTick {
+
+	if len(idleSessionList) > 0 {
+		// give warning every 2 second if not get ttMsg from source sessions
+		if maxCnt%10 == 0 {
+			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),
+				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.Milliseconds()*maxCnt))
+		}
+		return
+	}
+
+	// clear sess2ChanTsMap and send a clone
+	ptt := make(map[typeutil.UniqueID]*chanTsMsg)
+	for k, v := range t.sess2ChanTsMap {
 		ptt[k] = v
-		t.proxyTimeTick[k] = nil
+		t.sess2ChanTsMap[k] = nil
 	}
 	t.sendChan <- ptt
 }
 
 // AddDmlTimeTick add ts into ddlTimetickInfos[sourceID],
 // can be used to tell if DDL operation is in process.
-func (t *timetickSync) AddDdlTimeTick(ts typeutil.Timestamp, reason string) {
+func (t *timetickSync) addDdlTimeTick(ts typeutil.Timestamp, reason string) {
 	t.ddlLock.Lock()
 	defer t.ddlLock.Unlock()
 
@@ -118,7 +182,7 @@ func (t *timetickSync) AddDdlTimeTick(ts typeutil.Timestamp, reason string) {
 
 // RemoveDdlTimeTick is invoked in UpdateTimeTick.
 // It clears the ts generated by AddDdlTimeTick, indicates DDL operation finished.
-func (t *timetickSync) RemoveDdlTimeTick(ts typeutil.Timestamp, reason string) {
+func (t *timetickSync) removeDdlTimeTick(ts typeutil.Timestamp, reason string) {
 	t.ddlLock.Lock()
 	defer t.ddlLock.Unlock()
 
@@ -135,12 +199,12 @@ func (t *timetickSync) RemoveDdlTimeTick(ts typeutil.Timestamp, reason string) {
 				minTs = tt
 			}
 		}
-		t.ddlMinTs = ts
-		log.Debug("update ddl minTs", zap.Any("minTs", ts))
+		t.ddlMinTs = minTs
+		log.Debug("update ddl minTs", zap.Any("minTs", minTs))
 	}
 }
 
-func (t *timetickSync) GetDdlMinTimeTick() typeutil.Timestamp {
+func (t *timetickSync) getDdlMinTimeTick() typeutil.Timestamp {
 	t.ddlLock.Lock()
 	defer t.ddlLock.Unlock()
 
@@ -148,23 +212,23 @@ func (t *timetickSync) GetDdlMinTimeTick() typeutil.Timestamp {
 }
 
 // UpdateTimeTick check msg validation and send it to local channel
-func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg, reason string) error {
+func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason string) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	if len(in.ChannelNames) == 0 && in.DefaultTimestamp == 0 {
 		return nil
 	}
 	if len(in.Timestamps) != len(in.ChannelNames) {
-		return fmt.Errorf("Invalid TimeTickMsg")
+		return fmt.Errorf("invalid TimeTickMsg")
 	}
 
-	prev, ok := t.proxyTimeTick[in.Base.SourceID]
+	prev, ok := t.sess2ChanTsMap[in.Base.SourceID]
 	if !ok {
-		return fmt.Errorf("Skip ChannelTimeTickMsg from un-recognized proxy node %d", in.Base.SourceID)
+		return fmt.Errorf("skip ChannelTimeTickMsg from un-recognized session %d", in.Base.SourceID)
 	}
 
 	// if ddl operation not finished, skip current ts update
-	ddlMinTs := t.GetDdlMinTimeTick()
+	ddlMinTs := t.getDdlMinTimeTick()
 	if in.DefaultTimestamp > ddlMinTs {
 		log.Debug("ddl not finished", zap.Int64("source id", in.Base.SourceID),
 			zap.Uint64("curr ts", in.DefaultTimestamp),
@@ -173,86 +237,114 @@ func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 		return nil
 	}
 
-	if in.Base.SourceID == t.core.session.ServerID {
-		if prev != nil && in.DefaultTimestamp <= prev.in.DefaultTimestamp {
+	if in.Base.SourceID == t.sourceID {
+		if prev != nil && in.DefaultTimestamp <= prev.defaultTs {
 			log.Debug("timestamp go back", zap.Int64("source id", in.Base.SourceID),
 				zap.Uint64("curr ts", in.DefaultTimestamp),
-				zap.Uint64("prev ts", prev.in.DefaultTimestamp),
+				zap.Uint64("prev ts", prev.defaultTs),
 				zap.String("reason", reason))
 			return nil
 		}
 	}
-	if in.DefaultTimestamp == 0 {
-		mints := minTimeTick(in.Timestamps...)
-		log.Debug("default time stamp is zero, set it to the min value of inputs",
-			zap.Int64("proxy id", in.Base.SourceID), zap.Uint64("min ts", mints))
-		in.DefaultTimestamp = mints
-	}
 
-	t.proxyTimeTick[in.Base.SourceID] = newChannelTimeTickMsg(in)
-	//log.Debug("update proxyTimeTick", zap.Int64("source id", in.Base.SourceID),
-	//	zap.Uint64("inTs", in.DefaultTimestamp), zap.String("reason", reason))
+	if prev == nil {
+		t.sess2ChanTsMap[in.Base.SourceID] = newChanTsMsg(in, 1)
+	} else {
+		t.sess2ChanTsMap[in.Base.SourceID] = newChanTsMsg(in, prev.cnt+1)
+	}
 
 	t.sendToChannel()
 	return nil
 }
 
-func (t *timetickSync) AddProxy(sess *sessionutil.Session) {
+func (t *timetickSync) addSession(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	t.proxyTimeTick[sess.ServerID] = nil
+	t.sess2ChanTsMap[sess.ServerID] = nil
+	log.Debug("Add session for timeticksync", zap.Int64("serverID", sess.ServerID))
 }
 
-func (t *timetickSync) DelProxy(sess *sessionutil.Session) {
+func (t *timetickSync) delSession(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	if _, ok := t.proxyTimeTick[sess.ServerID]; ok {
-		delete(t.proxyTimeTick, sess.ServerID)
+	if _, ok := t.sess2ChanTsMap[sess.ServerID]; ok {
+		delete(t.sess2ChanTsMap, sess.ServerID)
+		log.Debug("Remove session from timeticksync", zap.Int64("serverID", sess.ServerID))
 		t.sendToChannel()
 	}
 }
 
-func (t *timetickSync) GetProxy(sess []*sessionutil.Session) {
+func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	for _, s := range sess {
-		t.proxyTimeTick[s.ServerID] = nil
+		t.sess2ChanTsMap[s.ServerID] = nil
+		log.Debug("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))
 	}
 }
 
-// StartWatch watch proxy node change and process all channels' timetick msg
-func (t *timetickSync) StartWatch() {
+// StartWatch watch session change and process all channels' timetick msg
+func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	var checker *timerecord.LongTermChecker
+	if enableTtChecker {
+		checker = timerecord.NewLongTermChecker(t.ctx, ttCheckerName, timeTickSyncTtInterval, ttCheckerWarnMsg)
+		checker.Start()
+		defer checker.Stop()
+	}
+
 	for {
 		select {
-		case <-t.core.ctx.Done():
-			log.Debug("root coord context done", zap.Error(t.core.ctx.Err()))
+		case <-t.ctx.Done():
+			log.Debug("rootcoord context done", zap.Error(t.ctx.Err()))
 			return
-		case ptt, ok := <-t.sendChan:
+		case sessTimetick, ok := <-t.sendChan:
 			if !ok {
 				log.Debug("timetickSync sendChan closed")
 				return
 			}
-
+			if enableTtChecker {
+				checker.Check()
+			}
 			// reduce each channel to get min timestamp
-			mtt := ptt[t.core.session.ServerID]
-			for _, chanName := range mtt.in.ChannelNames {
-				mints := mtt.getTimetick(chanName)
-				for _, tt := range ptt {
-					ts := tt.getTimetick(chanName)
-					if ts < mints {
-						mints = ts
+			local := sessTimetick[t.sourceID]
+			if len(local.chanTsMap) == 0 {
+				continue
+			}
+			hdr := fmt.Sprintf("send ts to %d channels", len(local.chanTsMap))
+			tr := timerecord.NewTimeRecorder(hdr)
+			wg := sync.WaitGroup{}
+			for chanName, ts := range local.chanTsMap {
+				wg.Add(1)
+				go func(chanName string, ts typeutil.Timestamp) {
+					mints := ts
+					for _, tt := range sessTimetick {
+						currTs := tt.getTimetick(chanName)
+						if currTs < mints {
+							mints = currTs
+						}
 					}
-				}
-				if err := t.SendChannelTimeTick(chanName, mints); err != nil {
-					log.Debug("SendChannelTimeTick fail", zap.Error(err))
-				}
+					if err := t.sendTimeTickToChannel([]string{chanName}, mints); err != nil {
+						log.Debug("SendTimeTickToChannel fail", zap.Error(err))
+					}
+					wg.Done()
+				}(chanName, ts)
+			}
+			wg.Wait()
+			span := tr.ElapseSpan()
+			metrics.RootCoordSyncTimeTickLatency.Observe(float64(span.Milliseconds()))
+			// rootcoord send tt msg to all channels every 200ms by default
+			if span > Params.ProxyCfg.TimeTickInterval {
+				log.Warn("rootcoord send tt to all channels too slowly",
+					zap.Int("chanNum", len(local.chanTsMap)), zap.Int64("span", span.Milliseconds()))
 			}
 		}
 	}
 }
 
-// SendChannelTimeTick send each channel's min timetick to msg stream
-func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestamp) error {
+// SendTimeTickToChannel send each channel's min timetick to msg stream
+func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Timestamp) error {
 	msgPack := msgstream.MsgPack{}
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: ts,
@@ -264,7 +356,7 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,
 			Timestamp: ts,
-			SourceID:  t.core.session.ServerID,
+			SourceID:  t.sourceID,
 		},
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
@@ -273,23 +365,73 @@ func (t *timetickSync) SendChannelTimeTick(chanName string, ts typeutil.Timestam
 	}
 	msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
 
-	err := t.core.dmlChannels.Broadcast(chanName, &msgPack)
-	if err == nil {
+	if err := t.dmlChannels.broadcast(chanNames, &msgPack); err != nil {
+		return err
+	}
+
+	for _, chanName := range chanNames {
 		metrics.RootCoordInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
 	}
-	return err
+	return nil
 }
 
-// GetProxyNum return the num of detected proxy node
-func (t *timetickSync) GetProxyNum() int {
+// GetSessionNum return the num of detected sessions
+func (t *timetickSync) getSessionNum() int {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	return len(t.proxyTimeTick)
+	return len(t.sess2ChanTsMap)
 }
 
-// GetChanNum return the num of channel
-func (t *timetickSync) GetChanNum() int {
-	return t.core.dmlChannels.GetNumChannels()
+///////////////////////////////////////////////////////////////////////////////
+// GetDmlChannelName return a valid dml channel name
+func (t *timetickSync) getDmlChannelName() string {
+	return t.dmlChannels.getChannelName()
+}
+
+// GetDmlChannelNum return the num of dml channels
+func (t *timetickSync) getDmlChannelNum() int {
+	return t.dmlChannels.getChannelNum()
+}
+
+// ListDmlChannels return all in-use dml channel names
+func (t *timetickSync) listDmlChannels() []string {
+	return t.dmlChannels.listChannels()
+}
+
+// AddDmlChannels add dml channels
+func (t *timetickSync) addDmlChannels(names ...string) {
+	t.dmlChannels.addChannels(names...)
+}
+
+// RemoveDmlChannels remove dml channels
+func (t *timetickSync) removeDmlChannels(names ...string) {
+	t.dmlChannels.removeChannels(names...)
+}
+
+// BroadcastDmlChannels broadcasts msg pack into dml channels
+func (t *timetickSync) broadcastDmlChannels(chanNames []string, pack *msgstream.MsgPack) error {
+	return t.dmlChannels.broadcast(chanNames, pack)
+}
+
+// BroadcastMarkDmlChannels broadcasts msg pack into dml channels
+func (t *timetickSync) broadcastMarkDmlChannels(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
+	return t.dmlChannels.broadcastMark(chanNames, pack)
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// GetDeltaChannelName return a valid delta channel name
+func (t *timetickSync) getDeltaChannelName() string {
+	return t.deltaChannels.getChannelName()
+}
+
+// AddDeltaChannels add delta channels
+func (t *timetickSync) addDeltaChannels(names ...string) {
+	t.deltaChannels.addChannels(names...)
+}
+
+// RemoveDeltaChannels remove delta channels
+func (t *timetickSync) removeDeltaChannels(names ...string) {
+	t.deltaChannels.removeChannels(names...)
 }
 
 func minTimeTick(tt ...typeutil.Timestamp) typeutil.Timestamp {

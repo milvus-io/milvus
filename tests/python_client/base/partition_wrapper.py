@@ -1,8 +1,9 @@
 import sys
 
+from pymilvus import Partition
+
 sys.path.append("..")
-from check.param_check import *
-from check.func_check import *
+from check.func_check import ResponseChecker
 from utils.api_request import api_request
 
 
@@ -93,4 +94,15 @@ class ApiPartitionWrapper:
                                        is_succ=succ, data=data, anns_field=anns_field,
                                        params=params, limit=limit, expr=expr,
                                        output_fields=output_fields, **kwargs).run()
+        return res, check_result
+
+    def delete(self, expr, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, succ = api_request([self.partition.delete, expr], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, is_succ=succ, expr=expr,
+                                       **kwargs).run()
         return res, check_result

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package rootcoord
 
@@ -22,36 +27,50 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-const TestDMLChannelNum = 32
+const (
+	TestDMLChannelNum        = 32
+	returnError              = "ReturnError"
+	returnUnsuccessfulStatus = "ReturnUnsuccessfulStatus"
+)
+
+type ctxKey struct{}
 
 type proxyMock struct {
 	types.Proxy
 	collArray []string
 	mutex     sync.Mutex
+}
+
+func (p *proxyMock) Stop() error {
+	return nil
 }
 
 func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -123,7 +142,7 @@ func (d *dataMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInf
 		},
 		Infos: []*datapb.SegmentInfo{
 			{
-				NumOfRows: Params.MinSegmentSizeToEnableIndex,
+				NumOfRows: Params.RootCoordCfg.MinSegmentSizeToEnableIndex,
 				State:     commonpb.SegmentState_Flushed,
 			},
 		},
@@ -142,6 +161,22 @@ func (d *dataMock) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushe
 	}
 	rsp.Segments = append(rsp.Segments, d.segs...)
 	return rsp, nil
+}
+
+func (d *dataMock) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
+	return &datapb.WatchChannelsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}}, nil
+}
+
+func (d *dataMock) Import(ctx context.Context, req *datapb.ImportTask) (*datapb.ImportTaskResponse, error) {
+	return &datapb.ImportTaskResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
 }
 
 type queryMock struct {
@@ -224,6 +259,32 @@ func (idx *indexMock) getFileArray() []string {
 	ret := make([]string, 0, len(idx.fileArray))
 	ret = append(ret, idx.fileArray...)
 	return ret
+}
+
+func (idx *indexMock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
+	v := ctx.Value(ctxKey{}).(string)
+	if v == returnError {
+		return nil, fmt.Errorf("injected error")
+	} else if v == returnUnsuccessfulStatus {
+		return &indexpb.GetIndexStatesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: 100,
+				Reason:    "not so good",
+			},
+		}, nil
+	}
+	resp := &indexpb.GetIndexStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+			Reason:    "all good",
+		},
+	}
+	for range req.IndexBuildIDs {
+		resp.States = append(resp.States, &indexpb.IndexInfo{
+			State: commonpb.IndexState_Finished,
+		})
+	}
+	return resp, nil
 }
 
 func clearMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack) {
@@ -316,15 +377,15 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	vchanNames := make([]string, t.ShardsNum)
 	chanNames := make([]string, t.ShardsNum)
 	for i := int32(0); i < t.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%d_%d_v%d", collName, collID, i, i)
-		chanNames[i] = ToPhysicalChannel(vchanNames[i])
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.chanTimeTick.getDmlChannelName(), collID, i)
+		chanNames[i] = funcutil.ToPhysicalChannel(vchanNames[i])
 	}
 
 	collInfo := etcdpb.CollectionInfo{
 		ID:                         collID,
 		Schema:                     &schema,
 		PartitionIDs:               []typeutil.UniqueID{partID},
-		PartitionNames:             []string{Params.DefaultPartitionName},
+		PartitionNames:             []string{Params.CommonCfg.DefaultPartitionName},
 		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
 		VirtualChannelNames:        vchanNames,
 		PhysicalChannelNames:       chanNames,
@@ -349,7 +410,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		Base:                 t.Base,
 		DbName:               t.DbName,
 		CollectionName:       t.CollectionName,
-		PartitionName:        Params.DefaultPartitionName,
+		PartitionName:        Params.CommonCfg.DefaultPartitionName,
 		DbID:                 0, //TODO,not used
 		CollectionID:         collID,
 		PartitionID:          partID,
@@ -358,17 +419,18 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		PhysicalChannelNames: chanNames,
 	}
 
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddOp := func(ts typeutil.Timestamp) (string, error) {
-		ddCollReq.Base.Timestamp = ts
-		return EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
-	}
-
 	reason := fmt.Sprintf("create collection %d", collID)
 	ts, err := core.TSOAllocator(1)
 	if err != nil {
-		return fmt.Errorf("TSO alloc fail, error = %w", err)
+		return fmt.Errorf("tso alloc fail, error = %w", err)
+	}
+
+	// build DdOperation and save it into etcd, when ddmsg send fail,
+	// system can restore ddmsg from etcd and re-send
+	ddCollReq.Base.Timestamp = ts
+	ddOpStr, err := EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
+	if err != nil {
+		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -377,11 +439,11 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		core.ddlLock.Lock()
 		defer core.ddlLock.Unlock()
 
-		core.chanTimeTick.AddDdlTimeTick(ts, reason)
+		core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
-		defer core.chanTimeTick.RemoveDdlTimeTick(ts, reason)
+		defer core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
-		err = core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOp)
+		err = core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr)
 		if err != nil {
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
@@ -395,12 +457,149 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	return nil
 }
 
-func TestRootCoord(t *testing.T) {
+// a mock kv that always fail when LoadWithPrefix
+type loadPrefixFailKV struct {
+	kv.TxnKV
+}
+
+// LoadWithPrefix override behavior
+func (kv *loadPrefixFailKV) LoadWithPrefix(key string) ([]string, []string, error) {
+	return []string{}, []string{}, retry.Unrecoverable(errors.New("mocked fail"))
+}
+
+func TestRootCoordInit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	coreFactory := msgstream.NewPmsFactory()
+	Params.Init()
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+
+	core, err := NewCore(ctx, coreFactory)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	core.SetEtcdClient(etcdCli)
+	randVal := rand.Int()
+
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+
+	err = core.Init()
+	assert.Nil(t, err)
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+	// inject kvBaseCreate fail
+	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+
+	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
+		return nil, retry.Unrecoverable(errors.New("injected"))
+	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
+		return nil, retry.Unrecoverable(errors.New("injected"))
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+	// inject metaKV create fail
+	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+
+	core.kvBaseCreate = func(root string) (kv.TxnKV, error) {
+		if root == Params.EtcdCfg.MetaRootPath {
+			return nil, retry.Unrecoverable(errors.New("injected"))
+		}
+		return memkv.NewMemoryKV(), nil
+	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
+		return nil, nil
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+	// inject newSuffixSnapshot failure
+	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+
+	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
+		return nil, nil
+	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
+		return nil, nil
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+	// inject newMetaTable failure
+	core, err = NewCore(ctx, coreFactory)
+	core.SetEtcdClient(etcdCli)
+	require.Nil(t, err)
+	assert.Nil(t, err)
+	randVal = rand.Int()
+
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+
+	core.kvBaseCreate = func(string) (kv.TxnKV, error) {
+		kv := memkv.NewMemoryKV()
+		return &loadPrefixFailKV{TxnKV: kv}, nil
+	}
+	core.metaKVCreate = func(root string) (kv.MetaKv, error) {
+		return nil, nil
+	}
+	err = core.Init()
+	assert.NotNil(t, err)
+
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+}
+
+func TestRootCoord_Base(t *testing.T) {
 	const (
-		dbName   = "testDb"
-		collName = "testColl"
-		partName = "testPartition"
-		segID    = 1001
+		dbName    = "testDb"
+		collName  = "testColl"
+		collName2 = "testColl2"
+		aliasName = "alias1"
+		partName  = "testPartition"
+		segID     = 1001
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -408,24 +607,23 @@ func TestRootCoord(t *testing.T) {
 
 	coreFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, coreFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
+	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.CommonCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	Params.CommonCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
 
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-	Params.DmlChannelName = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
 
-	err = core.Register()
-	assert.Nil(t, err)
-
-	etcdCli, err := clientv3.New(clientv3.Config{Endpoints: Params.EtcdEndpoints, DialTimeout: 5 * time.Second})
-	assert.Nil(t, err)
-	sessKey := path.Join(Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	defer func() {
@@ -472,24 +670,22 @@ func TestRootCoord(t *testing.T) {
 
 	tmpFactory := msgstream.NewPmsFactory()
 
-	m := map[string]interface{}{
-		"pulsarAddress":  Params.PulsarAddress,
-		"receiveBufSize": 1024,
-		"pulsarBufSize":  1024}
-	err = tmpFactory.SetParams(m)
+	err = tmpFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
 	clearMsgChan(1500*time.Millisecond, dmlStream.Chan())
 
+	core.SetEtcdClient(etcdCli)
+
 	err = core.Init()
 	assert.Nil(t, err)
 
-	var localTSO uint64 = 0
+	var localTSO uint64
 	localTSOLock := sync.RWMutex{}
 	core.TSOAllocator = func(c uint32) (uint64, error) {
 		localTSOLock.Lock()
@@ -501,10 +697,18 @@ func TestRootCoord(t *testing.T) {
 	err = core.Start()
 	assert.Nil(t, err)
 
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
 	time.Sleep(100 * time.Millisecond)
 	shardsNum := int32(8)
 
+	fmt.Printf("hello world2")
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("time tick", func(t *testing.T) {
+		defer wg.Done()
 		ttmsg, ok := <-timeTickStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, 1, len(ttmsg.Msgs))
@@ -522,7 +726,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, ttm2.Base.Timestamp, ttm.Base.Timestamp+1)
 	})
 
+	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
+		defer wg.Done()
 		schema := schemapb.CollectionSchema{
 			Name:   collName,
 			AutoID: true,
@@ -561,19 +767,23 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		assert.Equal(t, shardsNum, int32(core.dmlChannels.GetNumChannels()))
+		assert.Equal(t, shardsNum, int32(core.chanTimeTick.getDmlChannelNum()))
 
-		pChan := core.MetaTable.ListCollectionPhysicalChannels()
-		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
+		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
+		dmlStream.AsConsumer([]string{createMeta.PhysicalChannelNames[0]}, Params.CommonCfg.RootCoordSubName)
 		dmlStream.Start()
+
+		pChanMap := core.MetaTable.ListCollectionPhysicalChannels()
+		assert.Greater(t, len(pChanMap[createMeta.ID]), 0)
+		vChanMap := core.MetaTable.ListCollectionVirtualChannels()
+		assert.Greater(t, len(vChanMap[createMeta.ID]), 0)
 
 		// get CreateCollectionMsg
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
 		createMsg, ok := (msgs[0]).(*msgstream.CreateCollectionMsg)
 		assert.True(t, ok)
-		createMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
-		assert.Nil(t, err)
 		assert.Equal(t, createMeta.ID, createMsg.CollectionID)
 		assert.Equal(t, 1, len(createMeta.PartitionIDs))
 		assert.Equal(t, createMeta.PartitionIDs[0], createMsg.PartitionID)
@@ -584,7 +794,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, shardsNum, createMeta.ShardsNum)
 
 		vChanName := createMeta.VirtualChannelNames[0]
-		assert.Equal(t, createMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
+		assert.Equal(t, createMeta.PhysicalChannelNames[0], funcutil.ToPhysicalChannel(vChanName))
 
 		// get TimeTickMsg
 		//msgPack, ok = <-dmlStream.Chan()
@@ -594,25 +804,21 @@ func TestRootCoord(t *testing.T) {
 		//assert.True(t, ok)
 		//assert.Greater(t, ddm.Base.Timestamp, uint64(0))
 		core.chanTimeTick.lock.Lock()
-		assert.Equal(t, len(core.chanTimeTick.proxyTimeTick), 2)
-		pt, ok := core.chanTimeTick.proxyTimeTick[core.session.ServerID]
+		assert.Equal(t, len(core.chanTimeTick.sess2ChanTsMap), 2)
+		pt, ok := core.chanTimeTick.sess2ChanTsMap[core.session.ServerID]
 		assert.True(t, ok)
-		assert.Equal(t, shardsNum, int32(len(pt.in.ChannelNames)))
-		assert.Equal(t, shardsNum, int32(len(pt.in.Timestamps)))
-		assert.Equal(t, shardsNum, int32(len(pt.timeTick)))
-		assert.ElementsMatch(t, pt.in.ChannelNames, createMeta.PhysicalChannelNames)
-		assert.Equal(t, pt.in.Timestamps[0], pt.in.Timestamps[1])
-		assert.Equal(t, pt.in.Timestamps[0], pt.in.DefaultTimestamp)
-		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[0]], pt.in.DefaultTimestamp)
-		assert.Equal(t, pt.timeTick[pt.in.ChannelNames[1]], pt.in.DefaultTimestamp)
-		assert.LessOrEqual(t, createMsg.BeginTimestamp, pt.in.Timestamps[0])
+		assert.Equal(t, shardsNum, int32(len(pt.chanTsMap)))
+		for chanName, ts := range pt.chanTsMap {
+			assert.Contains(t, createMeta.PhysicalChannelNames, chanName)
+			assert.Equal(t, pt.defaultTs, ts)
+		}
 		core.chanTimeTick.lock.Unlock()
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
@@ -620,7 +826,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
 
 		var ddCollReq = internalpb.CreateCollectionRequest{}
-		err = proto.UnmarshalText(ddOp.Body, &ddCollReq)
+		err = proto.Unmarshal(ddOp.Body, &ddCollReq)
 		assert.Nil(t, err)
 		assert.Equal(t, createMeta.ID, ddCollReq.CollectionID)
 		assert.Equal(t, createMeta.PartitionIDs[0], ddCollReq.PartitionID)
@@ -656,7 +862,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("has collection", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.HasCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_HasCollection,
@@ -704,7 +912,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, true, rsp.Value)
 	})
 
+	wg.Add(1)
 	t.Run("describe collection", func(t *testing.T) {
+		defer wg.Done()
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
@@ -727,7 +937,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, shardsNum, rsp.ShardsNum)
 	})
 
+	wg.Add(1)
 	t.Run("show collection", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
@@ -744,7 +956,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, len(rsp.CollectionNames), 2)
 	})
 
+	wg.Add(1)
 	t.Run("create partition", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.CreatePartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreatePartition,
@@ -779,10 +993,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collName, pnm.GetCollArray()[0])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
@@ -790,16 +1004,18 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
 
 		var ddReq = internalpb.CreatePartitionRequest{}
-		err = proto.UnmarshalText(ddOp.Body, &ddReq)
+		err = proto.Unmarshal(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 		assert.Equal(t, collMeta.PartitionIDs[1], ddReq.PartitionID)
 
 		err = core.reSendDdMsg(core.ctx, true)
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("has partition", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.HasPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_HasPartition,
@@ -817,7 +1033,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, true, rsp.Value)
 	})
 
+	wg.Add(1)
 	t.Run("show partition", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		req := &milvuspb.ShowPartitionsRequest{
@@ -838,12 +1056,14 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 2, len(rsp.PartitionIDs))
 	})
 
+	wg.Add(1)
 	t.Run("show segment", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
 		dm.mu.Lock()
-		dm.segs = []typeutil.UniqueID{1000}
+		dm.segs = []typeutil.UniqueID{1000, 1001, 1002}
 		dm.mu.Unlock()
 
 		req := &milvuspb.ShowSegmentsRequest{
@@ -860,10 +1080,14 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, int64(1000), rsp.SegmentIDs[0])
-		assert.Equal(t, 1, len(rsp.SegmentIDs))
+		assert.Equal(t, int64(1001), rsp.SegmentIDs[1])
+		assert.Equal(t, int64(1002), rsp.SegmentIDs[2])
+		assert.Equal(t, 3, len(rsp.SegmentIDs))
 	})
 
+	wg.Add(1)
 	t.Run("create index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateIndex,
@@ -890,14 +1114,17 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 		time.Sleep(100 * time.Millisecond)
 		files := im.getFileArray()
-		assert.Equal(t, 3, len(files))
-		assert.ElementsMatch(t, files, []string{"file0-100", "file1-100", "file2-100"})
+		assert.Equal(t, 3*3, len(files))
+		assert.ElementsMatch(t, files,
+			[]string{"file0-100", "file1-100", "file2-100",
+				"file0-100", "file1-100", "file2-100",
+				"file0-100", "file1-100", "file2-100"})
 		collMeta, err = core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(collMeta.FieldIndexes))
 		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultIndexName, idxMeta.IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, idxMeta.IndexName)
 
 		req.FieldName = "no field"
 		rsp, err = core.CreateIndex(ctx, req)
@@ -905,7 +1132,9 @@ func TestRootCoord(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("describe segment", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 
@@ -925,7 +1154,9 @@ func TestRootCoord(t *testing.T) {
 		t.Logf("index id = %d", rsp.IndexID)
 	})
 
+	wg.Add(1)
 	t.Run("describe index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DescribeIndex,
@@ -942,11 +1173,13 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 		assert.Equal(t, "vector", rsp.IndexDescriptions[0].FieldName)
 	})
 
+	wg.Add(1)
 	t.Run("describe index not exist", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DescribeIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DescribeIndex,
@@ -965,7 +1198,33 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 0, len(rsp.IndexDescriptions))
 	})
 
+	wg.Add(1)
+	t.Run("count complete index", func(t *testing.T) {
+		defer wg.Done()
+		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.NoError(t, err)
+		// Normal case.
+		count, err := core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, ""),
+			collName, coll.ID, []UniqueID{1000, 1001, 1002})
+		assert.NoError(t, err)
+		assert.Equal(t, 3, count)
+		// Case with an empty result.
+		count, err = core.CountCompleteIndex(ctx, collName, coll.ID, []UniqueID{})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, count)
+		// Case where GetIndexStates failed with error.
+		_, err = core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, returnError),
+			collName, coll.ID, []UniqueID{1000, 1001, 1002})
+		assert.Error(t, err)
+		// Case where GetIndexStates failed with bad status.
+		_, err = core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, returnUnsuccessfulStatus),
+			collName, coll.ID, []UniqueID{1000, 1001, 1002})
+		assert.Error(t, err)
+	})
+
+	wg.Add(1)
 	t.Run("flush segment", func(t *testing.T) {
+		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		partID := coll.PartitionIDs[1]
@@ -1000,10 +1259,12 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 	})
 
+	wg.Add(1)
 	t.Run("over ride index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateIndex,
@@ -1039,15 +1300,17 @@ func TestRootCoord(t *testing.T) {
 
 		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultIndexName, idxMeta.IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, idxMeta.IndexName)
 
 		idxMeta, err = core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultIndexName+"_bak", idxMeta.IndexName)
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName+"_bak", idxMeta.IndexName)
 
 	})
 
+	wg.Add(1)
 	t.Run("drop index", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropIndex,
@@ -1058,9 +1321,9 @@ func TestRootCoord(t *testing.T) {
 			DbName:         "",
 			CollectionName: collName,
 			FieldName:      "vector",
-			IndexName:      Params.DefaultIndexName,
+			IndexName:      Params.CommonCfg.DefaultIndexName,
 		}
-		_, idx, err := core.MetaTable.GetIndexByName(collName, Params.DefaultIndexName)
+		_, idx, err := core.MetaTable.GetIndexByName(collName, Params.CommonCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(idx))
 
@@ -1073,12 +1336,14 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, idx[0].IndexID, im.idxDropID[0])
 		im.mutex.Unlock()
 
-		_, idx, err = core.MetaTable.GetIndexByName(collName, Params.DefaultIndexName)
+		_, idx, err = core.MetaTable.GetIndexByName(collName, Params.CommonCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, 0, len(idx))
 	})
 
+	wg.Add(1)
 	t.Run("drop partition", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropPartition,
@@ -1101,7 +1366,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
 		partName, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, Params.DefaultPartitionName, partName)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, partName)
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
@@ -1114,10 +1379,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collName, pnm.GetCollArray()[1])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
@@ -1125,16 +1390,18 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, DropPartitionDDType, ddOp.Type)
 
 		var ddReq = internalpb.DropPartitionRequest{}
-		err = proto.UnmarshalText(ddOp.Body, &ddReq)
+		err = proto.Unmarshal(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 		assert.Equal(t, dropPartID, ddReq.PartitionID)
 
 		err = core.reSendDdMsg(core.ctx, true)
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("remove DQL msgstream", func(t *testing.T) {
+		defer wg.Done()
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 
@@ -1150,7 +1417,9 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("drop collection", func(t *testing.T) {
+		defer wg.Done()
 		req := &milvuspb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropCollection,
@@ -1168,7 +1437,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 		vChanName := collMeta.VirtualChannelNames[0]
-		assert.Equal(t, collMeta.PhysicalChannelNames[0], ToPhysicalChannel(vChanName))
+		assert.Equal(t, collMeta.PhysicalChannelNames[0], funcutil.ToPhysicalChannel(vChanName))
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
 		assert.Equal(t, 1, len(msgs))
@@ -1204,10 +1473,10 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, collName, collArray[2])
 
 		// check DD operation info
-		flag, err := core.MetaTable.client.Load(DDMsgSendPrefix, 0)
+		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
 		assert.Nil(t, err)
 		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.client.Load(DDOperationPrefix, 0)
+		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
 		assert.Nil(t, err)
 		var ddOp DdOperation
 		err = DecodeDdOperation(ddOpStr, &ddOp)
@@ -1215,15 +1484,17 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, DropCollectionDDType, ddOp.Type)
 
 		var ddReq = internalpb.DropCollectionRequest{}
-		err = proto.UnmarshalText(ddOp.Body, &ddReq)
+		err = proto.Unmarshal(ddOp.Body, &ddReq)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.ID, ddReq.CollectionID)
 
 		err = core.reSendDdMsg(core.ctx, true)
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("context_cancel", func(t *testing.T) {
+		defer wg.Done()
 		ctx2, cancel2 := context.WithTimeout(ctx, time.Millisecond*100)
 		defer cancel2()
 		time.Sleep(100 * time.Millisecond)
@@ -1383,7 +1654,9 @@ func TestRootCoord(t *testing.T) {
 		time.Sleep(1 * time.Second)
 	})
 
+	wg.Add(1)
 	t.Run("undefined req type", func(t *testing.T) {
+		defer wg.Done()
 		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1540,7 +1813,9 @@ func TestRootCoord(t *testing.T) {
 
 	})
 
+	wg.Add(1)
 	t.Run("alloc time tick", func(t *testing.T) {
+		defer wg.Done()
 		req := &rootcoordpb.AllocTimestampRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1556,7 +1831,9 @@ func TestRootCoord(t *testing.T) {
 		assert.NotZero(t, rsp.Timestamp)
 	})
 
+	wg.Add(1)
 	t.Run("alloc id", func(t *testing.T) {
+		defer wg.Done()
 		req := &rootcoordpb.AllocIDRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Undefined,
@@ -1572,14 +1849,18 @@ func TestRootCoord(t *testing.T) {
 		assert.NotZero(t, rsp.ID)
 	})
 
+	wg.Add(1)
 	t.Run("get_channels", func(t *testing.T) {
+		defer wg.Done()
 		_, err := core.GetTimeTickChannel(ctx)
 		assert.Nil(t, err)
 		_, err = core.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
 	})
 
+	wg.Add(1)
 	t.Run("channel timetick", func(t *testing.T) {
+		defer wg.Done()
 		const (
 			proxyIDInvalid = 102
 			proxyName0     = "proxy_0"
@@ -1591,7 +1872,7 @@ func TestRootCoord(t *testing.T) {
 			ts1            = uint64(120)
 			ts2            = uint64(150)
 		)
-		numChan := core.chanTimeTick.GetChanNum()
+		numChan := core.chanTimeTick.getDmlChannelNum()
 		p1 := sessionutil.Session{
 			ServerID: 100,
 		}
@@ -1613,7 +1894,15 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		core.dmlChannels.AddProducerChannels("c0", "c1", "c2")
+		cn0 := core.chanTimeTick.getDmlChannelName()
+		cn1 := core.chanTimeTick.getDmlChannelName()
+		cn2 := core.chanTimeTick.getDmlChannelName()
+		core.chanTimeTick.addDmlChannels(cn0, cn1, cn2)
+
+		dn0 := core.chanTimeTick.getDeltaChannelName()
+		dn1 := core.chanTimeTick.getDeltaChannelName()
+		dn2 := core.chanTimeTick.getDeltaChannelName()
+		core.chanTimeTick.addDeltaChannels(dn0, dn1, dn2)
 
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1626,7 +1915,7 @@ func TestRootCoord(t *testing.T) {
 		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
 		assert.Equal(t, commonpb.ErrorCode_Success, s.ErrorCode)
 		time.Sleep(100 * time.Millisecond)
-		//t.Log(core.chanTimeTick.proxyTimeTick)
+		//t.Log(core.chanTimeTick.sess2ChanTsMap)
 
 		msg1 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
@@ -1653,10 +1942,10 @@ func TestRootCoord(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		// 2 proxy, 1 rootcoord
-		assert.Equal(t, 3, core.chanTimeTick.GetProxyNum())
+		assert.Equal(t, 3, core.chanTimeTick.getSessionNum())
 
 		// add 3 proxy channels
-		assert.Equal(t, 3, core.chanTimeTick.GetChanNum()-numChan)
+		assert.Equal(t, 3, core.chanTimeTick.getDmlChannelNum()-numChan)
 
 		_, err = core.etcdCli.Delete(ctx2, proxy1)
 		assert.Nil(t, err)
@@ -1664,7 +1953,165 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	schema := schemapb.CollectionSchema{
+		Name: collName,
+	}
+	sbf, err := proto.Marshal(&schema)
+	assert.Nil(t, err)
+	req := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			MsgID:     3011,
+			Timestamp: 3011,
+			SourceID:  3011,
+		},
+		DbName:         dbName,
+		CollectionName: collName,
+		Schema:         sbf,
+	}
+	status, err := core.CreateCollection(ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	wg.Add(1)
+	t.Run("create alias", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.CreateAliasRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateAlias,
+				MsgID:     3012,
+				Timestamp: 3012,
+				SourceID:  3012,
+			},
+			CollectionName: collName,
+			Alias:          aliasName,
+		}
+		rsp, err := core.CreateAlias(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("describe collection2", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.DescribeCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeCollection,
+				MsgID:     3013,
+				Timestamp: 3013,
+				SourceID:  3013,
+			},
+			DbName:         dbName,
+			CollectionName: collName,
+		}
+		rsp, err := core.DescribeCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+		assert.Equal(t, rsp.Aliases, []string{aliasName})
+	})
+
+	// temporarily create collName2
+	schema = schemapb.CollectionSchema{
+		Name: collName2,
+	}
+	sbf, err = proto.Marshal(&schema)
+	assert.Nil(t, err)
+	req2 := &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_CreateCollection,
+			MsgID:     3014,
+			Timestamp: 3014,
+			SourceID:  3014,
+		},
+		DbName:         dbName,
+		CollectionName: collName2,
+		Schema:         sbf,
+	}
+	status, err = core.CreateCollection(ctx, req2)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	wg.Add(1)
+	t.Run("alter alias", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.AlterAliasRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_AlterAlias,
+				MsgID:     3015,
+				Timestamp: 3015,
+				SourceID:  3015,
+			},
+			CollectionName: collName2,
+			Alias:          aliasName,
+		}
+		rsp, err := core.AlterAlias(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("drop collection with alias", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.DropCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropAlias,
+				MsgID:     3016,
+				Timestamp: 3016,
+				SourceID:  3016,
+			},
+			CollectionName: aliasName,
+		}
+		rsp, err := core.DropCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("drop alias", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.DropAliasRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DropAlias,
+				MsgID:     3017,
+				Timestamp: 3017,
+				SourceID:  3017,
+			},
+			Alias: aliasName,
+		}
+		rsp, err := core.DropAlias(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     3018,
+			Timestamp: 3018,
+			SourceID:  3018,
+		},
+		DbName:         dbName,
+		CollectionName: collName,
+	})
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	status, err = core.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     3019,
+			Timestamp: 3019,
+			SourceID:  3019,
+		},
+		DbName:         dbName,
+		CollectionName: collName2,
+	})
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	wg.Add(1)
 	t.Run("get metrics", func(t *testing.T) {
+		defer wg.Done()
 		// not healthy
 		stateSave := core.stateCode.Load().(internalpb.StateCode)
 		core.UpdateStateCode(internalpb.StateCode_Abnormal)
@@ -1698,7 +2145,46 @@ func TestRootCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("import", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.ImportRequest{
+			CollectionName: "c1",
+			PartitionName:  "p1",
+			RowBased:       true,
+			Files:          []string{"f1", "f2", "f3"},
+		}
+		rsp, err := core.Import(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("get import state", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.GetImportStateRequest{
+			Task: 0,
+		}
+		rsp, err := core.GetImportState(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("report import", func(t *testing.T) {
+		defer wg.Done()
+		req := &rootcoordpb.ImportResult{
+			TaskId:   0,
+			RowCount: 100,
+		}
+		rsp, err := core.ReportImport(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("get system info", func(t *testing.T) {
+		defer wg.Done()
 		// normal case
 		systemInfoMetricType := metricsinfo.SystemInfoMetrics
 		req, err := metricsinfo.ConstructRequestByMetricType(systemInfoMetricType)
@@ -1715,7 +2201,9 @@ func TestRootCoord(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, st.Status.ErrorCode)
 	assert.NotEqual(t, internalpb.StateCode_Healthy, st.State.StateCode)
 
+	wg.Add(1)
 	t.Run("state_not_healthy", func(t *testing.T) {
+		defer wg.Done()
 		st, err := core.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateCollection,
@@ -1870,9 +2358,31 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp8.Status.ErrorCode)
 
+		rsp9, err := core.Import(ctx, &milvuspb.ImportRequest{
+			CollectionName: "c1",
+			PartitionName:  "p1",
+			RowBased:       true,
+			Files:          []string{"f1", "f2", "f3"},
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp9.Status.ErrorCode)
+
+		rsp10, err := core.GetImportState(ctx, &milvuspb.GetImportStateRequest{
+			Task: 0,
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp10.Status.ErrorCode)
+
+		rsp11, err := core.ReportImport(ctx, &rootcoordpb.ImportResult{
+			RowCount: 0,
+		})
+		assert.Nil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp11.ErrorCode)
 	})
 
+	wg.Add(1)
 	t.Run("alloc_error", func(t *testing.T) {
+		defer wg.Done()
 		core.Stop()
 		core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 			return 0, 0, fmt.Errorf("id allocator error test")
@@ -1908,6 +2418,7 @@ func TestRootCoord(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, p2.Status.ErrorCode)
 	})
+	wg.Wait()
 	err = core.Stop()
 	assert.Nil(t, err)
 }
@@ -1924,19 +2435,21 @@ func TestRootCoord2(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-
-	err = core.Register()
-	assert.Nil(t, err)
+	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -1963,26 +2476,30 @@ func TestRootCoord2(t *testing.T) {
 		return nil, nil
 	}
 
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
 	err = core.Start()
 	assert.Nil(t, err)
 
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
 
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("time tick", func(t *testing.T) {
+		defer wg.Done()
 		ttmsg, ok := <-timeTickStream.Chan()
 		assert.True(t, ok)
 		assert.Equal(t, 1, len(ttmsg.Msgs))
@@ -1991,7 +2508,9 @@ func TestRootCoord2(t *testing.T) {
 		assert.Greater(t, ttm.Base.Timestamp, typeutil.Timestamp(0))
 	})
 
+	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
+		defer wg.Done()
 		schema := schemapb.CollectionSchema{
 			Name: collName,
 		}
@@ -2012,9 +2531,10 @@ func TestRootCoord2(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
-		pChan := core.MetaTable.ListCollectionPhysicalChannels()
+		collInfo, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.Nil(t, err)
 		dmlStream, _ := msFactory.NewMsgStream(ctx)
-		dmlStream.AsConsumer([]string{pChan[0]}, Params.MsgChannelSubName)
+		dmlStream.AsConsumer([]string{collInfo.PhysicalChannelNames[0]}, Params.CommonCfg.RootCoordSubName)
 		dmlStream.Start()
 
 		msgs := getNotTtMsg(ctx, 1, dmlStream.Chan())
@@ -2025,7 +2545,9 @@ func TestRootCoord2(t *testing.T) {
 		t.Log("time tick", m1.Base.Timestamp)
 	})
 
+	wg.Add(1)
 	t.Run("describe collection", func(t *testing.T) {
+		defer wg.Done()
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		req := &milvuspb.DescribeCollectionRequest{
@@ -2043,10 +2565,11 @@ func TestRootCoord2(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, collName, rsp.Schema.Name)
 		assert.Equal(t, collMeta.ID, rsp.CollectionID)
-		assert.Equal(t, DefaultShardsNum, int32(len(rsp.VirtualChannelNames)))
-		assert.Equal(t, DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
-		assert.Equal(t, DefaultShardsNum, rsp.ShardsNum)
+		assert.Equal(t, common.DefaultShardsNum, int32(len(rsp.VirtualChannelNames)))
+		assert.Equal(t, common.DefaultShardsNum, int32(len(rsp.PhysicalChannelNames)))
+		assert.Equal(t, common.DefaultShardsNum, rsp.ShardsNum)
 	})
+	wg.Wait()
 	err = core.Stop()
 	assert.Nil(t, err)
 }
@@ -2061,7 +2584,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.MetaTable = &metaTable{}
+	c.MetaTable = &MetaTable{}
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
@@ -2097,8 +2620,12 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.SendDdCreateCollectionReq = func(context.Context, *internalpb.CreateCollectionRequest, []string) error {
-		return nil
+	c.impTaskKv = &etcdkv.EtcdKV{}
+	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.SendDdCreateCollectionReq = func(context.Context, *internalpb.CreateCollectionRequest, []string) (map[string][]byte, error) {
+		return map[string][]byte{}, nil
 	}
 	err = c.checkInit()
 	assert.NotNil(t, err)
@@ -2139,7 +2666,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.NotNil(t, err)
 
-	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	c.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error) {
 		return 0, nil
 	}
 	err = c.checkInit()
@@ -2167,7 +2694,21 @@ func TestCheckInit(t *testing.T) {
 		return nil
 	}
 	err = c.checkInit()
+	assert.NotNil(t, err)
+
+	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
+		return nil
+	}
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+	}
+	err = c.checkInit()
 	assert.Nil(t, err)
+
 	err = c.Stop()
 	assert.Nil(t, err)
 }
@@ -2184,19 +2725,16 @@ func TestCheckFlushedSegments(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
 
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-
-	err = core.Register()
-	assert.Nil(t, err)
+	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2223,25 +2761,33 @@ func TestCheckFlushedSegments(t *testing.T) {
 		return nil, nil
 	}
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
 	err = core.Start()
 	assert.Nil(t, err)
 
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 	t.Run("check flushed segments", func(t *testing.T) {
+		defer wg.Done()
 		ctx := context.Background()
 		var collID int64 = 1
 		var partID int64 = 2
@@ -2309,7 +2855,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 		core.MetaTable.indexID2Meta[indexID] = etcdpb.IndexInfo{
 			IndexID: indexID,
 		}
-		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo) (int64, error) {
+		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo, numRows int64) (int64, error) {
 			assert.Equal(t, fieldID, field.FieldID)
 			assert.Equal(t, indexID, idx.IndexID)
 			return -1, errors.New("build index build")
@@ -2318,12 +2864,13 @@ func TestCheckFlushedSegments(t *testing.T) {
 		core.checkFlushedSegments(ctx)
 
 		var indexBuildID int64 = 10001
-		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo) (int64, error) {
+		core.CallBuildIndexService = func(_ context.Context, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo, numRows int64) (int64, error) {
 			return indexBuildID, nil
 		}
 		core.checkFlushedSegments(core.ctx)
 
 	})
+	wg.Wait()
 	err = core.Stop()
 	assert.Nil(t, err)
 }
@@ -2340,20 +2887,16 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 
 	msFactory := msgstream.NewPmsFactory()
 	Params.Init()
-	Params.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
 	core, err := NewCore(ctx, msFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
-
-	Params.TimeTickChannel = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.StatisticsChannel = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.MetaRootPath)
-	Params.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.KvRootPath)
-	Params.MsgChannelSubName = fmt.Sprintf("subname-%d", randVal)
-
-	err = core.Register()
-	assert.Nil(t, err)
+	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 
 	dm := &dataMock{randVal: randVal}
 	err = core.SetDataCoord(ctx, dm)
@@ -2380,21 +2923,26 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 		return nil, nil
 	}
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
 	err = core.Start()
 	assert.Nil(t, err)
 
-	m := map[string]interface{}{
-		"receiveBufSize": 1024,
-		"pulsarAddress":  Params.PulsarAddress,
-		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.Nil(t, err)
+
+	err = msFactory.Init(&Params)
 	assert.Nil(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.TimeTickChannel}, Params.MsgChannelSubName)
+	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
 	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
@@ -2429,4 +2977,18 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	})
 	err = core.Stop()
 	assert.Nil(t, err)
+}
+
+func TestCore_GetComponentStates(t *testing.T) {
+	n := &Core{}
+	n.stateCode.Store(internalpb.StateCode_Healthy)
+	resp, err := n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, common.NotRegisteredID, resp.State.NodeID)
+	n.session = &sessionutil.Session{}
+	n.session.UpdateRegistered(true)
+	resp, err = n.GetComponentStates(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }

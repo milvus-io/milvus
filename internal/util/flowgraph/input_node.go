@@ -1,50 +1,72 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package flowgraph
 
 import (
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
+	"go.uber.org/zap"
 )
 
+// InputNode is the entry point of flowgragh
 type InputNode struct {
 	BaseNode
-	inStream *msgstream.MsgStream
+	inStream msgstream.MsgStream
 	name     string
 }
 
+// IsInputNode returns whether Node is InputNode
 func (inNode *InputNode) IsInputNode() bool {
 	return true
 }
 
-func (inNode *InputNode) Close() {
-	// do nothing
+// Start is used to start input msgstream
+func (inNode *InputNode) Start() {
+	inNode.inStream.Start()
 }
 
+// Close implements node
+func (inNode *InputNode) Close() {
+	inNode.inStream.Close()
+	log.Debug("message stream closed",
+		zap.String("node name", inNode.name),
+	)
+}
+
+// Name returns node name
 func (inNode *InputNode) Name() string {
 	return inNode.name
 }
 
-func (inNode *InputNode) InStream() *msgstream.MsgStream {
+// InStream returns the internal MsgStream
+func (inNode *InputNode) InStream() msgstream.MsgStream {
 	return inNode.inStream
 }
 
-// empty input and return one *Msg
+// Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
-	//fmt.Println("Do InputNode operation")
-
-	msgPack := (*inNode.inStream).Consume()
+	msgPack, ok := <-inNode.inStream.Chan()
+	if !ok {
+		log.Warn("Receive Msg failed from upstream node", zap.Any("input node", inNode.Name()))
+		return []Msg{}
+	}
 
 	// TODO: add status
 	if msgPack == nil {
@@ -73,7 +95,8 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	return []Msg{msgStreamMsg}
 }
 
-func NewInputNode(inStream *msgstream.MsgStream, nodeName string, maxQueueLength int32, maxParallelism int32) *InputNode {
+// NewInputNode composes an InputNode with provided MsgStream, name and parameters
+func NewInputNode(inStream msgstream.MsgStream, nodeName string, maxQueueLength int32, maxParallelism int32) *InputNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)

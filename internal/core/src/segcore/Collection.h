@@ -11,9 +11,10 @@
 
 #pragma once
 
-#include "common/Schema.h"
-#include <string>
 #include <memory>
+#include <string>
+
+#include "common/Schema.h"
 
 namespace milvus::segcore {
 

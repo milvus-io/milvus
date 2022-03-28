@@ -9,13 +9,15 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <segcore/TimestampIndex.h>
+#include "TimestampIndex.h"
 
 namespace milvus::segcore {
+
 void
 TimestampIndex::set_length_meta(std::vector<int64_t> lengths) {
     lengths_ = std::move(lengths);
 }
+
 void
 TimestampIndex::build_with(const Timestamp* timestamps, int64_t size) {
     auto num_slice = lengths_.size();
@@ -45,6 +47,7 @@ TimestampIndex::build_with(const Timestamp* timestamps, int64_t size) {
     this->max_timestamp_ = last_max_v;
     this->timestamp_barriers_ = std::move(timestamp_barriers);
 }
+
 std::pair<int64_t, int64_t>
 TimestampIndex::get_active_range(Timestamp query_timestamp) const {
     if (query_timestamp >= max_timestamp_) {
@@ -59,14 +62,15 @@ TimestampIndex::get_active_range(Timestamp query_timestamp) const {
     Assert(0 <= block_id && block_id < lengths_.size());
     return {start_locs_[block_id], start_locs_[block_id + 1]};
 }
-boost::dynamic_bitset<>
+
+BitsetType
 TimestampIndex::GenerateBitset(Timestamp query_timestamp,
                                std::pair<int64_t, int64_t> active_range,
                                const Timestamp* timestamps,
                                int64_t size) {
     auto [beg, end] = active_range;
     Assert(beg < end);
-    boost::dynamic_bitset<> bitset;
+    BitsetType bitset;
     bitset.reserve(size);
     bitset.resize(beg, true);
     bitset.resize(size, false);
@@ -101,4 +105,5 @@ GenerateFakeSlices(const Timestamp* timestamps, int64_t size, int min_slice_leng
     results.push_back(slice_length);
     return results;
 }
+
 }  // namespace milvus::segcore

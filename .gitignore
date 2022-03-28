@@ -1,7 +1,14 @@
 # CLion generated files
+
+# This can ignore
+#   cmake-build-debug/
+#   proxy/cmake-build-debug/
+#   a/b/c/cmake-build-debug/
 **/cmake-build-debug/*
-**/cmake_build/*
 **/cmake-build-release/*
+**/cmake_build_release/*
+**/cmake_build/*
+
 internal/core/output/*
 internal/core/build/*
 internal/kv/rocksdb/cwrapper/output/*
@@ -14,10 +21,6 @@ internal/msgstream/pulsarms/client-cpp/build/*
 docker-compose-devcontainer.yml
 docker-compose-devcontainer.yml.tmp
 
-cmake-build-debug
-cmake-build-release
-cmake_build
-
 *.code-workspace
 
 # Docker generated cache file
@@ -27,10 +30,6 @@ cmake_build
 
 # proxy
 proxy/milvus
-proxy/cmake_build
-proxy/cmake-build-debug
-proxy/cmake-build-release
-proxy/cmake_build_release
 proxy/thirdparty/grpc-src
 proxy/thirdparty/grpc-build
 proxy/milvus/*
@@ -39,16 +38,9 @@ proxy/suvlim/*
 
 proxy-go/proxy-go
 
-# sdk
-sdk/cmake_build
-sdk/cmake-build-debug
-sdk/cmake-build-release
-sdk/cmake_build_release
-
 # Compiled source
 bin/
 lib/
-cmake_build/
 *.a
 *.so
 *.so.*
@@ -60,10 +52,10 @@ cmake_build/
 *.pyc
 *.log
 
+# macOS generated files & other irrelevant files
 .DS_Store
 *.sw[po]
 cwrapper_build
-cwrapper_dablooms_build
 **/cwrapper_rocksdb_build/
 **/.clangd/*
 **/compile_commands.json
@@ -76,11 +68,18 @@ gtags.conf
 # Delve generated file
 **/__debug_bin
 
-# go-codecov
-coverage.txt
+# codecov-go generated files
+*coverage.txt
 profile.out
+*coverage.html
 cover.out
-coverage.html
+
+# codecov-cpp generated files
+lcov_*.info
+cpp_coverage/
 
 # virtualenv
 venv/
+
+# docker compose volumes
+deployments/docker/*/volumes

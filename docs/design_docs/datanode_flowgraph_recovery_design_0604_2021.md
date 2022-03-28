@@ -4,12 +4,17 @@ update: 6.4.2021, by [Goose](https://github.com/XuanYang-cn)
 update: 6.21.2021, by [Goose](https://github.com/XuanYang-cn)
 
 ## 1. Common Sense
-A. 1 message stream to 1 vchannel, so there are 1 start position and 1 end position in 1 message pack
-B. Only when datanode flushes, datanode will update every segment's position
+
+A. One message stream to one vchannel, so there are one start and one end position in one message pack.
+
+B. Only when DataNode flushes, DataNode will update every segment's position.
 An optimization: update position of
-  - a. Current flushing segment 
-  - b. StartPosition of segments never been flushed.
+
+1. Current flushing segment
+2. StartPosition of segments has never been flushed.
+
 C. DataNode auto-flush is a valid flush.
+
 D. DDL messages are now in DML Vchannels.
 
 ## 2. Segments in Flowgraph
@@ -17,23 +22,29 @@ D. DDL messages are now in DML Vchannels.
 ![segments](graphs/segments.png)
 
 ## 3. Flowgraph Recovery
+
 ### A. Save checkpoints
+
 When a flowgraph flushes a segment, we need to save these things:
-- current segment's binlog paths,
-- current segment positions,
-- all other segments' current positions from replica (If a segment hasn't been flushed, save the position when datanode first meet it.)
+
+- current segment's binlog paths.
+- current segment positions.
+- all other segments' current positions from the replica (If a segment hasn't been flushed, save the position when DataNode first meets it).
 
 Whether save successfully:
-- If successed, flowgraph updates all segments' position to replica
+
+- If succeeded, flowgraph updates all segments' positions to the replica.
 - If not
-    - For a grpc failure( this failure will appear after many times retry internally), crush itself.
-    - For a normal failure, retry save 10 times, if fail still, crush itself. 
+  - For a grpc failure(this failure will appear after many times retry internally), crash itself.
+  - For a normal failure, retry save 10 times, if still fails, crash itself.
 
 ### B. Recovery from a set of checkpoints
-1. We need all positions of all segments in this vchannel `p1, p2, ... pn`
 
-A design of WatchDmChannelReq
-``` proto
+1. We need all positions of all segments in this vchannel `p1, p2, ... pn`.
+
+Proto design for WatchDmChannelReq:
+
+```proto
 message VchannelInfo {
   int64 collectionID = 1;
   string channelName = 2;
@@ -52,17 +63,18 @@ message WatchDmChannelsRequest {
 
 ![recovery](graphs/flowgraph_recovery_design.png)
 
-Supposing we have segment `s1, s2, s3`, corresponding position `p1, p2, p3`
-  - Sort positions in reverse order `p3, p2, p1`
-  - Get segments dup range time: `s3 ( p3 > mp_px > p1)`, `s2 (p2 > mp_px > p1)`, `s1(zero)`
-  - Seek from the earliest, in this example `p1`
-  - Then for every msgPack after seeking `p1`,  the pseudocode:
+Supposing we have segments `s1, s2, s3`, corresponding positions `p1, p2, p3`
+
+- Sort positions in reverse order `p3, p2, p1`
+- Get segments dup range time: `s3 ( p3 > mp_px > p1)`, `s2 (p2 > mp_px > p1)`, `s1(zero)`
+- Seek from the earliest, in this example `p1`
+- Then for every msgPack after seeking `p1`, the pseudocode:
 
 ```go
 const filter_threshold = recovery_time
 // mp means msgPack
 for mp := seeking(p1) {
-    if mp.position.endtime < filter_threshod {  
+    if mp.position.endtime < filter_threshod {
         if mp.position < p3 {
             filter s3
         }
@@ -72,6 +84,3 @@ for mp := seeking(p1) {
     }
 }
 ```
-
-
-

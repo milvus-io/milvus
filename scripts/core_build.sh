@@ -1,8 +1,34 @@
 #!/usr/bin/env bash
 
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Compile jobs variable; Usage: $ jobs=12 ./core_build.sh ...
 if [[ ! ${jobs+1} ]]; then
-    jobs=$(nproc)
+    if command -v nproc &> /dev/null
+    # For linux
+    then
+        jobs=$(nproc)
+    elif command -v sysctl &> /dev/null
+    # For macOS
+    then
+        jobs=$(sysctl -n hw.logicalcpu)
+    else
+        jobs=4
+    fi
 fi
 
 SOURCE="${BASH_SOURCE[0]}"
@@ -29,8 +55,9 @@ GPU_VERSION="OFF" #defaults to CPU version
 WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
+EMBEDDED_MILVUS="OFF"
 
-while getopts "p:d:t:s:f:ulrcghzme" arg; do
+while getopts "p:d:t:s:f:ulrcghzmeb" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -71,6 +98,9 @@ while getopts "p:d:t:s:f:ulrcghzme" arg; do
   s)
     CUDA_ARCH=$OPTARG
     ;;
+  b)
+    EMBEDDED_MILVUS="ON"
+    ;;
   h) # help
     echo "
 
@@ -87,10 +117,11 @@ parameter:
 -g: build GPU version(default: OFF)
 -e: build without prometheus(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
+-b: build embedded milvus(default: OFF)
 -h: help
 
 usage:
-./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h]
+./core_build.sh -p \${INSTALL_PREFIX} -t \${BUILD_TYPE} -s \${CUDA_ARCH} -f\${CUSTOM_THIRDPARTY_PATH} [-u] [-l] [-r] [-c] [-z] [-g] [-m] [-e] [-h] [-b]
                 "
     exit 0
     ;;
@@ -105,10 +136,30 @@ if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
 fi
 
+CMAKE_GENERATOR="Unix Makefiles"
+
+# MSYS system
+if [ "$MSYSTEM" == "MINGW64" ] ; then
+  BUILD_COVERAGE=OFF
+  PROFILING=OFF
+  GPU_VERSION=OFF
+  WITH_PROMETHEUS=OFF
+  CUDA_ARCH=OFF
+
+  # extra default cmake args for msys
+  CMAKE_GENERATOR="MSYS Makefiles"
+
+  # clang tools path
+  export CLANG_TOOLS_PATH=/mingw64/bin
+
+  # using system blas
+  export OpenBLAS_HOME="$(cygpath -w /mingw64)"
+fi
+
 pushd ${BUILD_OUTPUT_DIR}
 
-# remove make cache since build.sh -l use default variables
-# force update the variables each time
+# Remove make cache since build.sh -l use default variables
+# Force update the variables each time
 make rebuild_cache >/dev/null 2>&1
 
 
@@ -118,7 +169,22 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
   exit 0
 fi
 
+unameOut="$(uname -s)"
+case "${unameOut}" in
+    Darwin*)
+        llvm_prefix="$(brew --prefix llvm)"
+        export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
+        export CC="${llvm_prefix}/bin/clang"
+        export CXX="${llvm_prefix}/bin/clang++"
+        export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
+        export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
+        ;;
+          *)   echo "==System:${unameOut}";
+esac
+
+
 CMAKE_CMD="cmake \
+${CMAKE_EXTRA_ARGS} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
 -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -131,9 +197,11 @@ CMAKE_CMD="cmake \
 -DMILVUS_WITH_PROMETHEUS=${WITH_PROMETHEUS} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
+-DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 ${CPP_SRC_DIR}"
+
 echo ${CMAKE_CMD}
-${CMAKE_CMD}
+${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 
 
 if [[ ${RUN_CPPLINT} == "ON" ]]; then

@@ -1,0 +1,11 @@
+header:
+  license:
+    spdx-id: Apache-2.0
+    copyright-owner: LF AI & Data foundation
+
+  paths:
+    - 'internal/**/*.go'
+
+dependency:
+  files:
+    - go.mod

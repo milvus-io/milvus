@@ -10,8 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
-#include <iostream>
 #include <random>
 #include <string>
 #include <thread>
@@ -19,22 +17,11 @@
 
 #include "segcore/ConcurrentVector.h"
 #include "segcore/SegmentGrowing.h"
-// #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-
-#include "segcore/SegmentGrowing.h"
 #include "segcore/AckResponder.h"
 
-using std::cin;
-using std::cout;
-using std::endl;
 using namespace milvus::engine;
 using namespace milvus::segcore;
 using std::vector;
-
-TEST(ConcurrentVector, TestABI) {
-    ASSERT_EQ(TestABI(), 42);
-    assert(true);
-}
 
 TEST(ConcurrentVector, TestSingle) {
     auto dim = 8;
@@ -68,14 +55,12 @@ TEST(ConcurrentVector, TestMultithreads) {
 
     ConcurrentVectorImpl<int64_t, false> c_vec(dim, 32);
     std::atomic<int64_t> ack_counter = 0;
-    //    std::mutex mutex;
 
     auto executor = [&](int thread_id) {
         std::default_random_engine e(42 + thread_id);
         int64_t data = 0;
         int64_t total_count = 0;
-        for (int i = 0; i < 10000; ++i) {
-            // std::lock_guard lck(mutex);
+        for (int i = 0; i < 2000; ++i) {
             int insert_size = e() % 150;
             vector<int64_t> vec(insert_size * dim);
             for (auto& x : vec) {
@@ -109,6 +94,7 @@ TEST(ConcurrentVector, TestMultithreads) {
         }
     }
 }
+
 TEST(ConcurrentVector, TestAckSingle) {
     std::vector<std::tuple<int64_t, int64_t, int64_t>> raw_data;
     std::default_random_engine e(42);

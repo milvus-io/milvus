@@ -97,6 +97,26 @@ message DropPartitionRequest {
   int64 partitionID = 7;
 }
 
+message CreateAliasRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string alias = 4;
+}
+
+message DropAliasRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string alias = 3;
+}
+
+message AlterAliasRequest{
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string alias = 4;
+}
+
 message CreateIndexRequest {
   common.MsgBase base = 1;
   string db_name = 2;
@@ -108,19 +128,29 @@ message CreateIndexRequest {
   repeated common.KeyValuePair extra_params = 8;
 }
 
+enum InsertDataVersion {
+  // 0 must refer to row-based format, since it's the first version in Milvus.
+  RowBased = 0;
+  ColumnBased = 1;
+}
+
 message InsertRequest {
   common.MsgBase base = 1;
-  string db_name = 2;
-  string collection_name = 3;
-  string partition_name = 4;
-  int64 dbID = 5;
-  int64 collectionID = 6;
-  int64 partitionID = 7;
-  int64 segmentID = 8;
-  string channelID = 9;
+  string shardName = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  string partition_name = 5;
+  int64 dbID = 6;
+  int64 collectionID = 7;
+  int64 partitionID = 8;
+  int64 segmentID = 9;
   repeated uint64 timestamps = 10;
   repeated int64 rowIDs = 11;
+  // row_data was reserved for compatibility
   repeated common.Blob row_data = 12;
+  repeated schema.FieldData fields_data = 13;
+  uint64 num_rows = 14;
+  InsertDataVersion version = 15;
 }
 
 message SearchRequest {
@@ -137,6 +167,7 @@ message SearchRequest {
   repeated int64 output_fields_id = 10;
   uint64 travel_timestamp = 11;
   uint64 guarantee_timestamp = 12;
+  uint64 timeout_timestamp = 13;
 }
 
 message SearchResults {
@@ -165,6 +196,7 @@ message RetrieveRequest {
   repeated int64 output_fields_id = 7;
   uint64 travel_timestamp = 8;
   uint64 guarantee_timestamp = 9;
+  uint64 timeout_timestamp = 10;
 }
 
 message RetrieveResults {
@@ -180,15 +212,15 @@ message RetrieveResults {
 
 message DeleteRequest {
   common.MsgBase base = 1;
-  string collection_name = 2;
-  string channelID = 3;
-  repeated uint64 timestamps = 4;
-  repeated int64 primary_keys = 5;
-}
-
-message LoadBalanceSegmentsRequest {
-  common.MsgBase base = 1;
-  repeated int64 segmentIDs = 2;
+  string shardName = 2;
+  string db_name = 3;
+  string collection_name = 4;
+  string partition_name = 5;
+  int64 dbID = 6;
+  int64 collectionID = 7;
+  int64 partitionID = 8;
+  repeated int64 primary_keys = 9;
+  repeated uint64 timestamps = 10;
 }
 
 message LoadIndex {
@@ -198,21 +230,6 @@ message LoadIndex {
   int64 fieldID = 4;
   repeated string index_paths = 5;
   repeated common.KeyValuePair index_params = 6;
-}
-
-message SegmentStatisticsUpdates {
-  int64 SegmentID = 1;
-  int64 MemorySize = 2;
-  int64 NumRows = 3;
-  uint64 create_time = 4;
-  uint64 end_time = 5;
-  internal.MsgPosition start_position = 6;
-  internal.MsgPosition end_position = 7;
-}
-
-message SegmentStatistics {
-  common.MsgBase base = 1;
-  repeated SegmentStatisticsUpdates SegStats = 2;
 }
 
 message IndexStats {

@@ -10,21 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
 #include <gtest/gtest.h>
-
-#include <iostream>
+#include <random>
 #include <string>
 
-// #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-// #include "segment/SegmentReader.h"
-// #include "segment/SegmentWriter.h"
-#include "segcore/SegmentGrowing.h"
-// #include "utils/Json.h"
-#include "test_utils/DataGen.h"
-#include <random>
-#include <optional>
-using std::cin;
-using std::cout;
-using std::endl;
+#include "segcore/SegmentGrowingImpl.h"
+
 using namespace milvus;
 
 namespace {
@@ -53,26 +43,20 @@ generate_data(int N) {
 }
 }  // namespace
 
-TEST(SegmentCoreTest, TestABI) {
-    using namespace milvus::engine;
-    using namespace milvus::segcore;
-    ASSERT_EQ(TestABI(), 42);
-    assert(true);
-}
-
 TEST(SegmentCoreTest, NormalDistributionTest) {
     using namespace milvus::segcore;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
-    int N = 1000 * 1000;
+    int N = 100 * 1000;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->PreDelete(N);
 }
 
+// Test insert row-based data
 TEST(SegmentCoreTest, MockTest) {
     using namespace milvus::segcore;
     using namespace milvus::engine;
@@ -112,12 +96,84 @@ TEST(SegmentCoreTest, MockTest) {
     i++;
 }
 
+// Test insert column-based data
+TEST(SegmentCoreTest, MockTest2) {
+    using namespace milvus::segcore;
+    using namespace milvus::engine;
+
+    // schema
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("age", DataType::INT32);
+
+    // generate random row-based data
+    std::vector<char> row_data;
+    std::vector<Timestamp> timestamps;
+    std::vector<int64_t> uids;
+    int N = 10000;  // number of records
+    std::default_random_engine e(67);
+    for (int i = 0; i < N; ++i) {
+        uids.push_back(100000 + i);
+        timestamps.push_back(0);
+        // append vec
+        float vec[16];
+        for (auto& x : vec) {
+            x = e() % 2000 * 0.001 - 1.0;
+        }
+        row_data.insert(row_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        int age = e() % 100;
+        row_data.insert(row_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+    }
+    auto line_sizeof = (sizeof(int) + sizeof(float) * 16);
+    assert(row_data.size() == line_sizeof * N);
+
+    int64_t size = N;
+    const int64_t* uids_raw = uids.data();
+    const Timestamp* timestamps_raw = timestamps.data();
+    std::vector<std::tuple<Timestamp, idx_t, int64_t>> ordering(size);  // timestamp, pk, order_index
+    for (int i = 0; i < size; ++i) {
+        ordering[i] = std::make_tuple(timestamps_raw[i], uids_raw[i], i);
+    }
+    std::sort(ordering.begin(), ordering.end());  // sort according to timestamp
+
+    // convert row-based data to column-based data accordingly
+    auto sizeof_infos = schema->get_sizeof_infos();
+    std::vector<int> offset_infos(schema->size() + 1, 0);
+    std::partial_sum(sizeof_infos.begin(), sizeof_infos.end(), offset_infos.begin() + 1);
+    std::vector<aligned_vector<uint8_t>> entities(schema->size());
+
+    for (int fid = 0; fid < schema->size(); ++fid) {
+        auto len = sizeof_infos[fid];
+        entities[fid].resize(len * size);
+    }
+
+    auto raw_data = row_data.data();
+    std::vector<idx_t> sorted_uids(size);
+    std::vector<Timestamp> sorted_timestamps(size);
+    for (int index = 0; index < size; ++index) {
+        auto [t, uid, order_index] = ordering[index];
+        sorted_timestamps[index] = t;
+        sorted_uids[index] = uid;
+        for (int fid = 0; fid < schema->size(); ++fid) {
+            auto len = sizeof_infos[fid];
+            auto offset = offset_infos[fid];
+            auto src = raw_data + order_index * line_sizeof + offset;
+            auto dst = entities[fid].data() + index * len;
+            memcpy(dst, src, len);
+        }
+    }
+
+    // insert column-based data
+    ColumnBasedRawData data_chunk{entities, N};
+    auto segment = CreateGrowingSegment(schema);
+    auto reserved_begin = segment->PreInsert(N);
+    segment->Insert(reserved_begin, size, sorted_uids.data(), sorted_timestamps.data(), data_chunk);
+}
+
 TEST(SegmentCoreTest, SmallIndex) {
     using namespace milvus::segcore;
     using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
-    int N = 1024 * 1024;
-    auto data = DataGen(schema, N);
 }

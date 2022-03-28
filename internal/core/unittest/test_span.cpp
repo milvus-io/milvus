@@ -10,15 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include "utils/tools.h"
-#include "test_utils/DataGen.h"
+
 #include "segcore/SegmentGrowing.h"
+#include "test_utils/DataGen.h"
+#include "utils/Utils.h"
+
+const int64_t ROW_COUNT = 100 * 1000;
 
 TEST(Span, Naive) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
-    int64_t N = 1000 * 1000;
+    int64_t N = ROW_COUNT;
     constexpr int64_t size_per_chunk = 32 * 1024;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("binaryvec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
@@ -27,7 +30,7 @@ TEST(Span, Naive) {
 
     auto dataset = DataGen(schema, N);
     auto seg_conf = SegcoreConfig::default_config();
-    auto segment = CreateGrowingSegment(schema, seg_conf);
+    auto segment = CreateGrowingSegment(schema, -1, seg_conf);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
     auto vec_ptr = dataset.get_col<uint8_t>(0);

@@ -1,8 +1,12 @@
 syntax = "proto3";
-
 package milvus.proto.common;
+
 option go_package="github.com/milvus-io/milvus/internal/proto/commonpb";
 
+option java_multiple_files = true;
+option java_package = "io.milvus.grpc";
+option java_outer_classname = "CommonProto";
+option java_generate_equals_and_hash = true;
 
 enum ErrorCode {
     Success = 0;
@@ -51,6 +55,7 @@ enum SegmentState {
     Sealed = 3;
     Flushed = 4;
     Flushing = 5;
+    Dropped = 6;
 }
 
 message Status {
@@ -61,6 +66,11 @@ message Status {
 message KeyValuePair {
     string key = 1;
     string value = 2;
+}
+
+message KeyDataPair {
+    string key = 1;
+    bytes data = 2;
 }
 
 message Blob {
@@ -83,6 +93,10 @@ enum MsgType {
     GetSystemConfigs = 105;
     LoadCollection = 106;
     ReleaseCollection = 107;
+    CreateAlias = 108;
+    DropAlias = 109;
+    AlterAlias = 110;
+
 
     /* DEFINITION REQUESTS: PARTITION */
     CreatePartition = 200;
@@ -124,9 +138,14 @@ enum MsgType {
     RemoveDmChannels = 509;
     WatchQueryChannels = 510;
     RemoveQueryChannels = 511;
+    SealedSegmentsChangeInfo = 512;
+    WatchDeltaChannels = 513;
 
     /* DATA SERVICE */
     SegmentInfo = 600;
+    SystemInfo = 601;
+    GetRecoveryInfo = 602;
+    GetSegmentState = 603;
 
     /* SYSTEM CONTROL */
     TimeTick = 1200;
@@ -156,4 +175,34 @@ enum DslType {
 // Don't Modify This. @czs
 message MsgHeader {
     common.MsgBase base = 1;
+}
+
+// Don't Modify This. @czs
+message DMLMsgHeader {
+    common.MsgBase base = 1;
+    string shardName = 2;
+}
+
+enum CompactionState {
+  UndefiedState = 0;
+  Executing = 1;
+  Completed = 2;
+}
+
+enum ConsistencyLevel {
+    Strong = 0;
+    Session = 1; // default in PyMilvus
+    Bounded = 2;
+    Eventually = 3;
+    Customized = 4; // Users pass their own `guarantee_timestamp`.
+}
+
+enum ImportState {
+    ImportPending = 0;
+    ImportFailed = 1;
+    ImportStarted = 2;
+    ImportDownloaded = 3;
+    ImportParsed = 4;
+    ImportPersisted = 5;
+    ImportCompleted = 6;
 }

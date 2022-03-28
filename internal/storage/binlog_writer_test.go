@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package storage
 
@@ -17,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -37,7 +43,9 @@ func TestBinlogWriterReader(t *testing.T) {
 	nums, err := binlogWriter.GetRowNums()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 3, nums)
-	err = binlogWriter.Close()
+	sizeTotal := 20000000
+	binlogWriter.baseBinlogWriter.descriptorEventData.AddExtra(originalSizeKey, fmt.Sprintf("%v", sizeTotal))
+	err = binlogWriter.Finish()
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, binlogWriter.GetEventNums())
 	nums, err = binlogWriter.GetRowNums()
@@ -52,6 +60,7 @@ func TestBinlogWriterReader(t *testing.T) {
 	buffer, err := binlogWriter.GetBuffer()
 	assert.Nil(t, err)
 	fmt.Println("reader offset : " + strconv.Itoa(len(buffer)))
+	binlogWriter.Close()
 
 	binlogReader, err := NewBinlogReader(buffer)
 	assert.Nil(t, err)

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package proxy
 
@@ -15,24 +20,35 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+// Cache is the interface for system meta data cache
 type Cache interface {
+	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
+	// GetCollectionInfo get collection's information by name, such as collection id, schema, and etc.
 	GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error)
+	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error)
+	// GetPartitions get all partitions' id of specific collection.
 	GetPartitions(ctx context.Context, collectionName string) (map[string]typeutil.UniqueID, error)
+	// GetPartitionInfo get partition's info.
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
+	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
@@ -52,6 +68,10 @@ type partitionInfo struct {
 	createdUtcTimestamp uint64
 }
 
+// make sure MetaCache implements Cache.
+var _ Cache = (*MetaCache)(nil)
+
+// MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
 	client types.RootCoord
 
@@ -59,8 +79,10 @@ type MetaCache struct {
 	mu       sync.RWMutex
 }
 
+// globalMetaCache is singleton instance of Cache
 var globalMetaCache Cache
 
+// InitMetaCache initializes globalMetaCache
 func InitMetaCache(client types.RootCoord) error {
 	var err error
 	globalMetaCache, err = NewMetaCache(client)
@@ -70,6 +92,7 @@ func InitMetaCache(client types.RootCoord) error {
 	return nil
 }
 
+// NewMetaCache creates a MetaCache with provided RootCoord
 func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	return &MetaCache{
 		client:   client,
@@ -77,11 +100,14 @@ func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	}, nil
 }
 
+// GetCollectionID returns the corresponding collection id for provided collection name
 func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
 	m.mu.RLock()
 	collInfo, ok := m.collInfo[collectionName]
 
 	if !ok {
+		metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GeCollectionID", metrics.CacheMissLabel).Inc()
+		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.mu.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
@@ -90,14 +116,18 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.updateCollection(coll, collectionName)
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		collInfo = m.collInfo[collectionName]
 		return collInfo.collID, nil
 	}
 	defer m.mu.RUnlock()
+	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollectionID", metrics.CacheHitLabel).Inc()
 
 	return collInfo.collID, nil
 }
 
+// GetCollectionInfo returns the collection information related to provided collection name
+// If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error) {
 	m.mu.RLock()
 	var collInfo *collectionInfo
@@ -105,6 +135,8 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 	m.mu.RUnlock()
 
 	if !ok {
+		tr := timerecord.NewTimeRecorder("UpdateCache")
+		metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollectionInfo", metrics.CacheMissLabel).Inc()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
 			return nil, err
@@ -113,8 +145,9 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 		defer m.mu.Unlock()
 		m.updateCollection(coll, collectionName)
 		collInfo = m.collInfo[collectionName]
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
-
+	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollectionInfo", metrics.CacheHitLabel).Inc()
 	return &collectionInfo{
 		collID:              collInfo.collID,
 		schema:              collInfo.schema,
@@ -129,18 +162,28 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	collInfo, ok := m.collInfo[collectionName]
 
 	if !ok {
+		metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollectionSchema", metrics.CacheMissLabel).Inc()
+		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.mu.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
+			log.Warn("Failed to load collection from rootcoord ",
+				zap.String("collection name ", collectionName),
+				zap.Error(err))
 			return nil, err
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		m.updateCollection(coll, collectionName)
 		collInfo = m.collInfo[collectionName]
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		log.Debug("Reload collection from root coordinator ",
+			zap.String("collection name ", collectionName),
+			zap.Any("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
 	}
 	defer m.mu.RUnlock()
+	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollectionSchema", metrics.CacheHitLabel).Inc()
 
 	return collInfo.schema, nil
 }
@@ -179,6 +222,8 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 	}
 
 	if collInfo.partInfo == nil || len(collInfo.partInfo) == 0 {
+		tr := timerecord.NewTimeRecorder("UpdateCache")
+		metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetPartitions", metrics.CacheMissLabel).Inc()
 		m.mu.RUnlock()
 
 		partitions, err := m.showPartitions(ctx, collectionName)
@@ -189,8 +234,12 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
-		m.updatePartitions(partitions, collectionName)
-
+		err = m.updatePartitions(partitions, collectionName)
+		if err != nil {
+			return nil, err
+		}
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		log.Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		ret := make(map[string]typeutil.UniqueID)
 		partInfo := m.collInfo[collectionName].partInfo
 		for k, v := range partInfo {
@@ -200,6 +249,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 
 	}
 	defer m.mu.RUnlock()
+	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetPartitions", metrics.CacheHitLabel).Inc()
 
 	ret := make(map[string]typeutil.UniqueID)
 	partInfo := m.collInfo[collectionName].partInfo
@@ -229,6 +279,8 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 	m.mu.RUnlock()
 
 	if !ok {
+		tr := timerecord.NewTimeRecorder("UpdateCache")
+		metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetPartitionInfo", metrics.CacheMissLabel).Inc()
 		partitions, err := m.showPartitions(ctx, collectionName)
 		if err != nil {
 			return nil, err
@@ -236,15 +288,18 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		log.Debug("proxy", zap.Any("GetPartitionID:partitions before update", partitions), zap.Any("collectionName", collectionName))
-		m.updatePartitions(partitions, collectionName)
+		err = m.updatePartitions(partitions, collectionName)
+		if err != nil {
+			return nil, err
+		}
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
-
 		partInfo, ok = m.collInfo[collectionName].partInfo[partitionName]
 		if !ok {
 			return nil, fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
 		}
 	}
+	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetPartitionInfo", metrics.CacheHitLabel).Inc()
 	return &partitionInfo{
 		partitionID:         partInfo.partitionID,
 		createdTimestamp:    partInfo.createdTimestamp,
@@ -252,6 +307,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 	}, nil
 }
 
+// Get the collection information from rootcoord.
 func (m *MetaCache) describeCollection(ctx context.Context, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -281,7 +337,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 		CreatedUtcTimestamp:  coll.CreatedUtcTimestamp,
 	}
 	for _, field := range coll.Schema.Fields {
-		if field.FieldID >= 100 { // TODO(dragondriver): use StartOfUserField to replace 100
+		if field.FieldID >= common.StartOfUserFieldID {
 			resp.Schema.Fields = append(resp.Schema.Fields, field)
 		}
 	}
@@ -312,7 +368,7 @@ func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (
 	return partitions, nil
 }
 
-func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, collectionName string) {
+func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, collectionName string) error {
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		m.collInfo[collectionName] = &collectionInfo{
@@ -322,6 +378,11 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 	partInfo := m.collInfo[collectionName].partInfo
 	if partInfo == nil {
 		partInfo = map[string]*partitionInfo{}
+	}
+
+	// check partitionID, createdTimestamp and utcstamp has sam element numbers
+	if len(partitions.PartitionNames) != len(partitions.CreatedTimestamps) || len(partitions.PartitionNames) != len(partitions.CreatedUtcTimestamps) {
+		return errors.New("partition names and timestamps number is not aligned, response " + partitions.String())
 	}
 
 	for i := 0; i < len(partitions.PartitionIDs); i++ {
@@ -334,6 +395,7 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 		}
 	}
 	m.collInfo[collectionName].partInfo = partInfo
+	return nil
 }
 
 func (m *MetaCache) RemoveCollection(ctx context.Context, collectionName string) {

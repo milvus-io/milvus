@@ -1,5 +1,4 @@
 import time
-import pdb
 import copy
 import logging
 from milvus_benchmark import parser
@@ -48,6 +47,7 @@ class InsertRunner(BaseRunner):
             flush = False
         self.init_metric(self.name, collection_info, index_info, None)
         case_metric = copy.deepcopy(self.metric)
+        # set metric type as case
         case_metric.set_case_metric_type()
         case_metrics = list()
         case_params = list()
@@ -83,8 +83,7 @@ class InsertRunner(BaseRunner):
             logger.debug("Start drop collection")
             self.milvus.drop()
             time.sleep(utils.DELETE_INTERVAL_TIME)
-        self.milvus.create_collection(dimension, data_type=vector_type,
-                                          other_fields=other_fields)
+        self.milvus.create_collection(dimension, data_type=vector_type, other_fields=other_fields)
         # TODO: update fields in collection_info
         # fields = self.get_fields(self.milvus, collection_name)
         # collection_info = {
@@ -98,7 +97,7 @@ class InsertRunner(BaseRunner):
                 self.milvus.create_index(index_field_name, case_param["index_type"], case_param["metric_type"], index_param=case_param["index_param"])
                 logger.debug(self.milvus.describe_index(index_field_name))
             else:
-                build_index = False
+                # build_index = False
                 logger.warning("Please specify the index_type")
 
     # TODO: error handler

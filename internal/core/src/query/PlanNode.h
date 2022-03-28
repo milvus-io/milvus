@@ -10,14 +10,18 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <memory>
-#include <vector>
+
 #include <any>
-#include <string>
+#include <memory>
 #include <optional>
+#include <vector>
+#include <string>
+
 #include "Expr.h"
 #include "utils/Json.h"
+
 namespace milvus::query {
+
 class PlanNodeVisitor;
 
 // Base of all Nodes
@@ -32,6 +36,7 @@ using PlanNodePtr = std::unique_ptr<PlanNode>;
 
 struct SearchInfo {
     int64_t topk_;
+    int64_t round_decimal_;
     FieldOffset field_offset_;
     MetricType metric_type_;
     nlohmann::json search_params_;

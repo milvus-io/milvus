@@ -1,4 +1,3 @@
-import json
 import time
 import copy
 import logging
@@ -36,6 +35,7 @@ class AccuracyRunner(BaseRunner):
         filter_query = []
         top_ks = collection["top_ks"]
         nqs = collection["nqs"]
+        guarantee_timestamp = collection["guarantee_timestamp"] if "guarantee_timestamp" in collection else None
         search_params = collection["search_params"]
         search_params = utils.generate_combinations(search_params)
         cases = list()
@@ -62,12 +62,14 @@ class AccuracyRunner(BaseRunner):
                             "params": search_param}
                         # TODO: only update search_info
                         case_metric = copy.deepcopy(self.metric)
+                        # set metric type as case
                         case_metric.set_case_metric_type()
                         case_metric.search = {
                             "nq": nq,
                             "topk": top_k,
                             "search_param": search_param,
-                            "filter": filter_param
+                            "filter": filter_param,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         vector_query = {"vector": {index_field_name: search_info}}
                         case = {
@@ -79,7 +81,8 @@ class AccuracyRunner(BaseRunner):
                             "vector_type": vector_type,
                             "collection_size": collection_size,
                             "filter_query": filter_query,
-                            "vector_query": vector_query
+                            "vector_query": vector_query,
+                            "guarantee_timestamp": guarantee_timestamp
                         }
                         cases.append(case)
                         case_metrics.append(case_metric)
@@ -96,7 +99,8 @@ class AccuracyRunner(BaseRunner):
         collection_size = case_param["collection_size"]
         nq = case_metric.search["nq"]
         top_k = case_metric.search["topk"]
-        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                                      guarantee_timestamp=case_param["guarantee_timestamp"])
         true_ids = utils.get_ground_truth_ids(collection_size)
         logger.debug({"true_ids": [len(true_ids[0]), len(true_ids[0])]})
         result_ids = self.milvus.get_ids(query_res)
@@ -120,11 +124,13 @@ class AccAccuracyRunner(AccuracyRunner):
     def extract_cases(self, collection):
         collection_name = collection["collection_name"] if "collection_name" in collection else None
         (data_type, dimension, metric_type) = parser.parse_ann_collection_name(collection_name)
+        # hdf5_source_file: The path of the source data file saved on the NAS
         hdf5_source_file = collection["source_file"]
         index_types = collection["index_types"]
         index_params = collection["index_params"]
         top_ks = collection["top_ks"]
         nqs = collection["nqs"]
+        guarantee_timestamp = collection["guarantee_timestamp"] if "guarantee_timestamp" in collection else None
         search_params = collection["search_params"]
         vector_type = utils.get_vector_type(data_type)
         index_field_name = utils.get_default_field_name(vector_type)
@@ -136,11 +142,14 @@ class AccAccuracyRunner(AccuracyRunner):
         }
         filters = collection["filters"] if "filters" in collection else []
         filter_query = []
+        # Convert list data into a set of dictionary data
         search_params = utils.generate_combinations(search_params)
         index_params = utils.generate_combinations(index_params)
         cases = list()
         case_metrics = list()
         self.init_metric(self.name, collection_info, {}, search_info=None)
+
+        # true_ids: The data set used to verify the results returned by query
         true_ids = np.array(dataset["neighbors"])
         for index_type in index_types:
             for index_param in index_params:
@@ -169,13 +178,15 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "params": search_param}
                                 # TODO: only update search_info
                                 case_metric = copy.deepcopy(self.metric)
+                                # set metric type as case
                                 case_metric.set_case_metric_type()
                                 case_metric.index = index_info
                                 case_metric.search = {
                                     "nq": nq,
                                     "topk": top_k,
                                     "search_param": search_param,
-                                    "filter": filter_param
+                                    "filter": filter_param,
+                                    "guarantee_timestamp": guarantee_timestamp
                                 }
                                 vector_query = {"vector": {index_field_name: search_info}}
                                 case = {
@@ -190,13 +201,17 @@ class AccAccuracyRunner(AccuracyRunner):
                                     "index_param": index_param,
                                     "filter_query": filter_query,
                                     "vector_query": vector_query,
-                                    "true_ids": true_ids
+                                    "true_ids": true_ids,
+                                    "guarantee_timestamp": guarantee_timestamp
                                 }
+                                # Obtain the parameters of the use case to be tested
                                 cases.append(case)
                                 case_metrics.append(case_metric)
         return cases, case_metrics
 
     def prepare(self, **case_param):
+        """ According to the test case parameters, initialize the test """
+
         collection_name = case_param["collection_name"]
         metric_type = case_param["metric_type"]
         dimension = case_param["dimension"]
@@ -211,6 +226,7 @@ class AccAccuracyRunner(AccuracyRunner):
             self.milvus.drop()
         dataset = case_param["dataset"]
         self.milvus.create_collection(dimension, data_type=vector_type)
+        # Get the data set train for inserting into the collection
         insert_vectors = utils.normalize(metric_type, np.array(dataset["train"]))
         if len(insert_vectors) != dataset["train"].shape[0]:
             raise Exception("Row count of insert vectors: %d is not equal to dataset size: %d" % (
@@ -224,6 +240,7 @@ class AccAccuracyRunner(AccuracyRunner):
             start = i * INSERT_INTERVAL
             end = min((i + 1) * INSERT_INTERVAL, len(insert_vectors))
             if start < end:
+                # Insert up to INSERT_INTERVAL=50000 at a time
                 tmp_vectors = insert_vectors[start:end]
                 ids = [i for i in range(start, end)]
                 if not isinstance(tmp_vectors, list):
@@ -254,9 +271,26 @@ class AccAccuracyRunner(AccuracyRunner):
         true_ids = case_param["true_ids"]
         nq = case_metric.search["nq"]
         top_k = case_metric.search["topk"]
-        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"])
+        start_time = time.time()
+        end_time = start_time + 500
+        cnt = 0
+        while cnt < 100 and start_time < end_time:
+            self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                              guarantee_timestamp=case_param["guarantee_timestamp"])
+            cnt += 1
+            start_time = time.time()
+        query_res = self.milvus.query(case_param["vector_query"], filter_query=case_param["filter_query"],
+                                      guarantee_timestamp=case_param["guarantee_timestamp"])
         result_ids = self.milvus.get_ids(query_res)
+        # Calculate the accuracy of the result of query
         acc_value = utils.get_recall_value(true_ids[:nq, :top_k].tolist(), result_ids)
         tmp_result = {"acc": acc_value}
+        # Return accuracy results for reporting
         return tmp_result
 
+
+class AsyncThroughputRunner(AccuracyRunner):
+    name = "async_accuracy"
+
+    def __init__(self, env, metric):
+        super(AsyncThroughputRunner, self).__init__(env, metric)

@@ -9,21 +9,43 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "segcore/SegmentInterface.h"
+#include "SegmentInterface.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
+
 namespace milvus::segcore {
-class Naive;
+
+void
+SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const {
+    std::shared_lock lck(mutex_);
+    AssertInfo(plan, "empty plan");
+    auto size = results.distances_.size();
+    AssertInfo(results.ids_.size() == size, "Size of result distances is not equal to size of ids");
+    Assert(results.primary_keys_.size() == 0);
+    results.primary_keys_.resize(size);
+
+    auto element_sizeof = sizeof(int64_t);
+    aligned_vector<char> blob(size * element_sizeof);
+    if (plan->schema_.get_is_auto_id()) {
+        bulk_subscript(SystemFieldType::RowId, results.ids_.data(), size, blob.data());
+    } else {
+        auto key_offset_opt = get_schema().get_primary_key_offset();
+        AssertInfo(key_offset_opt.has_value(), "Cannot get primary key offset from schema");
+        auto key_offset = key_offset_opt.value();
+        AssertInfo(get_schema()[key_offset].get_data_type() == DataType::INT64, "Primary key field is not INT64 type");
+        bulk_subscript(key_offset, results.ids_.data(), size, blob.data());
+    }
+
+    memcpy(results.primary_keys_.data(), blob.data(), element_sizeof * size);
+}
 
 void
 SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult& results) const {
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
-    auto size = results.result_distances_.size();
-    Assert(results.internal_seg_offsets_.size() == size);
-    // Assert(results.result_offsets_.size() == size);
+    auto size = results.distances_.size();
+    AssertInfo(results.ids_.size() == size, "Size of result distances is not equal to size of ids");
     Assert(results.row_data_.size() == 0);
 
-    // std::vector<int64_t> row_ids(size);
     std::vector<int64_t> element_sizeofs;
     std::vector<aligned_vector<char>> blobs;
 
@@ -31,24 +53,25 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
     {
         aligned_vector<char> blob(size * sizeof(int64_t));
         if (plan->schema_.get_is_auto_id()) {
-            bulk_subscript(SystemFieldType::RowId, results.internal_seg_offsets_.data(), size, blob.data());
+            bulk_subscript(SystemFieldType::RowId, results.ids_.data(), size, blob.data());
         } else {
             auto key_offset_opt = get_schema().get_primary_key_offset();
-            Assert(key_offset_opt.has_value());
+            AssertInfo(key_offset_opt.has_value(), "Cannot get primary key offset from schema");
             auto key_offset = key_offset_opt.value();
-            Assert(get_schema()[key_offset].get_data_type() == DataType::INT64);
-            bulk_subscript(key_offset, results.internal_seg_offsets_.data(), size, blob.data());
+            AssertInfo(get_schema()[key_offset].get_data_type() == DataType::INT64,
+                       "Primary key field is not INT64 type");
+            bulk_subscript(key_offset, results.ids_.data(), size, blob.data());
         }
         blobs.emplace_back(std::move(blob));
         element_sizeofs.push_back(sizeof(int64_t));
     }
 
-    // fill other entries
+    // fill other entries except primary key
     for (auto field_offset : plan->target_entries_) {
         auto& field_meta = get_schema()[field_offset];
         auto element_sizeof = field_meta.get_sizeof();
         aligned_vector<char> blob(size * element_sizeof);
-        bulk_subscript(field_offset, results.internal_seg_offsets_.data(), size, blob.data());
+        bulk_subscript(field_offset, results.ids_.data(), size, blob.data());
         blobs.emplace_back(std::move(blob));
         element_sizeofs.push_back(element_sizeof);
     }
@@ -71,15 +94,16 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
     }
 }
 
-SearchResult
+std::unique_ptr<SearchResult>
 SegmentInternalInterface::Search(const query::Plan* plan,
                                  const query::PlaceholderGroup& placeholder_group,
                                  Timestamp timestamp) const {
     std::shared_lock lck(mutex_);
     check_search(plan);
     query::ExecPlanNodeVisitor visitor(*this, timestamp, placeholder_group);
-    auto results = visitor.get_moved_result(*plan->plan_node_);
-    results.segment_ = (void*)this;
+    auto results = std::make_unique<SearchResult>();
+    *results = visitor.get_moved_result(*plan->plan_node_);
+    results->segment_ = (void*)this;
     return results;
 }
 
@@ -161,7 +185,7 @@ CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_
                 break;
             }
             case DataType::VECTOR_BINARY: {
-                Assert(dim % 8 == 0);
+                AssertInfo(dim % 8 == 0, "Binary vector field dimension is not a multiple of 8");
                 auto num_bytes = count * dim / 8;
                 auto data = reinterpret_cast<const char*>(data_raw);
                 auto obj = vector_array->mutable_binary_vector();
@@ -199,9 +223,7 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
 
-    for (auto& seg_offset : retrieve_results.result_offsets_) {
-        results->add_offset(seg_offset);
-    }
+    results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(), retrieve_results.result_offsets_.end());
 
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
@@ -213,9 +235,8 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
         fields_data->AddAllocated(col_data);
         if (pk_offset.has_value() && pk_offset.value() == field_offset) {
             auto int_ids = ids->mutable_int_id();
-            for (int j = 0; j < col_data->scalars().long_data().data_size(); ++j) {
-                int_ids->add_data(col_data->scalars().long_data().data(j));
-            }
+            auto src_data = col_data->scalars().long_data();
+            int_ids->mutable_data()->Add(src_data.data().begin(), src_data.data().end());
         }
     }
     return results;

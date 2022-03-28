@@ -7,8 +7,6 @@ reviewers:
   - czs007
 
 approvers:
-  - pr-inspection
+  - maintainers
 
-labels:
-- component/querycoord
 

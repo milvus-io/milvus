@@ -12,19 +12,22 @@
 package timerecord
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// TimeRecorder provides methods to record time duration
 type TimeRecorder struct {
 	header string
 	start  time.Time
 	last   time.Time
 }
 
-// NewTimeRecorder create a new TimeRecorder
+// NewTimeRecorder creates a new TimeRecorder
 func NewTimeRecorder(header string) *TimeRecorder {
 	return &TimeRecorder{
 		header: header,
@@ -33,26 +36,39 @@ func NewTimeRecorder(header string) *TimeRecorder {
 	}
 }
 
-// Record calculates the time span from previous Record call
-func (tr *TimeRecorder) Record(msg string) time.Duration {
+// RecordSpan returns the duration from last record
+func (tr *TimeRecorder) RecordSpan() time.Duration {
 	curr := time.Now()
 	span := curr.Sub(tr.last)
 	tr.last = curr
+	return span
+}
+
+// ElapseSpan returns the duration from the beginning
+func (tr *TimeRecorder) ElapseSpan() time.Duration {
+	curr := time.Now()
+	span := curr.Sub(tr.start)
+	tr.last = curr
+	return span
+}
+
+// Record calculates the time span from previous Record call
+func (tr *TimeRecorder) Record(msg string) time.Duration {
+	span := tr.RecordSpan()
 	tr.printTimeRecord(msg, span)
 	return span
 }
 
 // Elapse calculates the time span from the beginning of this TimeRecorder
 func (tr *TimeRecorder) Elapse(msg string) time.Duration {
-	curr := time.Now()
-	span := curr.Sub(tr.start)
+	span := tr.ElapseSpan()
 	tr.printTimeRecord(msg, span)
 	return span
 }
 
 func (tr *TimeRecorder) printTimeRecord(msg string, span time.Duration) {
 	str := ""
-	if len(tr.header) != 0 {
+	if tr.header != "" {
 		str += tr.header + ": "
 	}
 	str += msg
@@ -60,4 +76,52 @@ func (tr *TimeRecorder) printTimeRecord(msg string, span time.Duration) {
 	str += strconv.Itoa(int(span.Milliseconds()))
 	str += "ms)"
 	log.Debug(str)
+}
+
+// LongTermChecker checks we receive at least one msg in d duration. If not, checker
+// will print a warn message.
+type LongTermChecker struct {
+	d    time.Duration
+	t    *time.Ticker
+	ch   chan struct{}
+	warn string
+	name string
+}
+
+// NewLongTermChecker creates a long term checker specified name, checking interval and warning string to print
+func NewLongTermChecker(ctx context.Context, name string, d time.Duration, warn string) *LongTermChecker {
+	c := &LongTermChecker{
+		name: name,
+		d:    d,
+		warn: warn,
+		ch:   make(chan struct{}),
+	}
+	return c
+}
+
+// Start starts the check process
+func (c *LongTermChecker) Start() {
+	c.t = time.NewTicker(c.d)
+	go func() {
+		for {
+			select {
+			case <-c.ch:
+				log.Warn(fmt.Sprintf("long term checker [%s] shutdown", c.name))
+				return
+			case <-c.t.C:
+				log.Warn(c.warn)
+			}
+		}
+	}()
+}
+
+// Check resets the time ticker
+func (c *LongTermChecker) Check() {
+	c.t.Reset(c.d)
+}
+
+// Stop stops the checker
+func (c *LongTermChecker) Stop() {
+	c.t.Stop()
+	close(c.ch)
 }

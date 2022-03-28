@@ -14,14 +14,14 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
-#include <stdlib.h>
 #include <stdint.h>
+#include <stdlib.h>
 
-#include "segcore/collection_c.h"
+#include "common/vector_index_c.h"
 #include "common/type_c.h"
+#include "segcore/collection_c.h"
 
 typedef void* CLoadIndexInfo;
-typedef void* CBinarySet;
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
@@ -37,15 +37,6 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info, int64_t field_id);
 
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set);
-
-CStatus
-NewBinarySet(CBinarySet* c_binary_set);
-
-void
-DeleteBinarySet(CBinarySet c_binary_set);
-
-CStatus
-AppendBinaryIndex(CBinarySet c_binary_set, void* index_binary, int64_t index_size, const char* c_index_key);
 
 #ifdef __cplusplus
 }

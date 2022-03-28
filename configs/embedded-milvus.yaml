@@ -1,0 +1,258 @@
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Related configuration of etcd, used to store Milvus metadata.
+etcd:
+  endpoints:
+    - localhost:2379
+  rootPath: by-dev # The root path where data is stored in etcd
+  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
+  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
+  log:
+    # path is one of:
+    #  - "default" as os.Stderr,
+    #  - "stderr" as os.Stderr,
+    #  - "stdout" as os.Stdout,
+    #  - file path to append server logs to.
+    path: /tmp/milvus/logs/etcd.log
+    level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  use:
+    embed: true # Whether to enable embedded Etcd (an in-process EtcdServer).
+
+# Related configuration of minio, which is responsible for data persistence for Milvus.
+minio:
+  address: localhost # Address of MinIO/S3
+  port: 9000   # Port of MinIO/S3
+  accessKeyID: minioadmin # accessKeyID of MinIO/S3
+  secretAccessKey: minioadmin # MinIO/S3 encryption string
+  useSSL: false # Access to MinIO/S3 with SSL
+  bucketName: "a-bucket" # Bucket name in MinIO/S3
+  rootPath: files # The root path where the message is stored in MinIO/S3
+
+# Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
+pulsar:
+  address: localhost # Address of pulsar
+  port: 6650 # Port of pulsar
+  maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
+
+rocksmq:
+  path: /tmp/milvus/rdb_data # The path where the message is stored in rocksmq
+  rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
+  retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes, The retention time of the message in rocksmq.
+  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
+
+# Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
+rootCoord:
+  address: localhost
+  port: 53100
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32, Maximum data size received by the server
+    serverMaxSendSize: 2147483647 # math.MaxInt32, Maximum data size sent by the server
+    clientMaxRecvSize: 104857600 # 100 MB, Maximum data size received by the client
+    clientMaxSendSize: 104857600 # 100 MB, Maximum data size sent by the client
+
+  dmlChannelNum: 256 # The number of dml channels created at system startup
+  maxPartitionNum: 4096 # Maximum number of partitions in a collection
+  minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
+
+# Related configuration of proxy, used to validate client requests and reduce the returned results.
+proxy:
+  port: 19530
+
+  http:
+    enabled: true # Whether to enable the http server
+    port: 8080 # Whether to enable the http server
+    readTimeout: 30000 # 30000 ms http read timeout
+    writeTimeout: 30000 # 30000 ms http write timeout
+
+  grpc:
+    serverMaxRecvSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
+    serverMaxSendSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+  timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
+  msgStream:
+    timeTick:
+      bufSize: 512
+  maxNameLength: 255  # Maximum length of name for a collection or alias
+  maxFieldNum: 256     # Maximum number of fields in a collection
+  maxDimension: 32768 # Maximum dimension of a vector
+  maxShardNum: 256 # Maximum number of shards in a collection
+  maxTaskNum: 1024 # max task number of proxy task queue
+  bufFlagExpireTime: 3600 # second, the time to expire bufFlag from cache in collectResultLoop
+  bufFlagCleanupInterval: 600 # second, the interval to clean bufFlag cache in collectResultLoop
+  ginLogging: false # Whether to produce gin logs.
+
+
+# Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
+queryCoord:
+  address: localhost
+  port: 19531
+  autoHandoff: true # Enable auto handoff
+  autoBalance: true # Enable auto balance
+  overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
+  balanceIntervalSeconds: 60
+  memoryUsageMaxDifferencePercentage: 30
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+# Related configuration of queryNode, used to run hybrid search between vector and scalar data.
+queryNode:
+  cacheSize: 32 # GB, default 32 GB, `cacheSize` is the memory used for caching data for faster query. The `cacheSize` must be less than system memory size.
+  gracefulTime: 0 # Minimum time before the newly inserted data can be searched (in ms)
+  port: 21123
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+  stats:
+    publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
+  dataSync:
+    flowGraph:
+      maxQueueLength: 1024 # Maximum length of task queue in flowgraph
+      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
+  msgStream:
+    search:
+      recvBufSize: 512 # msgPack channel buffer size
+      pulsarBufSize: 512 # pulsar channel buffer size
+    searchResult:
+      recvBufSize: 64 # msgPack channel buffer size
+  # Segcore will divide a segment into multiple chunks.
+  segcore:
+    chunkRows: 32768 # The number of vectors in a chunk.
+
+
+indexCoord:
+  address: localhost
+  port: 31000
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+indexNode:
+  port: 21121
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+dataCoord:
+  address: localhost
+  port: 13333
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+  enableCompaction: true # Enable data segment compression
+  enableGarbageCollection: false
+
+  segment:
+    maxSize: 512 # Maximum size of a segment in MB
+    sealProportion: 0.75 # It's the minimum proportion for a segment which can be sealed
+    assignmentExpiration: 2000 # The time of the assignment expiration in ms
+
+  compaction:
+    enableAutoCompaction: true
+    entityExpiration: 9223372037 # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and 9223372037 is the maximum value of entityExpiration
+
+  gc:
+    interval: 3600 # gc interval in seconds
+    missingTolerance: 86400 # file meta missing tolerance duration in seconds, 60*24
+    dropTolerance: 86400 # file belongs to dropped entity tolerance duration in seconds, 60*24
+
+
+dataNode:
+  port: 21124
+
+  grpc:
+    serverMaxRecvSize: 2147483647 # math.MaxInt32
+    serverMaxSendSize: 2147483647 # math.MaxInt32
+    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+  dataSync:
+    flowGraph:
+      maxQueueLength: 1024 # Maximum length of task queue in flowgraph
+      maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
+  flush:
+    # Max buffer size to flush for a single segment.
+    insertBufSize: 16777216 # Bytes, 16 MB
+
+# Configure whether to store the vector and the local path when querying/searching in Querynode.
+localStorage:
+  path: /tmp/milvus/data/
+  enabled: true
+
+# Configures the system log output.
+log:
+  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  file:
+    rootPath: /tmp/milvus/logs # default to stdout, stderr
+    maxSize: 300 # MB
+    maxAge: 10 # Maximum time for log retention in day.
+    maxBackups: 20
+  format: text # text/json
+
+common:
+  # Channel name generation rule: ${namePrefix}-${ChannelIdx}
+  chanNamePrefix:
+    cluster: "by-dev"
+    rootCoordTimeTick: "rootcoord-timetick"
+    rootCoordStatistics: "rootcoord-statistics"
+    rootCoordDml: "rootcoord-dml"
+    rootCoordDelta: "rootcoord-delta"
+    search: "search"
+    searchResult: "searchResult"
+    queryTimeTick: "queryTimeTick"
+    queryNodeStats: "query-node-stats"
+    # Cmd for loadIndex, flush, etc...
+    cmd: "cmd"
+    dataCoordStatistic: "datacoord-statistics-channel"
+    dataCoordTimeTick: "datacoord-timetick-channel"
+    dataCoordSegmentInfo: "segment-info-channel"
+
+  # Sub name generation rule: ${subNamePrefix}-${NodeID}
+  subNamePrefix:
+    rootCoordSubNamePrefix: "rootCoord"
+    proxySubNamePrefix: "proxy"
+    queryNodeSubNamePrefix: "queryNode"
+    dataNodeSubNamePrefix: "dataNode"
+    dataCoordSubNamePrefix: "dataCoord"
+
+  defaultPartitionName: "_default"  # default partition name for a collection
+  defaultIndexName: "_default_idx"  # default index name
+  retentionDuration: 432000 # 5 days in seconds
+
+  # Default value: auto
+  # Valid values: [auto, avx512, avx2, avx, sse4_2]
+  # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
+  simdType: auto

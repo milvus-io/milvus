@@ -1,5 +1,5 @@
 segcore:
-  chunk_size: 32768
+  chunk_rows: 32768
   small_index:
     - metric_type: ["L2", "IP"]
       index_type: "IVF"

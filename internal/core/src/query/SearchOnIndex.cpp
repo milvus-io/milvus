@@ -10,6 +10,8 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+
 namespace milvus::query {
 SubSearchResult
 SearchOnIndex(const dataset::SearchDataset& search_dataset,
@@ -20,7 +22,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto topK = search_dataset.topk;
     auto dim = search_dataset.dim;
     auto metric_type = search_dataset.metric_type;
-
+    auto round_decimal = search_dataset.round_decimal;
     auto dataset = knowhere::GenDataset(num_queries, dim, search_dataset.query_data);
 
     // NOTE: VecIndex Query API forget to add const qualifier
@@ -28,12 +30,13 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto& indexing_nonconst = const_cast<knowhere::VecIndex&>(indexing);
     auto ans = indexing_nonconst.Query(dataset, search_conf, bitset);
 
-    auto dis = ans->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    auto uids = ans->Get<int64_t*>(milvus::knowhere::meta::IDS);
+    auto dis = ans->Get<float*>(knowhere::meta::DISTANCE);
+    auto uids = ans->Get<int64_t*>(knowhere::meta::IDS);
 
-    SubSearchResult sub_qr(num_queries, topK, metric_type);
-    std::copy_n(dis, num_queries * topK, sub_qr.get_values());
-    std::copy_n(uids, num_queries * topK, sub_qr.get_labels());
+    SubSearchResult sub_qr(num_queries, topK, metric_type, round_decimal);
+    std::copy_n(dis, num_queries * topK, sub_qr.get_distances());
+    std::copy_n(uids, num_queries * topK, sub_qr.get_ids());
+    sub_qr.round_values();
     return sub_qr;
 }
 

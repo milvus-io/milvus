@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package grpcdatanode
 
@@ -21,45 +26,52 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
+	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dn "github.com/milvus-io/milvus/internal/datanode"
-	dsc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
+// Params contains parameters for datanode grpc server.
+var Params paramtable.GrpcServerConfig
+
 type Server struct {
-	datanode    *dn.DataNode
+	datanode    types.DataNodeComponent
 	wg          sync.WaitGroup
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
 	ctx         context.Context
 	cancel      context.CancelFunc
-
-	msFactory msgstream.Factory
+	etcdCli     *clientv3.Client
+	msFactory   msgstream.Factory
 
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	newRootCoordClient func(string, []string) (types.RootCoord, error)
-	newDataCoordClient func(string, []string) (types.DataCoord, error)
+	newRootCoordClient func(string, *clientv3.Client) (types.RootCoord, error)
+	newDataCoordClient func(string, *clientv3.Client) (types.DataCoord, error)
 
 	closer io.Closer
 }
 
-// NewServer new data node grpc server
+// NewServer new DataNode grpc server
 func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	var s = &Server{
@@ -67,11 +79,11 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 		cancel:      cancel,
 		msFactory:   factory,
 		grpcErrChan: make(chan error),
-		newRootCoordClient: func(etcdMetaRoot string, etcdEndpoints []string) (types.RootCoord, error) {
-			return rcc.NewClient(ctx1, etcdMetaRoot, etcdEndpoints)
+		newRootCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.RootCoord, error) {
+			return rcc.NewClient(ctx1, etcdMetaRoot, client)
 		},
-		newDataCoordClient: func(etcdMetaRoot string, etcdEndpoints []string) (types.DataCoord, error) {
-			return dsc.NewClient(ctx1, etcdMetaRoot, etcdEndpoints)
+		newDataCoordClient: func(etcdMetaRoot string, client *clientv3.Client) (types.DataCoord, error) {
+			return dcc.NewClient(ctx1, etcdMetaRoot, client)
 		},
 	}
 
@@ -82,66 +94,115 @@ func NewServer(ctx context.Context, factory msgstream.Factory) (*Server, error) 
 
 func (s *Server) startGrpc() error {
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.listener)
+	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	return err
 }
 
-func (s *Server) startGrpcLoop(listener net.Listener) {
+// startGrpcLoop starts the grep loop of datanode component.
+func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.wg.Done()
+	var kaep = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
+		PermitWithoutStream: true,            // Allow pings even when there are no active streams
+	}
+
+	var kasp = keepalive.ServerParameters{
+		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
+		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
+	}
+	var lis net.Listener
+
+	err := retry.Do(s.ctx, func() error {
+		addr := ":" + strconv.Itoa(grpcPort)
+		var err error
+		lis, err = net.Listen("tcp", addr)
+		return err
+	}, retry.Attempts(10))
+
+	if err != nil {
+		log.Error("DataNode GrpcServer:failed to listen", zap.Error(err))
+		s.grpcErrChan <- err
+		return
+	}
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
-		grpc.UnaryInterceptor(
-			grpc_opentracing.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(
-			grpc_opentracing.StreamServerInterceptor(opts...)))
+		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
+		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
-	if err := s.grpcServer.Serve(listener); err != nil {
+	if err := s.grpcServer.Serve(lis); err != nil {
 		log.Warn("DataNode Start Grpc Failed!")
 		s.grpcErrChan <- err
 	}
 
 }
 
+func (s *Server) SetEtcdClient(client *clientv3.Client) {
+	s.datanode.SetEtcdClient(client)
+}
+
 func (s *Server) SetRootCoordInterface(ms types.RootCoord) error {
-	return s.datanode.SetRootCoordInterface(ms)
+	return s.datanode.SetRootCoord(ms)
 }
 
 func (s *Server) SetDataCoordInterface(ds types.DataCoord) error {
-	return s.datanode.SetDataCoordInterface(ds)
+	return s.datanode.SetDataCoord(ds)
 }
 
+// Run initializes and starts Datanode's grpc service.
 func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("data node init done ...")
+	log.Debug("DataNode init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("data node start done ...")
+	log.Debug("DataNode start done ...")
 	return nil
 }
 
+// Stop stops Datanode's grpc service.
 func (s *Server) Stop() error {
+	log.Debug("Datanode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
 		}
 	}
 	s.cancel()
+	if s.etcdCli != nil {
+		defer s.etcdCli.Close()
+	}
 	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
+		log.Debug("Graceful stop grpc server...")
+		// make graceful stop has a timeout
+		stopped := make(chan struct{})
+		go func() {
+			s.grpcServer.GracefulStop()
+			close(stopped)
+		}()
+
+		t := time.NewTimer(10 * time.Second)
+		select {
+		case <-t.C:
+			// hard stop since grace timeout
+			s.grpcServer.Stop()
+		case <-stopped:
+			t.Stop()
+		}
 	}
 
 	err := s.datanode.Stop()
@@ -152,31 +213,39 @@ func (s *Server) Stop() error {
 	return nil
 }
 
+// init initializes Datanode's grpc service.
 func (s *Server) init() error {
 	ctx := context.Background()
-	Params.Init()
-	Params.LoadFromEnv()
-	Params.LoadFromArgs()
+	Params.InitOnce(typeutil.DataNodeRole)
+	if !funcutil.CheckPortAvailable(Params.Port) {
+		Params.Port = funcutil.GetAvailablePort()
+		log.Warn("DataNode get available port when init", zap.Int("Port", Params.Port))
+	}
+	dn.Params.InitOnce()
+	dn.Params.DataNodeCfg.Port = Params.Port
+	dn.Params.DataNodeCfg.IP = Params.IP
 
-	dn.Params.Init()
-	dn.Params.Port = Params.Port
-	dn.Params.IP = Params.IP
-
+	etcdCli, err := etcd.GetEtcdClient(&dn.Params.EtcdCfg)
+	if err != nil {
+		log.Debug("DataNode connect to etcd failed", zap.Error(err))
+		return err
+	}
+	s.etcdCli = etcdCli
+	s.SetEtcdClient(s.etcdCli)
 	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))
 
-	err := s.startGrpc()
+	err = s.startGrpc()
 	if err != nil {
 		return err
 	}
 
 	// --- RootCoord Client ---
 	if s.newRootCoordClient != nil {
-		log.Debug("RootCoord address", zap.String("address", Params.RootCoordAddress))
 		log.Debug("Init root coord client ...")
-		rootCoordClient, err := s.newRootCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints)
+		rootCoordClient, err := s.newRootCoordClient(dn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("DataNode newRootCoordClient failed", zap.Error(err))
 			panic(err)
@@ -202,9 +271,8 @@ func (s *Server) init() error {
 
 	// --- Data Server Client ---
 	if s.newDataCoordClient != nil {
-		log.Debug("Data service address", zap.String("address", Params.DataCoordAddress))
 		log.Debug("DataNode Init data service client ...")
-		dataCoordClient, err := s.newDataCoordClient(dn.Params.MetaRootPath, dn.Params.EtcdEndpoints)
+		dataCoordClient, err := s.newDataCoordClient(dn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Debug("DataNode newDataCoordClient failed", zap.Error(err))
 			panic(err)
@@ -228,7 +296,7 @@ func (s *Server) init() error {
 		}
 	}
 
-	s.datanode.NodeID = dn.Params.NodeID
+	s.datanode.SetNodeID(dn.Params.DataNodeCfg.NodeID)
 	s.datanode.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.datanode.Init(); err != nil {
@@ -239,6 +307,7 @@ func (s *Server) init() error {
 	return nil
 }
 
+// start starts datanode's grpc service.
 func (s *Server) start() error {
 	if err := s.datanode.Start(); err != nil {
 		return err
@@ -251,20 +320,23 @@ func (s *Server) start() error {
 	return nil
 }
 
+// GetComponentStates gets the component states of Datanode
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.datanode.GetComponentStates(ctx)
 }
 
+// GetStatisticsChannel gets the statistics channel of Datanode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.datanode.GetStatisticsChannel(ctx)
 }
 
+// Deprecated
 func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return s.datanode.WatchDmChannels(ctx, req)
 }
 
 func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	if s.datanode.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+	if s.datanode.GetStateCode() != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "DataNode isn't healthy.",
@@ -273,6 +345,15 @@ func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 	return s.datanode.FlushSegments(ctx, req)
 }
 
+// GetMetrics gets the metrics info of Datanode.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.datanode.GetMetrics(ctx, request)
+}
+
+func (s *Server) Compaction(ctx context.Context, request *datapb.CompactionPlan) (*commonpb.Status, error) {
+	return s.datanode.Compaction(ctx, request)
+}
+
+func (s *Server) Import(ctx context.Context, request *datapb.ImportTask) (*commonpb.Status, error) {
+	return s.datanode.Import(ctx, request)
 }

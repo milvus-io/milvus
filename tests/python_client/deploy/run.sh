@@ -26,4 +26,4 @@ bash test.sh -m standalone -t upgrade -p $pw
 # start test cluster reinstall
 bash test.sh -m cluster -t reinstall -p $pw
 # start test cluster upgrade
-bash test.sh -m cluster -t pgrade -p $pw
+bash test.sh -m cluster -t upgrade -p $pw

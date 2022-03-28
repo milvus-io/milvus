@@ -10,15 +10,17 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+
 #include <memory>
 #include <string_view>
 #include <string>
+
+#include "PlanImpl.h"
 #include "common/Schema.h"
 #include "pb/plan.pb.h"
 #include "pb/segcore.pb.h"
 
 namespace milvus::query {
-// NOTE: APIs for C wrapper
 
 // Incomplete Definition, shouldn't be instantiated
 struct Plan;
@@ -50,5 +52,3 @@ int64_t
 GetTopK(const Plan*);
 
 }  // namespace milvus::query
-
-#include "PlanImpl.h"

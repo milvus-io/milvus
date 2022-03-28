@@ -7,6 +7,7 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
 import "common.proto";
 import "internal.proto";
 import "milvus.proto";
+import "schema.proto";
 
 service IndexCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -77,6 +78,8 @@ message BuildIndexRequest {
   repeated string data_paths = 5;
   repeated common.KeyValuePair type_params = 6;
   repeated common.KeyValuePair index_params = 7;
+  int64 num_rows = 8;
+  schema.FieldSchema field_schema = 9;
 }
 
 message BuildIndexResponse {
@@ -92,6 +95,7 @@ message IndexFilePathInfo {
   common.Status status = 1;
   int64 indexBuildID = 2;
   repeated string index_file_paths = 3;
+  uint64 serialized_size = 4;
 }
 
 message GetIndexFilePathsResponse {
@@ -109,6 +113,7 @@ message IndexMeta {
   int64 nodeID = 7;
   int64 version = 8;
   bool recycled = 9;
+  uint64 serialize_size = 10;
 }
 
 message DropIndexRequest {

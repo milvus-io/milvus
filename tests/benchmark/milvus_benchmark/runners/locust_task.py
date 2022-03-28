@@ -1,6 +1,4 @@
 import time
-import pdb
-import random
 import logging
 from locust import User, events
 from milvus_benchmark.client import MilvusClient

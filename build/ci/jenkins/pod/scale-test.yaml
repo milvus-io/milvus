@@ -1,0 +1,36 @@
+piVersion: v1
+kind: Pod
+metadata:
+  name: milvus-test-pod
+  labels:
+    app: milvus-test
+spec:
+  containers:
+  - name: milvus-test
+#    image: registry.milvus.io/milvus/milvus-test-env:v0.5
+    image: dockerhub-mirror-sh.zilliz.cc/milvusdb/pytest:20211209-cef343f
+    command:
+    - cat
+    tty: true
+    resources:
+      limits:
+        memory: 16Gi
+        cpu: 8.0
+      requests:
+        memory: 12Gi
+        cpu: 8.0
+    volumeMounts:
+    - name: qa-kubeconfig
+      mountPath: /root/.kube/
+  - name: jnlp
+    image: jenkins/inbound-agent:4.11-1-jdk8
+    resources:
+      limits: {}
+      requests:
+        memory: 256Mi
+        cpu: 100m
+  volumes:
+  - name: qa-kubeconfig
+    secret:
+      secretName: qa-kubeconfig
+  serviceAccountName: account-milvus-test

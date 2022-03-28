@@ -1,13 +1,19 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -17,12 +23,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -30,11 +31,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func newMemoryMeta(allocator allocator) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
-	return NewMeta(memoryKV)
+	return newMeta(memoryKV)
 }
 
 var _ allocator = (*MockAllocator)(nil)
@@ -45,9 +49,7 @@ type MockAllocator struct {
 
 func (m *MockAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	val := atomic.AddInt64(&m.cnt, 1)
-	phy := time.Now().UnixNano() / int64(time.Millisecond)
-	ts := tsoutil.ComposeTS(phy, val)
-	return ts, nil
+	return Timestamp(val), nil
 }
 
 func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
@@ -76,6 +78,10 @@ func (kv *saveFailKV) Save(key, value string) error {
 	return errors.New("mocked fail")
 }
 
+func (kv *saveFailKV) MultiSave(kvs map[string]string) error {
+	return errors.New("mocked fail")
+}
+
 // a mock kv that always fail when do `Remove`
 type removeFailKV struct{ kv.TxnKV }
 
@@ -94,7 +100,7 @@ func newTestSchema() *schemapb.CollectionSchema {
 		Description: "schema for test used",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 1, Name: "field1", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_String},
+			{FieldID: 1, Name: "field1", IsPrimaryKey: false, Description: "field no.1", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: "max_length_per_row", Value: "100"}}},
 			{FieldID: 2, Name: "field2", IsPrimaryKey: false, Description: "field no.2", DataType: schemapb.DataType_FloatVector},
 		},
 	}
@@ -158,6 +164,7 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, nodeID),
+			ID:   nodeID,
 		},
 	}
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
@@ -182,6 +189,17 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
+func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	if c.ch != nil {
+		c.ch <- struct{}{}
+	}
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "not implemented"}, nil
+}
+
+func (c *mockDataNodeClient) Import(ctx context.Context, in *datapb.ImportTask) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = internalpb.StateCode_Abnormal
 	return nil
@@ -190,6 +208,18 @@ func (c *mockDataNodeClient) Stop() error {
 type mockRootCoordService struct {
 	state internalpb.StateCode
 	cnt   int64
+}
+
+func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	panic("implement me")
 }
 
 func newMockRootCoordService() *mockRootCoordService {
@@ -385,6 +415,7 @@ func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.Get
 		Self: metricsinfo.RootCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
+				ID:   nodeID,
 			},
 		},
 		Connections: metricsinfo.ConnTopology{
@@ -415,3 +446,175 @@ func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.Get
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
 }
+
+func (m *mockRootCoordService) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Check import task state from datanode
+func (m *mockRootCoordService) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+// Report impot task state to rootcoord
+func (m *mockRootCoordService) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+type mockCompactionHandler struct {
+	methods map[string]interface{}
+}
+
+func (h *mockCompactionHandler) start() {
+	if f, ok := h.methods["start"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
+}
+
+func (h *mockCompactionHandler) stop() {
+	if f, ok := h.methods["stop"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
+}
+
+// execCompactionPlan start to execute plan and return immediately
+func (h *mockCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
+	if f, ok := h.methods["execCompactionPlan"]; ok {
+		if ff, ok := f.(func(signal *compactionSignal, plan *datapb.CompactionPlan) error); ok {
+			return ff(signal, plan)
+		}
+	}
+	panic("not implemented")
+}
+
+// completeCompaction record the result of a compaction
+func (h *mockCompactionHandler) completeCompaction(result *datapb.CompactionResult) error {
+	if f, ok := h.methods["completeCompaction"]; ok {
+		if ff, ok := f.(func(result *datapb.CompactionResult) error); ok {
+			return ff(result)
+		}
+	}
+	panic("not implemented")
+}
+
+// getCompaction return compaction task. If planId does not exist, return nil.
+func (h *mockCompactionHandler) getCompaction(planID int64) *compactionTask {
+	if f, ok := h.methods["getCompaction"]; ok {
+		if ff, ok := f.(func(planID int64) *compactionTask); ok {
+			return ff(planID)
+		}
+	}
+	panic("not implemented")
+}
+
+// expireCompaction set the compaction state to expired
+func (h *mockCompactionHandler) expireCompaction(ts Timestamp) error {
+	if f, ok := h.methods["expireCompaction"]; ok {
+		if ff, ok := f.(func(ts Timestamp) error); ok {
+			return ff(ts)
+		}
+	}
+	panic("not implemented")
+}
+
+// isFull return true if the task pool is full
+func (h *mockCompactionHandler) isFull() bool {
+	if f, ok := h.methods["isFull"]; ok {
+		if ff, ok := f.(func() bool); ok {
+			return ff()
+		}
+	}
+	panic("not implemented")
+}
+
+// get compaction tasks by signal id
+func (h *mockCompactionHandler) getCompactionTasksBySignalID(signalID int64) []*compactionTask {
+	if f, ok := h.methods["getCompactionTasksBySignalID"]; ok {
+		if ff, ok := f.(func(signalID int64) []*compactionTask); ok {
+			return ff(signalID)
+		}
+	}
+	panic("not implemented")
+}
+
+type mockCompactionTrigger struct {
+	methods map[string]interface{}
+}
+
+// triggerCompaction trigger a compaction if any compaction condition satisfy.
+func (t *mockCompactionTrigger) triggerCompaction(tt *timetravel) error {
+	if f, ok := t.methods["triggerCompaction"]; ok {
+		if ff, ok := f.(func(tt *timetravel) error); ok {
+			return ff(tt)
+		}
+	}
+	panic("not implemented")
+}
+
+// triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
+func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID int64, partitionID int64, segmentID int64, channel string, tt *timetravel) error {
+	if f, ok := t.methods["triggerSingleCompaction"]; ok {
+		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string, tt *timetravel) error); ok {
+			return ff(collectionID, partitionID, segmentID, channel, tt)
+		}
+	}
+	panic("not implemented")
+}
+
+// forceTriggerCompaction force to start a compaction
+func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64, tt *timetravel) (UniqueID, error) {
+	if f, ok := t.methods["forceTriggerCompaction"]; ok {
+		if ff, ok := f.(func(collectionID int64, tt *timetravel) (UniqueID, error)); ok {
+			return ff(collectionID, tt)
+		}
+	}
+	panic("not implemented")
+}
+
+func (t *mockCompactionTrigger) start() {
+	if f, ok := t.methods["start"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
+}
+
+func (t *mockCompactionTrigger) stop() {
+	if f, ok := t.methods["stop"]; ok {
+		if ff, ok := f.(func()); ok {
+			ff()
+			return
+		}
+	}
+	panic("not implemented")
+}
+
+type mockHandler struct {
+}
+
+func newMockHandler() *mockHandler {
+	return &mockHandler{}
+}
+
+func (h *mockHandler) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
+	return &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channel,
+	}
+}
+
+func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
+	return false
+}
+
+func (h *mockHandler) FinishDropChannel(channel string) {}

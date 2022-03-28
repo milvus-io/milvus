@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package indexnode
 
@@ -17,11 +22,12 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,7 +36,11 @@ func TestIndexNodeMock(t *testing.T) {
 	inm := Mock{
 		Build: true,
 	}
-	err := inm.Register()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	inm.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+	err = inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)
@@ -68,12 +78,17 @@ func TestIndexNodeMock(t *testing.T) {
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
-		req := &milvuspb.GetMetricsRequest{
-			Request: "",
-		}
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.Nil(t, err)
 		resp, err := inm.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		req2, err := metricsinfo.ConstructRequestByMetricType("IndexNode")
+		assert.Nil(t, err)
+		resp2, err := inm.GetMetrics(ctx, req2)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp2.Status.ErrorCode)
 	})
 
 	err = inm.Stop()
@@ -139,8 +154,11 @@ func TestIndexNodeMockFiled(t *testing.T) {
 		Build:   true,
 		Err:     false,
 	}
-
-	err := inm.Register()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	inm.SetEtcdClient(etcdCli)
+	defer etcdCli.Close()
+	err = inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)
@@ -161,8 +179,9 @@ func TestIndexNodeMockFiled(t *testing.T) {
 			Version:      0,
 		}
 
-		value := proto.MarshalTextString(indexMeta)
-		err := inm.etcdKV.Save(key, value)
+		value, err := proto.Marshal(indexMeta)
+		assert.Nil(t, err)
+		err = inm.etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 		resp, err := inm.CreateIndex(ctx, req)
 		assert.Nil(t, err)

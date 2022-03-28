@@ -16,191 +16,202 @@
 #include <limits>
 #include <cmath>
 #include <google/protobuf/text_format.h>
+#include <knowhere/common/MetricType.h>
+#include <knowhere/index/vector_index/helpers/IndexParameter.h>
+#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/index/vector_index/VecIndexFactory.h>
 
 #include "pb/index_cgo_msg.pb.h"
-#include "index/knowhere/knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "index/knowhere/knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "indexbuilder/IndexWrapper.h"
+
+#include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "DataGen.h"
-#include "faiss/MetricType.h"
-#include "index/knowhere/knowhere/index/vector_index/VecIndexFactory.h"
 #include "indexbuilder/utils.h"
+#include "indexbuilder/helper.h"
+#define private public
+#include "indexbuilder/ScalarIndexCreator.h"
 
-constexpr int64_t DIM = 128;
+constexpr int64_t DIM = 8;
 constexpr int64_t NQ = 10;
 constexpr int64_t K = 4;
 #ifdef MILVUS_GPU_VERSION
 int DEVICEID = 0;
 #endif
 
+namespace indexcgo = milvus::proto::indexcgo;
+namespace schemapb = milvus::proto::schema;
+using milvus::indexbuilder::MapParams;
+using milvus::indexbuilder::ScalarIndexCreator;
+using knowhere::scalar::OperatorType;
+using ScalarTestParams = std::pair<MapParams, MapParams>;
+
 namespace {
 auto
-generate_conf(const milvus::knowhere::IndexType& index_type, const milvus::knowhere::MetricType& metric_type) {
-    if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+generate_conf(const knowhere::IndexType& index_type, const knowhere::MetricType& metric_type) {
+    if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 16},
-            {milvus::knowhere::IndexParams::nprobe, 4},
-            {milvus::knowhere::IndexParams::m, 4},
-            {milvus::knowhere::IndexParams::nbits, 8},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::nlist, 16},
+            {knowhere::IndexParams::nprobe, 4},
+            {knowhere::IndexParams::m, 4},
+            {knowhere::IndexParams::nbits, 8},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 16},
-            {milvus::knowhere::IndexParams::nprobe, 4},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::nlist, 16},
+            {knowhere::IndexParams::nprobe, 4},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
 #ifdef MILVUS_GPU_VERSION
-            {milvus::knowhere::meta::DEVICEID, DEVICEID},
+            {knowhere::meta::DEVICEID, DEVICEID},
 #endif
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 16},
-            {milvus::knowhere::IndexParams::nprobe, 4},
-            {milvus::knowhere::IndexParams::nbits, 8},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::nlist, 16},
+            {knowhere::IndexParams::nprobe, 4},
+            {knowhere::IndexParams::nbits, 8},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
 #ifdef MILVUS_GPU_VERSION
-            {milvus::knowhere::meta::DEVICEID, DEVICEID},
+            {knowhere::meta::DEVICEID, DEVICEID},
 #endif
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nlist, 16},
-            {milvus::knowhere::IndexParams::nprobe, 4},
-            {milvus::knowhere::IndexParams::m, 4},
-            {milvus::knowhere::IndexParams::nbits, 8},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::nlist, 16},
+            {knowhere::IndexParams::nprobe, 4},
+            {knowhere::IndexParams::m, 4},
+            {knowhere::IndexParams::nbits, 8},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::Metric::TYPE, metric_type},
+    } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::Metric::TYPE, metric_type},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_NSG) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::IndexParams::nlist, 163},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::nprobe, 8},
-            {milvus::knowhere::IndexParams::knng, 20},
-            {milvus::knowhere::IndexParams::search_length, 40},
-            {milvus::knowhere::IndexParams::out_degree, 30},
-            {milvus::knowhere::IndexParams::candidate, 100},
-            {milvus::knowhere::Metric::TYPE, metric_type},
+    } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::IndexParams::nlist, 163},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::nprobe, 8},
+            {knowhere::IndexParams::knng, 20},
+            {knowhere::IndexParams::search_length, 40},
+            {knowhere::IndexParams::out_degree, 30},
+            {knowhere::IndexParams::candidate, 100},
+            {knowhere::Metric::TYPE, metric_type},
         };
 #ifdef MILVUS_SUPPORT_SPTAG
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            // {knowhere::meta::TOPK, 10},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            // {milvus::knowhere::meta::TOPK, 10},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            // {knowhere::meta::TOPK, 10},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
 #endif
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_HNSW) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},       {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::M, 16},   {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200}, {milvus::knowhere::Metric::TYPE, metric_type},
+    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},       {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::M, 16},   {knowhere::IndexParams::efConstruction, 200},
+            {knowhere::IndexParams::ef, 200}, {knowhere::Metric::TYPE, metric_type},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_ANNOY) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::n_trees, 4},
-            {milvus::knowhere::IndexParams::search_k, 100},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::n_trees, 4},
+            {knowhere::IndexParams::search_k, 100},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_RHNSWFlat) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWFlat) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::M, 16},
+            {knowhere::IndexParams::efConstruction, 200},
+            {knowhere::IndexParams::ef, 200},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_RHNSWPQ) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
-            {milvus::knowhere::IndexParams::PQM, 8},
+    } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWPQ) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::M, 16},
+            {knowhere::IndexParams::efConstruction, 200},
+            {knowhere::IndexParams::ef, 200},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+            {knowhere::IndexParams::PQM, 8},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_RHNSWSQ) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::IndexParams::M, 16},
-            {milvus::knowhere::IndexParams::efConstruction, 200},
-            {milvus::knowhere::IndexParams::ef, 200},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWSQ) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::IndexParams::M, 16},
+            {knowhere::IndexParams::efConstruction, 200},
+            {knowhere::IndexParams::ef, 200},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_NGTPANNG) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::IndexParams::edge_size, 10},
-            {milvus::knowhere::IndexParams::epsilon, 0.1},
-            {milvus::knowhere::IndexParams::max_search_edges, 50},
-            {milvus::knowhere::IndexParams::forcedly_pruned_edge_size, 60},
-            {milvus::knowhere::IndexParams::selectively_pruned_edge_size, 30},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_NGTPANNG) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::IndexParams::edge_size, 10},
+            {knowhere::IndexParams::epsilon, 0.1},
+            {knowhere::IndexParams::max_search_edges, 50},
+            {knowhere::IndexParams::forcedly_pruned_edge_size, 60},
+            {knowhere::IndexParams::selectively_pruned_edge_size, 30},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
-    } else if (index_type == milvus::knowhere::IndexEnum::INDEX_NGTONNG) {
-        return milvus::knowhere::Config{
-            {milvus::knowhere::meta::DIM, DIM},
-            {milvus::knowhere::meta::TOPK, K},
-            {milvus::knowhere::Metric::TYPE, metric_type},
-            {milvus::knowhere::IndexParams::edge_size, 20},
-            {milvus::knowhere::IndexParams::epsilon, 0.1},
-            {milvus::knowhere::IndexParams::max_search_edges, 50},
-            {milvus::knowhere::IndexParams::outgoing_edge_size, 5},
-            {milvus::knowhere::IndexParams::incoming_edge_size, 40},
-            {milvus::knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
+    } else if (index_type == knowhere::IndexEnum::INDEX_NGTONNG) {
+        return knowhere::Config{
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::IndexParams::edge_size, 20},
+            {knowhere::IndexParams::epsilon, 0.1},
+            {knowhere::IndexParams::max_search_edges, 50},
+            {knowhere::IndexParams::outgoing_edge_size, 5},
+            {knowhere::IndexParams::incoming_edge_size, 40},
+            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, 4},
         };
     }
-    return milvus::knowhere::Config();
+    return knowhere::Config();
 }
 
 auto
-generate_params(const milvus::knowhere::IndexType& index_type, const milvus::knowhere::MetricType& metric_type) {
+generate_params(const knowhere::IndexType& index_type, const knowhere::MetricType& metric_type) {
     namespace indexcgo = milvus::proto::indexcgo;
 
     indexcgo::TypeParams type_params;
@@ -222,9 +233,9 @@ generate_params(const milvus::knowhere::IndexType& index_type, const milvus::kno
 }
 
 auto
-GenDataset(int64_t N, const milvus::knowhere::MetricType& metric_type, bool is_binary, int64_t dim = DIM) {
+GenDataset(int64_t N, const knowhere::MetricType& metric_type, bool is_binary, int64_t dim = DIM) {
     auto schema = std::make_shared<milvus::Schema>();
-    auto faiss_metric_type = milvus::knowhere::GetMetricType(metric_type);
+    auto faiss_metric_type = knowhere::GetMetricType(metric_type);
     if (!is_binary) {
         schema->AddDebugField("fakevec", milvus::engine::DataType::VECTOR_FLOAT, dim, faiss_metric_type);
         return milvus::segcore::DataGen(schema, N);
@@ -234,7 +245,7 @@ GenDataset(int64_t N, const milvus::knowhere::MetricType& metric_type, bool is_b
     }
 }
 
-using QueryResultPtr = std::unique_ptr<milvus::indexbuilder::IndexWrapper::QueryResult>;
+using QueryResultPtr = std::unique_ptr<milvus::indexbuilder::VecIndexCreator::QueryResult>;
 void
 PrintQueryResult(const QueryResultPtr& result) {
     auto nq = result->nq;
@@ -293,14 +304,14 @@ float
 CountDistance(const void* point_a,
               const void* point_b,
               int dim,
-              const milvus::knowhere::MetricType& metric,
+              const knowhere::MetricType& metric,
               bool is_binary = false) {
     if (point_a == nullptr || point_b == nullptr) {
         return std::numeric_limits<float>::max();
     }
-    if (metric == milvus::knowhere::Metric::L2) {
+    if (metric == knowhere::Metric::L2) {
         return L2(static_cast<const float*>(point_a), static_cast<const float*>(point_b), dim);
-    } else if (metric == milvus::knowhere::Metric::JACCARD) {
+    } else if (metric == knowhere::Metric::JACCARD) {
         return Jaccard(static_cast<const uint8_t*>(point_a), static_cast<const uint8_t*>(point_b), dim);
     } else {
         return std::numeric_limits<float>::max();
@@ -309,13 +320,13 @@ CountDistance(const void* point_a,
 
 void
 CheckDistances(const QueryResultPtr& result,
-               const milvus::knowhere::DatasetPtr& base_dataset,
-               const milvus::knowhere::DatasetPtr& query_dataset,
-               const milvus::knowhere::MetricType& metric,
+               const knowhere::DatasetPtr& base_dataset,
+               const knowhere::DatasetPtr& query_dataset,
+               const knowhere::MetricType& metric,
                const float threshold = 1.0e-5) {
-    auto base_vecs = base_dataset->Get<float*>(milvus::knowhere::meta::TENSOR);
-    auto query_vecs = query_dataset->Get<float*>(milvus::knowhere::meta::TENSOR);
-    auto dim = base_dataset->Get<int64_t>(milvus::knowhere::meta::DIM);
+    auto base_vecs = base_dataset->Get<float*>(knowhere::meta::TENSOR);
+    auto query_vecs = query_dataset->Get<float*>(knowhere::meta::TENSOR);
+    auto dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
     auto nq = result->nq;
     auto k = result->topk;
     for (auto i = 0; i < nq; i++) {
@@ -326,5 +337,123 @@ CheckDistances(const QueryResultPtr& result,
             // assert(std::abs(dis - count_dis) < threshold);
         }
     }
+}
+
+auto
+generate_type_params(const MapParams& m) {
+    indexcgo::TypeParams p;
+    for (const auto& [k, v] : m) {
+        auto kv = p.add_params();
+        kv->set_key(k);
+        kv->set_value(v);
+    }
+    std::string str;
+    auto ok = google::protobuf::TextFormat::PrintToString(p, &str);
+    Assert(ok);
+    return str;
+}
+
+auto
+generate_index_params(const MapParams& m) {
+    indexcgo::IndexParams p;
+    for (const auto& [k, v] : m) {
+        auto kv = p.add_params();
+        kv->set_key(k);
+        kv->set_value(v);
+    }
+    std::string str;
+    auto ok = google::protobuf::TextFormat::PrintToString(p, &str);
+    Assert(ok);
+    return str;
+}
+
+// TODO: std::is_arithmetic_v, hard to compare float point value. std::is_integral_v.
+template <typename T, typename = typename std::enable_if_t<std::is_arithmetic_v<T> || std::is_same_v<T, std::string>>>
+inline std::vector<T>
+GenArr(int64_t n) {
+    auto max_i8 = std::numeric_limits<int8_t>::max() - 1;
+    std::vector<T> arr;
+    arr.resize(n);
+    for (int64_t i = 0; i < n; i++) {
+        arr[i] = static_cast<T>(rand() % max_i8);
+    }
+    std::sort(arr.begin(), arr.end());
+    return arr;
+}
+
+inline auto
+GenStrArr(int64_t n) {
+    using T = std::string;
+    std::vector<T> arr;
+    arr.resize(n);
+    for (int64_t i = 0; i < n; i++) {
+        auto gen = std::to_string(std::rand());
+        arr[i] = gen;
+    }
+    std::sort(arr.begin(), arr.end());
+    return arr;
+}
+
+template <>
+inline std::vector<std::string>
+GenArr<std::string>(int64_t n) {
+    return GenStrArr(n);
+}
+
+template <typename T, typename = typename std::enable_if_t<std::is_arithmetic_v<T>>>
+inline std::vector<ScalarTestParams>
+GenParams() {
+    std::vector<ScalarTestParams> ret;
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "inverted_index"}}));
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
+    return ret;
+}
+
+std::vector<ScalarTestParams>
+GenBoolParams() {
+    std::vector<ScalarTestParams> ret;
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "inverted_index"}}));
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "flat"}}));
+    return ret;
+}
+
+std::vector<ScalarTestParams>
+GenStringParams() {
+    std::vector<ScalarTestParams> ret;
+    ret.emplace_back(ScalarTestParams(MapParams(), {{"index_type", "marisa-trie"}}));
+    return ret;
+}
+
+void
+PrintMapParam(const ScalarTestParams& tp) {
+    for (const auto& [k, v] : tp.first) {
+        std::cout << "k: " << k << ", v: " << v << std::endl;
+    }
+    for (const auto& [k, v] : tp.second) {
+        std::cout << "k: " << k << ", v: " << v << std::endl;
+    }
+}
+
+void
+PrintMapParams(const std::vector<ScalarTestParams>& tps) {
+    for (const auto& tp : tps) {
+        PrintMapParam(tp);
+    }
+}
+
+template <typename T>
+inline void
+build_index(const std::unique_ptr<ScalarIndexCreator<T>>& creator, const std::vector<T>& arr) {
+    const int64_t dim = 8;  // not important here
+    auto dataset = knowhere::GenDataset(arr.size(), dim, arr.data());
+    creator->Build(dataset);
+}
+
+// memory generated by this function should be freed by the caller.
+auto
+GenDsFromPB(const google::protobuf::Message& msg) {
+    auto data = new char[msg.ByteSize()];
+    msg.SerializeToArray(data, msg.ByteSize());
+    return knowhere::GenDataset(msg.ByteSize(), 8, data);
 }
 }  // namespace

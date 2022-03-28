@@ -96,7 +96,7 @@ spec:
       metadata: {}
       container:
         name: ''
-        image: 'registry.zilliz.com/milvus/milvus-test-env:v0.5'
+        image: 'registry.milvus.io/milvus/milvus-test-env:v0.5'
         command:
           - /bin/sh
           - '-c'
@@ -132,7 +132,7 @@ spec:
       metadata: {}
       container:
         name: ''
-        image: 'registry.zilliz.com/milvus/milvus-test-env:v0.5'
+        image: 'registry.milvus.io/milvus/milvus-test-env:v0.5'
         command:
           - /bin/sh
           - '-c'
@@ -168,7 +168,7 @@ spec:
       metadata: {}
       container:
         name: ''
-        image: 'registry.zilliz.com/milvus/milvus-test-env:v0.5'
+        image: 'registry.milvus.io/milvus/milvus-test-env:v0.5'
         command:
           - /bin/sh
           - '-c'
@@ -209,7 +209,7 @@ spec:
   arguments:
     parameters:
       - name: milvus-image-repository
-        value: harbor.zilliz.cc/dockerhub/milvusdb/milvus-dev
+        value: harbor.milvus.io/dockerhub/milvusdb/milvus-dev
       - name: milvus-image-tag
         value: master-latest
       - name: test-client-branch

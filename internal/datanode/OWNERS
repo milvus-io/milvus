@@ -3,12 +3,9 @@ reviewers:
   - XuanYang-cn
   - cydrain
   - scsven
-  - jeffoverflow
   - sunby
 
 approvers:
-  - pr-inspection
+  - maintainers
 
-labels:
-- component/datanode
 

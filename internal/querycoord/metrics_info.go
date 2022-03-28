@@ -1,19 +1,25 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package querycoord
 
 import (
 	"context"
-	"os"
+
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -30,13 +36,12 @@ import (
 func getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
-	qc *QueryCoord,
-) (*milvuspb.GetMetricsResponse, error) {
+	qc *QueryCoord) (string, error) {
 
 	clusterTopology := metricsinfo.QueryClusterTopology{
 		Self: metricsinfo.QueryCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
-				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
+				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordCfg.QueryCoordID),
 				HardwareInfos: metricsinfo.HardwareMetrics{
 					IP:           qc.session.Address,
 					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
@@ -46,20 +51,20 @@ func getSystemInfoMetrics(
 					Disk:         metricsinfo.GetDiskCount(),
 					DiskUsage:    metricsinfo.GetDiskUsage(),
 				},
-				SystemInfo: metricsinfo.DeployMetrics{
-					SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-					DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-				},
-				// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-				Type: typeutil.QueryCoordRole,
+				SystemInfo:  metricsinfo.DeployMetrics{},
+				CreatedTime: Params.QueryCoordCfg.CreatedTime.String(),
+				UpdatedTime: Params.QueryCoordCfg.UpdatedTime.String(),
+				Type:        typeutil.QueryCoordRole,
+				ID:          qc.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
-				SearchChannelPrefix:       Params.SearchChannelPrefix,
-				SearchResultChannelPrefix: Params.SearchResultChannelPrefix,
+				SearchChannelPrefix:       Params.CommonCfg.QueryCoordSearch,
+				SearchResultChannelPrefix: Params.CommonCfg.QueryCoordSearchResult,
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
 	}
+	metricsinfo.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
 
 	nodesMetrics := qc.cluster.getMetrics(ctx, req)
 	for _, nodeMetrics := range nodesMetrics {
@@ -70,8 +75,9 @@ func getSystemInfoMetrics(
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{
 					HasError:    true,
 					ErrorReason: nodeMetrics.err.Error(),
-					// Name doesn't matter here cause we can't get it when error occurs, using address as the Name?
+					// Name doesn't matter here because we can't get it when error occurs, using address as the Name?
 					Name: "",
+					ID:   int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},
 			})
 			continue
@@ -86,6 +92,7 @@ func getSystemInfoMetrics(
 					HasError:    true,
 					ErrorReason: nodeMetrics.resp.Status.Reason,
 					Name:        nodeMetrics.resp.ComponentName,
+					ID:          int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},
 			})
 			continue
@@ -101,6 +108,7 @@ func getSystemInfoMetrics(
 					HasError:    true,
 					ErrorReason: err.Error(),
 					Name:        nodeMetrics.resp.ComponentName,
+					ID:          int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},
 			})
 			continue
@@ -111,7 +119,7 @@ func getSystemInfoMetrics(
 	coordTopology := metricsinfo.QueryCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
+			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordCfg.QueryCoordID),
 			// TODO(dragondriver): fill ConnectedComponents if necessary
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
@@ -119,22 +127,8 @@ func getSystemInfoMetrics(
 
 	resp, err := metricsinfo.MarshalTopology(coordTopology)
 	if err != nil {
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
-		}, nil
+		return "", err
 	}
 
-	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordID),
-	}, nil
+	return resp, nil
 }

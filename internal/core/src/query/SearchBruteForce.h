@@ -10,11 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <faiss/utils/BinaryDistance.h>
-#include "segcore/ConcurrentVector.h"
+
 #include "common/Schema.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
+#include "segcore/ConcurrentVector.h"
 
 namespace milvus::query {
 

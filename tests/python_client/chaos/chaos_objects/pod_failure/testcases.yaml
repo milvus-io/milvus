@@ -1,0 +1,49 @@
+# Pod Failure Testcases All-in-one
+#   pod failure
+#     standalone
+#       todo
+#     cluster-1-node
+#       todo
+#     cluster-n-nodes
+#       4 pods(querynode, datanode, indexnode, proxy)
+Collections:
+  -
+    testcase:
+      name: test_querynode_pod_failure
+      chaos: chaos_querynode_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            search: fail
+            query: fail
+          cluster_n_nodes:
+  -
+    testcase:
+      name: test_indexnode_pod_failure
+      chaos: chaos_indexnode_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            index: fail
+          cluster_n_nodes:
+
+  -
+    testcase:
+      name: test_datanode_pod_failure
+      chaos: chaos_datanode_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            insert: fail
+          cluster_n_nodes:
+
+  -
+    testcase:
+      name: test_proxy_pod_failure
+      chaos: chaos_proxy_pod_failure.yaml
+      expectation:
+          cluster_1_node:
+            create: fail
+            insert: fail
+            flush: fail
+            index: fail
+            search: fail
+            query: fail
+          cluster_n_nodes:

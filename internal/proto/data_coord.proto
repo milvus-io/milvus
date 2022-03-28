@@ -33,6 +33,17 @@ service DataCoord {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+  rpc CompleteCompaction(CompactionResult) returns (common.Status) {}
+  rpc ManualCompaction(milvus.ManualCompactionRequest) returns (milvus.ManualCompactionResponse) {}
+  rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
+  rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
+
+  rpc WatchChannels(WatchChannelsRequest) returns (WatchChannelsResponse) {}
+  rpc GetFlushState(milvus.GetFlushStateRequest) returns (milvus.GetFlushStateResponse) {}
+  rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
+  rpc Import(ImportTask) returns (ImportTaskResponse) {}
 }
 
 service DataNode {
@@ -44,6 +55,10 @@ service DataNode {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+  rpc Compaction(CompactionPlan) returns (common.Status) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
+  rpc Import(ImportTask) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -158,7 +173,8 @@ message VchannelInfo {
   string channelName = 2;
   internal.MsgPosition seek_position = 3;
   repeated SegmentInfo unflushedSegments = 4;
-  repeated int64 flushedSegments = 5;
+  repeated SegmentInfo flushedSegments = 5;
+  repeated SegmentInfo dropped_segments = 6;
 }
 
 message WatchDmChannelsRequest {
@@ -170,7 +186,8 @@ message FlushSegmentsRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  repeated int64 segmentIDs = 4;
+  repeated int64 segmentIDs = 4; // segments to flush
+  repeated int64 markSegmentIDs = 5; // segments to clean buffer and mark segment position, but NOT flushed
 }
 
 message SegmentMsg{
@@ -178,16 +195,13 @@ message SegmentMsg{
   SegmentInfo segment = 2;
 }
 
-message DDLFlushMeta {
-    int64 collectionID = 1;
-    repeated string binlog_paths = 2;
-}
-
 message CollectionInfo {
   int64 ID = 1;
   schema.CollectionSchema schema = 2;
   repeated int64 partitions = 3;
+  repeated common.KeyDataPair start_positions = 4;
 }
+
 message SegmentInfo {
   int64 ID = 1;
   int64 collectionID = 2;
@@ -199,9 +213,16 @@ message SegmentInfo {
   uint64 last_expire_time = 8;
   internal.MsgPosition start_position = 9;
   internal.MsgPosition dml_position = 10;
+  // binlogs consist of insert binlogs
   repeated FieldBinlog binlogs = 11;
+  repeated FieldBinlog statslogs = 12;
+  // deltalogs consists of delete binlogs. FieldID is not used yet since delete is always applied on primary key
+  repeated FieldBinlog deltalogs = 13;
+  
+  bool createdByCompaction = 14;
+  repeated int64 compactionFrom = 15;
+  uint64 dropped_at = 16; // timestamp when segment marked drop
 }
-
 
 message SegmentStartPosition {
   internal.MsgPosition start_position = 1;
@@ -214,26 +235,48 @@ message SaveBinlogPathsRequest {
   int64 collectionID = 3;
   repeated FieldBinlog field2BinlogPaths = 4;
   repeated CheckPoint checkPoints = 5;
-  repeated SegmentStartPosition start_positions = 6;                                                             
+  repeated SegmentStartPosition start_positions = 6;
   bool flushed = 7;
+  repeated FieldBinlog field2StatslogPaths = 8;
+  repeated FieldBinlog deltalogs = 9;
+  bool dropped = 10;
 }
 
 message CheckPoint {
   int64 segmentID = 1;
   internal.MsgPosition position = 2;
   int64 num_of_rows = 3;
-  
+}
+
+message DeltaLogInfo {
+  uint64 record_entries = 1;
+  uint64 timestamp_from = 2;
+  uint64 timestamp_to = 3;
+  string delta_log_path = 4;
+  int64 delta_log_size = 5; 
 }
 
 message DataNodeTtMsg {
     common.MsgBase base =1;
     string channel_name = 2;
     uint64 timestamp = 3;
+    repeated SegmentStats segments_stats = 4;
+}
+
+message SegmentStats {
+  int64 SegmentID = 1;
+  int64 NumRows = 2;
 }
 
 enum ChannelWatchState {
-  Uncomplete = 0;
-  Complete = 1;
+  Uncomplete = 0; // deprecated, keep it for compatibility
+  Complete = 1; // deprecated, keep it for compatibility
+  ToWatch = 2;
+  WatchSuccess = 3;
+  WatchFailure = 4;
+  ToRelease = 5;
+  ReleaseSuccess = 6;
+  ReleaseFailure = 7;
 }
 
 message ChannelStatus {
@@ -252,11 +295,21 @@ message SegmentBinlogs {
   int64 segmentID = 1;
   repeated FieldBinlog fieldBinlogs = 2;
   int64 num_of_rows = 3;
+  repeated FieldBinlog statslogs = 4;
+  repeated FieldBinlog deltalogs = 5;
 }
 
 message FieldBinlog{
   int64 fieldID = 1;
-  repeated string binlogs = 2;
+  repeated Binlog binlogs = 2;
+}
+
+message Binlog {
+  int64 entries_num = 1;
+  uint64 timestamp_from = 2;
+  uint64 timestamp_to = 3;
+  string log_path = 4;
+  int64 log_size = 5; 
 }
 
 message GetRecoveryInfoResponse {
@@ -291,10 +344,112 @@ message ChannelWatchInfo {
     VchannelInfo vchan= 1;
     int64 startTs = 2;
     ChannelWatchState state = 3;
+    // the timeout ts, datanode shall do nothing after it
+    // if the timeout is not set(= 0), original infinite retry logic shall be applied
+    int64 timeoutTs = 4;
+}
+
+enum CompactionType {
+  UndefinedCompaction = 0;
+  InnerCompaction = 1;
+  MergeCompaction = 2;
+  MixCompaction = 3;
+}
+
+message CompactionSegmentBinlogs {
+  int64 segmentID = 1;
+  repeated FieldBinlog fieldBinlogs = 2;
+  repeated FieldBinlog field2StatslogPaths = 3;
+  repeated FieldBinlog deltalogs = 4;
+}
+
+message CompactionPlan {
+  int64 planID = 1;
+  repeated CompactionSegmentBinlogs segmentBinlogs = 2;
+  uint64 start_time = 3;
+  int32 timeout_in_seconds = 4;
+  CompactionType type = 5;
+  uint64 timetravel = 6;
+  string channel = 7;
+}
+
+message CompactionResult {
+  int64 planID = 1;
+  int64 segmentID = 2;
+  int64 num_of_rows = 3;
+  repeated FieldBinlog insert_logs = 4;
+  repeated FieldBinlog field2StatslogPaths = 5;
+  repeated FieldBinlog deltalogs = 6;
 }
 
 // Deprecated
 message SegmentFieldBinlogMeta {
   int64  fieldID = 1;
   string binlog_path = 2;
+}
+
+message WatchChannelsRequest {
+  int64 collectionID = 1;
+  repeated string channelNames = 2;
+}
+
+message WatchChannelsResponse {
+  common.Status status = 1;
+}
+
+message DropVirtualChannelRequest {
+  common.MsgBase base = 1; 
+  string channel_name = 2; 
+  repeated DropVirtualChannelSegment segments = 3;
+}
+
+message DropVirtualChannelSegment {
+  int64 segmentID = 1;
+  int64 collectionID = 2;
+  repeated FieldBinlog field2BinlogPaths = 3;
+  repeated FieldBinlog field2StatslogPaths = 4;
+  repeated FieldBinlog deltalogs = 5;
+  internal.MsgPosition startPosition = 6;
+  internal.MsgPosition checkPoint = 7;
+  int64 numOfRows = 8;
+}
+
+message DropVirtualChannelResponse {
+  common.Status status = 1;
+}
+
+message ImportTask {
+  common.Status status = 1;
+  string collection_name = 2;                // target collection
+  string partition_name = 3;                 // target partition
+  bool row_based = 4;                        // the file is row-based or column-based
+  int64 task_id = 5;                         // id of the task
+  repeated string files = 6;                 // file paths to be imported
+  repeated common.KeyValuePair infos = 7;    // more informations about the task, bucket, etc.
+}
+
+message ImportTaskState {
+  common.ImportState stateCode = 1;    // Import state code.
+  repeated int64 segments = 2;         // Ids of segments created in import task.
+  repeated int64 row_ids = 3;          // Row IDs for the newly inserted rows.
+  int64 row_count = 4;                 // # of rows added in the import task.
+  string error_message = 5;            // Error message for the failed task.
+}
+
+message ImportTaskInfo {
+  int64 id = 1;                  // Task ID.
+  int64 request_id = 2;          // Request ID of the import task.
+  int64 datanode_id = 3;         // ID of DataNode that processes the task.
+  string collection_id = 4;      // Collection ID for the import task.
+  string partition_id = 5;       // Partition ID for the import task.
+  string bucket = 6;             // Bucket for the import task.
+  bool row_based = 7;            // Boolean indicating whether import files are row-based or column-based.
+  repeated string files = 8;     // A list of files to import.
+  int64 create_ts = 9;           // Timestamp when the import task is created.
+  ImportTaskState state = 10;    // State of the import task.
+}
+
+message ImportTaskResponse {
+  common.Status status = 1;
+  int64 datanode_id = 2;                     // which datanode takes this task
 }

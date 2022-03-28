@@ -10,12 +10,15 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <common/Schema.h>
-#include <vector>
+
 #include <boost/dynamic_bitset.hpp>
+#include <vector>
 #include <utility>
 
+#include "common/Schema.h"
+
 namespace milvus::segcore {
+
 class TimestampIndex {
  public:
     void
@@ -31,7 +34,7 @@ class TimestampIndex {
     std::pair<int64_t, int64_t>
     get_active_range(Timestamp query_timestamp) const;
 
-    static boost::dynamic_bitset<>
+    static BitsetType
     GenerateBitset(Timestamp query_timestamp,
                    std::pair<int64_t, int64_t> active_range,
                    const Timestamp* timestamps,

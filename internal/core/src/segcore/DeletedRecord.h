@@ -11,11 +11,11 @@
 
 #pragma once
 
+#include <memory>
+#include <utility>
+
 #include "AckResponder.h"
 #include "common/Schema.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
-#include <utility>
-#include <memory>
 #include "segcore/Record.h"
 
 namespace milvus::segcore {
@@ -60,6 +60,7 @@ struct DeletedRecord {
     AckResponder ack_responder_;
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<idx_t> uids_;
+    int64_t record_size_ = 0;
 
  private:
     std::shared_ptr<TmpBitmap> lru_;
@@ -72,7 +73,7 @@ DeletedRecord::TmpBitmap::clone(int64_t capacity) -> std::shared_ptr<TmpBitmap> 
     res->del_barrier = this->del_barrier;
     res->bitmap_ptr = std::make_shared<faiss::ConcurrentBitset>(capacity);
     auto u8size = this->bitmap_ptr->size();
-    memcpy(res->bitmap_ptr->mutable_data(), res->bitmap_ptr->data(), u8size);
+    memcpy(res->bitmap_ptr->mutable_data(), this->bitmap_ptr->data(), u8size);
     return res;
 }
 

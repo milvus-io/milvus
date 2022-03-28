@@ -6,7 +6,7 @@ reviewers:
   - zhuwenxing
 
 approvers:
-  - pr-inspection
+  - maintainers
 
 labels:
 - area/test

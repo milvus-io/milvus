@@ -1,0 +1,43 @@
+apiVersion: milvus.io/v1alpha1
+kind: MilvusCluster
+metadata:
+  name: my-release
+  labels:
+    app: milvus
+spec:
+  dependencies:
+    etcd:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true
+    pulsar:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true
+        values:
+          image:
+            broker:
+              tag: 2.8.2
+            zookeeper:
+              tag: 2.8.2
+            bookkeeper:
+              tag: 2.8.2
+            proxy:
+              tag: 2.8.2
+            bastion:
+              tag: 2.8.2
+
+          zookeeper:
+            configData:
+             PULSAR_MEM: "\"-Xms1024m -Xmx1024m -Dcom.sun.management.jmxremote -Djute.maxbuffer=10485760DoEscapeAnalysis -XX:+DisableExplicitGC -XX:+PerfDisableSharedMem -Dzookeeper.forceSync=no\""
+
+          bookkeeper:
+            configData:
+             BOOKIE_MEM: "\"-Xms4096m -Xmx4096m -XX:MaxDirectMemorySize=8192m -Dio.netty.leakDetectionLevel=disabled -Dio.netty.recycler.linkCapacity=1024 -XX:+UseG1GC -XX:MaxGCPauseMillis=10 -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:+AggressiveOpts -XX:+DoEscapeAnalysis -XX:ParallelGCThreads=32 -XX:ConcGCThreads=32 -XX:G1NewSizePercent=50 -XX:+DisableExplicitGC -XX:-ResizePLAB -XX:+ExitOnOutOfMemoryError -XX:+PerfDisableSharedMem -verbosegc\""
+    storage:
+      inCluster:
+        deletionPolicy: Delete
+        pvcDeletion: true
+  config: {}
+  components: {}
+  

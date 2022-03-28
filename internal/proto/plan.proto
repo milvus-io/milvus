@@ -26,6 +26,7 @@ message QueryInfo {
   int64 topk = 1;
   string metric_type = 3;
   string search_params = 4;
+  int64 round_decimal = 5;
 }
 
 message ColumnInfo {

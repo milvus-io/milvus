@@ -1,32 +1,40 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package querynode
 
 import (
 	"context"
-	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"sync"
+	"time"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -43,36 +51,58 @@ type queryMsg interface {
 	msgstream.TsMsg
 	GuaranteeTs() Timestamp
 	TravelTs() Timestamp
+	TimeoutTs() Timestamp
+	SetTimeRecorder()
+	ElapseSpan() time.Duration
+	RecordSpan() time.Duration
 }
 
+// queryCollection manages and executes the retrieve and search tasks, it can be created
+// by LoadCollection or LoadPartition, but can only be destroyed by ReleaseCollection.
+// Currently query behaviors are defined below, if:
+// 1. LoadCollection --> ReleaseCollection: Query would be failed in proxy because collection is not loaded;
+// 2. LoadCollection --> ReleasePartition: Not allowed, release would failed;
+// 3. LoadPartition --> ReleaseCollection: Query would be failed in proxy because collection is not loaded;
+// 4. LoadPartition --> ReleasePartition: Query in collection should return empty results, and query in partition should return notLoaded error.
 type queryCollection struct {
 	releaseCtx context.Context
 	cancel     context.CancelFunc
 
 	collectionID UniqueID
-	collection   *Collection
 	historical   *historical
 	streaming    *streaming
 
 	unsolvedMsgMu sync.Mutex // guards unsolvedMsg
 	unsolvedMsg   []queryMsg
 
-	tSafeWatchers     map[Channel]*tSafeWatcher
-	watcherSelectCase []reflect.SelectCase
+	tSafeWatchersMu sync.RWMutex // guards tSafeWatchers
+	tSafeWatchers   map[Channel]*tSafeWatcher
+	tSafeUpdate     bool
+	watcherCond     *sync.Cond
 
-	serviceableTimeMutex sync.Mutex // guards serviceableTime
+	serviceableTimeMutex sync.RWMutex // guards serviceableTime
 	serviceableTime      Timestamp
 
-	queryMsgStream       msgstream.MsgStream
-	queryResultMsgStream msgstream.MsgStream
+	queryMsgStream msgstream.MsgStream
+	// queryResultMsgStream msgstream.MsgStream
+	sessionManager *SessionManager
 
 	localChunkManager  storage.ChunkManager
 	remoteChunkManager storage.ChunkManager
-	vectorChunkManager storage.ChunkManager
+	vectorChunkManager *storage.VectorChunkManager
 	localCacheEnabled  bool
+	localCacheSize     int64
+
+	globalSegmentManager *globalSealedSegmentManager
 }
 
-type ResultEntityIds []UniqueID
+type qcOpt func(*queryCollection)
+
+func qcOptWithSessionManager(s *SessionManager) qcOpt {
+	return func(qc *queryCollection) {
+		qc.sessionManager = s
+	}
+}
 
 func newQueryCollection(releaseCtx context.Context,
 	cancel context.CancelFunc,
@@ -83,43 +113,54 @@ func newQueryCollection(releaseCtx context.Context,
 	localChunkManager storage.ChunkManager,
 	remoteChunkManager storage.ChunkManager,
 	localCacheEnabled bool,
-) *queryCollection {
+	opts ...qcOpt,
+) (*queryCollection, error) {
 
 	unsolvedMsg := make([]queryMsg, 0)
 
 	queryStream, _ := factory.NewQueryMsgStream(releaseCtx)
-	queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
+	// queryResultStream, _ := factory.NewQueryMsgStream(releaseCtx)
 
-	collection, _ := streaming.replica.getCollectionByID(collectionID)
+	condMu := sync.Mutex{}
 
 	qc := &queryCollection{
 		releaseCtx: releaseCtx,
 		cancel:     cancel,
 
 		collectionID: collectionID,
-		collection:   collection,
 		historical:   historical,
 		streaming:    streaming,
 
 		tSafeWatchers: make(map[Channel]*tSafeWatcher),
+		tSafeUpdate:   false,
+		watcherCond:   sync.NewCond(&condMu),
 
 		unsolvedMsg: unsolvedMsg,
 
-		queryMsgStream:       queryStream,
-		queryResultMsgStream: queryResultStream,
+		queryMsgStream: queryStream,
+		// queryResultMsgStream: queryResultStream,
 
-		localChunkManager:  localChunkManager,
-		remoteChunkManager: remoteChunkManager,
-		localCacheEnabled:  localCacheEnabled,
+		localChunkManager:    localChunkManager,
+		remoteChunkManager:   remoteChunkManager,
+		localCacheEnabled:    localCacheEnabled,
+		localCacheSize:       Params.QueryNodeCfg.LocalFileCacheLimit,
+		globalSegmentManager: newGlobalSealedSegmentManager(collectionID),
 	}
 
-	qc.register()
-	return qc
+	for _, opt := range opts {
+		opt(qc)
+	}
+
+	err := qc.registerCollectionTSafe()
+	if err != nil {
+		return nil, err
+	}
+	return qc, nil
 }
 
 func (q *queryCollection) start() {
 	go q.queryMsgStream.Start()
-	go q.queryResultMsgStream.Start()
+	// go q.queryResultMsgStream.Start()
 	go q.consumeQuery()
 	go q.doUnsolvedQueryMsg()
 }
@@ -128,31 +169,105 @@ func (q *queryCollection) close() {
 	if q.queryMsgStream != nil {
 		q.queryMsgStream.Close()
 	}
-	if q.queryResultMsgStream != nil {
-		q.queryResultMsgStream.Close()
+	// if q.queryResultMsgStream != nil {
+	// 	q.queryResultMsgStream.Close()
+	// }
+	q.globalSegmentManager.close()
+	if q.vectorChunkManager != nil {
+		q.vectorChunkManager.Close()
 	}
 }
 
-func (q *queryCollection) register() {
-	collection, err := q.streaming.replica.getCollectionByID(q.collectionID)
+// registerCollectionTSafe registers tSafe watcher if vChannels exists
+func (q *queryCollection) registerCollectionTSafe() error {
+	streamingCollection, err := q.streaming.replica.getCollectionByID(q.collectionID)
 	if err != nil {
-		log.Warn(err.Error())
-		return
+		return err
 	}
-
-	//TODO:: can't add new vChannel to selectCase
-	q.watcherSelectCase = make([]reflect.SelectCase, 0)
+	for _, channel := range streamingCollection.getVChannels() {
+		err := q.addTSafeWatcher(channel)
+		if err != nil {
+			return err
+		}
+	}
 	log.Debug("register tSafe watcher and init watcher select case",
-		zap.Any("collectionID", collection.ID()),
-		zap.Any("dml channels", collection.getVChannels()),
+		zap.Any("collectionID", streamingCollection.ID()),
+		zap.Any("dml channels", streamingCollection.getVChannels()))
+
+	historicalCollection, err := q.historical.replica.getCollectionByID(q.collectionID)
+	if err != nil {
+		return err
+	}
+	for _, channel := range historicalCollection.getVDeltaChannels() {
+		err := q.addTSafeWatcher(channel)
+		if err != nil {
+			return err
+		}
+	}
+	log.Debug("register tSafe watcher and init watcher select case",
+		zap.Any("collectionID", historicalCollection.ID()),
+		zap.Any("delta channels", historicalCollection.getVDeltaChannels()))
+
+	return nil
+}
+
+func (q *queryCollection) addTSafeWatcher(vChannel Channel) error {
+	q.tSafeWatchersMu.Lock()
+	defer q.tSafeWatchersMu.Unlock()
+	if _, ok := q.tSafeWatchers[vChannel]; ok {
+		err := errors.New(fmt.Sprintln("tSafeWatcher of queryCollection has been exists, ",
+			"collectionID = ", q.collectionID, ", ",
+			"channel = ", vChannel))
+		log.Warn(err.Error())
+		return nil
+	}
+	q.tSafeWatchers[vChannel] = newTSafeWatcher()
+	err := q.streaming.tSafeReplica.registerTSafeWatcher(vChannel, q.tSafeWatchers[vChannel])
+	if err != nil {
+		return err
+	}
+	log.Debug("add tSafeWatcher to queryCollection",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", vChannel),
 	)
-	for _, channel := range collection.getVChannels() {
-		q.tSafeWatchers[channel] = newTSafeWatcher()
-		q.streaming.tSafeReplica.registerTSafeWatcher(channel, q.tSafeWatchers[channel])
-		q.watcherSelectCase = append(q.watcherSelectCase, reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(q.tSafeWatchers[channel].watcherChan()),
-		})
+	go q.startWatcher(q.tSafeWatchers[vChannel].watcherChan(), q.tSafeWatchers[vChannel].closeCh)
+	return nil
+}
+
+func (q *queryCollection) removeTSafeWatcher(channel Channel) error {
+	q.tSafeWatchersMu.Lock()
+	defer q.tSafeWatchersMu.Unlock()
+	if _, ok := q.tSafeWatchers[channel]; !ok {
+		err := errors.New(fmt.Sprintln("tSafeWatcher of queryCollection not exists, ",
+			"collectionID = ", q.collectionID, ", ",
+			"channel = ", channel))
+		return err
+	}
+	q.tSafeWatchers[channel].close()
+	delete(q.tSafeWatchers, channel)
+	log.Debug("remove tSafeWatcher from queryCollection",
+		zap.Any("collectionID", q.collectionID),
+		zap.Any("channel", channel),
+	)
+	return nil
+}
+
+func (q *queryCollection) startWatcher(channel <-chan bool, closeCh <-chan struct{}) {
+	for {
+		select {
+		case <-q.releaseCtx.Done():
+			log.Debug("stop queryCollection watcher because queryCollection ctx done", zap.Any("collectionID", q.collectionID))
+			return
+		case <-closeCh:
+			log.Debug("stop queryCollection watcher because watcher closed", zap.Any("collectionID", q.collectionID))
+			return
+		case <-channel:
+			// TODO: check if channel is closed
+			q.watcherCond.L.Lock()
+			q.tSafeUpdate = true
+			q.watcherCond.Broadcast()
+			q.watcherCond.L.Unlock()
+		}
 	}
 }
 
@@ -165,33 +280,54 @@ func (q *queryCollection) addToUnsolvedMsg(msg queryMsg) {
 func (q *queryCollection) popAllUnsolvedMsg() []queryMsg {
 	q.unsolvedMsgMu.Lock()
 	defer q.unsolvedMsgMu.Unlock()
-	tmp := q.unsolvedMsg
+	ret := make([]queryMsg, 0, len(q.unsolvedMsg))
+	ret = append(ret, q.unsolvedMsg...)
 	q.unsolvedMsg = q.unsolvedMsg[:0]
-	return tmp
+	return ret
 }
 
-func (q *queryCollection) waitNewTSafe() Timestamp {
-	// block until any vChannel updating tSafe
-	_, _, recvOK := reflect.Select(q.watcherSelectCase)
-	if !recvOK {
-		//log.Warn("tSafe has been closed", zap.Any("collectionID", q.collectionID))
-		return Timestamp(math.MaxInt64)
+func (q *queryCollection) waitNewTSafe() (Timestamp, error) {
+	q.watcherCond.L.Lock()
+	for !q.tSafeUpdate {
+		q.watcherCond.Wait()
+		err := q.releaseCtx.Err()
+		if err != nil {
+			return 0, err
+		}
 	}
-	//log.Debug("wait new tSafe", zap.Any("collectionID", s.collectionID))
+	q.tSafeUpdate = false
+	q.watcherCond.Broadcast()
+	q.watcherCond.L.Unlock()
+	q.tSafeWatchersMu.RLock()
+	defer q.tSafeWatchersMu.RUnlock()
 	t := Timestamp(math.MaxInt64)
 	for channel := range q.tSafeWatchers {
-		ts := q.streaming.tSafeReplica.getTSafe(channel)
+		ts, err := q.streaming.tSafeReplica.getTSafe(channel)
+		if err != nil {
+			return 0, err
+		}
 		if ts <= t {
 			t = ts
 		}
 	}
-	return t
+	//p, _ := tsoutil.ParseTS(t)
+	//log.Debug("waitNewTSafe",
+	//	zap.Any("collectionID", q.collectionID),
+	//	zap.Any("tSafe", t),
+	//	zap.Any("tSafe_p", p),
+	//)
+	return t, nil
 }
 
 func (q *queryCollection) getServiceableTime() Timestamp {
-	q.serviceableTimeMutex.Lock()
-	defer q.serviceableTimeMutex.Unlock()
-	return q.serviceableTime
+	gracefulTimeInMilliSecond := Params.QueryNodeCfg.GracefulTime
+	gracefulTime := typeutil.ZeroTimestamp
+	if gracefulTimeInMilliSecond > 0 {
+		gracefulTime = tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
+	}
+	q.serviceableTimeMutex.RLock()
+	defer q.serviceableTimeMutex.RUnlock()
+	return q.serviceableTime + gracefulTime
 }
 
 func (q *queryCollection) setServiceableTime(t Timestamp) {
@@ -201,14 +337,24 @@ func (q *queryCollection) setServiceableTime(t Timestamp) {
 	if t < q.serviceableTime {
 		return
 	}
+	q.serviceableTime = t
+	ps, _ := tsoutil.ParseHybridTs(t)
+	metrics.QueryNodeServiceTime.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(ps))
+}
 
-	gracefulTimeInMilliSecond := Params.GracefulTime
-	if gracefulTimeInMilliSecond > 0 {
-		gracefulTime := tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
-		q.serviceableTime = t + gracefulTime
-	} else {
-		q.serviceableTime = t
-	}
+func (q *queryCollection) checkTimeout(msg queryMsg) bool {
+	curTime := tsoutil.GetCurrentTime()
+	curTimePhysical, _ := tsoutil.ParseTS(curTime)
+	timeoutTsPhysical, _ := tsoutil.ParseTS(msg.TimeoutTs())
+	log.Debug("check if query timeout",
+		zap.Int64("collectionID", q.collectionID),
+		zap.Int64("msgID", msg.ID()),
+		zap.Uint64("TimeoutTs", msg.TimeoutTs()),
+		zap.Uint64("curTime", curTime),
+		zap.Time("timeoutTsPhysical", timeoutTsPhysical),
+		zap.Time("curTimePhysical", curTimePhysical),
+	)
+	return msg.TimeoutTs() > typeutil.ZeroTimestamp && curTime >= msg.TimeoutTs()
 }
 
 func (q *queryCollection) consumeQuery() {
@@ -217,18 +363,15 @@ func (q *queryCollection) consumeQuery() {
 		case <-q.releaseCtx.Done():
 			log.Debug("stop queryCollection's receiveQueryMsg", zap.Int64("collectionID", q.collectionID))
 			return
-		default:
-			msgPack := q.queryMsgStream.Consume()
-			if msgPack == nil || len(msgPack.Msgs) <= 0 {
-				//msgPackNil := msgPack == nil
-				//msgPackEmpty := true
-				//if msgPack != nil {
-				//	msgPackEmpty = len(msgPack.Msgs) <= 0
-				//}
-				//log.Debug("consume query message failed", zap.Any("msgPack is Nil", msgPackNil),
-				//	zap.Any("msgPackEmpty", msgPackEmpty))
+		case msgPack, ok := <-q.queryMsgStream.Chan():
+			if !ok {
+				log.Warn("Receive Query Msg from chan failed", zap.Int64("collectionID", q.collectionID))
+				return
+			}
+			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
 				continue
 			}
+
 			for _, msg := range msgPack.Msgs {
 				switch sm := msg.(type) {
 				case *msgstream.SearchMsg:
@@ -236,13 +379,13 @@ func (q *queryCollection) consumeQuery() {
 					if err != nil {
 						log.Warn(err.Error())
 					}
-				case *msgstream.LoadBalanceSegmentsMsg:
-					q.loadBalance(sm)
 				case *msgstream.RetrieveMsg:
 					err := q.receiveQueryMsg(sm)
 					if err != nil {
 						log.Warn(err.Error())
 					}
+				case *msgstream.SealedSegmentsChangeInfoMsg:
+					q.adjustByChangeInfo(sm)
 				default:
 					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
 				}
@@ -251,14 +394,62 @@ func (q *queryCollection) consumeQuery() {
 	}
 }
 
-func (q *queryCollection) loadBalance(msg *msgstream.LoadBalanceSegmentsMsg) {
-	//TODO:: get loadBalance info from etcd
+func (q *queryCollection) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeInfoMsg) {
+	for _, info := range msg.Infos {
+		// precheck collection id, if not the same collection, skip
+		for _, segment := range info.OnlineSegments {
+			if segment.CollectionID != q.collectionID {
+				return
+			}
+		}
+
+		for _, segment := range info.OfflineSegments {
+			if segment.CollectionID != q.collectionID {
+				return
+			}
+		}
+
+		// for OnlineSegments:
+		for _, segment := range info.OnlineSegments {
+			// 1. update global sealed segments
+			q.globalSegmentManager.addGlobalSegmentInfo(segment)
+			// 2. update excluded segment, cluster have been loaded sealed segments,
+			// so we need to avoid getting growing segment from flow graph.
+			q.streaming.replica.addExcludedSegments(segment.CollectionID, []*datapb.SegmentInfo{
+				{
+					ID:            segment.SegmentID,
+					CollectionID:  segment.CollectionID,
+					PartitionID:   segment.PartitionID,
+					InsertChannel: segment.DmChannel,
+					NumOfRows:     segment.NumRows,
+					// TODO: add status, remove query pb segment status, use common pb segment status?
+					DmlPosition: &internalpb.MsgPosition{
+						// use max timestamp to filter out dm messages
+						Timestamp: typeutil.MaxTimestamp,
+					},
+				},
+			})
+		}
+
+		// for OfflineSegments:
+		for _, segment := range info.OfflineSegments {
+			// 1. update global sealed segments
+			q.globalSegmentManager.removeGlobalSealedSegmentInfo(segment.SegmentID)
+		}
+
+		log.Info("Successfully changed global sealed segment info ",
+			zap.Int64("collection ", q.collectionID),
+			zap.Any("online segments ", info.OnlineSegments),
+			zap.Any("offline segments ", info.OfflineSegments))
+	}
 }
 
 func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	msgType := msg.Type()
 	var collectionID UniqueID
 	var msgTypeStr string
+
+	msg.SetTimeRecorder()
 
 	switch msgType {
 	case commonpb.MsgType_Retrieve:
@@ -293,6 +484,16 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	msg.SetTraceCtx(ctx)
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("receiveQueryMsg %d", msg.ID()))
 
+	if q.checkTimeout(msg) {
+		err := fmt.Errorf("do query failed in receiveQueryMsg because timeout, "+
+			"collectionID = %d, msgID = %d, timeoutTS = %d", collectionID, msg.ID(), msg.TimeoutTs())
+		publishErr := q.publishFailedQueryResult(msg, err.Error())
+		if publishErr != nil {
+			return fmt.Errorf("first err = %s, second err = %s", err, publishErr)
+		}
+		return err
+	}
+
 	// check if collection has been released
 	collection, err := q.historical.replica.getCollectionByID(collectionID)
 	if err != nil {
@@ -325,9 +526,9 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	}
 
 	serviceTime := q.getServiceableTime()
-	if guaranteeTs > serviceTime && len(collection.getVChannels()) > 0 {
-		gt, _ := tsoutil.ParseTS(guaranteeTs)
-		st, _ := tsoutil.ParseTS(serviceTime)
+	gt, _ := tsoutil.ParseTS(guaranteeTs)
+	st, _ := tsoutil.ParseTS(serviceTime)
+	if guaranteeTs > serviceTime && (len(collection.getVChannels()) > 0 || len(collection.getVDeltaChannels()) > 0) {
 		log.Debug("query node::receiveQueryMsg: add to unsolvedMsg",
 			zap.Any("collectionID", q.collectionID),
 			zap.Any("sm.GuaranteeTimestamp", gt),
@@ -336,6 +537,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 			zap.Any("msgID", msg.ID()),
 			zap.String("msgType", msgTypeStr),
 		)
+		msg.RecordSpan()
 		q.addToUnsolvedMsg(msg)
 		sp.LogFields(
 			oplog.String("send to unsolved buffer", "send to unsolved buffer"),
@@ -350,6 +552,9 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 
 	log.Debug("doing query in receiveQueryMsg...",
 		zap.Int64("collectionID", collectionID),
+		zap.Any("sm.GuaranteeTimestamp", gt),
+		zap.Any("serviceTime", st),
+		zap.Any("delta seconds", (guaranteeTs-serviceTime)/(1000*1000*1000)),
 		zap.Int64("msgID", msg.ID()),
 		zap.String("msgType", msgTypeStr),
 	)
@@ -396,7 +601,14 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			return
 		default:
 			//time.Sleep(10 * time.Millisecond)
-			serviceTime := q.waitNewTSafe()
+			serviceTime, err := q.waitNewTSafe()
+			if err != nil {
+				if err == q.releaseCtx.Err() {
+					continue
+				}
+				log.Error("[should not happen!] stop doUnsolvedMsg, err = " + err.Error())
+				return
+			}
 			//st, _ := tsoutil.ParseTS(serviceTime)
 			//log.Debug("get tSafe from flow graph",
 			//	zap.Int64("collectionID", q.collectionID),
@@ -420,7 +632,20 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					zap.Any("guaranteeTime_l", guaranteeTs),
 					zap.Any("serviceTime_l", serviceTime),
 				)
-				if guaranteeTs <= serviceTime {
+
+				if q.checkTimeout(m) {
+					err := errors.New(fmt.Sprintln("do query failed in doUnsolvedQueryMsg because timeout"+
+						", collectionID = ", q.collectionID,
+						", msgID = ", m.ID()))
+					log.Warn(err.Error())
+					publishErr := q.publishFailedQueryResult(m, err.Error())
+					if publishErr != nil {
+						log.Error(publishErr.Error())
+					}
+					continue
+				}
+
+				if guaranteeTs <= q.getServiceableTime() {
 					unSolvedMsg = append(unSolvedMsg, m)
 					continue
 				}
@@ -448,8 +673,12 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 				)
 				switch msgType {
 				case commonpb.MsgType_Retrieve:
+					metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID),
+						metrics.QueryLabel).Observe(float64(m.RecordSpan().Milliseconds()))
 					err = q.retrieve(m)
 				case commonpb.MsgType_Search:
+					metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID),
+						metrics.SearchLabel).Observe(float64(m.RecordSpan().Milliseconds()))
 					err = q.search(m)
 				default:
 					err := fmt.Errorf("receive invalid msgType = %d", msgType)
@@ -481,6 +710,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 }
 
 func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]byte) (*schemapb.SearchResultData, error) {
+	tr := timerecord.NewTimeRecorder("translateHitsDuration")
 	log.Debug("translateHits:", zap.Any("lenOfFieldIDs", len(fieldIDs)), zap.Any("lenOfRawHits", len(rawHits)))
 	if len(rawHits) == 0 {
 		return nil, fmt.Errorf("empty results")
@@ -585,7 +815,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int32(int16(binary.LittleEndian.Uint16(dataBlob)))
+					data := int32(int16(common.Endian.Uint16(dataBlob)))
 					colData = append(colData, data)
 				}
 			}
@@ -608,7 +838,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int32(binary.LittleEndian.Uint32(dataBlob))
+					data := int32(common.Endian.Uint32(dataBlob))
 					colData = append(colData, data)
 				}
 			}
@@ -631,7 +861,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int64(binary.LittleEndian.Uint64(dataBlob))
+					data := int64(common.Endian.Uint64(dataBlob))
 					colData = append(colData, data)
 				}
 			}
@@ -654,7 +884,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := math.Float32frombits(binary.LittleEndian.Uint32(dataBlob))
+					data := math.Float32frombits(common.Endian.Uint32(dataBlob))
 					colData = append(colData, data)
 				}
 			}
@@ -677,7 +907,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 			for _, hit := range hits {
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := math.Float64frombits(binary.LittleEndian.Uint64(dataBlob))
+					data := math.Float64frombits(common.Endian.Uint64(dataBlob))
 					colData = append(colData, data)
 				}
 			}
@@ -705,6 +935,7 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 				for _, row := range hit.RowData {
 					dataBlob := row[blobOffset : blobOffset+blobLen]
 					//ref https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+					/* #nosec G103 */
 					ptr := unsafe.Pointer(&dataBlob[0])
 					farray := (*[1 << 28]float32)(ptr)
 					colData = append(colData, farray[:dim:dim]...)
@@ -754,20 +985,32 @@ func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]
 		}
 	}
 
+	metrics.QueryNodeTranslateHitsLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return finalResult, nil
 }
 
 // TODO:: cache map[dsl]plan
 // TODO: reBatched search requests
 func (q *queryCollection) search(msg queryMsg) error {
+	q.streaming.replica.queryRLock()
+	q.historical.replica.queryRLock()
+	defer q.historical.replica.queryRUnlock()
+	defer q.streaming.replica.queryRUnlock()
+
 	searchMsg := msg.(*msgstream.SearchMsg)
+	collectionID := searchMsg.CollectionID
 	sp, ctx := trace.StartSpanFromContext(searchMsg.TraceCtx())
 	defer sp.Finish()
 	searchMsg.SetTraceCtx(ctx)
 	searchTimestamp := searchMsg.BeginTs()
 	travelTimestamp := searchMsg.TravelTimestamp
 
-	schema, err := typeutil.CreateSchemaHelper(q.collection.schema)
+	collection, err := q.streaming.replica.getCollectionByID(searchMsg.CollectionID)
+	if err != nil {
+		return err
+	}
+
+	schema, err := typeutil.CreateSchemaHelper(collection.schema)
 	if err != nil {
 		return err
 	}
@@ -775,29 +1018,34 @@ func (q *queryCollection) search(msg queryMsg) error {
 	var plan *SearchPlan
 	if searchMsg.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := searchMsg.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(q.collection, expr)
+		plan, err = createSearchPlanByExpr(collection, expr)
 		if err != nil {
 			return err
 		}
 	} else {
 		dsl := searchMsg.Dsl
-		plan, err = createSearchPlan(q.collection, dsl)
+		plan, err = createSearchPlan(collection, dsl)
 		if err != nil {
 			return err
 		}
 	}
+
+	defer plan.delete()
+
 	topK := plan.getTopK()
 	if topK == 0 {
-		return fmt.Errorf("limit must be greater than 0")
+		return fmt.Errorf("limit must be greater than 0, msgID = %d", searchMsg.ID())
 	}
 	if topK >= 16385 {
-		return fmt.Errorf("limit %d is too large", topK)
+		return fmt.Errorf("limit %d is too large, msgID = %d", topK, searchMsg.ID())
 	}
 	searchRequestBlob := searchMsg.PlaceholderGroup
 	searchReq, err := parseSearchRequest(plan, searchRequestBlob)
 	if err != nil {
 		return err
 	}
+	defer searchReq.delete()
+
 	queryNum := searchReq.getNumOfQuery()
 	searchRequests := make([]*searchRequest, 0)
 	searchRequests = append(searchRequests, searchReq)
@@ -812,39 +1060,40 @@ func (q *queryCollection) search(msg queryMsg) error {
 			oplog.Object("dsl", searchMsg.Dsl))
 	}
 
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d)", searchMsg.CollectionID, queryNum, topK))
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d(nq=%d, k=%d), msgID = %d", searchMsg.CollectionID, queryNum, topK, searchMsg.ID()))
 
 	// get global sealed segments
 	var globalSealedSegments []UniqueID
 	if len(searchMsg.PartitionIDs) > 0 {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDsByPartitionIds(searchMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(q.collection.id)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDs()
 	}
 
 	searchResults := make([]*SearchResult, 0)
-
+	defer func() {
+		deleteSearchResults(searchResults)
+	}()
 	// historical search
-	hisSearchResults, sealedSegmentSearched, err1 := q.historical.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
-	if err1 != nil {
-		log.Warn(err1.Error())
-		return err1
+	log.Debug("historical search start", zap.Int64("msgID", searchMsg.ID()))
+	hisSearchResults, sealedSegmentSearched, sealedPartitionSearched, err := q.historical.search(searchRequests, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
+	if err != nil {
+		return err
 	}
 	searchResults = append(searchResults, hisSearchResults...)
-	tr.Record("historical search done")
+	log.Debug("historical search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("searched partitionIDs", sealedPartitionSearched), zap.Int64s("searched segmentIDs", sealedSegmentSearched))
+	tr.Record(fmt.Sprintf("historical search done, msgID = %d", searchMsg.ID()))
 
-	// streaming search
-	var err2 error
-	for _, channel := range q.collection.getVChannels() {
-		var strSearchResults []*SearchResult
-		strSearchResults, err2 = q.streaming.search(searchRequests, q.collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
-		if err2 != nil {
-			log.Warn(err2.Error())
-			return err2
+	log.Debug("streaming search start", zap.Int64("msgID", searchMsg.ID()))
+	for _, channel := range collection.getVChannels() {
+		strSearchResults, growingSegmentSearched, growingPartitionSearched, err := q.streaming.search(searchRequests, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+		if err != nil {
+			return err
 		}
 		searchResults = append(searchResults, strSearchResults...)
+		log.Debug("streaming search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.String("searched dmChannel", channel), zap.Int64s("searched partitionIDs", growingPartitionSearched), zap.Int64s("searched segmentIDs", growingSegmentSearched))
 	}
-	tr.Record("streaming search done")
+	tr.Record(fmt.Sprintf("streaming search done, msgID = %d", searchMsg.ID()))
 
 	sp.LogFields(oplog.String("statistical time", "segment search end"))
 	if len(searchResults) <= 0 {
@@ -868,31 +1117,38 @@ func (q *queryCollection) search(msg queryMsg) error {
 					SlicedOffset:             1,
 					SlicedNumCount:           1,
 					SealedSegmentIDsSearched: sealedSegmentSearched,
-					ChannelIDsSearched:       q.collection.getVChannels(),
+					ChannelIDsSearched:       collection.getVChannels(),
 					GlobalSealedSegmentIDs:   globalSealedSegments,
 				},
 			}
 			log.Debug("QueryNode Empty SearchResultMsg",
-				zap.Any("collectionID", q.collection.id),
+				zap.Any("collectionID", collection.id),
 				zap.Any("msgID", searchMsg.ID()),
-				zap.Any("vChannels", q.collection.getVChannels()),
+				zap.Any("vChannels", collection.getVChannels()),
 				zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 			)
-			err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
+			err = q.publishSearchResult(&searchResultMsg.SearchResults, searchMsg.Base.SourceID)
 			if err != nil {
 				return err
 			}
-			tr.Record("publish empty search result done")
-			tr.Elapse("all done")
+			metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.SearchLabel).Observe(float64(msg.ElapseSpan().Milliseconds()))
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.SearchLabel, metrics.SuccessLabel).Inc()
+
+			tr.Record(fmt.Sprintf("publish empty search result done, msgID = %d", searchMsg.ID()))
+			tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))
 			return nil
 		}
 	}
 
 	numSegment := int64(len(searchResults))
-	var marshaledHits *MarshaledHits = nil
+	var marshaledHits *MarshaledHits
+	log.Debug("QueryNode reduce data", zap.Int64("msgID", searchMsg.ID()), zap.Int64("numSegment", numSegment))
+	tr.RecordSpan()
 	err = reduceSearchResultsAndFillData(plan, searchResults, numSegment)
+	log.Debug("QueryNode reduce data finished", zap.Int64("msgID", searchMsg.ID()))
 	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
 	if err != nil {
+		log.Error("QueryNode reduce data failed", zap.Int64("msgID", searchMsg.ID()), zap.Error(err))
 		return err
 	}
 	marshaledHits, err = reorganizeSearchResults(searchResults, numSegment)
@@ -900,15 +1156,16 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
+	defer deleteMarshaledHits(marshaledHits)
 
 	hitsBlob, err := marshaledHits.getHitsBlob()
 	sp.LogFields(oplog.String("statistical time", "getHitsBlob end"))
 	if err != nil {
 		return err
 	}
-	tr.Record("reduce result done")
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
-	var offset int64 = 0
+	var offset int64
 	for index := range searchRequests {
 		hitBlobSizePeerQuery, err := marshaledHits.hitBlobSizeInGroup(int64(index))
 		if err != nil {
@@ -960,14 +1217,14 @@ func (q *queryCollection) search(msg queryMsg) error {
 				SlicedOffset:             1,
 				SlicedNumCount:           1,
 				SealedSegmentIDsSearched: sealedSegmentSearched,
-				ChannelIDsSearched:       q.collection.getVChannels(),
+				ChannelIDsSearched:       collection.getVChannels(),
 				GlobalSealedSegmentIDs:   globalSealedSegments,
 			},
 		}
 		log.Debug("QueryNode SearchResultMsg",
-			zap.Any("collectionID", q.collection.id),
+			zap.Any("collectionID", collection.id),
 			zap.Any("msgID", searchMsg.ID()),
-			zap.Any("vChannels", q.collection.getVChannels()),
+			zap.Any("vChannels", collection.getVChannels()),
 			zap.Any("sealedSegmentSearched", sealedSegmentSearched),
 		)
 
@@ -982,20 +1239,19 @@ func (q *queryCollection) search(msg queryMsg) error {
 		//	fmt.Println(testHits.IDs)
 		//	fmt.Println(testHits.Scores)
 		//}
-		err = q.publishQueryResult(searchResultMsg, searchMsg.CollectionID)
+		err = q.publishSearchResult(&searchResultMsg.SearchResults, searchMsg.Base.SourceID)
 		if err != nil {
 			return err
 		}
-		tr.Record("publish search result")
+		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID),
+			metrics.SearchLabel).Observe(float64(msg.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID),
+			metrics.SearchLabel,
+			metrics.SuccessLabel).Inc()
+		tr.Record(fmt.Sprintf("publish search result, msgID = %d", searchMsg.ID()))
 	}
-
-	sp.LogFields(oplog.String("statistical time", "before free c++ memory"))
-	deleteSearchResults(searchResults)
-	deleteMarshaledHits(marshaledHits)
 	sp.LogFields(oplog.String("statistical time", "stats done"))
-	plan.delete()
-	searchReq.delete()
-	tr.Elapse("all done")
+	tr.Elapse(fmt.Sprintf("all done, msgID = %d", searchMsg.ID()))
 	return nil
 }
 
@@ -1029,49 +1285,56 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 
 	var globalSealedSegments []UniqueID
 	if len(retrieveMsg.PartitionIDs) > 0 {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByPartitionIds(retrieveMsg.PartitionIDs)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDsByPartitionIds(retrieveMsg.PartitionIDs)
 	} else {
-		globalSealedSegments = q.historical.getGlobalSegmentIDsByCollectionID(collectionID)
+		globalSealedSegments = q.globalSegmentManager.getGlobalSegmentIDs()
 	}
 
 	var mergeList []*segcorepb.RetrieveResults
 
 	if q.vectorChunkManager == nil {
 		if q.localChunkManager == nil {
-			return fmt.Errorf("can not create vector chunk manager for local chunk manager is nil")
+			return fmt.Errorf("can not create vector chunk manager for local chunk manager is nil, msgID = %d", retrieveMsg.ID())
 		}
 		if q.remoteChunkManager == nil {
-			return fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil")
+			return fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil, msgID = %d", retrieveMsg.ID())
 		}
-		q.vectorChunkManager = storage.NewVectorChunkManager(q.localChunkManager, q.remoteChunkManager,
+		q.vectorChunkManager, err = storage.NewVectorChunkManager(q.localChunkManager, q.remoteChunkManager,
 			&etcdpb.CollectionMeta{
 				ID:     collection.id,
 				Schema: collection.schema,
-			}, q.localCacheEnabled)
+			}, q.localCacheSize, q.localCacheEnabled)
+		if err != nil {
+			return err
+		}
 	}
+
 	// historical retrieve
-	hisRetrieveResults, sealedSegmentRetrieved, err1 := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
-	if err1 != nil {
-		log.Warn(err1.Error())
-		return err1
+	log.Debug("historical retrieve start", zap.Int64("msgID", retrieveMsg.ID()))
+	hisRetrieveResults, sealedSegmentRetrieved, sealedPartitionRetrieved, err := q.historical.retrieve(collectionID, retrieveMsg.PartitionIDs, q.vectorChunkManager, plan)
+	if err != nil {
+		return err
 	}
 	mergeList = append(mergeList, hisRetrieveResults...)
-	tr.Record("historical retrieve done")
+	log.Debug("historical retrieve", zap.Int64("msgID", retrieveMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("retrieve partitionIDs", sealedPartitionRetrieved), zap.Int64s("retrieve segmentIDs", sealedSegmentRetrieved))
+	tr.Record(fmt.Sprintf("historical retrieve done, msgID = %d", retrieveMsg.ID()))
 
 	// streaming retrieve
-	strRetrieveResults, _, err2 := q.streaming.retrieve(collectionID, retrieveMsg.PartitionIDs, plan)
-	if err2 != nil {
-		log.Warn(err2.Error())
-		return err2
+	log.Debug("streaming retrieve start", zap.Int64("msgID", retrieveMsg.ID()))
+	strRetrieveResults, streamingSegmentRetrived, streamingPartitionRetrived, err := q.streaming.retrieve(collectionID, retrieveMsg.PartitionIDs, plan)
+	if err != nil {
+		return err
 	}
 	mergeList = append(mergeList, strRetrieveResults...)
-	tr.Record("streaming retrieve done")
+	log.Debug("streaming retrieve", zap.Int64("msgID", retrieveMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("retrieve partitionIDs", streamingPartitionRetrived), zap.Int64s("retrieve segmentIDs", streamingSegmentRetrived))
+	tr.Record(fmt.Sprintf("streaming retrieve done, msgID = %d", retrieveMsg.ID()))
 
 	result, err := mergeRetrieveResults(mergeList)
 	if err != nil {
 		return err
 	}
-	tr.Record("merge result done")
+	reduceDuration := tr.Record(fmt.Sprintf("merge result done, msgID = %d", retrieveMsg.ID()))
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.QueryLabel).Observe(float64(reduceDuration.Milliseconds()))
 
 	resultChannelInt := 0
 	retrieveResultMsg := &msgstream.RetrieveResultMsg{
@@ -1092,99 +1355,101 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 		},
 	}
 
-	err = q.publishQueryResult(retrieveResultMsg, retrieveMsg.CollectionID)
+	err = q.publishRetrieveResult(&retrieveResultMsg.RetrieveResults, retrieveMsg.Base.SourceID)
 	if err != nil {
 		return err
 	}
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.QueryLabel, metrics.SuccessLabel).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.QueryLabel).Observe(float64(msg.ElapseSpan().Milliseconds()))
+
 	log.Debug("QueryNode publish RetrieveResultMsg",
+		zap.Int64("msgID", retrieveMsg.ID()),
 		zap.Any("vChannels", collection.getVChannels()),
 		zap.Any("collectionID", collection.ID()),
 		zap.Any("sealedSegmentRetrieved", sealedSegmentRetrieved),
 	)
-	tr.Elapse("all done")
+	tr.Elapse(fmt.Sprintf("all done, msgID = %d", retrieveMsg.ID()))
 	return nil
 }
 
-func getSegmentsByPKs(pks []int64, segments []*Segment) (map[int64][]int64, error) {
-	if pks == nil {
-		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
-	}
-	if segments == nil {
-		return nil, fmt.Errorf("segments is nil when getSegmentsByPKs")
-	}
-	results := make(map[int64][]int64)
-	buf := make([]byte, 8)
-	for _, segment := range segments {
-		for _, pk := range pks {
-			binary.BigEndian.PutUint64(buf, uint64(pk))
-			exist := segment.pkFilter.Test(buf)
-			if exist {
-				results[segment.segmentID] = append(results[segment.segmentID], pk)
+func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
+	var ret *segcorepb.RetrieveResults
+	var skipDupCnt int64
+	var idSet = make(map[int64]struct{})
+
+	// merge results and remove duplicates
+	for _, rr := range retrieveResults {
+		// skip empty result, it will break merge result
+		if rr == nil || len(rr.Offset) == 0 {
+			continue
+		}
+
+		if ret == nil {
+			ret = &segcorepb.RetrieveResults{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{},
+						},
+					},
+				},
+				FieldsData: make([]*schemapb.FieldData, len(rr.FieldsData)),
 			}
 		}
-	}
-	return results, nil
-}
 
-func mergeRetrieveResults(dataArr []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	var final *segcorepb.RetrieveResults
-	for _, data := range dataArr {
-		// skip empty result, it will break merge result
-		if data == nil || len(data.Offset) == 0 {
-			continue
-		}
-
-		if final == nil {
-			final = proto.Clone(data).(*segcorepb.RetrieveResults)
-			continue
-		}
-
-		proto.Merge(final.Ids, data.Ids)
-		if len(final.FieldsData) != len(data.FieldsData) {
+		if len(ret.FieldsData) != len(rr.FieldsData) {
 			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
 		}
 
-		for i := range final.FieldsData {
-			proto.Merge(final.FieldsData[i], data.FieldsData[i])
+		dstIds := ret.Ids.GetIntId()
+		for i, id := range rr.Ids.GetIntId().GetData() {
+			if _, ok := idSet[id]; !ok {
+				dstIds.Data = append(dstIds.Data, id)
+				typeutil.AppendFieldData(ret.FieldsData, rr.FieldsData, int64(i))
+				idSet[id] = struct{}{}
+			} else {
+				// primary keys duplicate
+				skipDupCnt++
+			}
 		}
 	}
+	log.Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
 
 	// not found, return default values indicating not result found
-	if final == nil {
-		final = &segcorepb.RetrieveResults{
-			Ids:        nil,
+	if ret == nil {
+		ret = &segcorepb.RetrieveResults{
+			Ids:        &schemapb.IDs{},
 			FieldsData: []*schemapb.FieldData{},
 		}
 	}
 
-	return final, nil
+	return ret, nil
 }
 
-func (q *queryCollection) publishQueryResult(msg msgstream.TsMsg, collectionID UniqueID) error {
-	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-	defer span.Finish()
-	msg.SetTraceCtx(ctx)
-	msgPack := msgstream.MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	err := q.queryResultMsgStream.Produce(&msgPack)
-	if err != nil {
-		log.Error(err.Error())
-	}
-
-	return err
+func (q *queryCollection) publishSearchResultWithCtx(ctx context.Context, result *internalpb.SearchResults, nodeID UniqueID) error {
+	return q.sessionManager.SendSearchResult(ctx, nodeID, result)
 }
 
-func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
+func (q *queryCollection) publishSearchResult(result *internalpb.SearchResults, nodeID UniqueID) error {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.SearchLabel, metrics.TotalLabel).Inc()
+	return q.publishSearchResultWithCtx(q.releaseCtx, result, nodeID)
+}
+
+func (q *queryCollection) publishRetrieveResultWithCtx(ctx context.Context, result *internalpb.RetrieveResults, nodeID UniqueID) error {
+	return q.sessionManager.SendRetrieveResult(ctx, nodeID, result)
+}
+
+func (q *queryCollection) publishRetrieveResult(result *internalpb.RetrieveResults, nodeID UniqueID) error {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.QueryLabel, metrics.TotalLabel).Inc()
+	return q.publishRetrieveResultWithCtx(q.releaseCtx, result, nodeID)
+}
+
+func (q *queryCollection) publishFailedQueryResultWithCtx(ctx context.Context, msg msgstream.TsMsg, errMsg string) error {
 	msgType := msg.Type()
-	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	span, traceCtx := trace.StartSpanFromContext(msg.TraceCtx())
 	defer span.Finish()
-	msg.SetTraceCtx(ctx)
-	msgPack := msgstream.MsgPack{}
+	msg.SetTraceCtx(traceCtx)
 
-	resultChannelInt := 0
-	baseMsg := msgstream.BaseMsg{
-		HashValues: []uint32{uint32(resultChannelInt)},
-	}
 	baseResult := &commonpb.MsgBase{
 		MsgID:     msg.ID(),
 		Timestamp: msg.BeginTs(),
@@ -1195,37 +1460,94 @@ func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg s
 	case commonpb.MsgType_Retrieve:
 		retrieveMsg := msg.(*msgstream.RetrieveMsg)
 		baseResult.MsgType = commonpb.MsgType_RetrieveResult
-		retrieveResultMsg := &msgstream.RetrieveResultMsg{
-			BaseMsg: baseMsg,
-			RetrieveResults: internalpb.RetrieveResults{
-				Base:            baseResult,
-				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-				ResultChannelID: retrieveMsg.ResultChannelID,
-				Ids:             nil,
-				FieldsData:      nil,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, retrieveResultMsg)
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.QueryLabel, metrics.FailLabel).Inc()
+		return q.publishRetrieveResult(&internalpb.RetrieveResults{
+			Base:            baseResult,
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+			ResultChannelID: retrieveMsg.ResultChannelID,
+			Ids:             nil,
+			FieldsData:      nil,
+		}, msg.SourceID())
 	case commonpb.MsgType_Search:
 		searchMsg := msg.(*msgstream.SearchMsg)
 		baseResult.MsgType = commonpb.MsgType_SearchResult
-		searchResultMsg := &msgstream.SearchResultMsg{
-			BaseMsg: baseMsg,
-			SearchResults: internalpb.SearchResults{
-				Base:            baseResult,
-				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-				ResultChannelID: searchMsg.ResultChannelID,
-			},
-		}
-		msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.SearchLabel, metrics.FailLabel).Inc()
+		return q.publishSearchResultWithCtx(ctx, &internalpb.SearchResults{
+			Base:            baseResult,
+			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+			ResultChannelID: searchMsg.ResultChannelID,
+		}, msg.SourceID())
 	default:
 		return fmt.Errorf("publish invalid msgType %d", msgType)
 	}
-
-	err := q.queryResultMsgStream.Produce(&msgPack)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
+
+func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
+	return q.publishFailedQueryResultWithCtx(q.releaseCtx, msg, errMsg)
+}
+
+// func (q *queryCollection) publishQueryResult(msg msgstream.TsMsg, collectionID UniqueID) error {
+// 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+// 	defer span.Finish()
+// 	msg.SetTraceCtx(ctx)
+// 	msgPack := msgstream.MsgPack{}
+// 	msgPack.Msgs = append(msgPack.Msgs, msg)
+// 	err := q.queryResultMsgStream.Produce(&msgPack)
+// 	if err != nil {
+// 		log.Error(err.Error())
+// 	}
+//
+// 	return err
+// }
+
+// func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
+// 	msgType := msg.Type()
+// 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+// 	defer span.Finish()
+// 	msg.SetTraceCtx(ctx)
+// 	msgPack := msgstream.MsgPack{}
+//
+// 	resultChannelInt := 0
+// 	baseMsg := msgstream.BaseMsg{
+// 		HashValues: []uint32{uint32(resultChannelInt)},
+// 	}
+// 	baseResult := &commonpb.MsgBase{
+// 		MsgID:     msg.ID(),
+// 		Timestamp: msg.BeginTs(),
+// 		SourceID:  msg.SourceID(),
+// 	}
+//
+// 	switch msgType {
+// 	case commonpb.MsgType_Retrieve:
+// 		retrieveMsg := msg.(*msgstream.RetrieveMsg)
+// 		baseResult.MsgType = commonpb.MsgType_RetrieveResult
+// 		retrieveResultMsg := &msgstream.RetrieveResultMsg{
+// 			BaseMsg: baseMsg,
+// 			RetrieveResults: internalpb.RetrieveResults{
+// 				Base:            baseResult,
+// 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+// 				ResultChannelID: retrieveMsg.ResultChannelID,
+// 				Ids:             nil,
+// 				FieldsData:      nil,
+// 			},
+// 		}
+// 		msgPack.Msgs = append(msgPack.Msgs, retrieveResultMsg)
+// 	case commonpb.MsgType_Search:
+// 		searchMsg := msg.(*msgstream.SearchMsg)
+// 		baseResult.MsgType = commonpb.MsgType_SearchResult
+// 		searchResultMsg := &msgstream.SearchResultMsg{
+// 			BaseMsg: baseMsg,
+// 			SearchResults: internalpb.SearchResults{
+// 				Base:            baseResult,
+// 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
+// 				ResultChannelID: searchMsg.ResultChannelID,
+// 			},
+// 		}
+// 		msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
+// 	default:
+// 		return fmt.Errorf("publish invalid msgType %d", msgType)
+// 	}
+//
+// 	return q.queryResultMsgStream.Produce(&msgPack)
+// }
+//

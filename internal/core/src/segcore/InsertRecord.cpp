@@ -13,7 +13,8 @@
 
 namespace milvus::segcore {
 
-InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk) : uids_(1), timestamps_(1) {
+InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk)
+    : uids_(size_per_chunk), timestamps_(size_per_chunk) {
     for (auto& field : schema) {
         if (field.is_vector()) {
             if (field.get_data_type() == DataType::VECTOR_FLOAT) {
@@ -43,17 +44,14 @@ InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk) : uids_
                 this->append_field_data<int32_t>(size_per_chunk);
                 break;
             }
-
             case DataType::INT64: {
                 this->append_field_data<int64_t>(size_per_chunk);
                 break;
             }
-
             case DataType::FLOAT: {
                 this->append_field_data<float>(size_per_chunk);
                 break;
             }
-
             case DataType::DOUBLE: {
                 this->append_field_data<double>(size_per_chunk);
                 break;
@@ -64,4 +62,5 @@ InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk) : uids_
         }
     }
 }
+
 }  // namespace milvus::segcore

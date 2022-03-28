@@ -3204,7 +3204,7 @@ class NestingState(object):
 
       token = matched.group(1)
       if token == '{':
-        # If namespace or class hasn't seen a opening brace yet, mark
+        # If namespace or class hasn't seen an opening brace yet, mark
         # namespace/class head as complete.  Push a new block onto the
         # stack otherwise.
         if not self.SeenOpenBrace():
@@ -5967,7 +5967,7 @@ for _header, _templates in _HEADERS_CONTAINING_TEMPLATES:
 def FilesBelongToSameModule(filename_cc, filename_h):
   """Check if these two filenames belong to the same module.
 
-  The concept of a 'module' here is a as follows:
+  The concept of a 'module' here is as follows:
   foo.h, foo-inl.h, foo.cc, foo_test.cc and foo_unittest.cc belong to the
   same 'module' if they are in the same directory.
   some/path/public/xyzzy and some/path/internal/xyzzy are also considered

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package storage
 
@@ -16,25 +21,25 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-const (
-	// todo : put to param table
-	ServerID      = 1
-	BinlogVersion = 1
-	CommitID      = 1
-	ServerVersion = 1
-)
-
+// BinlogType is to distinguish different files saving different data.
 type BinlogType int32
 
 const (
+	// InsertBinlog BinlogType for insert data
 	InsertBinlog BinlogType = iota
+	// DeleteBinlog BinlogType for delete data
 	DeleteBinlog
+	// DDLBinlog BinlogType for DDL
 	DDLBinlog
+	// IndexFileBinlog BinlogType for index
+	IndexFileBinlog
 )
 const (
+	// MagicNumber used in binlog
 	MagicNumber int32 = 0xfffabc
 )
 
@@ -51,10 +56,12 @@ func (writer *baseBinlogWriter) isClosed() bool {
 	return writer.buffer != nil
 }
 
+// GetEventNums returns the number of event writers
 func (writer *baseBinlogWriter) GetEventNums() int32 {
 	return int32(len(writer.eventWriters))
 }
 
+// GetRowNums returns writer's number of rows
 func (writer *baseBinlogWriter) GetRowNums() (int32, error) {
 	if writer.isClosed() {
 		return writer.length, nil
@@ -71,11 +78,12 @@ func (writer *baseBinlogWriter) GetRowNums() (int32, error) {
 	return int32(length), nil
 }
 
+// GetBinlogType returns writer's binlogType
 func (writer *baseBinlogWriter) GetBinlogType() BinlogType {
 	return writer.binlogType
 }
 
-// GetBuffer get binlog buffer. Return nil if binlog is not finished yet.
+// GetBuffer gets binlog buffer. Return nil if binlog is not finished yet.
 func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 	if writer.buffer == nil {
 		return nil, fmt.Errorf("please close binlog before get buffer")
@@ -83,8 +91,8 @@ func (writer *baseBinlogWriter) GetBuffer() ([]byte, error) {
 	return writer.buffer.Bytes(), nil
 }
 
-// Close allocate buffer and release resource
-func (writer *baseBinlogWriter) Close() error {
+// Finish allocates buffer and releases resource
+func (writer *baseBinlogWriter) Finish() error {
 	if writer.buffer != nil {
 		return nil
 	}
@@ -92,9 +100,9 @@ func (writer *baseBinlogWriter) Close() error {
 		return fmt.Errorf("invalid start/end timestamp")
 	}
 
-	var offset int32 = 0
+	var offset int32
 	writer.buffer = new(bytes.Buffer)
-	if err := binary.Write(writer.buffer, binary.LittleEndian, int32(MagicNumber)); err != nil {
+	if err := binary.Write(writer.buffer, common.Endian, MagicNumber); err != nil {
 		return err
 	}
 	offset += int32(binary.Size(MagicNumber))
@@ -122,17 +130,22 @@ func (writer *baseBinlogWriter) Close() error {
 			return err
 		}
 		writer.length += int32(rows)
-		if err := w.ReleasePayloadWriter(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
 
+func (writer *baseBinlogWriter) Close() {
+	for _, e := range writer.eventWriters {
+		e.Close()
+	}
+}
+
+// InsertBinlogWriter is an object to write binlog file which saves insert data.
 type InsertBinlogWriter struct {
 	baseBinlogWriter
 }
 
+// NextInsertEventWriter returns an event writer to write insert data to an event.
 func (writer *InsertBinlogWriter) NextInsertEventWriter() (*insertEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -145,10 +158,12 @@ func (writer *InsertBinlogWriter) NextInsertEventWriter() (*insertEventWriter, e
 	return event, nil
 }
 
+// DeleteBinlogWriter is an object to write binlog file which saves delete data.
 type DeleteBinlogWriter struct {
 	baseBinlogWriter
 }
 
+// NextDeleteEventWriter returns an event writer to write delete data to an event.
 func (writer *DeleteBinlogWriter) NextDeleteEventWriter() (*deleteEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -161,10 +176,13 @@ func (writer *DeleteBinlogWriter) NextDeleteEventWriter() (*deleteEventWriter, e
 	return event, nil
 }
 
+// DDLBinlogWriter is an object to write binlog file which saves ddl information.
 type DDLBinlogWriter struct {
 	baseBinlogWriter
 }
 
+// NextCreateCollectionEventWriter returns an event writer to write CreateCollection
+// information to an event.
 func (writer *DDLBinlogWriter) NextCreateCollectionEventWriter() (*createCollectionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -177,6 +195,8 @@ func (writer *DDLBinlogWriter) NextCreateCollectionEventWriter() (*createCollect
 	return event, nil
 }
 
+// NextDropCollectionEventWriter returns an event writer to write DropCollection
+// information to an event.
 func (writer *DDLBinlogWriter) NextDropCollectionEventWriter() (*dropCollectionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -189,6 +209,8 @@ func (writer *DDLBinlogWriter) NextDropCollectionEventWriter() (*dropCollectionE
 	return event, nil
 }
 
+// NextCreatePartitionEventWriter returns an event writer to write CreatePartition
+// information to an event.
 func (writer *DDLBinlogWriter) NextCreatePartitionEventWriter() (*createPartitionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -201,6 +223,8 @@ func (writer *DDLBinlogWriter) NextCreatePartitionEventWriter() (*createPartitio
 	return event, nil
 }
 
+// NextDropPartitionEventWriter returns an event writer to write DropPartition
+// information to an event.
 func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
@@ -213,6 +237,25 @@ func (writer *DDLBinlogWriter) NextDropPartitionEventWriter() (*dropPartitionEve
 	return event, nil
 }
 
+// IndexFileBinlogWriter is an object to write binlog file which saves index files
+type IndexFileBinlogWriter struct {
+	baseBinlogWriter
+}
+
+// NextIndexFileEventWriter return next available EventWriter
+func (writer *IndexFileBinlogWriter) NextIndexFileEventWriter() (*indexFileEventWriter, error) {
+	if writer.isClosed() {
+		return nil, fmt.Errorf("binlog has closed")
+	}
+	event, err := newIndexFileEventWriter()
+	if err != nil {
+		return nil, err
+	}
+	writer.eventWriters = append(writer.eventWriters, event)
+	return event, nil
+}
+
+// NewInsertBinlogWriter creates InsertBinlogWriter to write binlog file.
 func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID, FieldID int64) *InsertBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
@@ -220,7 +263,8 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 	descriptorEvent.PartitionID = partitionID
 	descriptorEvent.SegmentID = segmentID
 	descriptorEvent.FieldID = FieldID
-	return &InsertBinlogWriter{
+
+	w := &InsertBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -229,13 +273,18 @@ func NewInsertBinlogWriter(dataType schemapb.DataType, collectionID, partitionID
 			buffer:          nil,
 		},
 	}
+
+	return w
 }
 
-func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *DeleteBinlogWriter {
+// NewDeleteBinlogWriter creates DeleteBinlogWriter to write binlog file.
+func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID, partitionID, segmentID int64) *DeleteBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
-	return &DeleteBinlogWriter{
+	descriptorEvent.PartitionID = partitionID
+	descriptorEvent.SegmentID = segmentID
+	w := &DeleteBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -244,13 +293,15 @@ func NewDeleteBinlogWriter(dataType schemapb.DataType, collectionID int64) *Dele
 			buffer:          nil,
 		},
 	}
+	return w
 }
 
+// NewDDLBinlogWriter creates DDLBinlogWriter to write binlog file.
 func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinlogWriter {
 	descriptorEvent := newDescriptorEvent()
 	descriptorEvent.PayloadDataType = dataType
 	descriptorEvent.CollectionID = collectionID
-	return &DDLBinlogWriter{
+	w := &DDLBinlogWriter{
 		baseBinlogWriter: baseBinlogWriter{
 			descriptorEvent: *descriptorEvent,
 			magicNumber:     MagicNumber,
@@ -259,4 +310,40 @@ func NewDDLBinlogWriter(dataType schemapb.DataType, collectionID int64) *DDLBinl
 			buffer:          nil,
 		},
 	}
+	return w
+}
+
+// NewIndexFileBinlogWriter returns a new IndexFileBinlogWriter with provided parameters
+func NewIndexFileBinlogWriter(
+	indexBuildID UniqueID,
+	version int64,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	fieldID UniqueID,
+	indexName string,
+	indexID UniqueID,
+	key string,
+) *IndexFileBinlogWriter {
+	descriptorEvent := newDescriptorEvent()
+	descriptorEvent.CollectionID = collectionID
+	descriptorEvent.PartitionID = partitionID
+	descriptorEvent.SegmentID = segmentID
+	descriptorEvent.FieldID = fieldID
+	descriptorEvent.PayloadDataType = schemapb.DataType_Int8
+	descriptorEvent.AddExtra("indexBuildID", fmt.Sprintf("%d", indexBuildID))
+	descriptorEvent.AddExtra("version", fmt.Sprintf("%d", version))
+	descriptorEvent.AddExtra("indexName", indexName)
+	descriptorEvent.AddExtra("indexID", fmt.Sprintf("%d", indexID))
+	descriptorEvent.AddExtra("key", key)
+	w := &IndexFileBinlogWriter{
+		baseBinlogWriter: baseBinlogWriter{
+			descriptorEvent: *descriptorEvent,
+			magicNumber:     MagicNumber,
+			binlogType:      IndexFileBinlog,
+			eventWriters:    make([]EventWriter, 0),
+			buffer:          nil,
+		},
+	}
+	return w
 }

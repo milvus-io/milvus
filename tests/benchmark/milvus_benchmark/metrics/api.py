@@ -1,4 +1,3 @@
-import pdb
 import logging
 from pymongo import MongoClient
 
@@ -9,6 +8,8 @@ from .models.server import Server
 from .config import DB, UNIQUE_ID_COLLECTION, DOC_COLLECTION
 from milvus_benchmark import config
 
+
+# Initialize the mongoDB client
 _client = MongoClient(config.MONGO_SERVER)
 logger = logging.getLogger("milvus_benchmark.metric.api")
 
@@ -26,7 +27,6 @@ def save(obj):
         logger.error("obj is not instance of Metric")
         return False
 
-    logger.debug(vars(obj))
     if not isinstance(obj.server, Server):
         logger.error("obj.server is not instance of Server")
         return False
@@ -51,5 +51,7 @@ def save(obj):
     env_doc_id = insert_or_get(md5)
     obj.env = {"id": env_doc_id, "value": vars(obj.env)}
 
+    # insert data to mongoDB
+    logger.debug(vars(obj))
     collection = _client[DB][DOC_COLLECTION]
     collection.insert_one(vars(obj))

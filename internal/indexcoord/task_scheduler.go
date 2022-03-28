@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package indexcoord
 
@@ -17,16 +22,17 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/storage"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
 )
 
+// TaskQueue is a queue used to store tasks.
 type TaskQueue interface {
 	utChan() <-chan int
 	utEmpty() bool
@@ -40,6 +46,7 @@ type TaskQueue interface {
 	tryToRemoveUselessIndexAddTask(indexID UniqueID) []UniqueID
 }
 
+// BaseTaskQueue is a basic instance of TaskQueue.
 type BaseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[UniqueID]task
@@ -90,12 +97,12 @@ func (queue *BaseTaskQueue) addUnissuedTask(t task) error {
 //	return queue.unissuedTasks.Front().Value.(task)
 //}
 
+// PopUnissuedTask pops a task from tasks queue.
 func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	queue.utLock.Lock()
 	defer queue.utLock.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Fatal("sorry, but the unissued task list is empty!")
 		return nil
 	}
 
@@ -105,6 +112,7 @@ func (queue *BaseTaskQueue) PopUnissuedTask() task {
 	return ft.Value.(task)
 }
 
+// AddActiveTask adds a task to activeTasks.
 func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
@@ -118,6 +126,7 @@ func (queue *BaseTaskQueue) AddActiveTask(t task) {
 	queue.activeTasks[tID] = t
 }
 
+// PopActiveTask tasks out a task from activateTask and the task will be executed.
 func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	queue.atLock.Lock()
 	defer queue.atLock.Unlock()
@@ -131,6 +140,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 	return nil
 }
 
+// Enqueue adds a task to TaskQueue.
 func (queue *BaseTaskQueue) Enqueue(t task) error {
 	tID, _ := queue.sched.idAllocator.AllocOne()
 	log.Debug("indexcoord", zap.Int64("[Builder] allocate reqID", tID))
@@ -142,11 +152,13 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
+// IndexAddTaskQueue is a task queue used to store building index tasks.
 type IndexAddTaskQueue struct {
 	BaseTaskQueue
 	lock sync.Mutex
 }
 
+// Enqueue adds a building index task to IndexAddTaskQueue.
 func (queue *IndexAddTaskQueue) Enqueue(t task) error {
 	queue.lock.Lock()
 	defer queue.lock.Unlock()
@@ -176,6 +188,7 @@ func (queue *IndexAddTaskQueue) tryToRemoveUselessIndexAddTask(indexID UniqueID)
 	return indexBuildIDs
 }
 
+// NewIndexAddTaskQueue creates a new IndexAddTaskQueue.
 func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
 	return &IndexAddTaskQueue{
 		BaseTaskQueue: BaseTaskQueue{
@@ -188,27 +201,29 @@ func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
 	}
 }
 
+// TaskScheduler is a scheduler of indexing tasks.
 type TaskScheduler struct {
 	IndexAddQueue TaskQueue
 
 	idAllocator *allocator.GlobalIDAllocator
 	metaTable   *metaTable
-	kv          kv.BaseKV
+	cm          storage.ChunkManager
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
+// NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context,
 	idAllocator *allocator.GlobalIDAllocator,
-	kv kv.BaseKV,
+	cm storage.ChunkManager,
 	table *metaTable) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
 		idAllocator: idAllocator,
 		metaTable:   table,
-		kv:          kv,
+		cm:          cm,
 		ctx:         ctx1,
 		cancel:      cancel,
 	}
@@ -273,6 +288,7 @@ func (sched *TaskScheduler) indexAddLoop() {
 	}
 }
 
+// Start stats the task scheduler of indexing tasks.
 func (sched *TaskScheduler) Start() error {
 
 	sched.wg.Add(1)
@@ -281,7 +297,10 @@ func (sched *TaskScheduler) Start() error {
 	return nil
 }
 
+// Close closes the task scheduler of indexing tasks.
 func (sched *TaskScheduler) Close() {
-	sched.cancel()
+	if sched.cancel != nil {
+		sched.cancel()
+	}
 	sched.wg.Wait()
 }

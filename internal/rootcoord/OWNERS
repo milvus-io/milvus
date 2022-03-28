@@ -7,8 +7,6 @@ reviewers:
   - yhmo
 
 approvers:
-  - pr-inspection
+  - maintainers
 
-labels:
-- component/rootcoord
 

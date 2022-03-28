@@ -1,6 +1,5 @@
 import logging
 import random
-import pdb
 import gevent
 # import gevent.monkey
 # gevent.monkey.patch_all()
@@ -10,7 +9,7 @@ import locust.stats
 import math
 from locust import LoadTestShape
 from locust.stats import stats_printer, print_stats
-from locust.log import setup_logging, greenlet_exception_logger
+# from locust.log import setup_logging, greenlet_exception_logger
 from milvus_benchmark.client import MilvusClient
 from .locust_task import MilvusTask
 from .locust_tasks import Tasks
@@ -45,7 +44,7 @@ class StepLoadShape(LoadTestShape):
             return None
 
         current_step = math.floor(run_time / self.step_time) + 1
-        return (current_step * self.step_load, self.spawn_rate)
+        return current_step * self.step_load, self.spawn_rate
 
 
 class MyUser(User):
@@ -56,19 +55,25 @@ class MyUser(User):
 
 def locust_executor(host, port, collection_name, connection_type="single", run_params=None):
     m = MilvusClient(host=host, port=port, collection_name=collection_name)
-    MyUser.tasks = {}
     MyUser.op_info = run_params["op_info"]
     MyUser.params = {}
     tasks = run_params["tasks"]
     for op, value in tasks.items():
-        task = {eval("Tasks." + op): value["weight"]}
-        MyUser.tasks.update(task)
+        # task = {eval("Tasks." + op): value["weight"]}
+        for i in range(int(value["weight"])):
+            MyUser.tasks.append(eval("Tasks." + op))
         MyUser.params[op] = value["params"] if "params" in value else None
     logger.info(MyUser.tasks)
+
+    _nq = nq
+    if "insert" in MyUser.params and "ni_per" in MyUser.params["insert"]:
+        ni_per = MyUser.params["insert"]["ni_per"]
+        _nq = ni_per + 10 if ni_per > nq else _nq
+
     MyUser.values = {
         "ids": [random.randint(1000000, 10000000) for _ in range(nb)],
         "get_ids": [random.randint(1, 10000000) for _ in range(nb)],
-        "X": utils.generate_vectors(nq, MyUser.op_info["dimension"])
+        "X": utils.generate_vectors(_nq, MyUser.op_info["dimension"])
     }
 
     # MyUser.tasks = {Tasks.query: 1, Tasks.flush: 1}
@@ -100,10 +105,10 @@ def locust_executor(host, port, collection_name, connection_type="single", run_p
     runner.greenlet.join()
     print_stats(env.stats)
     result = {
-        "rps": round(env.stats.total.current_rps, 1),
-        "fail_ratio": env.stats.total.fail_ratio,
-        "max_response_time": round(env.stats.total.max_response_time, 1),
-        "avg_response_time": round(env.stats.total.avg_response_time, 1)
+        "rps": round(env.stats.total.current_rps, 1),  # Number of interface requests per second
+        "fail_ratio": env.stats.total.fail_ratio,  # Interface request failure rate
+        "max_response_time": round(env.stats.total.max_response_time, 1),  # Maximum interface response time
+        "avg_response_time": round(env.stats.total.avg_response_time, 1)  # ratio of average response time
     }
     runner.stop()
     return result

@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import functools
 import socket
@@ -8,9 +10,8 @@ from utils.util_log import test_log as log
 from base.client_base import param_info
 from check.param_check import ip_check, number_check
 from config.log_config import log_config
-from utils.utils import *
-
-
+from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
+from pymilvus.orm.types import CONSISTENCY_STRONG
 
 timeout = 60
 dimension = 128
@@ -38,7 +39,6 @@ def pytest_addoption(parser):
     parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
     parser.addoption('--check_content', action='store', default="check_content", help="content of check")
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
-
 
 
 @pytest.fixture
@@ -158,7 +158,10 @@ def initialize_env(request):
     assert ip_check(host) and number_check(port)
 
     """ modify log files """
-    cf.modify_file(file_path_list=[log_config.log_debug, log_config.log_info, log_config.log_err], is_modify=clean_log)
+    file_path_list = [log_config.log_debug, log_config.log_info, log_config.log_err]
+    if log_config.log_worker != "":
+        file_path_list.append(log_config.log_worker)
+    cf.modify_file(file_path_list=file_path_list, is_modify=clean_log)
 
     log.info("#" * 80)
     log.info("[initialize_milvus] Log cleaned up, start testing...")
@@ -206,6 +209,7 @@ def get_invalid_partition_name(request):
 @pytest.fixture(params=ct.get_invalid_dict)
 def get_invalid_vector_dict(request):
     yield request.param
+
 
 def pytest_configure(config):
     # register an additional marker
@@ -303,12 +307,14 @@ def connect(request):
     except Exception as e:
         logging.getLogger().error(str(e))
         pytest.exit("Milvus server can not connected, exit pytest ...")
+
     def fin():
         try:
             milvus.close()
             pass
         except Exception as e:
             logging.getLogger().info(str(e))
+
     request.addfinalizer(fin)
     return milvus
 
@@ -355,14 +361,17 @@ def milvus(request):
 def collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
+    log.debug(f'collection_name: {collection_name}')
     try:
         default_fields = gen_default_fields()
-        connect.create_collection(collection_name, default_fields)
+        connect.create_collection(collection_name, default_fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -373,14 +382,17 @@ def collection(request, connect):
 def id_collection(request, connect):
     ori_collection_name = getattr(request.module, "collection_id", "test")
     collection_name = gen_unique_str(ori_collection_name)
+    log.debug(f'id_collection_name: {collection_name}')
     try:
         fields = gen_default_fields(auto_id=False)
-        connect.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -392,13 +404,15 @@ def binary_collection(request, connect):
     collection_name = gen_unique_str(ori_collection_name)
     try:
         fields = gen_binary_default_fields()
-        connect.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         collection_names = connect.list_collections()
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name
@@ -411,12 +425,14 @@ def binary_id_collection(request, connect):
     collection_name = gen_unique_str(ori_collection_name)
     try:
         fields = gen_binary_default_fields(auto_id=False)
-        connect.create_collection(collection_name, fields)
+        connect.create_collection(collection_name, fields, consistency_level=CONSISTENCY_STRONG)
     except Exception as e:
         pytest.exit(str(e))
+
     def teardown():
         if connect.has_collection(collection_name):
             connect.drop_collection(collection_name, timeout=delete_timeout)
+
     request.addfinalizer(teardown)
     assert connect.has_collection(collection_name)
     return collection_name

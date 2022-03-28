@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package grpcrootcoord
 
@@ -17,8 +22,6 @@ import (
 	"fmt"
 	"math/rand"
 	"path"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,7 +30,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -38,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -66,13 +70,9 @@ func TestGrpcService(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 
-	Params.Init()
+	Params.InitOnce(typeutil.RootCoordRole)
 	Params.Port = (randVal % 100) + 10000
-	parts := strings.Split(Params.Address, ":")
-	if len(parts) == 2 {
-		Params.Address = parts[0] + ":" + strconv.Itoa(Params.Port)
-		t.Log("newParams.Address:", Params.Address)
-	}
+	t.Log("newParams.Address:", Params.GetAddress())
 
 	ctx := context.Background()
 	msFactory := msgstream.NewPmsFactory()
@@ -80,31 +80,28 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 
 	rootcoord.Params.Init()
-	rootcoord.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
-	rootcoord.Params.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
-	rootcoord.Params.MsgChannelSubName = fmt.Sprintf("msgChannel%d", randVal)
-	rootcoord.Params.TimeTickChannel = fmt.Sprintf("timeTick%d", randVal)
-	rootcoord.Params.StatisticsChannel = fmt.Sprintf("stateChannel%d", randVal)
+	rootcoord.Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/test/kv", randVal)
+	rootcoord.Params.CommonCfg.RootCoordSubName = fmt.Sprintf("msgChannel%d", randVal)
+	rootcoord.Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("timeTick%d", randVal)
+	rootcoord.Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("stateChannel%d", randVal)
 
-	rootcoord.Params.MaxPartitionNum = 64
-	rootcoord.Params.DefaultPartitionName = "_default"
-	rootcoord.Params.DefaultIndexName = "_default"
+	rootcoord.Params.RootCoordCfg.MaxPartitionNum = 64
+	rootcoord.Params.CommonCfg.DefaultPartitionName = "_default"
+	rootcoord.Params.CommonCfg.DefaultIndexName = "_default"
 
-	t.Logf("master service port = %d", Params.Port)
+	t.Logf("service port = %d", Params.Port)
 
 	core, ok := (svr.rootCoord).(*rootcoord.Core)
 	assert.True(t, ok)
 
-	err = core.Register()
-	assert.Nil(t, err)
-
-	err = svr.startGrpc()
+	err = svr.startGrpc(Params.Port)
 	assert.Nil(t, err)
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	etcdCli, err := initEtcd(rootcoord.Params.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	sessKey := path.Join(rootcoord.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
@@ -117,6 +114,9 @@ func TestGrpcService(t *testing.T) {
 	_, err = etcdCli.Put(ctx, path.Join(sessKey, typeutil.ProxyRole+"-100"), string(pnb))
 	assert.Nil(t, err)
 
+	rootcoord.Params.RootCoordCfg.Address = Params.GetAddress()
+
+	core.SetEtcdClient(etcdCli)
 	err = core.Init()
 	assert.Nil(t, err)
 
@@ -129,11 +129,8 @@ func TestGrpcService(t *testing.T) {
 		timeTickArray = append(timeTickArray, ts)
 		return nil
 	}
-	createCollectionArray := make([]*internalpb.CreateCollectionRequest, 0, 16)
-	core.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error {
-		t.Logf("Create Colllection %s", req.CollectionName)
-		createCollectionArray = append(createCollectionArray, req)
-		return nil
+	core.SendDdCreateCollectionReq = func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) (map[string][]byte, error) {
+		return map[string][]byte{}, nil
 	}
 
 	dropCollectionArray := make([]*internalpb.DropCollectionRequest, 0, 16)
@@ -161,8 +158,12 @@ func TestGrpcService(t *testing.T) {
 		return []string{"file1", "file2", "file3"}, nil
 	}
 	core.CallGetNumRowsService = func(ctx context.Context, segID typeutil.UniqueID, isFromFlushedChan bool) (int64, error) {
-		return rootcoord.Params.MinSegmentSizeToEnableIndex, nil
+		return rootcoord.Params.RootCoordCfg.MinSegmentSizeToEnableIndex, nil
 	}
+	core.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
+		return nil
+	}
+
 	segs := []typeutil.UniqueID{}
 	segLock := sync.Mutex{}
 	core.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error) {
@@ -175,7 +176,7 @@ func TestGrpcService(t *testing.T) {
 
 	var binlogLock sync.Mutex
 	binlogPathArray := make([]string, 0, 16)
-	core.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
+	core.CallBuildIndexService = func(ctx context.Context, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error) {
 		binlogLock.Lock()
 		defer binlogLock.Unlock()
 		binlogPathArray = append(binlogPathArray, binlog...)
@@ -209,17 +210,16 @@ func TestGrpcService(t *testing.T) {
 	core.CallReleasePartitionService = func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error {
 		return nil
 	}
-
-	rootcoord.Params.Address = Params.Address
-	err = svr.rootCoord.Register()
-	assert.Nil(t, err)
+	core.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+		return nil
+	}
 
 	err = svr.start()
 	assert.Nil(t, err)
 
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Healthy)
 
-	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.MetaRootPath, rootcoord.Params.EtcdEndpoints)
+	cli, err := rcc.NewClient(context.Background(), rootcoord.Params.EtcdCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 
 	err = cli.Init()
@@ -251,6 +251,9 @@ func TestGrpcService(t *testing.T) {
 
 	t.Run("alloc time stamp", func(t *testing.T) {
 		req := &rootcoordpb.AllocTimestampRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_RequestTSO,
+			},
 			Count: 1,
 		}
 		rsp, err := svr.AllocTimestamp(ctx, req)
@@ -260,6 +263,9 @@ func TestGrpcService(t *testing.T) {
 
 	t.Run("alloc id", func(t *testing.T) {
 		req := &rootcoordpb.AllocIDRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_RequestID,
+			},
 			Count: 1,
 		}
 		rsp, err := svr.AllocID(ctx, req)
@@ -328,11 +334,14 @@ func TestGrpcService(t *testing.T) {
 
 		status, err := cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
+		colls, err := core.MetaTable.ListCollections(0)
+		assert.Nil(t, err)
 
-		assert.Equal(t, 1, len(createCollectionArray))
+		assert.Equal(t, 1, len(colls))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-		assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionArray[0].Base.MsgType)
-		assert.Equal(t, collName, createCollectionArray[0].CollectionName)
+		//assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionArray[0].Base.MsgType)
+		_, has := colls[collName]
+		assert.True(t, has)
 
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101
@@ -359,10 +368,11 @@ func TestGrpcService(t *testing.T) {
 		status, err = cli.CreateCollection(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-		assert.Equal(t, 2, len(createCollectionArray))
-		assert.Equal(t, commonpb.MsgType_CreateCollection, createCollectionArray[1].Base.MsgType)
-		assert.Equal(t, collName2, createCollectionArray[1].CollectionName)
-
+		colls, err = core.MetaTable.ListCollections(0)
+		assert.Nil(t, err)
+		assert.Equal(t, 2, len(colls))
+		_, has = colls[collName2]
+		assert.True(t, has)
 		//time stamp go back, master response to add the timestamp, so the time tick will never go back
 		//schema.Name = "testColl-goback"
 		//sbf, err = proto.Marshal(&schema)
@@ -632,7 +642,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, rootcoord.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, rootcoord.Params.CommonCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 	})
 
 	t.Run("flush segment", func(t *testing.T) {
@@ -680,7 +690,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		assert.Equal(t, 1, len(rsp.IndexDescriptions))
-		assert.Equal(t, rootcoord.Params.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+		assert.Equal(t, rootcoord.Params.CommonCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
 
 	})
 
@@ -695,9 +705,9 @@ func TestGrpcService(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collName,
 			FieldName:      fieldName,
-			IndexName:      rootcoord.Params.DefaultIndexName,
+			IndexName:      rootcoord.Params.CommonCfg.DefaultIndexName,
 		}
-		_, idx, err := core.MetaTable.GetIndexByName(collName, rootcoord.Params.DefaultIndexName)
+		_, idx, err := core.MetaTable.GetIndexByName(collName, rootcoord.Params.CommonCfg.DefaultIndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, len(idx), 1)
 		rsp, err := cli.DropIndex(ctx, req)
@@ -730,7 +740,7 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, 1, len(collMeta.PartitionIDs))
 		partName, err := core.MetaTable.GetPartitionNameByID(collMeta.ID, collMeta.PartitionIDs[0], 0)
 		assert.Nil(t, err)
-		assert.Equal(t, rootcoord.Params.DefaultPartitionName, partName)
+		assert.Equal(t, rootcoord.Params.CommonCfg.DefaultPartitionName, partName)
 		assert.Equal(t, 2, len(collectionMetaCache))
 	})
 
@@ -787,6 +797,9 @@ type mockCore struct {
 }
 
 func (m *mockCore) UpdateStateCode(internalpb.StateCode) {
+}
+
+func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
 func (m *mockCore) SetDataCoord(context.Context, types.DataCoord) error {
@@ -884,19 +897,19 @@ func TestRun(t *testing.T) {
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	Params.Init()
+	Params.InitOnce(typeutil.RootCoordRole)
 	Params.Port = 1000000
 	err := svr.Run()
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
 
-	svr.newDataCoordClient = func(string, []string) types.DataCoord {
+	svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, []string) types.IndexCoord {
+	svr.newIndexCoordClient = func(string, *clientv3.Client) types.IndexCoord {
 		return &mockIndex{}
 	}
-	svr.newQueryCoordClient = func(string, []string) types.QueryCoord {
+	svr.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
 		return &mockQuery{}
 	}
 
@@ -905,11 +918,11 @@ func TestRun(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
 	rootcoord.Params.Init()
-	rootcoord.Params.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
+	rootcoord.Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
-	etcdCli, err := initEtcd(rootcoord.Params.EtcdEndpoints)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	sessKey := path.Join(rootcoord.Params.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	err = svr.Run()

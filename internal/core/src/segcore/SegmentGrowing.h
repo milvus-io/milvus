@@ -10,19 +10,19 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
+
+#include <memory>
 #include <vector>
 
-#include "common/Types.h"
-#include "common/Schema.h"
-#include <memory>
-
-#include "query/deprecated/GeneralQuery.h"
-#include "query/Plan.h"
 #include "common/LoadInfo.h"
+#include "common/Schema.h"
+#include "common/Types.h"
+#include "query/Plan.h"
+#include "query/deprecated/GeneralQuery.h"
 #include "segcore/SegmentInterface.h"
 
-namespace milvus {
-namespace segcore {
+namespace milvus::segcore {
+
 using SearchResult = milvus::SearchResult;
 struct RowBasedRawData {
     void* raw_data;      // schema
@@ -35,13 +35,10 @@ struct ColumnBasedRawData {
     int64_t count;
 };
 
-int
-TestABI();
-
 class SegmentGrowing : public SegmentInternalInterface {
  public:
     virtual void
-    debug_disable_small_index() = 0;
+    disable_small_index() = 0;
 
     virtual int64_t
     PreInsert(int64_t size) = 0;
@@ -60,11 +57,11 @@ class SegmentGrowing : public SegmentInternalInterface {
            const Timestamp* timestamps,
            const ColumnBasedRawData& values) = 0;
 
-    virtual int64_t
-    PreDelete(int64_t size) = 0;
+    // virtual int64_t
+    // PreDelete(int64_t size) = 0;
 
-    virtual Status
-    Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
+    // virtual Status
+    // Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
  public:
     virtual ssize_t
@@ -73,14 +70,4 @@ class SegmentGrowing : public SegmentInternalInterface {
 
 using SegmentGrowingPtr = std::unique_ptr<SegmentGrowing>;
 
-SegmentGrowingPtr
-CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config);
-
-inline SegmentGrowingPtr
-CreateGrowingSegment(SchemaPtr schema) {
-    auto seg_conf = SegcoreConfig::default_config();
-    return CreateGrowingSegment(schema, seg_conf);
-}
-
-}  // namespace segcore
-}  // namespace milvus
+}  // namespace milvus::segcore

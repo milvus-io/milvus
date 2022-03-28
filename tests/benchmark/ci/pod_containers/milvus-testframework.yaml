@@ -7,7 +7,7 @@ metadata:
 spec:
   containers:
   - name: milvus-testframework
-    image: registry.zilliz.com/milvus/milvus-test:v0.2
+    image: registry.milvus.io/milvus/milvus-test:v0.2
     command:
     - cat
     tty: true

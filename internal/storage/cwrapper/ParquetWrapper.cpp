@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "ParquetWrapper.h"
 #include "PayloadStream.h"
@@ -71,6 +76,7 @@ CPayloadWriter NewPayloadWriter(int columnType) {
       p->schema = arrow::schema({arrow::field("val", arrow::float64())});
       break;
     }
+    case ColumnType::VARCHAR:
     case ColumnType::STRING : {
       p->columnType = ColumnType::STRING;
       p->builder = std::make_shared<arrow::StringBuilder>();
@@ -297,6 +303,7 @@ CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
     st.error_msg = ErrorMsg("arrow builder is nullptr");
     return st;
   }
+
   if (p->output == nullptr) {
     std::shared_ptr<arrow::Array> array;
     auto ast = p->builder->Finish(&array);
@@ -305,9 +312,14 @@ CStatus FinishPayloadWriter(CPayloadWriter payloadWriter) {
       st.error_msg = ErrorMsg(ast.message());
       return st;
     }
+
     auto table = arrow::Table::Make(p->schema, {array});
     p->output = std::make_shared<wrapper::PayloadOutputStream>();
-    ast = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), p->output, 1024 * 1024 * 1024);
+    auto mem_pool = arrow::default_memory_pool();
+    ast = parquet::arrow::WriteTable(*table, mem_pool, p->output, 1024 * 1024 * 1024, 
+      parquet::WriterProperties::Builder().compression(arrow::Compression::ZSTD)
+      ->compression_level(3)->build());
+      
     if (!ast.ok()) {
       st.error_code = static_cast<int>(ErrorCode::UNEXPECTED_ERROR);
       st.error_msg = ErrorMsg(ast.message());
@@ -338,13 +350,10 @@ int GetPayloadLengthFromWriter(CPayloadWriter payloadWriter) {
 }
 
 extern "C"
-CStatus ReleasePayloadWriter(CPayloadWriter handler) {
-  CStatus st;
-  st.error_code = static_cast<int>(ErrorCode::SUCCESS);
-  st.error_msg = nullptr;
+void ReleasePayloadWriter(CPayloadWriter handler) {
   auto p = reinterpret_cast<wrapper::PayloadWriter *>(handler);
   if (p != nullptr) delete p;
-  return st;
+  arrow::default_memory_pool()->ReleaseUnused();
 }
 
 extern "C"
@@ -352,7 +361,8 @@ CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_siz
   auto p = new wrapper::PayloadReader;
   p->bValues = nullptr;
   p->input = std::make_shared<wrapper::PayloadInputStream>(buffer, buf_size);
-  auto st = parquet::arrow::OpenFile(p->input, arrow::default_memory_pool(), &p->reader);
+  auto mem_pool = arrow::default_memory_pool();
+  auto st = parquet::arrow::OpenFile(p->input, mem_pool, &p->reader);
   if (!st.ok()) {
     delete p;
     return nullptr;
@@ -366,7 +376,6 @@ CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_siz
   assert(p->column != nullptr);
   assert(p->column->chunks().size() == 1);
   p->array = p->column->chunk(0);
-
   switch (columnType) {
     case ColumnType::BOOL :
     case ColumnType::INT8 :
@@ -376,6 +385,7 @@ CPayloadReader NewPayloadReader(int columnType, uint8_t *buffer, int64_t buf_siz
     case ColumnType::FLOAT :
     case ColumnType::DOUBLE :
     case ColumnType::STRING :
+    case ColumnType::VARCHAR:
     case ColumnType::VECTOR_BINARY :
     case ColumnType::VECTOR_FLOAT : {
       break;
@@ -526,12 +536,11 @@ int GetPayloadLengthFromReader(CPayloadReader payloadReader) {
 }
 
 extern "C"
-CStatus ReleasePayloadReader(CPayloadReader payloadReader) {
-  CStatus st;
-  st.error_code = static_cast<int>(ErrorCode::SUCCESS);
-  st.error_msg = nullptr;
+void ReleasePayloadReader(CPayloadReader payloadReader) {
   auto p = reinterpret_cast<wrapper::PayloadReader *>(payloadReader);
-  delete[] p->bValues;
-  delete p;
-  return st;
+  if (p != nullptr) {
+    delete[] p->bValues;
+    delete p;
+  }
+  arrow::default_memory_pool()->ReleaseUnused();
 }

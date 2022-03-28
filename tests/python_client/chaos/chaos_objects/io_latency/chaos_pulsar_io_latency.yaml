@@ -1,0 +1,21 @@
+kind: IOChaos
+apiVersion: chaos-mesh.org/v1alpha1
+metadata:
+  name: test-pulsar-io-latency
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      component: bookkeeper
+      release: milvus-chaos
+  mode: all
+  action: latency
+  delay: 10ms
+  methods:
+    - read
+    - write
+    - flush
+  percent: 100
+  volumePath: /pulsar/data/bookkeeper/ledgers

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package querynode
 
@@ -15,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -223,6 +230,54 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
+	node := newQueryNodeMock()
+	collectionID := UniqueID(0)
+	collectionMeta := genTestCollectionMeta(collectionID, false)
+	collection := node.historical.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
+	node.historical.replica.addPartition(collectionID, defaultPartitionID)
+
+	// test get indexed segment info
+	vectorFieldIDDs, err := node.historical.replica.getVecFieldIDsByCollectionID(collectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(vectorFieldIDDs))
+	fieldID := vectorFieldIDDs[0]
+
+	indexID := UniqueID(10000)
+	indexInfo := &VectorFieldInfo{
+		indexInfo: &querypb.VecFieldIndexInfo{
+			IndexName:   "test-index-name",
+			IndexID:     indexID,
+			EnableIndex: true,
+		},
+	}
+
+	segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	assert.NoError(t, err)
+	err = node.historical.replica.setSegment(segment1)
+	assert.NoError(t, err)
+
+	segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, collectionID, "", segmentTypeSealed, true)
+	assert.NoError(t, err)
+	segment2.setVectorFieldInfo(fieldID, indexInfo)
+	err = node.historical.replica.setSegment(segment2)
+	assert.NoError(t, err)
+
+	targetSegs, err := node.historical.replica.getSegmentInfosByColID(collectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(targetSegs))
+	for _, segment := range targetSegs {
+		if segment.GetSegmentState() == segmentTypeGrowing {
+			assert.Equal(t, UniqueID(0), segment.IndexID)
+		} else {
+			assert.Equal(t, indexID, segment.IndexID)
+		}
+	}
+
+	err = node.Stop()
+	assert.NoError(t, err)
+}
+
 func TestCollectionReplica_hasSegment(t *testing.T) {
 	node := newQueryNodeMock()
 	collectionID := UniqueID(0)
@@ -254,38 +309,6 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 	err := node.Stop()
 	assert.NoError(t, err)
 }
-
-//func TestReplaceGrowingSegmentBySealedSegment(t *testing.T) {
-//	node := newQueryNodeMock()
-//	collectionID := UniqueID(0)
-//	segmentID := UniqueID(520)
-//	initTestMeta(t, node, collectionID, segmentID)
-//
-//	_, _, segIDs := node.historical.replica.getSegmentsBySegmentType(segmentTypeGrowing)
-//	assert.Equal(t, len(segIDs), 1)
-//
-//	collection, err := node.historical.replica.getCollectionByID(collectionID)
-//	assert.NoError(t, err)
-//	ns := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
-//	err = node.historical.replica.replaceGrowingSegmentBySealedSegment(ns)
-//	assert.NoError(t, err)
-//
-//	segmentNums := node.historical.replica.getSegmentNum()
-//	assert.Equal(t, segmentNums, 1)
-//
-//	segment, err := node.historical.replica.getSegmentByID(segmentID)
-//	assert.NoError(t, err)
-//
-//	assert.Equal(t, segment.getType(), segmentTypeSealed)
-//
-//	_, _, segIDs = node.historical.replica.getSegmentsBySegmentType(segmentTypeGrowing)
-//	assert.Equal(t, len(segIDs), 0)
-//	_, _, segIDs = node.historical.replica.getSegmentsBySegmentType(segmentTypeSealed)
-//	assert.Equal(t, len(segIDs), 1)
-//
-//	err = node.Stop()
-//	assert.NoError(t, err)
-//}
 
 func TestCollectionReplica_statistic(t *testing.T) {
 	t.Run("test getCollectionIDs", func(t *testing.T) {

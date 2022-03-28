@@ -8,43 +8,42 @@ For instance, if the dataNode pod expands from one to two:
    - verify that the DDL and DML operation is working
 
 ## Prerequisite
-   - Milvus Helm Chart ( refer to [Milvus Helm Chart](https://github.com/milvus-io/milvus-helm/blob/master/charts/milvus/README.md) )
+   - Kubernetes Cluster
+   - Milvus Operator (refer to [Milvus Operator](https://github.com/milvus-io/milvus-operator))
 
 ## Test Scenarios
 ### Milvus in cluster mode
-- expand / shrink dataNode pod
+- scale dataNode replicas
    
-- expand / shrink indexNode pod
+- expand / shrink indexNode replicas
 
-- expand / shrink queryNode pod
+- scale queryNode replicas
 
-- expand / shrink proxy pod
+- scale proxy replicas
 
 ## How it works
 
-- Milvus scales the number of pods in a deployment based on the helm upgrade
+- Milvus scales the number of pods in a deployment based on the milvus operator
   
 - Scale test decouple the milvus deployment from the test code
   
 - Each test scenario is carried out along the process:
   <br> deploy milvus -> operate milvus -> scale milvus -> verify milvus 
   
-- Milvus deployment and milvus scaling are designed in `helm_env.py`
+- Milvus deployment and milvus scaling are designed in `./customize/milvus_operator.py`
 
 ## Run
 ### Manually
 Run a single test scenario manually(take scale dataNode as instance):  
   
-- update milvus helm chart path (choose one of the following)  
-  - `export MILVUS_CHART_ENV=/your/milvus-helm/charts/milvus`  
-  
-  - update <code>MILVUS_CHART = '/home/zong/milvus-helm/charts/milvus'</code> in <code>scale/constants.py</code>  
+- update 
+update milvus image tag `IMAGE_TAG` in `scale/constants.py`
   
 - run the commands below:  
 ```bash  
-    cd /milvus/tests/python_client/scale  
+  cd /milvus/tests/python_client/scale  
   
-    pytest test_data_node_scale.py::TestDataNodeScale::test_expand_data_node -v -s  
+  pytest test_data_node_scale.py::TestDataNodeScale::test_expand_data_node -v -s  
 ```
 
 ### Nightly 

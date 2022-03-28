@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package distributed
 
 import (
@@ -24,6 +40,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// ConnectionManager handles connection to other components of the system
 type ConnectionManager struct {
 	session *sessionutil.Session
 
@@ -54,6 +71,7 @@ type ConnectionManager struct {
 	closeCh chan struct{}
 }
 
+// NewConnectionManager creates a new connection manager.
 func NewConnectionManager(session *sessionutil.Session) *ConnectionManager {
 	return &ConnectionManager{
 		session: session,
@@ -71,6 +89,7 @@ func NewConnectionManager(session *sessionutil.Session) *ConnectionManager {
 	}
 }
 
+// AddDependency add a dependency by role name.
 func (cm *ConnectionManager) AddDependency(roleName string) error {
 	if !cm.checkroleName(roleName) {
 		return errors.New("roleName is illegal")
@@ -97,7 +116,7 @@ func (cm *ConnectionManager) AddDependency(roleName string) error {
 		}
 	}
 
-	eventChannel := cm.session.WatchServices(roleName, rev)
+	eventChannel := cm.session.WatchServices(roleName, rev, nil)
 	go cm.processEvent(eventChannel)
 
 	return nil
@@ -200,6 +219,10 @@ func (cm *ConnectionManager) Stop() {
 	}
 }
 
+//go:norace
+// fix datarace in unittest
+// startWatchService will only be invoked at start procedure
+// otherwise, remove the annotation and add atomic protection
 func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEvent) {
 	for {
 		select {
@@ -207,11 +230,16 @@ func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEve
 			if !ok {
 				return
 			}
-		case ev := <-channel:
-			if ev.EventType == sessionutil.SessionAddEvent {
+		case ev, ok := <-channel:
+			if !ok {
+				//TODO silverxia add retry logic
+				return
+			}
+			switch ev.EventType {
+			case sessionutil.SessionAddEvent:
 				log.Debug("ConnectionManager", zap.Any("add event", ev.Session))
 				cm.buildConnections(ev.Session)
-			} else if ev.EventType == sessionutil.SessionDelEvent {
+			case sessionutil.SessionDelEvent:
 				cm.removeTask(ev.Session.ServerID)
 				cm.removeConnection(ev.Session.ServerID)
 			}

@@ -16,7 +16,7 @@
 TEST(Bitmap, Naive) {
     using namespace milvus;
     using namespace milvus::segcore;
-    using namespace milvus::query;
+
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("height", DataType::FLOAT);
     int N = 10000;

@@ -43,7 +43,7 @@ def meta_gen(content):
             eprint(struct_name)
             eprint(body_res)
             eprint(body)
-            assert(false)
+            assert False
         struct_name, base_name = pack
         if not base_name:
             root_base = struct_name

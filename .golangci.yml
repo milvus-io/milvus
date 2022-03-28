@@ -8,9 +8,6 @@ run:
     - internal/core
 
 linters-settings:
-  golint:
-    min-confidence: 0.8
-
   misspell:
     locale: US
 
@@ -21,9 +18,10 @@ linters:
     - goimports
     - misspell
     - govet
-    - golint
     - ineffassign
     - gosimple
+    - gosec
+    - revive
 
 issues:
   exclude-use-default: false
@@ -33,6 +31,26 @@ issues:
     - should be of the form
     - should not use dot imports
     - which can be annoying to use
+    # Binds to all network interfaces
+    - G102
+    # Errors unhandled
+    - G104
+    # file/folder Permission
+    - G301
+    - G302
+    # Potential file inclusion via variable
+    - G304
+    # Deferring unsafe method like *os.File Close 
+    - G307
+    # Use of weak random number generator math/rand
+    - G404
+    # Exclude copylocks
+    - copylocks
+  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
+  max-same-issues: 0
+
 service:
   golangci-lint-version: 1.27.0 # use the fixed version to not introduce new linters unexpectedly
 

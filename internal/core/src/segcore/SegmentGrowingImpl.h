@@ -11,29 +11,29 @@
 
 #pragma once
 
+#include <deque>
+#include <memory>
+#include <shared_mutex>
+#include <string>
 #include <tbb/concurrent_priority_queue.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
-
-#include <shared_mutex>
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <query/PlanNode.h>
+#include <vector>
+#include <utility>
 
 #include "AckResponder.h"
-#include "SealedIndexingRecord.h"
 #include "ConcurrentVector.h"
-#include "segcore/SegmentGrowing.h"
-#include "query/deprecated/GeneralQuery.h"
-#include "utils/Status.h"
-#include "segcore/DeletedRecord.h"
-#include "exceptions/EasyAssert.h"
+#include "DeletedRecord.h"
 #include "FieldIndexing.h"
 #include "InsertRecord.h"
-#include <utility>
-#include <memory>
-#include <string>
-#include <vector>
-#include <deque>
+#include "SealedIndexingRecord.h"
+#include "SegmentGrowing.h"
+
+#include "exceptions/EasyAssert.h"
+#include "knowhere/index/vector_index/VecIndex.h"
+#include "query/PlanNode.h"
+#include "query/deprecated/GeneralQuery.h"
+#include "utils/Status.h"
 
 namespace milvus::segcore {
 
@@ -109,17 +109,17 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     size_per_chunk() const final {
-        return segcore_config_.get_size_per_chunk();
+        return segcore_config_.get_chunk_rows();
     }
 
  public:
     // only for debug
     void
-    debug_disable_small_index() override {
-        debug_disable_small_index_ = true;
+    disable_small_index() override {
+        enable_small_index_ = false;
     }
 
-    ssize_t
+    int64_t
     get_row_count() const override {
         return record_.ack_responder_.GetAck();
     }
@@ -154,17 +154,18 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  public:
     friend std::unique_ptr<SegmentGrowing>
-    CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config);
+    CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id);
 
-    explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config)
+    explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
-          record_(*schema_, segcore_config.get_size_per_chunk()),
-          indexing_record_(*schema_, segcore_config_) {
+          record_(*schema_, segcore_config.get_chunk_rows()),
+          indexing_record_(*schema_, segcore_config_),
+          id_(segment_id) {
     }
 
     void
-    mask_with_timestamps(boost::dynamic_bitset<>& bitset_chunk, Timestamp timestamp) const override;
+    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const override;
 
     void
     vector_search(int64_t vec_count,
@@ -177,13 +178,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  public:
     std::shared_ptr<DeletedRecord::TmpBitmap>
-    get_deleted_bitmap(int64_t del_barrier, Timestamp query_timestamp, int64_t insert_barrier, bool force = false);
+    get_deleted_bitmap(int64_t del_barrier,
+                       Timestamp query_timestamp,
+                       int64_t insert_barrier,
+                       bool force = false) const;
+
+    BitsetView
+    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>
-    search_ids(const boost::dynamic_bitset<>& view, Timestamp timestamp) const override;
+    search_ids(const BitsetType& view, Timestamp timestamp) const override;
+
+    std::vector<SegOffset>
+    search_ids(const BitsetView& view, Timestamp timestamp) const override;
 
  protected:
     int64_t
@@ -210,14 +220,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SchemaPtr schema_;
 
     InsertRecord record_;
-    DeletedRecord deleted_record_;
+    mutable DeletedRecord deleted_record_;
     IndexingRecord indexing_record_;
     SealedIndexingRecord sealed_indexing_record_;
 
     tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
+    int64_t id_;
 
  private:
-    bool debug_disable_small_index_ = false;
+    bool enable_small_index_ = true;
 };
+
+inline SegmentGrowingPtr
+CreateGrowingSegment(SchemaPtr schema,
+                     int64_t segment_id = -1,
+                     const SegcoreConfig& conf = SegcoreConfig::default_config()) {
+    return std::make_unique<SegmentGrowingImpl>(schema, conf, segment_id);
+}
 
 }  // namespace milvus::segcore

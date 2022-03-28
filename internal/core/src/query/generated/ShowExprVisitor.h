@@ -38,16 +38,13 @@ class ShowExprVisitor : public ExprVisitor {
     visit(CompareExpr& expr) override;
 
  public:
-    using RetType = Json;
-
- public:
-    RetType
+    Json
     call_child(Expr& expr) {
-        assert(!ret_.has_value());
+        assert(!json_opt_.has_value());
         expr.accept(*this);
-        assert(ret_.has_value());
-        auto ret = std::move(ret_);
-        ret_ = std::nullopt;
+        assert(json_opt_.has_value());
+        auto ret = std::move(json_opt_);
+        json_opt_ = std::nullopt;
         return std::move(ret.value());
     }
 
@@ -67,6 +64,6 @@ class ShowExprVisitor : public ExprVisitor {
     }
 
  private:
-    std::optional<RetType> ret_;
+    std::optional<json> json_opt_;
 };
 }  // namespace milvus::query

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package datanode
 
@@ -18,8 +23,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"path"
-	"strconv"
 	"sync"
 	"time"
 
@@ -27,9 +30,13 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -37,24 +44,28 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
 const ctxTimeInMillisecond = 5000
 const debug = false
 
-func newIDLEDataNodeMock(ctx context.Context) *DataNode {
-	msFactory := msgstream.NewPmsFactory()
+var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
+
+func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
+	msFactory := msgstream.NewRmsFactory()
 	node := NewDataNode(ctx, msFactory)
 
 	rc := &RootCoordFactory{
 		ID:             0,
 		collectionID:   1,
 		collectionName: "collection-1",
+		pkType:         pkType,
 	}
-	node.SetRootCoordInterface(rc)
+	node.rootCoord = rc
 
 	ds := &DataCoordFactory{}
-	node.SetDataCoordInterface(ds)
+	node.dataCoord = ds
 
 	return node
 }
@@ -82,11 +93,10 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 		collectionID:   1,
 		collectionName: "collection-1",
 	}
-
-	node.SetRootCoordInterface(ms)
+	node.rootCoord = ms
 
 	ds := &DataCoordFactory{}
-	node.SetDataCoordInterface(ds)
+	node.dataCoord = ds
 
 	return node
 }
@@ -99,16 +109,12 @@ func makeNewChannelNames(names []string, suffix string) []string {
 	return ret
 }
 
-func refreshChannelNames() {
-	Params.SegmentStatisticsChannelName = "datanode-refresh-segment-statistics"
-	Params.TimeTickChannelName = "datanode-refresh-hard-timetick"
-}
-
 func clearEtcd(rootPath string) error {
-	etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, rootPath)
+	client, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
 		return err
 	}
+	etcdKV := etcdkv.NewEtcdKV(client, rootPath)
 
 	err = etcdKV.RemoveWithPrefix("writer/segment")
 	if err != nil {
@@ -136,8 +142,13 @@ func clearEtcd(rootPath string) error {
 type MetaFactory struct {
 }
 
+func NewMetaFactory() *MetaFactory {
+	return &MetaFactory{}
+}
+
 type DataFactory struct {
-	rawData []byte
+	rawData    []byte
+	columnData []*schemapb.FieldData
 }
 
 type RootCoordFactory struct {
@@ -145,163 +156,222 @@ type RootCoordFactory struct {
 	ID             UniqueID
 	collectionName string
 	collectionID   UniqueID
+	pkType         schemapb.DataType
 }
 
 type DataCoordFactory struct {
 	types.DataCoord
 
-	SaveBinlogPathError     bool
-	SaveBinlogPathNotSucess bool
+	SaveBinlogPathError      bool
+	SaveBinlogPathNotSuccess bool
+
+	CompleteCompactionError      bool
+	CompleteCompactionNotSuccess bool
+
+	DropVirtualChannelError      bool
+	DropVirtualChannelNotSuccess bool
 }
 
-func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	if ds.SaveBinlogPathError {
+func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
+	if ds.CompleteCompactionError {
 		return nil, errors.New("Error")
 	}
-	if ds.SaveBinlogPathNotSucess {
+	if ds.CompleteCompactionNotSuccess {
 		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
 	}
 
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (mf *MetaFactory) CollectionMetaFactory(collectionID UniqueID, collectionName string) *etcdpb.CollectionMeta {
+func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
+	if ds.SaveBinlogPathError {
+		return nil, errors.New("Error")
+	}
+	if ds.SaveBinlogPathNotSuccess {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
+	}
+
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
+func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
+	if ds.DropVirtualChannelError {
+		return nil, errors.New("error")
+	}
+	if ds.DropVirtualChannelNotSuccess {
+		return &datapb.DropVirtualChannelResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, nil
+	}
+	return &datapb.DropVirtualChannelResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
+}
+
+func (mf *MetaFactory) GetCollectionMeta(collectionID UniqueID, collectionName string, pkDataType schemapb.DataType) *etcdpb.CollectionMeta {
 	sch := schemapb.CollectionSchema{
 		Name:        collectionName,
 		Description: "test collection by meta factory",
 		AutoID:      true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:     0,
-				Name:        "RowID",
-				Description: "RowID field",
-				DataType:    schemapb.DataType_Int64,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "f0_tk1",
-						Value: "f0_tv1",
-					},
-				},
-			},
-			{
-				FieldID:     1,
-				Name:        "Timestamp",
-				Description: "Timestamp field",
-				DataType:    schemapb.DataType_Int64,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "f1_tk1",
-						Value: "f1_tv1",
-					},
-				},
-			},
-			{
-				FieldID:     100,
-				Name:        "float_vector_field",
-				Description: "field 100",
-				DataType:    schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "dim",
-						Value: "2",
-					},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "indexkey",
-						Value: "indexvalue",
-					},
-				},
-			},
-			{
-				FieldID:     101,
-				Name:        "binary_vector_field",
-				Description: "field 101",
-				DataType:    schemapb.DataType_BinaryVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "dim",
-						Value: "32",
-					},
-				},
-				IndexParams: []*commonpb.KeyValuePair{
-					{
-						Key:   "indexkey",
-						Value: "indexvalue",
-					},
-				},
-			},
-			{
-				FieldID:     102,
-				Name:        "bool_field",
-				Description: "field 102",
-				DataType:    schemapb.DataType_Bool,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     103,
-				Name:        "int8_field",
-				Description: "field 103",
-				DataType:    schemapb.DataType_Int8,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     104,
-				Name:        "int16_field",
-				Description: "field 104",
-				DataType:    schemapb.DataType_Int16,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     105,
-				Name:        "int32_field",
-				Description: "field 105",
-				DataType:    schemapb.DataType_Int32,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     106,
-				Name:        "int64_field",
-				Description: "field 106",
-				DataType:    schemapb.DataType_Int64,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     107,
-				Name:        "float32_field",
-				Description: "field 107",
-				DataType:    schemapb.DataType_Float,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-			{
-				FieldID:     108,
-				Name:        "float64_field",
-				Description: "field 108",
-				DataType:    schemapb.DataType_Double,
-				TypeParams:  []*commonpb.KeyValuePair{},
-				IndexParams: []*commonpb.KeyValuePair{},
-			},
-		},
+	}
+	sch.Fields = mf.GetFieldSchema()
+	for _, field := range sch.Fields {
+		if field.GetDataType() == pkDataType && field.FieldID >= 100 {
+			field.IsPrimaryKey = true
+		}
 	}
 
-	collection := etcdpb.CollectionMeta{
+	return &etcdpb.CollectionMeta{
 		ID:           collectionID,
 		Schema:       &sch,
 		CreateTime:   Timestamp(1),
 		SegmentIDs:   make([]UniqueID, 0),
 		PartitionIDs: []UniqueID{0},
 	}
-	return &collection
+}
+
+func (mf *MetaFactory) GetFieldSchema() []*schemapb.FieldSchema {
+	fields := []*schemapb.FieldSchema{
+		{
+			FieldID:     0,
+			Name:        "RowID",
+			Description: "RowID field",
+			DataType:    schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "f0_tk1",
+					Value: "f0_tv1",
+				},
+			},
+		},
+		{
+			FieldID:     1,
+			Name:        "Timestamp",
+			Description: "Timestamp field",
+			DataType:    schemapb.DataType_Int64,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "f1_tk1",
+					Value: "f1_tv1",
+				},
+			},
+		},
+		{
+			FieldID:     100,
+			Name:        "float_vector_field",
+			Description: "field 100",
+			DataType:    schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "2",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "indexkey",
+					Value: "indexvalue",
+				},
+			},
+		},
+		{
+			FieldID:     101,
+			Name:        "binary_vector_field",
+			Description: "field 101",
+			DataType:    schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "32",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "indexkey",
+					Value: "indexvalue",
+				},
+			},
+		},
+		{
+			FieldID:     102,
+			Name:        "bool_field",
+			Description: "field 102",
+			DataType:    schemapb.DataType_Bool,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     103,
+			Name:        "int8_field",
+			Description: "field 103",
+			DataType:    schemapb.DataType_Int8,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     104,
+			Name:        "int16_field",
+			Description: "field 104",
+			DataType:    schemapb.DataType_Int16,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     105,
+			Name:        "int32_field",
+			Description: "field 105",
+			DataType:    schemapb.DataType_Int32,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     106,
+			Name:        "int64_field",
+			Description: "field 106",
+			DataType:    schemapb.DataType_Int64,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     107,
+			Name:        "float32_field",
+			Description: "field 107",
+			DataType:    schemapb.DataType_Float,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     108,
+			Name:        "float64_field",
+			Description: "field 108",
+			DataType:    schemapb.DataType_Double,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     109,
+			Name:        "varChar_field",
+			Description: "field 109",
+			DataType:    schemapb.DataType_VarChar,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "max_length_per_row",
+					Value: "100",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+	}
+
+	return fields
 }
 
 func NewDataFactory() *DataFactory {
-	return &DataFactory{rawData: GenRowData()}
+	return &DataFactory{rawData: GenRowData(), columnData: GenColumnData()}
 }
 
 func GenRowData() (rawData []byte) {
@@ -312,7 +382,7 @@ func GenRowData() (rawData []byte) {
 	var fvector = [DIM]float32{1, 2}
 	for _, ele := range fvector {
 		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, math.Float32bits(ele))
+		common.Endian.PutUint32(buf, math.Float32bits(ele))
 		rawData = append(rawData, buf...)
 	}
 
@@ -325,7 +395,7 @@ func GenRowData() (rawData []byte) {
 	// Bool
 	var fieldBool = true
 	buf := new(bytes.Buffer)
-	if err := binary.Write(buf, binary.LittleEndian, fieldBool); err != nil {
+	if err := binary.Write(buf, common.Endian, fieldBool); err != nil {
 		panic(err)
 	}
 
@@ -334,7 +404,7 @@ func GenRowData() (rawData []byte) {
 	// int8
 	var dataInt8 int8 = 100
 	bint8 := new(bytes.Buffer)
-	if err := binary.Write(bint8, binary.LittleEndian, dataInt8); err != nil {
+	if err := binary.Write(bint8, common.Endian, dataInt8); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint8.Bytes()...)
@@ -342,7 +412,7 @@ func GenRowData() (rawData []byte) {
 	// int16
 	var dataInt16 int16 = 200
 	bint16 := new(bytes.Buffer)
-	if err := binary.Write(bint16, binary.LittleEndian, dataInt16); err != nil {
+	if err := binary.Write(bint16, common.Endian, dataInt16); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint16.Bytes()...)
@@ -350,7 +420,7 @@ func GenRowData() (rawData []byte) {
 	// int32
 	var dataInt32 int32 = 300
 	bint32 := new(bytes.Buffer)
-	if err := binary.Write(bint32, binary.LittleEndian, dataInt32); err != nil {
+	if err := binary.Write(bint32, common.Endian, dataInt32); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint32.Bytes()...)
@@ -358,7 +428,7 @@ func GenRowData() (rawData []byte) {
 	// int64
 	var dataInt64 int64 = 400
 	bint64 := new(bytes.Buffer)
-	if err := binary.Write(bint64, binary.LittleEndian, dataInt64); err != nil {
+	if err := binary.Write(bint64, common.Endian, dataInt64); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bint64.Bytes()...)
@@ -366,7 +436,7 @@ func GenRowData() (rawData []byte) {
 	// float32
 	var datafloat float32 = 1.1
 	bfloat32 := new(bytes.Buffer)
-	if err := binary.Write(bfloat32, binary.LittleEndian, datafloat); err != nil {
+	if err := binary.Write(bfloat32, common.Endian, datafloat); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat32.Bytes()...)
@@ -374,11 +444,197 @@ func GenRowData() (rawData []byte) {
 	// float64
 	var datafloat64 = 2.2
 	bfloat64 := new(bytes.Buffer)
-	if err := binary.Write(bfloat64, binary.LittleEndian, datafloat64); err != nil {
+	if err := binary.Write(bfloat64, common.Endian, datafloat64); err != nil {
 		panic(err)
 	}
 	rawData = append(rawData, bfloat64.Bytes()...)
 	log.Debug("Rawdata length:", zap.Int("Length of rawData", len(rawData)))
+	return
+}
+
+func GenColumnData() (fieldsData []*schemapb.FieldData) {
+	// Float vector
+	var fVector = []float32{1, 2}
+	floatVectorData := &schemapb.FieldData{
+		Type:      schemapb.DataType_FloatVector,
+		FieldName: "float_vector_field",
+		FieldId:   100,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 2,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: fVector,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, floatVectorData)
+
+	// Binary vector
+	// Dimension of binary vector is 32
+	// size := 4,  = 32 / 8
+	binaryVector := []byte{255, 255, 255, 0}
+	binaryVectorData := &schemapb.FieldData{
+		Type:      schemapb.DataType_BinaryVector,
+		FieldName: "binary_vector_field",
+		FieldId:   101,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: 32,
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: binaryVector,
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, binaryVectorData)
+
+	// bool
+	boolData := []bool{true}
+	boolFieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Bool,
+		FieldName: "bool_field",
+		FieldId:   102,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{
+						Data: boolData,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, boolFieldData)
+
+	// int8
+	int8Data := []int32{100}
+	int8FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int8,
+		FieldName: "int8_field",
+		FieldId:   103,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: int8Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, int8FieldData)
+
+	// int16
+	int16Data := []int32{200}
+	int16FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int16,
+		FieldName: "int16_field",
+		FieldId:   104,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: int16Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, int16FieldData)
+
+	// int32
+	int32Data := []int32{300}
+	int32FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int32,
+		FieldName: "int32_field",
+		FieldId:   105,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: int32Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, int32FieldData)
+
+	// int64
+	int64Data := []int64{400}
+	int64FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: "int64_field",
+		FieldId:   106,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: int64Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, int64FieldData)
+
+	// float
+	floatData := []float32{1.1}
+	floatFieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Float,
+		FieldName: "float32_field",
+		FieldId:   107,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: floatData,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, floatFieldData)
+
+	//double
+	doubleData := []float64{2.2}
+	doubleFieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_Double,
+		FieldName: "float64_field",
+		FieldId:   108,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: doubleData,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, doubleFieldData)
+
+	//var char
+	varCharData := []string{"test"}
+	varCharFieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_VarChar,
+		FieldName: "varChar_field",
+		FieldId:   109,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: varCharData,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, varCharFieldData)
+
 	return
 }
 
@@ -397,10 +653,14 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 			CollectionName: "col1",
 			PartitionName:  "default",
 			SegmentID:      1,
-			ChannelID:      chanName,
+			CollectionID:   UniqueID(0),
+			ShardName:      chanName,
 			Timestamps:     []Timestamp{Timestamp(idx + 1000)},
 			RowIDs:         []UniqueID{UniqueID(idx)},
-			RowData:        []*commonpb.Blob{{Value: df.rawData}},
+			// RowData:        []*commonpb.Blob{{Value: df.rawData}},
+			FieldsData: df.columnData,
+			Version:    internalpb.InsertDataVersion_ColumnBased,
+			NumRows:    1,
 		},
 	}
 	return msg
@@ -415,51 +675,150 @@ func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string) (inMsgs 
 	return
 }
 
-func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (inMsgs []*msgstream.InsertMsg) {
+func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMsg) {
 	for i := 0; i < n; i++ {
 		var msg = df.GenMsgStreamInsertMsg(i, "")
-		inMsgs = append(inMsgs, msg)
+		msgs = append(msgs, msg)
 	}
 	return
 }
 
+func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgstream.DeleteMsg {
+	idx := 100
+	timestamps := make([]Timestamp, len(pks))
+	for i := 0; i < len(pks); i++ {
+		timestamps[i] = Timestamp(i) + 1000
+	}
+	var msg = &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{uint32(idx)},
+		},
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     0,
+				Timestamp: Timestamp(idx + 1000),
+				SourceID:  0,
+			},
+			CollectionName: "col1",
+			PartitionName:  "default",
+			ShardName:      chanName,
+			PrimaryKeys:    pks,
+			Timestamps:     timestamps,
+		},
+	}
+	return msg
+}
+
+func genFlowGraphInsertMsg(chanName string) flowGraphMsg {
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: chanName,
+			MsgID:       make([]byte, 0),
+			Timestamp:   0,
+		},
+	}
+
+	var fgMsg = &flowGraphMsg{
+		insertMessages: make([]*msgstream.InsertMsg, 0),
+		timeRange: TimeRange{
+			timestampMin: timeRange.timestampMin,
+			timestampMax: timeRange.timestampMax,
+		},
+		startPositions: startPos,
+		endPositions:   startPos,
+	}
+
+	dataFactory := NewDataFactory()
+	fgMsg.insertMessages = append(fgMsg.insertMessages, dataFactory.GetMsgStreamInsertMsgs(2)...)
+
+	return *fgMsg
+}
+
+func genFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
+	timeRange := TimeRange{
+		timestampMin: 0,
+		timestampMax: math.MaxUint64,
+	}
+
+	startPos := []*internalpb.MsgPosition{
+		{
+			ChannelName: chanName,
+			MsgID:       make([]byte, 0),
+			Timestamp:   0,
+		},
+	}
+
+	var fgMsg = &flowGraphMsg{
+		insertMessages: make([]*msgstream.InsertMsg, 0),
+		timeRange: TimeRange{
+			timestampMin: timeRange.timestampMin,
+			timestampMax: timeRange.timestampMax,
+		},
+		startPositions: startPos,
+		endPositions:   startPos,
+	}
+
+	dataFactory := NewDataFactory()
+	fgMsg.deleteMessages = append(fgMsg.deleteMessages, dataFactory.GenMsgStreamDeleteMsg(pks, chanName))
+
+	return *fgMsg
+}
+
 type AllocatorFactory struct {
 	sync.Mutex
-	r *rand.Rand
+	r             *rand.Rand
+	isvalid       bool
+	random        bool
+	errAllocBatch bool
 }
 
 var _ allocatorInterface = &AllocatorFactory{}
 
 func NewAllocatorFactory(id ...UniqueID) *AllocatorFactory {
 	f := &AllocatorFactory{
-		r: rand.New(rand.NewSource(time.Now().UnixNano())),
+		r:       rand.New(rand.NewSource(time.Now().UnixNano())),
+		isvalid: len(id) == 0 || (len(id) > 0 && id[0] > 0),
 	}
-
 	return f
 }
 
 func (alloc *AllocatorFactory) allocID() (UniqueID, error) {
 	alloc.Lock()
 	defer alloc.Unlock()
-	return alloc.r.Int63n(10000), nil
+
+	if !alloc.isvalid {
+		return -1, errors.New("allocID error")
+	}
+
+	if alloc.random {
+		return alloc.r.Int63n(10000), nil
+	}
+
+	return 19530, nil
 }
 
-func (alloc *AllocatorFactory) genKey(isalloc bool, ids ...UniqueID) (key string, err error) {
-	if isalloc {
-		idx, err := alloc.allocID()
-		if err != nil {
-			return "", err
-		}
-		ids = append(ids, idx)
+func (alloc *AllocatorFactory) allocIDBatch(count uint32) (UniqueID, uint32, error) {
+	if count == 0 || alloc.errAllocBatch {
+		return 0, 0, errors.New("count should be greater than zero")
 	}
 
-	idStr := make([]string, len(ids))
-	for _, id := range ids {
-		idStr = append(idStr, strconv.FormatInt(id, 10))
-	}
+	start, err := alloc.allocID()
+	return start, count, err
+}
 
-	key = path.Join(idStr...)
-	return
+func (alloc *AllocatorFactory) genKey(ids ...UniqueID) (string, error) {
+	idx, err := alloc.allocID()
+	if err != nil {
+		return "", err
+	}
+	ids = append(ids, idx)
+	return JoinIDPath(ids...), nil
 }
 
 // If id == 0, AllocID will return not successful status
@@ -493,6 +852,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	}
 
 	resp.ID = m.ID
+	resp.Count = in.GetCount()
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
@@ -516,7 +876,7 @@ func (m *RootCoordFactory) ShowCollections(ctx context.Context, in *milvuspb.Sho
 
 func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	f := MetaFactory{}
-	meta := f.CollectionMetaFactory(m.collectionID, m.collectionName)
+	meta := f.GetCollectionMeta(m.collectionID, m.collectionName, m.pkType)
 	resp := &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -547,4 +907,198 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}, nil
+}
+
+// FailMessageStreamFactory mock MessageStreamFactory failure
+type FailMessageStreamFactory struct {
+	msgstream.Factory
+}
+
+func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, errors.New("mocked failure")
+}
+
+func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, errors.New("mocked failure")
+}
+
+func genInsertDataWithPKs(PKs [2]int64) *InsertData {
+	iD := genInsertData()
+	iD.Data[106].(*s.Int64FieldData).Data = PKs[:]
+
+	return iD
+}
+
+func genInsertData() *InsertData {
+	return &InsertData{
+		Data: map[int64]s.FieldData{
+			0: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{11, 22},
+			},
+			1: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{3, 4},
+			},
+			100: &s.FloatVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{1.0, 6.0, 7.0, 8.0},
+				Dim:     2,
+			},
+			101: &s.BinaryVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []byte{0, 255, 255, 255, 128, 128, 128, 0},
+				Dim:     32,
+			},
+			102: &s.BoolFieldData{
+				NumRows: []int64{2},
+				Data:    []bool{true, false},
+			},
+			103: &s.Int8FieldData{
+				NumRows: []int64{2},
+				Data:    []int8{5, 6},
+			},
+			104: &s.Int16FieldData{
+				NumRows: []int64{2},
+				Data:    []int16{7, 8},
+			},
+			105: &s.Int32FieldData{
+				NumRows: []int64{2},
+				Data:    []int32{9, 10},
+			},
+			106: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{1, 2},
+			},
+			107: &s.FloatFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{2.333, 2.334},
+			},
+			108: &s.DoubleFieldData{
+				NumRows: []int64{2},
+				Data:    []float64{3.333, 3.334},
+			},
+			109: &s.StringFieldData{
+				NumRows: []int64{2},
+				Data:    []string{"test1", "test2"},
+			},
+		}}
+}
+
+func genEmptyInsertData() *InsertData {
+	return &InsertData{
+		Data: map[int64]s.FieldData{
+			0: &s.Int64FieldData{
+				NumRows: []int64{0},
+				Data:    []int64{},
+			},
+			1: &s.Int64FieldData{
+				NumRows: []int64{0},
+				Data:    []int64{},
+			},
+			100: &s.FloatVectorFieldData{
+				NumRows: []int64{0},
+				Data:    []float32{},
+				Dim:     2,
+			},
+			101: &s.BinaryVectorFieldData{
+				NumRows: []int64{0},
+				Data:    []byte{},
+				Dim:     32,
+			},
+			102: &s.BoolFieldData{
+				NumRows: []int64{0},
+				Data:    []bool{},
+			},
+			103: &s.Int8FieldData{
+				NumRows: []int64{0},
+				Data:    []int8{},
+			},
+			104: &s.Int16FieldData{
+				NumRows: []int64{0},
+				Data:    []int16{},
+			},
+			105: &s.Int32FieldData{
+				NumRows: []int64{0},
+				Data:    []int32{},
+			},
+			106: &s.Int64FieldData{
+				NumRows: []int64{0},
+				Data:    []int64{},
+			},
+			107: &s.FloatFieldData{
+				NumRows: []int64{0},
+				Data:    []float32{},
+			},
+			108: &s.DoubleFieldData{
+				NumRows: []int64{0},
+				Data:    []float64{},
+			},
+			109: &s.StringFieldData{
+				NumRows: []int64{0},
+				Data:    []string{},
+			},
+		}}
+}
+
+func genInsertDataWithExpiredTS() *InsertData {
+	return &InsertData{
+		Data: map[int64]s.FieldData{
+			0: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{11, 22},
+			},
+			1: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{329749364736000000, 329500223078400000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-10-31 23:00:00 +0000 UTC
+			},
+			100: &s.FloatVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{1.0, 6.0, 7.0, 8.0},
+				Dim:     2,
+			},
+			101: &s.BinaryVectorFieldData{
+				NumRows: []int64{2},
+				Data:    []byte{0, 255, 255, 255, 128, 128, 128, 0},
+				Dim:     32,
+			},
+			102: &s.BoolFieldData{
+				NumRows: []int64{2},
+				Data:    []bool{true, false},
+			},
+			103: &s.Int8FieldData{
+				NumRows: []int64{2},
+				Data:    []int8{5, 6},
+			},
+			104: &s.Int16FieldData{
+				NumRows: []int64{2},
+				Data:    []int16{7, 8},
+			},
+			105: &s.Int32FieldData{
+				NumRows: []int64{2},
+				Data:    []int32{9, 10},
+			},
+			106: &s.Int64FieldData{
+				NumRows: []int64{2},
+				Data:    []int64{1, 2},
+			},
+			107: &s.FloatFieldData{
+				NumRows: []int64{2},
+				Data:    []float32{2.333, 2.334},
+			},
+			108: &s.DoubleFieldData{
+				NumRows: []int64{2},
+				Data:    []float64{3.333, 3.334},
+			},
+			109: &s.StringFieldData{
+				NumRows: []int64{2},
+				Data:    []string{"test1", "test2"},
+			},
+		}}
+}
+
+func genTimestamp() typeutil.Timestamp {
+	// Generate birthday of Golang
+	gb := time.Date(2009, time.Month(11), 10, 23, 0, 0, 0, time.UTC)
+	return tsoutil.ComposeTSByTime(gb, 0)
 }

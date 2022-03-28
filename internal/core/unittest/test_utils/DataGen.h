@@ -10,27 +10,28 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Schema.h"
-#include <random>
-#include <memory>
-#include <cstring>
-#include "segcore/SegmentGrowing.h"
-#include "segcore/SegmentSealed.h"
-#include "Constants.h"
-#include <boost/algorithm/string/predicate.hpp>
-#include "segcore/SegmentSealed.h"
 
+#include <boost/algorithm/string/predicate.hpp>
+#include <cstring>
+#include <memory>
+#include <random>
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <knowhere/index/vector_index/IndexIVF.h>
-#include <query/SearchOnIndex.h>
+
+#include "Constants.h"
+#include "common/Schema.h"
+#include "query/SearchOnIndex.h"
+#include "segcore/SegmentGrowingImpl.h"
+#include "segcore/SegmentSealedImpl.h"
+
 using boost::algorithm::starts_with;
 
 namespace milvus::segcore {
 
 struct GeneratedData {
-    std::vector<char> rows_;
+    std::vector<uint8_t> rows_;
     std::vector<aligned_vector<uint8_t>> cols_;
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
@@ -55,7 +56,7 @@ struct GeneratedData {
  private:
     GeneratedData() = default;
     friend GeneratedData
-    DataGen(SchemaPtr schema, int64_t N, uint64_t seed);
+    DataGen(SchemaPtr schema, int64_t N, uint64_t seed, uint64_t ts_offset);
     void
     generate_rows(int64_t N, SchemaPtr schema);
 };
@@ -68,13 +69,14 @@ GeneratedData::generate_rows(int64_t N, SchemaPtr schema) {
     int64_t len_per_row = offset_infos.back();
     assert(len_per_row == schema->get_total_sizeof());
 
-    std::vector<char> result(len_per_row * N);
+    // change column-based data to row-based data
+    std::vector<uint8_t> result(len_per_row * N);
     for (int index = 0; index < N; ++index) {
         for (int fid = 0; fid < schema->size(); ++fid) {
             auto len = sizeof_infos[fid];
             auto offset = offset_infos[fid];
             auto src = cols_[fid].data() + index * len;
-            auto dst = result.data() + offset + index * len_per_row;
+            auto dst = result.data() + index * len_per_row + offset;
             memcpy(dst, src, len);
         }
     }
@@ -85,7 +87,7 @@ GeneratedData::generate_rows(int64_t N, SchemaPtr schema) {
 }
 
 inline GeneratedData
-DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
+DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0) {
     using std::vector;
     std::vector<aligned_vector<uint8_t>> cols;
     std::default_random_engine er(seed);
@@ -192,7 +194,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42) {
     res.cols_ = std::move(cols);
     for (int i = 0; i < N; ++i) {
         res.row_ids_.push_back(i);
-        res.timestamps_.push_back(i);
+        res.timestamps_.push_back(i + ts_offset);
     }
     //    std::shuffle(res.row_ids_.begin(), res.row_ids_.end(), er);
     res.generate_rows(N, schema);
@@ -288,8 +290,7 @@ SearchResultToJson(const SearchResult& sr) {
         std::vector<std::string> result;
         for (int k = 0; k < topk; ++k) {
             int index = q * topk + k;
-            result.emplace_back(std::to_string(sr.internal_seg_offsets_[index]) + "->" +
-                                std::to_string(sr.result_distances_[index]));
+            result.emplace_back(std::to_string(sr.ids_[index]) + "->" + std::to_string(sr.distances_[index]));
         }
         results.emplace_back(std::move(result));
     }
@@ -338,7 +339,7 @@ GenIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
     auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
                                  {knowhere::IndexParams::nlist, 1024},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
     auto database = knowhere::GenDataset(N, dim, vec);
     auto indexing = std::make_shared<knowhere::IVF>();

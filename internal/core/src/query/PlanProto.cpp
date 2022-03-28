@@ -9,11 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "query/PlanProto.h"
-#include "ExprImpl.h"
 #include <google/protobuf/text_format.h>
-#include <query/generated/ExtractInfoPlanNodeVisitor.h>
-#include "query/generated/ExtractInfoExprVisitor.h"
+
+#include "ExprImpl.h"
+#include "PlanProto.h"
+#include "generated/ExtractInfoExprVisitor.h"
+#include "generated/ExtractInfoPlanNodeVisitor.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -22,82 +23,70 @@ template <typename T>
 std::unique_ptr<TermExprImpl<T>>
 ExtractTermExprImpl(FieldOffset field_offset, DataType data_type, const planpb::TermExpr& expr_proto) {
     static_assert(std::is_fundamental_v<T>);
-    auto result = std::make_unique<TermExprImpl<T>>();
-    result->field_offset_ = field_offset;
-    result->data_type_ = data_type;
     auto size = expr_proto.values_size();
+    std::vector<T> terms(size);
     for (int i = 0; i < size; ++i) {
         auto& value_proto = expr_proto.values(i);
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
-            result->terms_.emplace_back(static_cast<T>(value_proto.bool_val()));
+            terms[i] = static_cast<T>(value_proto.bool_val());
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
-            result->terms_.emplace_back(static_cast<T>(value_proto.int64_val()));
+            terms[i] = static_cast<T>(value_proto.int64_val());
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
-            result->terms_.emplace_back(static_cast<T>(value_proto.float_val()));
+            terms[i] = static_cast<T>(value_proto.float_val());
         } else {
             static_assert(always_false<T>);
         }
     }
-    return result;
+    std::sort(terms.begin(), terms.end());
+    return std::make_unique<TermExprImpl<T>>(field_offset, data_type, terms);
 }
 
 template <typename T>
 std::unique_ptr<UnaryRangeExprImpl<T>>
 ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::UnaryRangeExpr& expr_proto) {
     static_assert(std::is_fundamental_v<T>);
-    auto result = std::make_unique<UnaryRangeExprImpl<T>>();
-    result->field_offset_ = field_offset;
-    result->data_type_ = data_type;
-    result->op_type_ = static_cast<OpType>(expr_proto.op());
-
-    auto setValue = [&](T& v, const auto& value_proto) {
+    auto getValue = [&](const auto& value_proto) -> T {
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
-            v = static_cast<T>(value_proto.bool_val());
+            return static_cast<T>(value_proto.bool_val());
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
-            v = static_cast<T>(value_proto.int64_val());
+            return static_cast<T>(value_proto.int64_val());
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
-            v = static_cast<T>(value_proto.float_val());
+            return static_cast<T>(value_proto.float_val());
         } else {
             static_assert(always_false<T>);
         }
     };
-    setValue(result->value_, expr_proto.value());
-    return result;
+    return std::make_unique<UnaryRangeExprImpl<T>>(field_offset, data_type, static_cast<OpType>(expr_proto.op()),
+                                                   getValue(expr_proto.value()));
 }
 
 template <typename T>
 std::unique_ptr<BinaryRangeExprImpl<T>>
 ExtractBinaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::BinaryRangeExpr& expr_proto) {
     static_assert(std::is_fundamental_v<T>);
-    auto result = std::make_unique<BinaryRangeExprImpl<T>>();
-    result->field_offset_ = field_offset;
-    result->data_type_ = data_type;
-
-    auto setValue = [&](T& v, const auto& value_proto) {
+    auto getValue = [&](const auto& value_proto) -> T {
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
-            v = static_cast<T>(value_proto.bool_val());
+            return static_cast<T>(value_proto.bool_val());
         } else if constexpr (std::is_integral_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kInt64Val);
-            v = static_cast<T>(value_proto.int64_val());
+            return static_cast<T>(value_proto.int64_val());
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
-            v = static_cast<T>(value_proto.float_val());
+            return static_cast<T>(value_proto.float_val());
         } else {
             static_assert(always_false<T>);
         }
     };
-    setValue(result->lower_value_, expr_proto.lower_value());
-    setValue(result->upper_value_, expr_proto.upper_value());
-    result->lower_inclusive_ = expr_proto.lower_inclusive();
-    result->upper_inclusive_ = expr_proto.upper_inclusive();
-    return result;
+    return std::make_unique<BinaryRangeExprImpl<T>>(field_offset, data_type, expr_proto.lower_inclusive(),
+                                                    expr_proto.upper_inclusive(), getValue(expr_proto.lower_value()),
+                                                    getValue(expr_proto.upper_value()));
 }
 
 std::unique_ptr<VectorPlanNode>
@@ -122,6 +111,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 
     search_info.metric_type_ = GetMetricType(query_info_proto.metric_type());
     search_info.topk_ = query_info_proto.topk();
+    search_info.round_decimal_ = query_info_proto.round_decimal();
     search_info.search_params_ = json::parse(query_info_proto.search_params());
 
     auto plan_node = [&]() -> std::unique_ptr<VectorPlanNode> {
@@ -336,10 +326,7 @@ ProtoParser::ParseUnaryExpr(const proto::plan::UnaryExpr& expr_pb) {
     auto op = static_cast<LogicalUnaryExpr::OpType>(expr_pb.op());
     Assert(op == LogicalUnaryExpr::OpType::LogicalNot);
     auto expr = this->ParseExpr(expr_pb.child());
-    auto result = std::make_unique<LogicalUnaryExpr>();
-    result->child_ = std::move(expr);
-    result->op_type_ = op;
-    return result;
+    return std::make_unique<LogicalUnaryExpr>(op, expr);
 }
 
 ExprPtr
@@ -347,11 +334,7 @@ ProtoParser::ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb) {
     auto op = static_cast<LogicalBinaryExpr::OpType>(expr_pb.op());
     auto left_expr = this->ParseExpr(expr_pb.left());
     auto right_expr = this->ParseExpr(expr_pb.right());
-    auto result = std::make_unique<LogicalBinaryExpr>();
-    result->op_type_ = op;
-    result->left_ = std::move(left_expr);
-    result->right_ = std::move(right_expr);
-    return result;
+    return std::make_unique<LogicalBinaryExpr>(op, left_expr, right_expr);
 }
 
 ExprPtr

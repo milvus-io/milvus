@@ -1,24 +1,33 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #pragma once
-#include <memory>
-#include <vector>
+
 #include <any>
-#include <string>
-#include <optional>
 #include <map>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "common/Schema.h"
 
 namespace milvus::query {
+
 class ExprVisitor;
 
 // Base of all Exprs
@@ -32,17 +41,30 @@ struct Expr {
 using ExprPtr = std::unique_ptr<Expr>;
 
 struct BinaryExprBase : Expr {
-    ExprPtr left_;
-    ExprPtr right_;
+    const ExprPtr left_;
+    const ExprPtr right_;
+
+    BinaryExprBase() = delete;
+
+    BinaryExprBase(ExprPtr& left, ExprPtr& right) : left_(std::move(left)), right_(std::move(right)) {
+    }
 };
 
 struct UnaryExprBase : Expr {
-    ExprPtr child_;
+    const ExprPtr child_;
+
+    UnaryExprBase() = delete;
+
+    explicit UnaryExprBase(ExprPtr& child) : child_(std::move(child)) {
+    }
 };
 
 struct LogicalUnaryExpr : UnaryExprBase {
     enum class OpType { Invalid = 0, LogicalNot = 1 };
-    OpType op_type_;
+    const OpType op_type_;
+
+    LogicalUnaryExpr(const OpType op_type, ExprPtr& child) : UnaryExprBase(child), op_type_(op_type) {
+    }
 
  public:
     void
@@ -52,7 +74,11 @@ struct LogicalUnaryExpr : UnaryExprBase {
 struct LogicalBinaryExpr : BinaryExprBase {
     // Note: bitA - bitB == bitA & ~bitB, alias to LogicalMinus
     enum class OpType { Invalid = 0, LogicalAnd = 1, LogicalOr = 2, LogicalXor = 3, LogicalMinus = 4 };
-    OpType op_type_;
+    const OpType op_type_;
+
+    LogicalBinaryExpr(const OpType op_type, ExprPtr& left, ExprPtr& right)
+        : BinaryExprBase(left, right), op_type_(op_type) {
+    }
 
  public:
     void
@@ -60,12 +86,16 @@ struct LogicalBinaryExpr : BinaryExprBase {
 };
 
 struct TermExpr : Expr {
-    FieldOffset field_offset_;
-    DataType data_type_ = DataType::NONE;
+    const FieldOffset field_offset_;
+    const DataType data_type_;
 
  protected:
     // prevent accidential instantiation
-    TermExpr() = default;
+    TermExpr() = delete;
+
+    TermExpr(const FieldOffset field_offset, const DataType data_type)
+        : field_offset_(field_offset), data_type_(data_type) {
+    }
 
  public:
     void
@@ -90,13 +120,17 @@ static const std::map<std::string, OpType> mapping_ = {
 };
 
 struct UnaryRangeExpr : Expr {
-    FieldOffset field_offset_;
-    DataType data_type_ = DataType::NONE;
-    OpType op_type_;
+    const FieldOffset field_offset_;
+    const DataType data_type_;
+    const OpType op_type_;
 
  protected:
     // prevent accidential instantiation
-    UnaryRangeExpr() = default;
+    UnaryRangeExpr() = delete;
+
+    UnaryRangeExpr(const FieldOffset field_offset, const DataType data_type, const OpType op_type)
+        : field_offset_(field_offset), data_type_(data_type), op_type_(op_type) {
+    }
 
  public:
     void
@@ -104,14 +138,24 @@ struct UnaryRangeExpr : Expr {
 };
 
 struct BinaryRangeExpr : Expr {
-    FieldOffset field_offset_;
-    DataType data_type_ = DataType::NONE;
-    bool lower_inclusive_;
-    bool upper_inclusive_;
+    const FieldOffset field_offset_;
+    const DataType data_type_;
+    const bool lower_inclusive_;
+    const bool upper_inclusive_;
 
  protected:
     // prevent accidential instantiation
-    BinaryRangeExpr() = default;
+    BinaryRangeExpr() = delete;
+
+    BinaryRangeExpr(const FieldOffset field_offset,
+                    const DataType data_type,
+                    const bool lower_inclusive,
+                    const bool upper_inclusive)
+        : field_offset_(field_offset),
+          data_type_(data_type),
+          lower_inclusive_(lower_inclusive),
+          upper_inclusive_(upper_inclusive) {
+    }
 
  public:
     void
@@ -129,4 +173,5 @@ struct CompareExpr : Expr {
     void
     accept(ExprVisitor&) override;
 };
+
 }  // namespace milvus::query

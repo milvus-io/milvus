@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package rootcoord
 
@@ -26,6 +31,7 @@ import (
 )
 
 const (
+	// RequestTimeout timeout for request
 	RequestTimeout = 10 * time.Second
 )
 
@@ -86,7 +92,7 @@ func (ms *metaSnapshot) loadTs() error {
 	if err != nil {
 		return err
 	}
-	log.Info("load last ts", zap.Int64("version", version), zap.Int64("revision", revision))
+	log.Info("Load last ts", zap.Int64("version", version), zap.Int64("revision", revision))
 
 	ms.initTs(revision, ts)
 	// start from revision-1, until equals to create revision
@@ -114,7 +120,7 @@ func (ms *metaSnapshot) loadTs() error {
 		strTs := string(resp.Kvs[0].Value)
 		if strTs == "0" {
 			//#issue 7150, index building inserted "0", skipping
-			//this is a special fix for backward compatibility, previous version will put 0 ts into snapshot building index
+			//this is a special fix for backward compatibility, the previous version will put 0 ts into the snapshot building index
 			continue
 		}
 		curTs, err := strconv.ParseUint(strTs, 10, 64)
@@ -321,26 +327,18 @@ func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error {
+func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
-	ops := make([]clientv3.Op, 0, len(kvs)+2)
+	ops := make([]clientv3.Op, 0, len(kvs)+1)
 	for key, value := range kvs {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
 	}
 
 	strTs := strconv.FormatInt(int64(ts), 10)
-	for _, addition := range additions {
-		if addition == nil {
-			continue
-		}
-		if k, v, e := addition(ts); e == nil {
-			ops = append(ops, clientv3.OpPut(path.Join(ms.root, k), v))
-		}
-	}
 	ops = append(ops, clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs))
 	resp, err := ms.cli.Txn(ctx).If().Then(ops...).Commit()
 	if err != nil {
@@ -349,6 +347,7 @@ func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp, 
 	ms.putTs(resp.Header.Revision, ts)
 	return nil
 }
+
 func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	ms.lock.RLock()
 	defer ms.lock.RUnlock()
@@ -386,26 +385,18 @@ func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 	return keys, values, nil
 }
 
-func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp, additions ...func(ts typeutil.Timestamp) (string, string, error)) error {
+func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
-	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+2)
+	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+1)
 	for key, value := range saves {
 		ops = append(ops, clientv3.OpPut(path.Join(ms.root, key), value))
 	}
 
 	strTs := strconv.FormatInt(int64(ts), 10)
-	for _, addition := range additions {
-		if addition == nil {
-			continue
-		}
-		if k, v, e := addition(ts); e == nil {
-			ops = append(ops, clientv3.OpPut(path.Join(ms.root, k), v))
-		}
-	}
 	for _, key := range removals {
 		ops = append(ops, clientv3.OpDelete(path.Join(ms.root, key), clientv3.WithPrefix()))
 	}

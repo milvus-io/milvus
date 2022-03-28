@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package indexparamcheck
 
@@ -16,19 +21,21 @@ import (
 	"sync"
 )
 
+// ConfAdapterMgr manages the conf adapter.
 type ConfAdapterMgr interface {
+	// GetAdapter gets the conf adapter by the index type.
 	GetAdapter(indexType string) (ConfAdapter, error)
 }
 
+// ConfAdapterMgrImpl implements ConfAdapter.
 type ConfAdapterMgrImpl struct {
-	init     bool
 	adapters map[IndexType]ConfAdapter
+	once     sync.Once
 }
 
+// GetAdapter gets the conf adapter by the index type.
 func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error) {
-	if !mgr.init {
-		mgr.registerConfAdapter()
-	}
+	mgr.once.Do(mgr.registerConfAdapter)
 
 	adapter, ok := mgr.adapters[indexType]
 	if ok {
@@ -38,8 +45,6 @@ func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error)
 }
 
 func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
-	mgr.init = true
-
 	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
 	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
 	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
@@ -59,7 +64,6 @@ func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 
 func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
 	return &ConfAdapterMgrImpl{
-		init:     false,
 		adapters: make(map[IndexType]ConfAdapter),
 	}
 }
@@ -67,6 +71,7 @@ func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {
 var confAdapterMgr ConfAdapterMgr
 var getConfAdapterMgrOnce sync.Once
 
+// GetConfAdapterMgrInstance gets the instance of ConfAdapterMgr.
 func GetConfAdapterMgrInstance() ConfAdapterMgr {
 	getConfAdapterMgrOnce.Do(func() {
 		confAdapterMgr = newConfAdapterMgrImpl()

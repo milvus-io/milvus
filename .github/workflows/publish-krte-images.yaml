@@ -3,6 +3,7 @@ name: Publish KRTE Images
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
+  workflow_dispatch:
   push:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
@@ -36,7 +37,7 @@ jobs:
           export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
           docker build --build-arg IMAGE_ARG="milvusdb/krte:$TAG" --build-arg GO_VERSION=1.15.8 -t "milvusdb/krte:$TAG" .
       - name: Docker Push
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' )&& github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         run: |
@@ -46,20 +47,20 @@ jobs:
           docker push "milvusdb/krte:$TAG"
           echo "Push krte image Succeeded"
       - name: Update KRTE Image Changes
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ) && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         working-directory: build/ci/jenkins/pod
         run: |
           export TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
-          sed -i "s#image: .*#image: milvusdb/krte:$TAG#g" krte.yaml
+          sed -i "s#krte:.*#krte:${TAG}#g" ./build/ci/jenkins/pod/rte.yaml
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add krte.yaml
+          git add rte.yaml
           git commit -m "Update KRTE image changes"
       - name: Create Pull Request
         id: cpr
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ) && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         uses: peter-evans/create-pull-request@v3
         with:
@@ -74,7 +75,7 @@ jobs:
 
             Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
       - name: Check outputs
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        if: success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' ) && github.repository == 'milvus-io/milvus'
         run: |
           echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
           echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

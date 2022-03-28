@@ -9,13 +9,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "exceptions/EasyAssert.h"
-#include "utils/Json.h"
 #include <optional>
-#include <utility>
 
-#include "query/generated/ShowPlanNodeVisitor.h"
+#include "exceptions/EasyAssert.h"
 #include "query/generated/ShowExprVisitor.h"
+#include "query/generated/ShowPlanNodeVisitor.h"
+#include "utils/Json.h"
 
 namespace milvus::query {
 #if 0
@@ -63,7 +62,7 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     };
     if (node.predicate_.has_value()) {
         ShowExprVisitor expr_show;
-        Assert(node.predicate_.value());
+        AssertInfo(node.predicate_.value(), "[ShowPlanNodeVisitor]Can't get value from node predict");
         json_body["predicate"] = expr_show.call_child(node.predicate_->operator*());
     } else {
         json_body["predicate"] = "None";
@@ -85,7 +84,7 @@ ShowPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     };
     if (node.predicate_.has_value()) {
         ShowExprVisitor expr_show;
-        Assert(node.predicate_.value());
+        AssertInfo(node.predicate_.value(), "[ShowPlanNodeVisitor]Can't get value from node predict");
         json_body["predicate"] = expr_show.call_child(node.predicate_->operator*());
     } else {
         json_body["predicate"] = "None";

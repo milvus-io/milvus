@@ -1,10 +1,11 @@
+---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: logging
 
+# create dameonset to rsync pod logs
 ---
-
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:

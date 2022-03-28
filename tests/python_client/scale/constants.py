@@ -1,15 +1,7 @@
 # scale object
+# IMAGE_REPOSITORY = "registry.milvus.io/milvus/milvus"  # repository of milvus image
 IMAGE_REPOSITORY = "milvusdb/milvus-dev"
-IMAGE_TAG = "master-latest"
-NAMESPACE = "chaos-testing"
-IF_NOT_PRESENT = "IfNotPresent"
-ALWAYS = "Always"
-PROXY = "proxy"
-DATA_NODE = "dataNode"
-INDEX_NODE = "indexNode"
-QUERY_NODE = "queryNode"
-
-# my values.yaml path
-MILVUS_CHART_ENV = 'MILVUS_CHART_ENV'
-MILVUS_CHART_PATH = '/home/zong/milvus-helm/charts/milvus'
-MILVUS_LOGS_PATH = '/tmp/milvus'
+IMAGE_TAG = "master-20211227-b022615"  # tag of milvus image
+NAMESPACE = "chaos-testing"  # namespace
+IF_NOT_PRESENT = "IfNotPresent"  # image pullPolicy IfNotPresent
+ALWAYS = "Always"  # image pullPolicy Always

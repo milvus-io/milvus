@@ -25,11 +25,11 @@ extern "C" {
 
 typedef void* CSegmentInterface;
 typedef void* CSearchResult;
-typedef void* CRetrieveResult;
+typedef CProto CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
-NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
+NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id);
 
 void
 DeleteSegment(CSegmentInterface c_segment);
@@ -42,10 +42,14 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
-       CSearchResult* result);
+       CSearchResult* result,
+       int64_t segment_id);
 
-CProtoResult
-Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp);
+void
+DeleteRetrieveResult(CRetrieveResult* retrieve_result);
+
+CStatus
+Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
@@ -68,6 +72,15 @@ Insert(CSegmentInterface c_segment,
        int64_t count);
 
 CStatus
+InsertColumnData(CSegmentInterface c_segment,
+                 int64_t reserved_offset,
+                 int64_t size,
+                 const int64_t* row_ids,
+                 const uint64_t* timestamps,
+                 void* raw_data,
+                 int64_t count);
+
+CStatus
 PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset);
 
 CStatus
@@ -83,6 +96,9 @@ PreDelete(CSegmentInterface c_segment, int64_t size);
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
 CStatus
 LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
+
+CStatus
+LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info);
 
 CStatus
 UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);

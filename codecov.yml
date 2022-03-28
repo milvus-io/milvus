@@ -1,8 +1,11 @@
-#Configuration File for CodeCov
+# Configuration File for CodeCov
 codecov:
+  require_ci_to_pass: no
   notify:
-    require_ci_to_pass: yes
-
+    require_ci_to_pass: no
+    wait_for_ci: false
+  ci:
+    - jenkins.milvus.io:18080
 coverage:
   precision: 2
   round: down
@@ -11,12 +14,13 @@ coverage:
   status:
     project:
       default:
+        target: 77%
         threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
         branches:
           - master
     patch:
       default:
-        target: 70%
+        target: 80%   #target of patch diff
         threshold: 0%
         branches:
           - master
@@ -36,3 +40,7 @@ ignore:
   - "*.md"
   - "docs/.*"
   - "**/*.pb.go"
+  - "**/*.proto"
+
+
+

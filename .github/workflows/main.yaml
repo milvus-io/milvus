@@ -35,7 +35,7 @@ on:
 jobs:
   ubuntu:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -50,7 +50,7 @@ jobs:
         uses: actions/cache@v1
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
-          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('internal/core/**') }}
+          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('/internal/core/**') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
       - name: Cache Go Mod Volumes
         uses: actions/cache@v1
@@ -66,11 +66,29 @@ jobs:
         env:
           CHECK_BUILDER: "1"
         run: |
-          ./build/builder.sh /bin/bash -c "make check-proto-product && make unittest"
+          ./build/builder.sh /bin/bash -c "make check-proto-product && make codecov"
+      - name: Get the status & restart count for containers when ut failed
+        if: ${{ failure() }}
+        run: |  
+          echo "----show current status for each container---"
+          docker ps --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
+          for container in $(docker ps --format "table {{.Names}}" | grep -v "NAMES"); do
+              echo "restart count for ${container} is $(docker inspect ${container} --format '{{json .RestartCount}}')"
+          done
+      - name: Get pulsar/minio/etcd logs when ut failed
+        if: ${{ failure() }}
+        run: |
+          echo "-------------logs for pulsar ---------------"
+          docker logs  milvus_pulsar_1
+          echo "-------------logs for minio ----------------"
+          docker logs  milvus_minio_1
+          echo "-------------logs for etcd ----------------"
+          docker logs  milvus_etcd_1
       - name: Upload coverage to Codecov
-        if: github.repository == 'milvus-io/milvus'
-        uses: codecov/codecov-action@v1
+        if: "github.repository == 'milvus-io/milvus'"
+        uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.txt
+          files: ./go_coverage.txt,./lcov_output.info
           name: ubuntu-${{ matrix.ubuntu }}-unittests
+          fail_ci_if_error: true

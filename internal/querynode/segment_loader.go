@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package querynode
 
@@ -15,85 +20,94 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
+	"runtime"
+	"strconv"
+	"sync"
+	"time"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	minioKV "github.com/milvus-io/milvus/internal/kv/minio"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
-const (
-	queryCoordSegmentMetaPrefix = "queryCoord-segmentMeta"
-	queryNodeSegmentMetaPrefix  = "queryNode-segmentMeta"
-)
+const timeoutForEachRead = 10 * time.Second
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	historicalReplica ReplicaInterface
+	streamingReplica  ReplicaInterface
 
 	dataCoord types.DataCoord
 
-	minioKV kv.BaseKV // minio minioKV
-	etcdKV  *etcdkv.EtcdKV
+	cm     storage.ChunkManager // minio cm
+	etcdKV *etcdkv.EtcdKV
 
-	indexLoader *indexLoader
+	factory msgstream.Factory
 }
 
-func (loader *segmentLoader) loadSegmentOfConditionHandOff(req *querypb.LoadSegmentsRequest) error {
-	return errors.New("TODO: implement hand off")
-}
+func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
+	if req.Base == nil {
+		return fmt.Errorf("nil base message when load segment, collectionID = %d", req.CollectionID)
+	}
 
-func (loader *segmentLoader) loadSegmentOfConditionLoadBalance(req *querypb.LoadSegmentsRequest) error {
-	return loader.loadSegment(req, false)
-}
-
-func (loader *segmentLoader) loadSegmentOfConditionGRPC(req *querypb.LoadSegmentsRequest) error {
-	return loader.loadSegment(req, true)
-}
-
-func (loader *segmentLoader) loadSegmentOfConditionNodeDown(req *querypb.LoadSegmentsRequest) error {
-	return loader.loadSegment(req, true)
-}
-
-func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onService bool) error {
 	// no segment needs to load, return
 	if len(req.Infos) == 0 {
 		return nil
 	}
 
-	err := loader.checkSegmentMemory(req.Infos)
-	if err != nil {
+	var metaReplica ReplicaInterface
+	switch segmentType {
+	case segmentTypeGrowing:
+		metaReplica = loader.streamingReplica
+	case segmentTypeSealed:
+		metaReplica = loader.historicalReplica
+	default:
+		err := fmt.Errorf("illegal segment type when load segment, collectionID = %d", req.CollectionID)
+		log.Error("load segment failed, illegal segment type", zap.Int64("loadSegmentRequest msgID", req.Base.MsgID), zap.Error(err))
 		return err
 	}
 
-	newSegments := make([]*Segment, 0)
+	log.Debug("segmentLoader start loading...",
+		zap.Any("collectionID", req.CollectionID),
+		zap.Any("numOfSegments", len(req.Infos)),
+		zap.Any("loadType", segmentType),
+	)
+	// check memory limit
+	concurrencyLevel := runtime.GOMAXPROCS(0)
+	for ; concurrencyLevel > 1; concurrencyLevel /= 2 {
+		err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
+		if err == nil {
+			break
+		}
+	}
+
+	err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
+	if err != nil {
+		log.Error("load failed, OOM if loaded", zap.Int64("loadSegmentRequest msgID", req.Base.MsgID), zap.Error(err))
+		return err
+	}
+
+	newSegments := make(map[UniqueID]*Segment)
 	segmentGC := func() {
 		for _, s := range newSegments {
 			deleteSegment(s)
 		}
 	}
-	setSegments := func() {
-		for _, s := range newSegments {
-			err := loader.historicalReplica.setSegment(s)
-			if err != nil {
-				log.Warn(err.Error())
-				deleteSegment(s)
-			}
-		}
-	}
 
-	// start to load
 	for _, info := range req.Infos {
 		segmentID := info.SegmentID
 		partitionID := info.PartitionID
@@ -101,92 +115,64 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, onSer
 
 		collection, err := loader.historicalReplica.getCollectionByID(collectionID)
 		if err != nil {
-			log.Warn(err.Error())
 			segmentGC()
 			return err
 		}
-		segment := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, onService)
-		err = loader.loadSegmentInternal(collectionID, segment, info)
+		segment, err := newSegment(collection, segmentID, partitionID, collectionID, "", segmentType, true)
 		if err != nil {
-			deleteSegment(segment)
-			log.Warn(err.Error())
+			log.Error("load segment failed when create new segment",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("partitionID", partitionID),
+				zap.Int64("segmentID", segmentID),
+				zap.Int32("segment type", int32(segmentType)),
+				zap.Error(err))
 			segmentGC()
 			return err
 		}
-		if onService {
-			key := fmt.Sprintf("%s/%d", queryCoordSegmentMetaPrefix, segmentID)
-			value, err := loader.etcdKV.Load(key)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when load segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo := &querypb.SegmentInfo{}
-			err = proto.UnmarshalText(value, segmentInfo)
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when unmarshal segment info from etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-			segmentInfo.SegmentState = querypb.SegmentState_sealed
-			newKey := fmt.Sprintf("%s/%d", queryNodeSegmentMetaPrefix, segmentID)
-			err = loader.etcdKV.Save(newKey, proto.MarshalTextString(segmentInfo))
-			if err != nil {
-				deleteSegment(segment)
-				log.Warn("error when update segment info to etcd", zap.Any("error", err.Error()))
-				segmentGC()
-				return err
-			}
-		}
-		newSegments = append(newSegments, segment)
+
+		newSegments[segmentID] = segment
 	}
-	setSegments()
 
-	// sendQueryNodeStats
-	return loader.indexLoader.sendQueryNodeStats()
-}
+	loadSegmentFunc := func(idx int) error {
+		loadInfo := req.Infos[idx]
+		collectionID := loadInfo.CollectionID
+		partitionID := loadInfo.PartitionID
+		segmentID := loadInfo.SegmentID
+		segment := newSegments[segmentID]
+		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
+		err = loader.loadSegmentInternal(segment, loadInfo)
+		if err != nil {
+			log.Error("load segment failed when load data into memory",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("partitionID", partitionID),
+				zap.Int64("segmentID", segmentID),
+				zap.Int32("segment type", int32(segmentType)),
+				zap.Error(err))
+			return err
+		}
 
-func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment *Segment, segmentLoadInfo *querypb.SegmentLoadInfo) error {
-	vectorFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
+		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+		return nil
+	}
+	// start to load
+	err = funcutil.ProcessFuncParallel(len(req.Infos), concurrencyLevel, loadSegmentFunc, "loadSegmentFunc")
 	if err != nil {
+		segmentGC()
 		return err
 	}
-	if len(vectorFieldIDs) <= 0 {
-		return fmt.Errorf("no vector field in collection %d", collectionID)
-	}
 
-	// add VectorFieldInfo for vector fields
-	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
-		if funcutil.SliceContain(vectorFieldIDs, fieldBinlog.FieldID) {
-			vectorFieldInfo := newVectorFieldInfo(fieldBinlog)
-			segment.setVectorFieldInfo(fieldBinlog.FieldID, vectorFieldInfo)
-		}
-	}
-
-	indexedFieldIDs := make([]int64, 0)
-	for _, vecFieldID := range vectorFieldIDs {
-		err = loader.indexLoader.setIndexInfo(collectionID, segment, vecFieldID)
+	// set segment to meta replica
+	for _, s := range newSegments {
+		err = metaReplica.setSegment(s)
 		if err != nil {
-			log.Warn(err.Error())
-			continue
-		}
-		indexedFieldIDs = append(indexedFieldIDs, vecFieldID)
-	}
-
-	// we don't need to load raw data for indexed vector field
-	fieldBinlogs := loader.filterFieldBinlogs(segmentLoadInfo.BinlogPaths, indexedFieldIDs)
-
-	log.Debug("loading insert...")
-	err = loader.loadSegmentFieldsData(segment, fieldBinlogs)
-	if err != nil {
-		return err
-	}
-	for _, id := range indexedFieldIDs {
-		log.Debug("loading index...")
-		err = loader.indexLoader.loadIndex(segment, id)
-		if err != nil {
+			log.Error("load segment failed, set segment to meta failed",
+				zap.Int64("collectionID", s.collectionID),
+				zap.Int64("partitionID", s.partitionID),
+				zap.Int64("segmentID", s.segmentID),
+				zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
+				zap.Error(err))
+			segmentGC()
 			return err
 		}
 	}
@@ -194,103 +180,102 @@ func (loader *segmentLoader) loadSegmentInternal(collectionID UniqueID, segment 
 	return nil
 }
 
-func (loader *segmentLoader) checkSegmentMemory(segmentLoadInfos []*querypb.SegmentLoadInfo) error {
-	totalRAM := metricsinfo.GetMemoryCount()
-	usedRAM := metricsinfo.GetUsedMemoryCount()
+func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
+	loadInfo *querypb.SegmentLoadInfo) error {
+	collectionID := loadInfo.CollectionID
+	partitionID := loadInfo.PartitionID
+	segmentID := loadInfo.SegmentID
+	log.Debug("start loading segment data into memory",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int64("segmentID", segmentID))
+	vecFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
+	if err != nil {
+		return err
+	}
+	pkFieldID, err := loader.historicalReplica.getPKFieldIDByCollectionID(collectionID)
+	if err != nil {
+		return err
+	}
 
-	segmentTotalSize := uint64(0)
-	for _, segInfo := range segmentLoadInfos {
-		collectionID := segInfo.CollectionID
-		segmentID := segInfo.SegmentID
+	var nonVecFieldBinlogs []*datapb.FieldBinlog
+	if segment.getType() == segmentTypeSealed {
+		fieldID2IndexInfo := make(map[int64]*querypb.VecFieldIndexInfo)
+		for _, indexInfo := range loadInfo.IndexInfos {
+			fieldID := indexInfo.FieldID
+			fieldID2IndexInfo[fieldID] = indexInfo
+		}
 
-		col, err := loader.historicalReplica.getCollectionByID(collectionID)
+		vecFieldInfos := make(map[int64]*VectorFieldInfo)
+
+		for _, fieldBinlog := range loadInfo.BinlogPaths {
+			fieldID := fieldBinlog.FieldID
+			if funcutil.SliceContain(vecFieldIDs, fieldID) {
+				fieldInfo := &VectorFieldInfo{
+					fieldBinlog: fieldBinlog,
+				}
+				if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
+					fieldInfo.indexInfo = indexInfo
+				}
+				vecFieldInfos[fieldID] = fieldInfo
+			} else {
+				nonVecFieldBinlogs = append(nonVecFieldBinlogs, fieldBinlog)
+			}
+		}
+
+		err = loader.loadVecFieldData(segment, vecFieldInfos)
 		if err != nil {
 			return err
 		}
+	} else {
+		nonVecFieldBinlogs = loadInfo.BinlogPaths
+	}
+	err = loader.loadFiledBinlogData(segment, nonVecFieldBinlogs)
+	if err != nil {
+		return err
+	}
 
-		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
+	if pkFieldID == common.InvalidFieldID {
+		log.Warn("segment primary key field doesn't exist when load segment")
+	} else {
+		log.Debug("loading bloom filter...")
+		pkStatsBinlogs := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkFieldID)
+		err = loader.loadSegmentBloomFilter(segment, pkStatsBinlogs)
 		if err != nil {
 			return err
-		}
-
-		segmentSize := uint64(int64(sizePerRecord) * segInfo.NumOfRows)
-		segmentTotalSize += segmentSize
-		// TODO: get 0.9 from param table
-		thresholdMemSize := float64(totalRAM) * 0.9
-
-		log.Debug("memory size[byte] stats when load segment",
-			zap.Any("collectionIDs", collectionID),
-			zap.Any("segmentID", segmentID),
-			zap.Any("numOfRows", segInfo.NumOfRows),
-			zap.Any("totalRAM", totalRAM),
-			zap.Any("usedRAM", usedRAM),
-			zap.Any("segmentSize", segmentSize),
-			zap.Any("segmentTotalSize", segmentTotalSize),
-			zap.Any("thresholdMemSize", thresholdMemSize),
-		)
-		if usedRAM+segmentTotalSize > uint64(thresholdMemSize) {
-			return errors.New("load segment failed, OOM if load, collectionID = " + fmt.Sprintln(collectionID))
 		}
 	}
 
-	return nil
+	log.Debug("loading delta...")
+	err = loader.loadDeltaLogs(segment, loadInfo.Deltalogs)
+	return err
 }
 
-//func (loader *segmentLoader) GetSegmentStates(segmentID UniqueID) (*datapb.GetSegmentStatesResponse, error) {
-//	ctx := context.TODO()
-//	if loader.dataCoord == nil {
-//		return nil, errors.New("null data service client")
-//	}
-//
-//	segmentStatesRequest := &datapb.GetSegmentStatesRequest{
-//		SegmentIDs: []int64{segmentID},
-//	}
-//	statesResponse, err := loader.dataCoord.GetSegmentStates(ctx, segmentStatesRequest)
-//	if err != nil || statesResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-//		return nil, err
-//	}
-//	if len(statesResponse.States) != 1 {
-//		return nil, errors.New("segment states' len should be 1")
-//	}
-//
-//	return statesResponse, nil
-//}
-
-func (loader *segmentLoader) filterFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog, skipFieldIDs []int64) []*datapb.FieldBinlog {
-	result := make([]*datapb.FieldBinlog, 0)
+func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) []string {
+	result := make([]string, 0)
 	for _, fieldBinlog := range fieldBinlogs {
-		if !funcutil.SliceContain(skipFieldIDs, fieldBinlog.FieldID) {
-			result = append(result, fieldBinlog)
+		if fieldBinlog.FieldID == pkFieldID {
+			for _, binlog := range fieldBinlog.GetBinlogs() {
+				result = append(result, binlog.GetLogPath())
+			}
 		}
 	}
 	return result
 }
 
-func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
+func (loader *segmentLoader) loadFiledBinlogData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
+	segmentType := segment.getType()
 	iCodec := storage.InsertCodec{}
-	defer func() {
-		err := iCodec.Close()
-		if err != nil {
-			log.Warn(err.Error())
-		}
-	}()
 	blobs := make([]*storage.Blob, 0)
-	for _, fb := range fieldBinlogs {
-		log.Debug("load segment fields data",
-			zap.Int64("segmentID", segment.segmentID),
-			zap.Any("fieldID", fb.FieldID),
-			zap.String("paths", fmt.Sprintln(fb.Binlogs)),
-		)
-		for _, path := range fb.Binlogs {
-			p := path
-			binLog, err := loader.minioKV.Load(path)
+	for _, fieldBinlog := range fieldBinlogs {
+		for _, path := range fieldBinlog.Binlogs {
+			binLog, err := loader.cm.Read(path.GetLogPath())
 			if err != nil {
-				// TODO: return or continue?
 				return err
 			}
 			blob := &storage.Blob{
-				Key:   p,
-				Value: []byte(binLog),
+				Key:   path.GetLogPath(),
+				Value: binLog,
 			}
 			blobs = append(blobs, blob)
 		}
@@ -302,6 +287,115 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		return err
 	}
 
+	switch segmentType {
+	case segmentTypeGrowing:
+		timestamps, ids, rowData, err := storage.TransferColumnBasedInsertDataToRowBased(insertData)
+		if err != nil {
+			return err
+		}
+		return loader.loadGrowingSegments(segment, ids, timestamps, rowData)
+	case segmentTypeSealed:
+		return loader.loadSealedSegments(segment, insertData)
+	default:
+		err := errors.New(fmt.Sprintln("illegal segment type when load segment, collectionID = ", segment.collectionID))
+		return err
+	}
+}
+
+func (loader *segmentLoader) loadVecFieldData(segment *Segment, vecFieldInfos map[int64]*VectorFieldInfo) error {
+	for fieldID, fieldInfo := range vecFieldInfos {
+		if fieldInfo.indexInfo == nil || !fieldInfo.indexInfo.EnableIndex {
+			fieldBinlog := fieldInfo.fieldBinlog
+			err := loader.loadFiledBinlogData(segment, []*datapb.FieldBinlog{fieldBinlog})
+			if err != nil {
+				return err
+			}
+			log.Debug("load vector field's binlog data done", zap.Int64("segmentID", segment.ID()), zap.Int64("fieldID", fieldID))
+		} else {
+			indexInfo := fieldInfo.indexInfo
+			err := loader.loadVecFieldIndexData(segment, indexInfo)
+			if err != nil {
+				return err
+			}
+			log.Debug("load vector field's index data done", zap.Int64("segmentID", segment.ID()), zap.Int64("fieldID", fieldID))
+		}
+		segment.setVectorFieldInfo(fieldID, fieldInfo)
+	}
+
+	return nil
+}
+
+func (loader *segmentLoader) loadVecFieldIndexData(segment *Segment, indexInfo *querypb.VecFieldIndexInfo) error {
+	indexBuffer := make([][]byte, 0)
+	indexCodec := storage.NewIndexFileBinlogCodec()
+	for _, p := range indexInfo.IndexFilePaths {
+		log.Debug("load index file", zap.String("path", p))
+		indexPiece, err := loader.cm.Read(p)
+		if err != nil {
+			return err
+		}
+
+		if path.Base(p) != storage.IndexParamsKey {
+			data, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: path.Base(p), Value: indexPiece}})
+			if err != nil {
+				return err
+			}
+			indexBuffer = append(indexBuffer, data[0].Value)
+		}
+	}
+	// 2. use index bytes and index path to update segment
+	err := segment.segmentLoadIndexData(indexBuffer, indexInfo)
+	return err
+}
+
+func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
+	ids []UniqueID,
+	timestamps []Timestamp,
+	records []*commonpb.Blob) error {
+	if len(ids) != len(timestamps) || len(timestamps) != len(records) {
+		return errors.New(fmt.Sprintln("illegal insert data when load segment, collectionID = ", segment.collectionID))
+	}
+
+	log.Debug("start load growing segments...",
+		zap.Any("collectionID", segment.collectionID),
+		zap.Any("segmentID", segment.ID()),
+		zap.Any("numRows", len(ids)),
+	)
+
+	// 1. do preInsert
+	var numOfRecords = len(ids)
+	offset, err := segment.segmentPreInsert(numOfRecords)
+	if err != nil {
+		return err
+	}
+	log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segment.ID()))
+
+	// 2. update bloom filter
+	tmpInsertMsg := &msgstream.InsertMsg{
+		InsertRequest: internalpb.InsertRequest{
+			CollectionID: segment.collectionID,
+			Timestamps:   timestamps,
+			RowIDs:       ids,
+			RowData:      records,
+		},
+	}
+	pks, err := getPrimaryKeys(tmpInsertMsg, loader.streamingReplica)
+	if err != nil {
+		return err
+	}
+	segment.updateBloomFilter(pks)
+
+	// 3. do insert
+	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	if err != nil {
+		return err
+	}
+	log.Debug("Do insert done in segment loader", zap.Int("len", numOfRecords), zap.Int64("segmentID", segment.ID()), zap.Int64("collectionID", segment.collectionID))
+
+	return nil
+}
+
+func (loader *segmentLoader) loadSealedSegments(segment *Segment, insertData *storage.InsertData) error {
 	for fieldID, value := range insertData.Data {
 		var numRows []int64
 		var data interface{}
@@ -327,7 +421,7 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		case *storage.DoubleFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
-		case storage.StringFieldData:
+		case *storage.StringFieldData:
 			numRows = fieldData.NumRows
 			data = fieldData.Data
 		case *storage.FloatVectorFieldData:
@@ -339,45 +433,275 @@ func (loader *segmentLoader) loadSegmentFieldsData(segment *Segment, fieldBinlog
 		default:
 			return errors.New("unexpected field data type")
 		}
-		if fieldID == rootcoord.TimeStampField {
+		if fieldID == common.TimeStampField {
 			segment.setIDBinlogRowSizes(numRows)
 		}
 		totalNumRows := int64(0)
 		for _, numRow := range numRows {
 			totalNumRows += numRow
 		}
-		err = segment.segmentLoadFieldData(fieldID, int(totalNumRows), data)
+		err := segment.segmentLoadFieldData(fieldID, int(totalNumRows), data)
 		if err != nil {
 			// TODO: return or continue?
 			return err
 		}
 	}
+	return nil
+}
+
+func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPaths []string) error {
+	if len(binlogPaths) == 0 {
+		log.Info("there are no stats logs saved with segment", zap.Any("segmentID", segment.segmentID))
+		return nil
+	}
+
+	values, err := loader.cm.MultiRead(binlogPaths)
+	if err != nil {
+		return err
+	}
+	blobs := make([]*storage.Blob, 0)
+	for i := 0; i < len(values); i++ {
+		blobs = append(blobs, &storage.Blob{Value: values[i]})
+	}
+
+	stats, err := storage.DeserializeStats(blobs)
+	if err != nil {
+		return err
+	}
+	for _, stat := range stats {
+		if stat.BF == nil {
+			log.Warn("stat log with nil bloom filter", zap.Int64("segmentID", segment.segmentID), zap.Any("stat", stat))
+			continue
+		}
+		err = segment.pkFilter.Merge(stat.BF)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb.FieldBinlog) error {
+	dCodec := storage.DeleteCodec{}
+	var blobs []*storage.Blob
+	for _, deltaLog := range deltaLogs {
+		for _, log := range deltaLog.GetBinlogs() {
+			value, err := loader.cm.Read(log.GetLogPath())
+			if err != nil {
+				return err
+			}
+			blob := &storage.Blob{
+				Key:   log.GetLogPath(),
+				Value: value,
+			}
+			blobs = append(blobs, blob)
+		}
+	}
+	if len(blobs) == 0 {
+		log.Info("there are no delta logs saved with segment", zap.Any("segmentID", segment.segmentID))
+		return nil
+	}
+	_, _, deltaData, err := dCodec.Deserialize(blobs)
+	if err != nil {
+		return err
+	}
+
+	err = segment.segmentLoadDeletedRecord(deltaData.Pks, deltaData.Tss, deltaData.RowCount)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
+	log.Debug("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
+	stream, err := loader.factory.NewMsgStream(ctx)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Dec()
+		stream.Close()
+	}()
+
+	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
+	position.ChannelName = pChannelName
+
+	stream.AsConsumer([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.QueryNodeID, collectionID))
+	lastMsgID, err := stream.GetLatestMsgID(pChannelName)
+	if err != nil {
+		return err
+	}
+
+	if lastMsgID.AtEarliestPosition() {
+		log.Debug("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+		return nil
+	}
+
+	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+	err = stream.Seek([]*internalpb.MsgPosition{position})
+	if err != nil {
+		return err
+	}
+	stream.Start()
+
+	delData := &deleteData{
+		deleteIDs:        make(map[UniqueID][]int64),
+		deleteTimestamps: make(map[UniqueID][]Timestamp),
+		deleteOffset:     make(map[UniqueID]int64),
+	}
+
+	log.Debug("start read delta msg from seek position to last position",
+		zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+	hasMore := true
+	for hasMore {
+		select {
+		case <-ctx.Done():
+			break
+		case msgPack, ok := <-stream.Chan():
+			if !ok {
+				log.Warn("fail to read delta msg", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
+				return err
+			}
+
+			if msgPack == nil {
+				continue
+			}
+
+			for _, tsMsg := range msgPack.Msgs {
+				if tsMsg.Type() == commonpb.MsgType_Delete {
+					dmsg := tsMsg.(*msgstream.DeleteMsg)
+					if dmsg.CollectionID != collectionID {
+						continue
+					}
+					log.Debug("delete pk",
+						zap.Any("pk", dmsg.PrimaryKeys),
+						zap.String("vChannelName", position.GetChannelName()),
+						zap.Any("msg id", position.GetMsgID()),
+					)
+					processDeleteMessages(loader.historicalReplica, dmsg, delData)
+				}
+
+				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
+				if err != nil {
+					log.Warn("check whether current MsgID less than last MsgID failed",
+						zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName), zap.Error(err))
+					return err
+				}
+
+				if ret {
+					hasMore = false
+					break
+				}
+			}
+		}
+	}
+
+	log.Debug("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
+		zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
+	for segmentID, pks := range delData.deleteIDs {
+		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
+		if err != nil {
+			log.Debug(err.Error())
+			continue
+		}
+		offset := segment.segmentPreDelete(len(pks))
+		delData.deleteOffset[segmentID] = offset
+	}
+
+	wg := sync.WaitGroup{}
+	for segmentID := range delData.deleteOffset {
+		wg.Add(1)
+		go deletePk(loader.historicalReplica, delData, segmentID, &wg)
+	}
+	wg.Wait()
+	log.Debug("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
+	return nil
+}
+
+func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
+	defer wg.Done()
+	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
+	targetSegment, err := replica.getSegmentByID(segmentID)
+	if err != nil {
+		log.Error(err.Error())
+		return
+	}
+
+	if targetSegment.segmentType != segmentTypeSealed {
+		return
+	}
+
+	ids := deleteData.deleteIDs[segmentID]
+	timestamps := deleteData.deleteTimestamps[segmentID]
+	offset := deleteData.deleteOffset[segmentID]
+
+	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
+	if err != nil {
+		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
+		return
+	}
+	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("segmentType", targetSegment.segmentType))
+}
+
+// JoinIDPath joins ids to path format.
+func JoinIDPath(ids ...UniqueID) string {
+	idStr := make([]string, 0, len(ids))
+	for _, id := range ids {
+		idStr = append(idStr, strconv.FormatInt(id, 10))
+	}
+	return path.Join(idStr...)
+}
+
+func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) error {
+	usedMem := metricsinfo.GetUsedMemoryCount()
+	totalMem := metricsinfo.GetMemoryCount()
+	if len(segmentLoadInfos) < concurrency {
+		concurrency = len(segmentLoadInfos)
+	}
+
+	if usedMem == 0 || totalMem == 0 {
+		return fmt.Errorf("get memory failed when checkSegmentSize, collectionID = %d", collectionID)
+	}
+
+	usedMemAfterLoad := usedMem
+	maxSegmentSize := uint64(0)
+	for _, loadInfo := range segmentLoadInfos {
+		segmentSize := uint64(loadInfo.SegmentSize)
+		usedMemAfterLoad += segmentSize
+		if segmentSize > maxSegmentSize {
+			maxSegmentSize = segmentSize
+		}
+	}
+
+	toMB := func(mem uint64) float64 {
+		return float64(mem) / 1024 / 1024
+	}
+
+	// when load segment, data will be copied from go memory to c++ memory
+	if usedMemAfterLoad+maxSegmentSize*uint64(concurrency) > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
+		return fmt.Errorf("load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %.2f MB, concurrency = %d, usedMemAfterLoad = %.2f MB, totalMem = %.2f MB, thresholdFactor = %f",
+			collectionID, toMB(maxSegmentSize), concurrency, toMB(usedMemAfterLoad), toMB(totalMem), Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage)
+	}
 
 	return nil
 }
 
-func newSegmentLoader(ctx context.Context, rootCoord types.RootCoord, indexCoord types.IndexCoord, replica ReplicaInterface, etcdKV *etcdkv.EtcdKV) *segmentLoader {
-	option := &minioKV.Option{
-		Address:           Params.MinioEndPoint,
-		AccessKeyID:       Params.MinioAccessKeyID,
-		SecretAccessKeyID: Params.MinioSecretAccessKey,
-		UseSSL:            Params.MinioUseSSLStr,
-		CreateBucket:      true,
-		BucketName:        Params.MinioBucketName,
-	}
+func newSegmentLoader(
+	historicalReplica ReplicaInterface,
+	streamingReplica ReplicaInterface,
+	etcdKV *etcdkv.EtcdKV,
+	cm storage.ChunkManager,
+	factory msgstream.Factory) *segmentLoader {
 
-	client, err := minioKV.NewMinIOKV(ctx, option)
-	if err != nil {
-		panic(err)
-	}
-
-	iLoader := newIndexLoader(ctx, rootCoord, indexCoord, replica)
 	return &segmentLoader{
-		historicalReplica: replica,
+		historicalReplica: historicalReplica,
+		streamingReplica:  streamingReplica,
 
-		minioKV: client,
-		etcdKV:  etcdKV,
+		cm:     cm,
+		etcdKV: etcdKV,
 
-		indexLoader: iLoader,
+		factory: factory,
 	}
 }

@@ -28,11 +28,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     visit(BinaryVectorANNS& node) override;
 
     void
-    visit(RetrievePlanNode& node);
+    visit(RetrievePlanNode& node) override;
 
  public:
-    using RetType = SearchResult;
-    using RetrieveRetType = RetrieveResult;
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup& placeholder_group)
@@ -43,25 +41,27 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         : segment_(segment), timestamp_(timestamp) {
     }
 
-    RetType
+    SearchResult
     get_moved_result(PlanNode& node) {
-        assert(!ret_.has_value());
+        assert(!search_result_opt_.has_value());
         node.accept(*this);
-        assert(ret_.has_value());
-        auto ret = std::move(ret_).value();
-        ret_ = std::nullopt;
+        assert(search_result_opt_.has_value());
+        auto ret = std::move(search_result_opt_).value();
+        search_result_opt_.reset();
+        search_result_opt_ = std::nullopt;
         return ret;
     }
 
-    RetrieveRetType
+    RetrieveResult
     get_retrieve_result(PlanNode& node) {
-        assert(!retrieve_ret_.has_value());
+        assert(!retrieve_result_opt_.has_value());
         std::cout.flush();
         node.accept(*this);
-        assert(retrieve_ret_.has_value());
-        auto retrieve_ret = std::move(retrieve_ret_).value();
-        retrieve_ret_ = std::nullopt;
-        return retrieve_ret;
+        assert(retrieve_result_opt_.has_value());
+        auto ret = std::move(retrieve_result_opt_).value();
+        retrieve_result_opt_.reset();
+        retrieve_result_opt_ = std::nullopt;
+        return ret;
     }
 
  private:
@@ -70,12 +70,11 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     VectorVisitorImpl(VectorPlanNode& node);
 
  private:
-    // std::optional<RetType> ret_;
     const segcore::SegmentInterface& segment_;
     Timestamp timestamp_;
     PlaceholderGroup placeholder_group_;
 
-    std::optional<RetType> ret_;
-    std::optional<RetrieveResult> retrieve_ret_;
+    SearchResultOpt search_result_opt_;
+    RetrieveResultOpt retrieve_result_opt_;
 };
 }  // namespace milvus::query

@@ -1,5 +1,4 @@
 import os
-import pdb
 import logging
 import numpy as np
 import sklearn.preprocessing
@@ -72,6 +71,8 @@ def get_len_vectors_per_file(data_type, dimension):
             vectors_per_file = 100000
         elif dimension == 16384:
             vectors_per_file = 10000
+        else:
+            raise Exception("dimension: %s not supported" % str(dimension))
     elif data_type == "sift":
         vectors_per_file = SIFT_VECTORS_PER_FILE
     elif data_type in ["binary"]:
@@ -84,7 +85,7 @@ def get_len_vectors_per_file(data_type, dimension):
 
 
 def get_vectors_from_binary(nq, dimension, data_type):
-    # use the first file, nq should be less than VECTORS_PER_FILE
+    # use the first file, nq should be less than VECTORS_PER_FILE 10001
     if nq > MAX_NQ:
         raise Exception("Over size nq")
     if data_type == "local":
@@ -97,6 +98,8 @@ def get_vectors_from_binary(nq, dimension, data_type):
         file_name = DEEP_SRC_DATA_DIR + 'query.npy'
     elif data_type == "binary":
         file_name = BINARY_SRC_DATA_DIR + 'query.npy'
+    else:
+        raise Exception("There is no corresponding file for this data type %s." % str(data_type))
     data = np.load(file_name)
     vectors = data[0:nq].tolist()
     return vectors
@@ -136,6 +139,7 @@ def metric_type_trans(metric_type):
 
 
 def get_dataset(hdf5_file_path):
+    """ Determine whether hdf5 file exists, and return the content of hdf5 file """
     if not os.path.exists(hdf5_file_path):
         raise Exception("%s not existed" % hdf5_file_path)
     dataset = h5py.File(hdf5_file_path)
@@ -143,6 +147,7 @@ def get_dataset(hdf5_file_path):
 
 
 def get_default_field_name(data_type=DataType.FLOAT_VECTOR):
+    """ Return field name according to data type """
     if data_type == DataType.FLOAT_VECTOR:
         field_name = DEFAULT_F_FIELD_NAME
     elif data_type == DataType.BINARY_VECTOR:
@@ -158,6 +163,7 @@ def get_default_field_name(data_type=DataType.FLOAT_VECTOR):
 
 
 def get_vector_type(data_type):
+    """ Return vector type according to data type """
     vector_type = ''
     if data_type in ["random", "sift", "deep", "glove", "local"]:
         vector_type = DataType.FLOAT_VECTOR
@@ -169,7 +175,6 @@ def get_vector_type(data_type):
 
 
 def get_vector_type_from_metric(metric_type):
-    vector_type = ''
     if metric_type in ["hamming", "jaccard"]:
         vector_type = DataType.BINARY_VECTOR
     else:
@@ -230,13 +235,21 @@ def gen_file_name(idx, dimension, data_type):
 def get_recall_value(true_ids, result_ids):
     """
     Use the intersection length
+    true_ids: neighbors taken from the dataset
+    result_ids: ids returned by query
     """
     sum_radio = 0.0
     for index, item in enumerate(result_ids):
         # tmp = set(item).intersection(set(flat_id_list[index]))
+
+        # Get the value of true_ids and the returned value to do the intersection
         tmp = set(true_ids[index]).intersection(set(item))
+
+        # Add up each ratio
         sum_radio = sum_radio + len(tmp) / len(item)
         # logger.debug(sum_radio)
+
+    # Calculate the average ratio and take three digits after the decimal point
     return round(sum_radio / len(result_ids), 3)
 
 

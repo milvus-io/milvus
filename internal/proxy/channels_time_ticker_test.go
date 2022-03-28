@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package proxy
 
@@ -18,13 +23,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func newGetStatisticsFunc(pchans []pChan) getPChanStatisticsFuncType {
@@ -68,7 +72,7 @@ func TestChannelsTimeTickerImpl_start(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChannelsTimeTickerImpl_close(t *testing.T) {
@@ -90,35 +94,7 @@ func TestChannelsTimeTickerImpl_close(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
-}
-
-func TestChannelsTimeTickerImpl_addPChan(t *testing.T) {
-	interval := time.Millisecond * 10
-	pchanNum := rand.Uint64()%10 + 1
-	pchans := make([]pChan, 0, pchanNum)
-	for i := 0; uint64(i) < pchanNum; i++ {
-		pchans = append(pchans, funcutil.GenRandomStr())
-	}
-	tso := newMockTsoAllocator()
-	ctx := context.Background()
-
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
-	err := ticker.start()
-	assert.Equal(t, nil, err)
-
-	newPChanNum := rand.Uint64()%10 + 1
-	for i := 0; uint64(i) < newPChanNum; i++ {
-		err = ticker.addPChan(funcutil.GenRandomStr())
-		assert.Equal(t, nil, err)
-	}
-
-	defer func() {
-		err := ticker.close()
-		assert.Equal(t, nil, err)
-	}()
-
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
@@ -156,7 +132,7 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	b <- struct{}{}
 	wg.Wait()
 
@@ -165,7 +141,7 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
@@ -193,7 +169,7 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 			case <-b:
 				return
 			case <-timer.C:
-				stats, err := ticker.getMinTsStatistics()
+				stats, _, err := ticker.getMinTsStatistics()
 				assert.Equal(t, nil, err)
 				for pchan, ts := range stats {
 					log.Debug("TestChannelsTimeTickerImpl_getLastTick",
@@ -203,7 +179,7 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
 	b <- struct{}{}
 	wg.Wait()
 
@@ -212,5 +188,48 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 		assert.Equal(t, nil, err)
 	}()
 
-	time.Sleep(time.Second)
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestChannelsTimeTickerImpl_getMinTick(t *testing.T) {
+	interval := time.Millisecond * 10
+	pchanNum := rand.Uint64()%10 + 1
+	pchans := make([]pChan, 0, pchanNum)
+	for i := 0; uint64(i) < pchanNum; i++ {
+		pchans = append(pchans, funcutil.GenRandomStr())
+	}
+	tso := newMockTsoAllocator()
+	ctx := context.Background()
+
+	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
+	err := ticker.start()
+	assert.Equal(t, nil, err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	b := make(chan struct{}, 1)
+	ts := typeutil.ZeroTimestamp
+	go func() {
+		defer wg.Done()
+		timer := time.NewTicker(interval * 40)
+		for {
+			select {
+			case <-b:
+				return
+			case <-timer.C:
+				minTs := ticker.getMinTick()
+				assert.GreaterOrEqual(t, minTs, ts)
+			}
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	b <- struct{}{}
+	wg.Wait()
+
+	defer func() {
+		err := ticker.close()
+		assert.Equal(t, nil, err)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
 }

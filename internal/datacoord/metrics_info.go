@@ -1,33 +1,35 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package datacoord
 
 import (
 	"context"
 	"errors"
-	"os"
-
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
+	"go.uber.org/zap"
 )
 
-// getSystemInfoMetrics compose data cluster metrics
+// getSystemInfoMetrics composes data cluster metrics
 func (s *Server) getSystemInfoMetrics(
 	ctx context.Context,
 	req *milvuspb.GetMetricsRequest,
@@ -35,7 +37,7 @@ func (s *Server) getSystemInfoMetrics(
 	// TODO(dragondriver): add more detail metrics
 
 	// get datacoord info
-	nodes := s.cluster.GetNodes()
+	nodes := s.cluster.GetSessions()
 	clusterTopology := metricsinfo.DataClusterTopology{
 		Self:           s.getDataCoordMetrics(),
 		ConnectedNodes: make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
@@ -43,11 +45,11 @@ func (s *Server) getSystemInfoMetrics(
 
 	// for each data node, fetch metrics info
 	log.Debug("datacoord.getSystemInfoMetrics",
-		zap.Int("data nodes num", len(nodes)))
+		zap.Int("DataNodes number", len(nodes)))
 	for _, node := range nodes {
 		infos, err := s.getDataNodeMetrics(ctx, req, node)
 		if err != nil {
-			log.Warn("fails to get datanode metrics", zap.Error(err))
+			log.Warn("fails to get DataNode metrics", zap.Error(err))
 			continue
 		}
 		clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, infos)
@@ -57,7 +59,7 @@ func (s *Server) getSystemInfoMetrics(
 	coordTopology := metricsinfo.DataCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
 			// TODO(dragondriver): fill ConnectedComponents if necessary
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
@@ -68,7 +70,7 @@ func (s *Server) getSystemInfoMetrics(
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 		Response:      "",
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
 	}
 	var err error
 	resp.Response, err = metricsinfo.MarshalTopology(coordTopology)
@@ -83,9 +85,9 @@ func (s *Server) getSystemInfoMetrics(
 
 // getDataCoordMetrics composes datacoord infos
 func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
-	return metricsinfo.DataCoordInfos{
+	ret := metricsinfo.DataCoordInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           s.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
@@ -95,38 +97,43 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 				Disk:         metricsinfo.GetDiskCount(),
 				DiskUsage:    metricsinfo.GetDiskUsage(),
 			},
-			SystemInfo: metricsinfo.DeployMetrics{
-				SystemVersion: os.Getenv(metricsinfo.GitCommitEnvKey),
-				DeployMode:    os.Getenv(metricsinfo.DeployModeEnvKey),
-			},
-			// TODO(dragondriver): CreatedTime & UpdatedTime, easy but time-costing
-			Type: typeutil.DataCoordRole,
+			SystemInfo:  metricsinfo.DeployMetrics{},
+			CreatedTime: Params.DataCoordCfg.CreatedTime.String(),
+			UpdatedTime: Params.DataCoordCfg.UpdatedTime.String(),
+			Type:        typeutil.DataCoordRole,
+			ID:          s.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
-			SegmentMaxSize: Params.SegmentMaxSize,
+			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize,
 		},
 	}
+
+	metricsinfo.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)
+
+	return ret
 }
 
-// getDataNodeMetrics composes data node infos
-// this function will invoke GetMetrics with data node specified in NodeInfo
-func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *NodeInfo) (metricsinfo.DataNodeInfos, error) {
+// getDataNodeMetrics composes DataNode infos
+// this function will invoke GetMetrics with DataNode specified in NodeInfo
+func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *Session) (metricsinfo.DataNodeInfos, error) {
 	infos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HasError: true,
+			ID:       int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 		},
 	}
 	if node == nil {
-		return infos, errors.New("datanode is nil")
+		return infos, errors.New("DataNode is nil")
 	}
 
-	if node.GetClient() == nil {
-		return infos, errors.New("datanode client is nil")
-	}
-
-	metrics, err := node.GetClient().GetMetrics(ctx, req)
+	cli, err := node.GetOrCreateClient(ctx)
 	if err != nil {
-		log.Warn("invalid metrics of data node was found",
+		return infos, err
+	}
+
+	metrics, err := cli.GetMetrics(ctx, req)
+	if err != nil {
+		log.Warn("invalid metrics of DataNode was found",
 			zap.Error(err))
 		infos.BaseComponentInfos.ErrorReason = err.Error()
 		// err handled, returns nil
@@ -135,7 +142,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	infos.BaseComponentInfos.Name = metrics.GetComponentName()
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("invalid metrics of data node was found",
+		log.Warn("invalid metrics of DataNode was found",
 			zap.Any("error_code", metrics.Status.ErrorCode),
 			zap.Any("error_reason", metrics.Status.Reason))
 		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
@@ -144,7 +151,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 	err = metricsinfo.UnmarshalComponentInfos(metrics.GetResponse(), &infos)
 	if err != nil {
-		log.Warn("invalid metrics of data node was found",
+		log.Warn("invalid metrics of DataNode found",
 			zap.Error(err))
 		infos.BaseComponentInfos.ErrorReason = err.Error()
 		return infos, nil

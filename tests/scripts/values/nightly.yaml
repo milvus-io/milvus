@@ -1,0 +1,12 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+pulsar:
+  bookkeeper:
+    volumes:
+      ledgers:
+        existingStorageClassName: local-path
+  zookeeper:
+    volumes:
+      data:
+        existingStorageClassName: local-path

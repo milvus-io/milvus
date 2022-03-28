@@ -1,7 +1,6 @@
 reviewers:
-  - cydrain
-  - czs007
-  - jeffoverflow
+  - LoveEachDay
+  - zwd1208
 
 approvers:
-  - pr-inspection
+  - maintainers

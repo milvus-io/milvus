@@ -1,178 +1,197 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package grpcdatanodeclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/retry"
-
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"google.golang.org/grpc/codes"
-
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
 
+var ClientParams paramtable.GrpcClientConfig
+
+// Client is the grpc client for DataNode
 type Client struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	grpc datapb.DataNodeClient
-	conn *grpc.ClientConn
-
-	addr string
-
-	retryOptions []retry.Option
+	grpcClient grpcclient.GrpcClient
+	addr       string
 }
 
-func NewClient(ctx context.Context, addr string, retryOptions ...retry.Option) (*Client, error) {
+// NewClient creates a client for DataNode.
+func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
+	ClientParams.InitOnce(typeutil.DataNodeRole)
+	client := &Client{
+		addr: addr,
+		grpcClient: &grpcclient.ClientBase{
+			ClientMaxRecvSize: ClientParams.ClientMaxRecvSize,
+			ClientMaxSendSize: ClientParams.ClientMaxSendSize,
+		},
+	}
+	client.grpcClient.SetRole(typeutil.DataNodeRole)
+	client.grpcClient.SetGetAddrFunc(client.getAddr)
+	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 
-	ctx, cancel := context.WithCancel(ctx)
-	return &Client{
-		ctx:          ctx,
-		cancel:       cancel,
-		addr:         addr,
-		retryOptions: retryOptions,
-	}, nil
+	return client, nil
 }
 
+// Init initializes the client.
 func (c *Client) Init() error {
-	Params.Init()
-	return c.connect(retry.Attempts(20))
-}
-
-func (c *Client) connect(retryOptions ...retry.Option) error {
-	connectGrpcFunc := func() error {
-		opts := trace.GetInterceptorOpts()
-		log.Debug("DataNode connect ", zap.String("address", c.addr))
-		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
-		defer cancel()
-		conn, err := grpc.DialContext(ctx, c.addr,
-			grpc.WithInsecure(), grpc.WithBlock(),
-			grpc.WithDefaultCallOptions(
-				grpc.MaxCallRecvMsgSize(Params.ClientMaxRecvSize),
-				grpc.MaxCallSendMsgSize(Params.ClientMaxSendSize)),
-			grpc.WithDisableRetry(),
-			grpc.WithUnaryInterceptor(
-				grpc_middleware.ChainUnaryClient(
-					grpc_retry.UnaryClientInterceptor(
-						grpc_retry.WithMax(3),
-						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
-					),
-					grpc_opentracing.UnaryClientInterceptor(opts...),
-				)),
-			grpc.WithStreamInterceptor(
-				grpc_middleware.ChainStreamClient(
-					grpc_retry.StreamClientInterceptor(
-						grpc_retry.WithMax(3),
-						grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
-					),
-					grpc_opentracing.StreamClientInterceptor(opts...),
-				)),
-		)
-		if err != nil {
-			return err
-		}
-		c.conn = conn
-		return nil
-	}
-
-	err := retry.Do(c.ctx, connectGrpcFunc, retryOptions...)
-	if err != nil {
-		log.Debug("DataNodeClient try connect failed", zap.Error(err))
-		return err
-	}
-	log.Debug("DataNodeClient connect success")
-	c.grpc = datapb.NewDataNodeClient(c.conn)
 	return nil
 }
 
-func (c *Client) recall(caller func() (interface{}, error)) (interface{}, error) {
-	ret, err := caller()
-	if err == nil {
-		return ret, nil
-	}
-	log.Debug("DataNode Client grpc error", zap.Error(err))
-	err = c.connect()
-	if err != nil {
-		return ret, errors.New("Connect to datanode failed with error:\n" + err.Error())
-	}
-	ret, err = caller()
-	if err == nil {
-		return ret, nil
-	}
-	return ret, err
-}
-
+// Start starts the client.
+// Currently, it does nothing.
 func (c *Client) Start() error {
 	return nil
 }
 
+// Stop stops the client.
+// Currently, it closes the grpc connection with the DataNode.
 func (c *Client) Stop() error {
-	c.cancel()
-	return c.conn.Close()
+	return c.grpcClient.Close()
 }
 
-// Register dummy
+// Register does nothing.
 func (c *Client) Register() error {
 	return nil
 }
 
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+	return datapb.NewDataNodeClient(cc)
+}
+
+func (c *Client) getAddr() (string, error) {
+	return c.addr, nil
+}
+
+// GetComponentStates returns ComponentStates
 func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*internalpb.ComponentStates), err
 }
 
+// GetStatisticsChannel return the statistics channel in string
+// Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.StringResponse), err
 }
 
+// Deprecated
+// WatchDmChannels create consumers on dmChannels to reveive Incremental data
 func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.WatchDmChannels(ctx, req)
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).WatchDmChannels(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
+// FlushSegments notifies DataNode to flush the segments req provids. The flush tasks are async to this
+//  rpc, DataNode will flush the segments in the background.
+//
+// Return UnexpectedError code in status:
+//     If DataNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY
+//     If DataNode doesn't find the correspounding segmentID in its memeory replica
+// Return Success code in status and trigers background flush:
+//     Log an info log if a segment is under flushing
 func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.FlushSegments(ctx, req)
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).FlushSegments(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*commonpb.Status), err
 }
 
+// GetMetrics returns metrics
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.recall(func() (interface{}, error) {
-		return c.grpc.GetMetrics(ctx, req)
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).GetMetrics(ctx, req)
 	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
 	return ret.(*milvuspb.GetMetricsResponse), err
+}
+
+// Compaction return compaction by given plan
+func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).Compaction(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}
+
+// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+func (c *Client) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).Import(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
 }

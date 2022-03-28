@@ -1,0 +1,148 @@
+version: '3.5'
+
+services:
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.0
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+
+  pulsar:
+    container_name: milvus-pulsar
+    image: apachepulsar/pulsar:2.7.3
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
+    environment:
+      # bin/apply-config-from-env.py script will modify the configuration file based on the environment variables
+      # nettyMaxFrameSizeBytes must be calculated from maxMessageSize + 10240 (padding)
+      - nettyMaxFrameSizeBytes=104867840 # this is 104857600 + 10240 (padding)
+      - defaultRetentionTimeInMinutes=10080
+      - defaultRetentionSizeInMB=-1
+      # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
+      - PULSAR_PREFIX_maxMessageSize=104857600
+      - PULSAR_GC=-XX:+UseG1GC
+    command: |
+      /bin/bash -c \
+      "bin/apply-config-from-env.py conf/standalone.conf && \
+      exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
+
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2020-12-03T00-03-10Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    command: minio server /minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  rootcoord:
+    container_name: milvus-rootcoord
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "rootcoord"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      ROOT_COORD_ADDRESS: rootcoord:53100
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+
+  proxy:
+    container_name: milvus-proxy
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "proxy"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+    ports:
+      - "19530:19530"
+
+  querycoord:
+    container_name: milvus-querycoord
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "querycoord"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      QUERY_COORD_ADDRESS: querycoord:19531
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+
+  querynode:
+    container_name: milvus-querynode
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "querynode"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+    depends_on:
+      - "querycoord"
+
+  indexcoord:
+    container_name: milvus-indexcoord
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "indexcoord"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      INDEX_COORD_ADDRESS: indexcoord:31000
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+
+  indexnode:
+    container_name: milvus-indexnode
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "indexnode"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      INDEX_COORD_ADDRESS: indexcoord:31000
+    depends_on:
+      - "indexcoord"
+
+  datacoord:
+    container_name: milvus-datacoord
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "datacoord"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+      DATA_COORD_ADDRESS: datacoord:13333
+    depends_on:
+      - "etcd"
+      - "pulsar"
+      - "minio"
+
+  datanode:
+    container_name: milvus-datanode
+    image: ${MILVUS_IMAGE:-milvusdb/milvus-dev:master-latest}
+    command: ["milvus", "run", "datanode"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      PULSAR_ADDRESS: pulsar://pulsar:6650
+    depends_on:
+      - "datacoord"
+
+networks:
+  default:
+    name: milvus

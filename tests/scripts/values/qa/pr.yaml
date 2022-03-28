@@ -1,0 +1,111 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+proxy:
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "256Mi"
+
+
+rootCoordinator:
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "256Mi"
+
+
+queryCoordinator:
+  resources:
+    requests:
+      cpu: "0.4"
+      memory: "100Mi"
+
+queryNode:
+  resources:
+    requests:
+      cpu: "2"
+      memory: "500Mi"
+indexCoordinator:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "50Mi"
+indexNode:
+  resources:
+    requests:
+      cpu: "4"
+      memory: "500Mi"
+
+dataCoordinator:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "50Mi"
+
+dataNode:
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: "500Mi"
+pulsar:
+  proxy:
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+  # Resources for the websocket proxy
+    wsResources:
+      requests:
+        memory: "512Mi"
+        cpu: "0.3"
+  broker:
+    resources:
+      requests:
+        cpu: "1.5"
+        memory: "4Gi"
+  bookkeeper:
+    volumes:
+      ledgers:
+        existingStorageClassName: local-path
+    resources:
+      requests:
+        cpu: 1
+        memory: "4Gi"
+  bastion:
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: "50Mi"
+
+  autorecovery:
+    resources:
+      requests:
+        cpu: "1"
+        memory: "512Mi"
+
+  zookeeper:
+    volumes:
+      data:
+        existingStorageClassName: local-path
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: "1Gi"
+etcd:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "100Mi"
+
+minio:
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "512Mi"
+
+standalone:
+  resources:
+    requests:
+      cpu: "1"
+      memory: "3.5Gi"

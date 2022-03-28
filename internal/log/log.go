@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 // Copyright 2019 PingCAP, Inc.
 //
@@ -31,21 +36,25 @@ import (
 
 	"errors"
 
+	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
-var _globalL, _globalP, _globalS atomic.Value
+var _globalL, _globalP, _globalS, _globalR atomic.Value
+var rateLimiter *utils.ReconfigurableRateLimiter
 
 func init() {
 	l, p := newStdLogger()
 	_globalL.Store(l)
 	_globalP.Store(p)
-
 	s := _globalL.Load().(*zap.Logger).Sugar()
 	_globalS.Store(s)
+
+	r := utils.NewRateLimiter(1.0, 60.0)
+	_globalR.Store(r)
 }
 
 // InitLogger initializes a zap logger.
@@ -84,7 +93,7 @@ func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...
 	level := zap.NewAtomicLevel()
 	err := level.UnmarshalText([]byte(cfg.Level))
 	if err != nil {
-		return nil, nil, fmt.Errorf("InitLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
+		return nil, nil, fmt.Errorf("initLoggerWithWriteSyncer UnmarshalText cfg.Level err:%w", err)
 	}
 	core := NewTextCore(newZapTextEncoder(cfg), output, level)
 	opts = append(cfg.buildOptions(output), opts...)
@@ -134,6 +143,11 @@ func L() *zap.Logger {
 // ReplaceGlobals. It's safe for concurrent use.
 func S() *zap.SugaredLogger {
 	return _globalS.Load().(*zap.SugaredLogger)
+}
+
+// R returns utils.ReconfigurableRateLimiter.
+func R() *utils.ReconfigurableRateLimiter {
+	return _globalR.Load().(*utils.ReconfigurableRateLimiter)
 }
 
 // ReplaceGlobals replaces the global Logger and SugaredLogger.

@@ -1,17 +1,26 @@
 #!/bin/bash
 
-# Copyright (C) 2019-2020 Zilliz. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
 # with the License. You may obtain a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software distributed under the License
-# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-# or implied. See the License for the specific language governing permissions and limitations under the License.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+
+# Exit immediately for non zero status
 set -e
+
+# Print commands
 set -x
 
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
@@ -44,35 +53,40 @@ if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
     MILVUS_SERVICE_IP=$(kubectl get nodes --namespace "${MILVUS_HELM_NAMESPACE}" -o jsonpath='{.items[0].status.addresses[0].address}')
     MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].nodePort}')
   else
-    MILVUS_SERVICE_IP="127.0.0.1"
-    POD_NAME=$(kubectl get pods --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].metadata.name}')
-    MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
-    kubectl --namespace "${MILVUS_HELM_NAMESPACE}" port-forward "${POD_NAME}" "${MILVUS_SERVICE_PORT}" &
-    PORT_FORWARD_PID=$!
-    trap "kill -TERM ${PORT_FORWARD_PID}" EXIT
+    #[remove-kind] use service ip when disable kind to run ci test
+    if [[ -n "${DISABLE_KIND:-}" ]]; then
+      MILVUS_SERVICE_IP=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.clusterIP}')
+      MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
+    else
+      MILVUS_SERVICE_IP="127.0.0.1"
+      POD_NAME=$(kubectl get pods --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].metadata.name}')
+      MILVUS_SERVICE_PORT=$(kubectl get service --namespace "${MILVUS_HELM_NAMESPACE}" -l "${MILVUS_LABELS}" -o jsonpath='{.items[0].spec.ports[0].port}')
+      kubectl --namespace "${MILVUS_HELM_NAMESPACE}" port-forward "${POD_NAME}" "${MILVUS_SERVICE_PORT}" &
+      PORT_FORWARD_PID=$!
+      trap "kill -TERM ${PORT_FORWARD_PID}" EXIT
+    fi
   fi
 fi
 
-pushd "${ROOT}/tests/docker"
-  if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
-    export PRE_EXIST_NETWORK="true"
-    export PYTEST_NETWORK="kind"
-  fi
 
-  export MILVUS_SERVICE_IP="${MILVUS_SERVICE_IP:-127.0.0.1}"
-  export MILVUS_SERVICE_PORT="${MILVUS_SERVICE_PORT:-19530}"
+
+  pushd "${ROOT}/tests/docker"
+    if [[ "${TEST_ENV:-}" =~ ^kind*  ]]; then
+      export PRE_EXIST_NETWORK="true"
+      export PYTEST_NETWORK="kind"
+    fi
+
+    export MILVUS_SERVICE_IP="${MILVUS_SERVICE_IP:-127.0.0.1}"
+    export MILVUS_SERVICE_PORT="${MILVUS_SERVICE_PORT:-19530}"
 
   if [[ "${MANUAL:-}" == "true" ]]; then
     docker-compose up -d
   else
     if [[ "${MILVUS_CLIENT}" == "pymilvus" ]]; then
+      # Better to run pytest under pytest workspace
       export MILVUS_PYTEST_WORKSPACE="/milvus/tests/python_client"
       docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
                                                    --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
-#    elif [[ "${MILVUS_CLIENT}" == "pymilvus-orm" ]]; then
-#      export MILVUS_PYTEST_WORKSPACE="/milvus/tests20/python_client"
-#      docker-compose run --rm pytest /bin/bash -c "pytest -n ${PARALLEL_NUM} --host ${MILVUS_SERVICE_IP} --port ${MILVUS_SERVICE_PORT} \
-#                                               --html=\${CI_LOG_PATH}/report.html --self-contained-html ${@:-}"
     fi
   fi
-popd
+  popd

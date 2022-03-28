@@ -14,34 +14,18 @@
 #include <iostream>
 #include <random>
 #include <string>
-#include <thread>
 #include <vector>
 
-#include <faiss/utils/distances.h>
-#include "segcore/ConcurrentVector.h"
-#include "segcore/SegmentGrowing.h"
-// #include "knowhere/index/vector_index/helpers/IndexParameter.h"
-
-#include "segcore/SegmentGrowing.h"
-#include "segcore/AckResponder.h"
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <knowhere/index/vector_index/IndexIVF.h>
-#include <algorithm>
-#include <chrono>
-#include "test_utils/Timer.h"
+#include "faiss/utils/distances.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_offset_index/IndexIVF_NM.h"
+#include "query/SearchBruteForce.h"
 #include "segcore/Reduce.h"
 #include "test_utils/DataGen.h"
-#include "query/SearchBruteForce.h"
+#include "test_utils/Timer.h"
 
-using std::cin;
-using std::cout;
-using std::endl;
-using namespace milvus::engine;
-using namespace milvus::segcore;
-using std::vector;
 using namespace milvus;
+using namespace milvus::segcore;
 
 namespace {
 template <int DIM>
@@ -57,7 +41,7 @@ generate_data(int N) {
         uids.push_back(10 * N + i);
         timestamps.push_back(0);
         // append vec
-        vector<float> vec(DIM);
+        std::vector<float> vec(DIM);
         for (auto& x : vec) {
             x = distribution(er);
         }
@@ -68,8 +52,6 @@ generate_data(int N) {
 }  // namespace
 
 TEST(Indexing, SmartBruteForce) {
-    // how to ?
-    // I'd know
     constexpr int N = 100000;
     constexpr int DIM = 16;
     constexpr int TOPK = 10;
@@ -90,12 +72,12 @@ TEST(Indexing, SmartBruteForce) {
 
     auto query_data = raw;
 
-    vector<int64_t> final_uids(total_count, -1);
-    vector<float> final_dis(total_count, std::numeric_limits<float>::max());
+    std::vector<int64_t> final_uids(total_count, -1);
+    std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
 
     for (int beg = 0; beg < N; beg += TestChunkSize) {
-        vector<int64_t> buf_uids(total_count, -1);
-        vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
+        std::vector<int64_t> buf_uids(total_count, -1);
+        std::vector<float> buf_dis(total_count, std::numeric_limits<float>::max());
         faiss::float_maxheap_array_t buf = {queries, TOPK, buf_uids.data(), buf_dis.data()};
         auto end = beg + TestChunkSize;
         if (end > N) {
@@ -114,9 +96,9 @@ TEST(Indexing, SmartBruteForce) {
     for (int qn = 0; qn < queries; ++qn) {
         for (int kn = 0; kn < TOPK; ++kn) {
             auto index = qn * TOPK + kn;
-            cout << final_uids[index] << "->" << final_dis[index] << endl;
+            std::cout << final_uids[index] << "->" << final_dis[index] << std::endl;
         }
-        cout << endl;
+        std::cout << std::endl;
     }
 }
 
@@ -129,14 +111,14 @@ TEST(Indexing, Naive) {
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
                                                                          knowhere::IndexMode::MODE_CPU);
 
-    auto conf = milvus::knowhere::Config{
+    auto conf = knowhere::Config{
         {knowhere::meta::DIM, DIM},
         {knowhere::meta::TOPK, TOPK},
         {knowhere::IndexParams::nlist, 100},
         {knowhere::IndexParams::nprobe, 4},
         {knowhere::IndexParams::m, 4},
         {knowhere::IndexParams::nbits, 8},
-        {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+        {knowhere::Metric::TYPE, knowhere::Metric::L2},
         {knowhere::meta::DEVICEID, 0},
     };
 
@@ -189,49 +171,98 @@ TEST(Indexing, Naive) {
     auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
     for (int i = 0; i < TOPK; ++i) {
         if (ids[i] < N / 2) {
-            cout << "WRONG: ";
+            std::cout << "WRONG: ";
         }
-        cout << ids[i] << "->" << distances[i] << endl;
+        std::cout << ids[i] << "->" << distances[i] << std::endl;
     }
-    int i = 1 + 1;
 }
 
-TEST(Indexing, IVFFlatNM) {
-    // hello, world
-    constexpr auto DIM = 16;
-    constexpr auto K = 10;
+TEST(Indexing, IVFFlat) {
+    constexpr int N = 100000;
+    constexpr int NQ = 10;
+    constexpr int DIM = 16;
+    constexpr int TOPK = 5;
+    constexpr int NLIST = 128;
+    constexpr int NPROBE = 16;
 
-    auto N = 1024 * 1024 * 10;
-    auto num_query = 100;
     Timer timer;
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
-    std::cout << "generate data: " << timer.get_step_seconds() << " seconds" << endl;
+    std::cout << "generate data: " << timer.get_step_seconds() << " seconds" << std::endl;
     auto indexing = std::make_shared<knowhere::IVF>();
     auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
-                                 {knowhere::meta::TOPK, K},
-                                 {knowhere::IndexParams::nlist, 100},
-                                 {knowhere::IndexParams::nprobe, 4},
-                                 {knowhere::Metric::TYPE, milvus::knowhere::Metric::L2},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, NLIST},
+                                 {knowhere::IndexParams::nprobe, NPROBE},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
                                  {knowhere::meta::DEVICEID, 0}};
 
     auto database = knowhere::GenDataset(N, DIM, raw_data.data());
-    std::cout << "init ivf " << timer.get_step_seconds() << " seconds" << endl;
+    std::cout << "init ivf " << timer.get_step_seconds() << " seconds" << std::endl;
     indexing->Train(database, conf);
-    std::cout << "train ivf " << timer.get_step_seconds() << " seconds" << endl;
+    std::cout << "train ivf " << timer.get_step_seconds() << " seconds" << std::endl;
     indexing->AddWithoutIds(database, conf);
-    std::cout << "insert ivf " << timer.get_step_seconds() << " seconds" << endl;
+    std::cout << "insert ivf " << timer.get_step_seconds() << " seconds" << std::endl;
 
     EXPECT_EQ(indexing->Count(), N);
     EXPECT_EQ(indexing->Dim(), DIM);
-    auto dataset = knowhere::GenDataset(num_query, DIM, raw_data.data() + DIM * 4200);
+    auto dataset = knowhere::GenDataset(NQ, DIM, raw_data.data() + DIM * 4200);
 
     auto result = indexing->Query(dataset, conf, nullptr);
-    std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << endl;
+    std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    auto ids = result->Get<int64_t*>(milvus::knowhere::meta::IDS);
-    auto dis = result->Get<float*>(milvus::knowhere::meta::DISTANCE);
-    for (int i = 0; i < std::min(num_query * K, 100); ++i) {
-        cout << ids[i] << "->" << dis[i] << endl;
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
+    for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
+        std::cout << ids[i] << "->" << dis[i] << std::endl;
+    }
+}
+
+TEST(Indexing, IVFFlatNM) {
+    constexpr int N = 100000;
+    constexpr int NQ = 10;
+    constexpr int DIM = 16;
+    constexpr int TOPK = 5;
+    constexpr int NLIST = 128;
+    constexpr int NPROBE = 16;
+
+    Timer timer;
+    auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
+    std::cout << "generate data: " << timer.get_step_seconds() << " seconds" << std::endl;
+    auto indexing = std::make_shared<knowhere::IVF_NM>();
+    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
+                                 {knowhere::meta::TOPK, TOPK},
+                                 {knowhere::IndexParams::nlist, NLIST},
+                                 {knowhere::IndexParams::nprobe, NPROBE},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
+
+    auto database = knowhere::GenDataset(N, DIM, raw_data.data());
+    std::cout << "init ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
+    indexing->Train(database, conf);
+    std::cout << "train ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
+    indexing->AddWithoutIds(database, conf);
+    std::cout << "insert ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
+
+    indexing->SetIndexSize(NQ * DIM * sizeof(float));
+    knowhere::BinarySet bs = indexing->Serialize(conf);
+
+    knowhere::BinaryPtr bptr = std::make_shared<knowhere::Binary>();
+    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)raw_data.data(), [&](uint8_t*) {});
+    bptr->size = DIM * N * sizeof(float);
+    bs.Append(RAW_DATA, bptr);
+    indexing->Load(bs);
+
+    EXPECT_EQ(indexing->Count(), N);
+    EXPECT_EQ(indexing->Dim(), DIM);
+    auto dataset = knowhere::GenDataset(NQ, DIM, raw_data.data() + DIM * 4200);
+
+    auto result = indexing->Query(dataset, conf, nullptr);
+    std::cout << "query ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
+
+    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
+    for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
+        std::cout << ids[i] << "->" << dis[i] << std::endl;
     }
 }
 
@@ -239,6 +270,7 @@ TEST(Indexing, BinaryBruteForce) {
     int64_t N = 100000;
     int64_t num_queries = 10;
     int64_t topk = 5;
+    int64_t round_decimal = 3;
     int64_t dim = 8192;
     auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
@@ -251,8 +283,9 @@ TEST(Indexing, BinaryBruteForce) {
         faiss::MetricType::METRIC_Jaccard,  //
         num_queries,                        //
         topk,                               //
-        dim,                                //
-        query_data                          //
+        round_decimal,
+        dim,        //
+        query_data  //
     };
 
     auto sub_result = query::BinarySearchBruteForce(search_dataset, bin_vec.data(), N, nullptr);
@@ -260,83 +293,83 @@ TEST(Indexing, BinaryBruteForce) {
     SearchResult sr;
     sr.num_queries_ = num_queries;
     sr.topk_ = topk;
-    sr.internal_seg_offsets_ = std::move(sub_result.mutable_labels());
-    sr.result_distances_ = std::move(sub_result.mutable_values());
+    sr.ids_ = std::move(sub_result.mutable_ids());
+    sr.distances_ = std::move(sub_result.mutable_distances());
 
     auto json = SearchResultToJson(sr);
-    cout << json.dump(2);
+    std::cout << json.dump(2);
     auto ref = json::parse(R"(
 [
   [
     [
       "1024->0.000000",
-      "48942->0.641860",
-      "18494->0.643842",
-      "68225->0.644310",
-      "93557->0.644320"
+      "48942->0.642000",
+      "18494->0.644000",
+      "68225->0.644000",
+      "93557->0.644000"
     ],
     [
       "1025->0.000000",
-      "73557->0.641265",
-      "53086->0.642550",
-      "9737->0.642834",
-      "62855->0.643802"
+      "73557->0.641000",
+      "53086->0.643000",
+      "9737->0.643000",
+      "62855->0.644000"
     ],
     [
       "1026->0.000000",
-      "62904->0.643793",
-      "46758->0.644466",
-      "57969->0.645362",
-      "98113->0.645536"
+      "62904->0.644000",
+      "46758->0.644000",
+      "57969->0.645000",
+      "98113->0.646000"
     ],
     [
       "1027->0.000000",
-      "92446->0.638235",
-      "96034->0.640414",
-      "92129->0.644207",
-      "45887->0.644415"
+      "92446->0.638000",
+      "96034->0.640000",
+      "92129->0.644000",
+      "45887->0.644000"
     ],
     [
       "1028->0.000000",
-      "22992->0.643497",
-      "73903->0.644090",
-      "19969->0.644948",
-      "65178->0.645119"
+      "22992->0.643000",
+      "73903->0.644000",
+      "19969->0.645000",
+      "65178->0.645000"
     ],
     [
       "1029->0.000000",
-      "19776->0.641118",
-      "15166->0.641916",
-      "85470->0.642357",
-      "16730->0.642997"
+      "19776->0.641000",
+      "15166->0.642000",
+      "85470->0.642000",
+      "16730->0.643000"
     ],
     [
       "1030->0.000000",
-      "55939->0.639781",
-      "84253->0.642518",
-      "31958->0.644277",
-      "11667->0.645638"
+      "55939->0.640000",
+      "84253->0.643000",
+      "31958->0.644000",
+      "11667->0.646000"
     ],
     [
       "1031->0.000000",
-      "89536->0.637372",
-      "61622->0.637850",
-      "9275->0.639138",
-      "91403->0.640182"
+      "89536->0.637000",
+      "61622->0.638000",
+      "9275->0.639000",
+      "91403->0.640000"
     ],
     [
       "1032->0.000000",
-      "69504->0.642279",
-      "23414->0.643707",
-      "48770->0.645262",
-      "23231->0.645433"
+      "69504->0.642000",
+      "23414->0.644000",
+      "48770->0.645000",
+      "23231->0.645000"
     ],
     [
       "1033->0.000000",
-      "33540->0.635903",
-      "25310->0.639673",
-      "18576->0.640482",
-      "73729->0.641620"
+      "33540->0.636000",
+      "25310->0.640000",
+      "18576->0.640000",
+      "73729->0.642000"
     ]
   ]
 ]

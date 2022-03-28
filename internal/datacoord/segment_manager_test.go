@@ -1,12 +1,19 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -20,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -50,7 +56,7 @@ func TestManagerOptions(t *testing.T) {
 	})
 
 	t.Run("test withAllocPolicy", func(t *testing.T) {
-		opt := withAllocPolicy(defaultAlocatePolicy())
+		opt := withAllocPolicy(defaultAllocatePolicy())
 		assert.NotNil(t, opt)
 		// manual set nil
 		segmentManager.allocPolicy = nil
@@ -268,7 +274,8 @@ func TestExpireAllocation(t *testing.T) {
 	segment := meta.GetSegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 100, len(segment.allocations))
-	segmentManager.ExpireAllocations("ch1", maxts)
+	err = segmentManager.ExpireAllocations("ch1", maxts)
+	assert.Nil(t, err)
 	segment = meta.GetSegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 0, len(segment.allocations))
@@ -295,6 +302,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
 
+		meta.SetCurrentRows(allocations[0].SegmentID, 1)
 		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(ids))
@@ -396,7 +404,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := NewMeta(memoryKV)
+		meta, err := newMeta(memoryKV)
 
 		assert.Nil(t, err)
 
@@ -422,7 +430,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := NewMeta(memoryKV)
+		meta, err := newMeta(memoryKV)
 
 		assert.Nil(t, err)
 
@@ -461,7 +469,7 @@ func TestAllocationPool(t *testing.T) {
 	})
 
 	t.Run("put nil", func(t *testing.T) {
-		var allo *Allocation = nil
+		var allo *Allocation
 		allocPool = sync.Pool{
 			New: func() interface{} {
 				return &Allocation{}
@@ -487,4 +495,91 @@ func TestAllocationPool(t *testing.T) {
 		assert.EqualValues(t, 0, allo.SegmentID)
 
 	})
+}
+
+func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
+	type fields struct {
+		meta     *meta
+		segments []UniqueID
+	}
+	type args struct {
+		channel string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+		want   []UniqueID
+	}{
+		{
+			"test drop segments",
+			fields{
+				meta: &meta{
+					segments: &SegmentsInfo{
+						segments: map[int64]*SegmentInfo{
+							1: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            1,
+									InsertChannel: "ch1",
+									State:         commonpb.SegmentState_Flushed,
+								},
+							},
+							2: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            2,
+									InsertChannel: "ch2",
+									State:         commonpb.SegmentState_Flushed,
+								},
+							},
+						},
+					},
+				},
+				segments: []UniqueID{1, 2},
+			},
+			args{
+				"ch1",
+			},
+			[]UniqueID{2},
+		},
+		{
+			"test drop segments with dropped segment",
+			fields{
+				meta: &meta{
+					segments: &SegmentsInfo{
+						segments: map[int64]*SegmentInfo{
+							1: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            1,
+									InsertChannel: "ch1",
+									State:         commonpb.SegmentState_Dropped,
+								},
+							},
+							2: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:            2,
+									InsertChannel: "ch2",
+									State:         commonpb.SegmentState_Growing,
+								},
+							},
+						},
+					},
+				},
+				segments: []UniqueID{1, 2, 3},
+			},
+			args{
+				"ch1",
+			},
+			[]UniqueID{2},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SegmentManager{
+				meta:     tt.fields.meta,
+				segments: tt.fields.segments,
+			}
+			s.DropSegmentsOfChannel(context.TODO(), tt.args.channel)
+			assert.ElementsMatch(t, tt.want, s.segments)
+		})
+	}
 }

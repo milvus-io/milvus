@@ -1,13 +1,11 @@
 import time
 import pdb
 import logging
-import threading
 import traceback
 import grpc
 import numpy as np
 
 from milvus_benchmark.env import get_env
-from milvus_benchmark import config
 from milvus_benchmark.client import MilvusClient
 from . import utils
 
@@ -56,6 +54,7 @@ class BaseRunner(object):
         return self._run_as_group
     
     def init_metric(self, name, collection_info=None, index_info=None, search_info=None, run_params=None, t="metric"):
+        # The locust test calls this method to pass the corresponding metric
         self._metric.collection = collection_info
         self._metric.index = index_info
         self._metric.search = search_info
@@ -91,11 +90,16 @@ class BaseRunner(object):
 
     # TODO: need to improve
     def insert(self, milvus, collection_name, data_type, dimension, size, ni):
+        """ insert data to collection before testing """
         total_time = 0.0
         rps = 0.0
         ni_time = 0.0
         vectors_per_file = utils.get_len_vectors_per_file(data_type, dimension)
         if size % vectors_per_file or size % ni:
+            """ 
+            An error is reported when 
+            the amount of data inserted in a single time cannot divide the total amount of data 
+            """
             logger.error("Not invalid collection size or ni")
             return False
         i = 0
@@ -118,8 +122,10 @@ class BaseRunner(object):
             while i < (size // vectors_per_file):
                 vectors = []
                 if vectors_per_file >= ni:
+                    # Get the path of the specified file
                     file_name = utils.gen_file_name(i, dimension, data_type)
                     # logger.info("Load npy file: %s start" % file_name)
+                    # Load file content
                     data = np.load(file_name)
                     # logger.info("Load npy file: %s end" % file_name)
                     for j in range(vectors_per_file // ni):

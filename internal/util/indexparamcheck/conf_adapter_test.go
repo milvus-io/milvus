@@ -65,6 +65,7 @@ func TestBaseConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// IVFConfAdapter checks if an ivf index can be built.
 func TestIVFConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
@@ -180,6 +181,7 @@ func TestIVFSQConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// BinIDMAPConfAdapter checks if a bin id map index can be built.
 func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
@@ -200,6 +202,7 @@ func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// BinIVFConfAdapter checks if a bin ivf index can be built.
 func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),
@@ -230,6 +233,7 @@ func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// NSGConfAdapter checks if a nsg index can be built.
 func TestNSGConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:          strconv.Itoa(128),
@@ -292,6 +296,7 @@ func TestNSGConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// HNSWConfAdapter checks if a hnsw index can be built.
 func TestHNSWConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:            strconv.Itoa(128),
@@ -331,6 +336,7 @@ func TestHNSWConfAdapter_CheckTrain(t *testing.T) {
 	}
 }
 
+// ANNOYConfAdapter checks if an annoy index can be built
 func TestANNOYConfAdapter_CheckTrain(t *testing.T) {
 	validParams := map[string]string{
 		DIM:    strconv.Itoa(128),

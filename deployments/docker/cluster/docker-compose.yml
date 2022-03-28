@@ -4,13 +4,17 @@ services:
   etcd:
     container_name: milvus-etcd
     image: quay.io/coreos/etcd:v3.5.0
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
     command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
 
   pulsar:
     container_name: milvus-pulsar
-    image: apachepulsar/pulsar:2.7.3
+    image: apachepulsar/pulsar:2.8.2
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
     environment:
@@ -18,7 +22,7 @@ services:
       # nettyMaxFrameSizeBytes must be calculated from maxMessageSize + 10240 (padding)
       - nettyMaxFrameSizeBytes=104867840 # this is 104857600 + 10240 (padding)
       - defaultRetentionTimeInMinutes=10080
-      - defaultRetentionSizeInMB=-1
+      - defaultRetentionSizeInMB=8192
       # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
       - PULSAR_PREFIX_maxMessageSize=104857600
       - PULSAR_GC=-XX:+UseG1GC
@@ -44,7 +48,7 @@ services:
 
   rootcoord:
     container_name: milvus-rootcoord
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "rootcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -58,7 +62,7 @@ services:
 
   proxy:
     container_name: milvus-proxy
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "proxy"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -69,7 +73,7 @@ services:
 
   querycoord:
     container_name: milvus-querycoord
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "querycoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -83,7 +87,7 @@ services:
 
   querynode:
     container_name: milvus-querynode
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "querynode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -94,7 +98,7 @@ services:
 
   indexcoord:
     container_name: milvus-indexcoord
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "indexcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -108,7 +112,7 @@ services:
 
   indexnode:
     container_name: milvus-indexnode
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "indexnode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -120,7 +124,7 @@ services:
 
   datacoord:
     container_name: milvus-datacoord
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "datacoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -134,7 +138,7 @@ services:
 
   datanode:
     container_name: milvus-datanode
-    image: milvusdb/milvus:v2.0.0-rc5-hotfix1-20210901-9e0b2cc
+    image: milvusdb/milvus:v2.0.1
     command: ["milvus", "run", "datanode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379

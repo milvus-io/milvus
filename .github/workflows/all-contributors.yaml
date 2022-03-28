@@ -4,27 +4,28 @@ on:
     schedule:
     # * is a special character in YAML so you have to quote this string
     #         ┌───────────── minute (0 - 59)
-    #         │ ┌───────────── hour (0 - 23)
-    #         │ │ ┌───────────── day of the month (1 - 31)
-    #         │ │ │ ┌───────────── month (1 - 12 or JAN-DEC)
-    #         │ │ │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
-    #         │ │ │ │ │
-    #         │ │ │ │ │
-    #         │ │ │ │ │
-    - cron:  '* 0 * * *'
+    #         │  ┌───────────── hour (0 - 23)
+    #         │  │   ┌───────────── day of the month (1 - 31)
+    #         │  │   │ ┌───────────── month (1 - 12 or JAN-DEC)
+    #         │  │   │ │ ┌───────────── day of the week (0 - 6 or SUN-SAT)
+    #         │  │   │ │ │
+    #         │  │   │ │ │
+    #         │  │   │ │ │
+    - cron:  '0 0,12 * * *'
 
 jobs:
   contributor:
     runs-on: ubuntu-latest
     steps:
       - name: checkout code
+        uses: actions/checkout@v2
+        with:
+         token: ${{ secrets.ALL_CONTRIBUTORS_TOKEN }}
+    
+      - name: log path
         run: |
-          sudo git clone https://.:${{ secrets.ALL_CONTRIBUTORS_TOKEN }}@github.com/${{ github.repository }}.git
-          git config --global user.email "sre-ci-robot@zilliz.com"
-          git config --global user.name "sre-ci-robot"
-          sudo chmod -R 777 milvus
-          cd milvus
           pwd
+          ls
           
       - name: Update README.md
         uses: milvus-io/hero-bot@dco-enabled
@@ -37,7 +38,7 @@ jobs:
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
-          workingDir: '/home/runner/work/milvus/milvus/milvus'
+          workingDir: '/home/runner/work/milvus/milvus'
           
       - name: Update README_CN.md
         uses: milvus-io/hero-bot@dco-enabled
@@ -50,15 +51,15 @@ jobs:
           isAscend: True
           width: '30px'
           customUserConfig: 'milvus-io/milvus/.contributors'
-          workingDir: '/home/runner/work/milvus/milvus/milvus'
+          workingDir: '/home/runner/work/milvus/milvus'
     
       - name: commit code
         run: |
-          cd milvus
           pwd
+          git config --global user.email "sre-ci-robot@zilliz.com"
+          git config --global user.name "sre-ci-robot"
           git add -u
-          git commit -s -m 'Update all contributors'
-          git push
+          git diff-index --cached --quiet HEAD || (git commit -s -m 'Update all contributors' && git push)
 
 
 

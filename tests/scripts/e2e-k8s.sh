@@ -1,15 +1,20 @@
 #!/bin/bash
 
-# Copyright (C) 2019-2020 Zilliz. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+# Licensed to the LF AI & Data foundation under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership. The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
 # with the License. You may obtain a copy of the License at
 #
-# http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software distributed under the License
-# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-# or implied. See the License for the specific language governing permissions and limitations under the License.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
@@ -32,6 +37,10 @@ setup_and_export_git_sha
 
 # shellcheck source=build/kind_provisioner.sh
 source "${ROOT}/build/kind_provisioner.sh"
+
+# shellcheck source=ci-util.sh
+source "${ROOT}/tests/scripts/ci-util.sh"
+
 
 TOPOLOGY=SINGLE_CLUSTER
 NODE_IMAGE="kindest/node:v1.20.2"
@@ -97,6 +106,10 @@ while (( "$#" )); do
       SKIP_EXPORT_LOGS=true
       shift
     ;;
+    --disable-kind)
+      DISABLE_KIND=true
+      shift
+    ;;
     --manual)
       MANUAL=true
       shift
@@ -138,7 +151,7 @@ Usage:
                                 Refer: https://helm.sh/docs/helm/helm_install/#helm-install
 
     --test-extra-arg            Run e2e test extra configuration
-                                For example, \"--tag=smoke\"
+                                For example, \"--tags=L0\"
 
     --test-timeout              To specify timeout period of e2e test. Timeout time is specified in seconds.
 
@@ -163,6 +176,8 @@ Usage:
     --skip-export-logs          Skip kind export logs
 
     --manual                    Manual Mode
+
+    --disable-kind              Remove KinD cluster
 
     -h or --help                Print help information
 
@@ -200,7 +215,7 @@ fi
 export PULL_POLICY=IfNotPresent
 
 # We run a local-registry in a docker container that KinD nodes pull from
-# These values are must match what is in config/trustworthy-jwt.yaml
+# These values must match what are in config/trustworthy-jwt.yaml
 export KIND_REGISTRY_NAME="kind-registry"
 export KIND_REGISTRY_PORT="5000"
 export KIND_REGISTRY="localhost:${KIND_REGISTRY_PORT}"
@@ -217,15 +232,6 @@ if [[ ! -d "${ARTIFACTS}" ]];then
   mkdir -p "${ARTIFACTS}"
 fi
 
-if [[ ! -x "$(command -v kind)" ]]; then
-  KIND_DIR="${KIND_DIR:-"${HOME}/tool_cache/kind"}"
-  KIND_VERSION="v0.11.1"
-
-  export PATH="${KIND_DIR}:${PATH}"
-  if [[ ! -x "$(command -v kind)" ]]; then
-    install_kind "${KIND_DIR}" "${KIND_VERSION}"
-  fi
-fi
 
 if [[ ! -x "$(command -v kubectl)" ]]; then
   KUBECTL_DIR="${KUBECTL_DIR:-"${HOME}/tool_cache/kubectl"}"
@@ -237,19 +243,27 @@ if [[ ! -x "$(command -v kubectl)" ]]; then
   fi
 fi
 
-if [[ ! -x "$(command -v helm)" ]]; then
-  HELM_DIR="${HELM_DIR:-"${HOME}/tool_cache/helm"}"
-  HELM_VERSION="v3.5.4"
+if [[  -z "${DISABLE_KIND:-}" ]];then
+  if [[ ! -x "$(command -v kind)" ]]; then
+    KIND_DIR="${KIND_DIR:-"${HOME}/tool_cache/kind"}"
+    KIND_VERSION="v0.11.1"
 
-  export PATH="${HELM_DIR}:${PATH}"
-  if [[ ! -x "$(command -v helm)" ]]; then
-    install_helm "${HELM_DIR}" "${HELM_VERSION}"
+    export PATH="${KIND_DIR}:${PATH}"
+    if [[ ! -x "$(command -v kind)" ]]; then
+      install_kind "${KIND_DIR}" "${KIND_VERSION}"
+    fi
   fi
 fi
 
 if [[ -z "${SKIP_SETUP:-}" ]]; then
+
   export DEFAULT_CLUSTER_YAML="${ROOT}/build/config/topology/trustworthy-jwt.yaml"
   export METRICS_SERVER_CONFIG_DIR="${ROOT}/build/config/metrics"
+
+  if ! docker info > /dev/null 2>&1; then
+    echo "KinD need docker to set up cluster - please start docker and try again!"
+    exit 1
+  fi
 
   if [[ "${TOPOLOGY}" == "SINGLE_CLUSTER" ]]; then
     trace "setup kind cluster" setup_kind_cluster "${SINGLE_CLUSTER_NAME}" "${NODE_IMAGE}" "${KIND_CONFIG}"
@@ -275,39 +289,75 @@ if [[ -z "${SKIP_SETUP:-}" ]]; then
 fi
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
-  trace "setup kind registry" setup_kind_registry
-  pushd "${ROOT}"
-    trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "${BUILD_COMMAND}"
-  popd
+  #If disable_kind exist, do not need kind registry
+  if [[ -n "${DISABLE_KIND:-}" ]]; then
+    echo "do not set up kind registry when disable_kind exist"
+  else
+    trace "setup kind registry" setup_kind_registry
+  fi 
+    pushd "${ROOT}"
+      trace "docker pull builder " docker-compose pull --ignore-pull-failures builder
+      trace "build milvus" "${ROOT}/build/builder.sh" /bin/bash -c "${BUILD_COMMAND}"
+    popd
+  
 fi
 
-if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
-  # If we're not intending to pull from an actual remote registry, use the local kind registry
-  running="$(docker inspect -f '{{.State.Running}}' "${KIND_REGISTRY_NAME}" 2>/dev/null || true)"
-  if [[ "${running}" == 'true' ]]; then
-    HUB="${KIND_REGISTRY}"
-    export HUB
-  fi
-  export MILVUS_IMAGE_REPO="${HUB}/milvus"
+if [[ -n "${DISABLE_KIND:-}" ]]; then
   export MILVUS_IMAGE_TAG="${TAG}"
+  export MILVUS_IMAGE_REPO="${HUB}/milvus"
+fi
+if [[ -z "${SKIP_BUILD_IMAGE:-}" ]]; then
+
+  # If disable_kind exist,login ci docker registry instead
+  if [[ -n "${DISABLE_KIND:-}" ]]; then
+      trace "docker login in ci registry" docker_login_ci_registry
+  else
+    # If we're not intending to pull from an actual remote registry, use the local kind registry
+      running="$(docker inspect -f '{{.State.Running}}' "${KIND_REGISTRY_NAME}" 2>/dev/null || true)"
+      if [[ "${running}" == 'true' ]]; then
+        HUB="${KIND_REGISTRY}"
+        export HUB
+      fi
+      export MILVUS_IMAGE_REPO="${HUB}/milvus"
+      export MILVUS_IMAGE_TAG="${TAG}"
+  fi
+  
+ 
 
   pushd "${ROOT}"
+    # Build Milvus Docker Image
     trace "build milvus image" "${ROOT}/build/build_image.sh"
     trace "push milvus image" docker push "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}"
   popd
 fi
 
 if [[ -z "${SKIP_INSTALL:-}" ]]; then
+  if [[ ! -x "$(command -v helm)" ]]; then
+    HELM_DIR="${HELM_DIR:-"${HOME}/tool_cache/helm"}"
+    HELM_VERSION="v3.5.4"
+
+    export PATH="${HELM_DIR}:${PATH}"
+    if [[ ! -x "$(command -v helm)" ]]; then
+      install_helm "${HELM_DIR}" "${HELM_VERSION}"
+    fi
+  fi
+  export MILVUS_HELM_RELEASE_NAME=$(./get_release_name.sh)
+  echo "[debug] helm install ${MILVUS_HELM_RELEASE_NAME}"
   trace "install milvus helm chart" "${ROOT}/tests/scripts/install_milvus.sh" "${INSTALL_EXTRA_ARG}"
 fi
 
 if [[ -z "${SKIP_TEST:-}" ]]; then
-  trace "prepare e2e test" "${ROOT}/tests/scripts/prepare_e2e.sh"
+
   if [[ -n "${TEST_TIMEOUT:-}" ]]; then
-    trace "e2e test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    if [[ -n "${DISABLE_KIND:-}" ]]; then
+      trace "e2e test" "timeout" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    else
+      trace "e2e test" "timeout" "-v" "${TEST_TIMEOUT}" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
+    fi
   else
     trace "e2e test" "${ROOT}/tests/scripts/e2e.sh" "${TEST_EXTRA_ARG}"
   fi
+
 fi
 
 # Check if the user is running the clusters in manual mode.

@@ -1,29 +1,41 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package funcutil
 
 import (
 	"reflect"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 
+// GetFunctionName returns the name of input
 func GetFunctionName(i interface{}) string {
 	return runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name()
 }
 
+// ProcessFuncParallel process function in parallel.
+//
+// ProcessFuncParallel waits for all goroutines done if no errors occur.
+// If some goroutines return error, ProcessFuncParallel cancels other goroutines as soon as possible and wait
+// for all other goroutines done, and returns the first error occurs.
 // Reference: https://stackoverflow.com/questions/40809504/idiomatic-goroutine-termination-and-error-handling
 func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname string) error {
 	if maxParallel <= 0 {
@@ -49,10 +61,20 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 		return b
 	}
 	routineNum := 0
+	var wg sync.WaitGroup
 	for begin := 0; begin < total; begin = begin + nPerBatch {
 		j := begin
 
+		wg.Add(1)
 		go func(begin int) {
+			defer wg.Done()
+
+			select {
+			case <-quit:
+				return
+			default:
+			}
+
 			err := error(nil)
 
 			end := getMin(total, begin+nPerBatch)
@@ -91,10 +113,12 @@ func ProcessFuncParallel(total, maxParallel int, f func(idx int) error, fname st
 		select {
 		case err := <-errc:
 			close(quit)
+			wg.Wait()
 			return err
 		case <-done:
 			count++
 			if count == routineNum {
+				wg.Wait()
 				return nil
 			}
 		}

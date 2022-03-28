@@ -10,14 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "exceptions/EasyAssert.h"
-#include "common/Types.h"
-#include "pb/schema.pb.h"
 
 #include <memory>
-#include <vector>
 #include <string>
 #include <utility>
+#include <vector>
+
+#include "common/Types.h"
+#include "pb/schema.pb.h"
 
 namespace milvus::segcore {
 
@@ -25,6 +25,8 @@ class ScalarIndexBase {
  public:
     virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const = 0;
+    virtual std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+    do_search_ids(const std::vector<idx_t>& ids) const = 0;
     virtual ~ScalarIndexBase() = default;
     virtual std::string
     debug() const = 0;
@@ -44,6 +46,9 @@ class ScalarIndexVector : public ScalarIndexBase {
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const override;
 
+    std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+    do_search_ids(const std::vector<idx_t>& ids) const override;
+
     std::string
     debug() const override {
         std::string dbg_str;
@@ -56,4 +61,5 @@ class ScalarIndexVector : public ScalarIndexBase {
  private:
     std::vector<std::pair<T, SegOffset>> mapping_;
 };
+
 }  // namespace milvus::segcore

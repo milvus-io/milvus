@@ -5,8 +5,6 @@ reviewers:
   - DragonDriver
 
 approvers:
-  - pr-inspection
+  - maintainers
 
-labels:
-- component/indexcoord
 

@@ -1,13 +1,25 @@
-# order by contributions
-reviewers:
-  - fishpenguin
-  - godchen0212
-  - xige-16
-  - FluorineDog
-  - XuanYang-cn
-  - czs007
-  - bigsheeper
-  - sunby
+filters:
+  ".*":
+    reviewers:
+      - fishpenguin
+      - godchen0212
+      - xige-16
+      - FluorineDog
+      - XuanYang-cn
+      - czs007
+      - bigsheeper
+      - sunby
+    approvers:
+      - maintainers
 
-approvers:
-  - pr-inspection
+  "{common|milvus|schema}\\.proto":
+    labels:
+      - area/api
+    approvers:
+      - maintainers
+
+  "{data_coord|index_coord|internal|proxy|query_coord|root_coord}\\.proto":
+    labels:
+      - area/internal-api
+    approvers:
+      - maintainers

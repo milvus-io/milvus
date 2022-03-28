@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 // Package datanode implements data persistence logic.
 //
@@ -20,62 +25,72 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/logutil"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/msgstream"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/logutil"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 const (
+	// RPCConnectionTimeout is used to set the timeout for rpc request
 	RPCConnectionTimeout = 30 * time.Second
 
-	// MetricRequestsTotal used to count the num of total requests
+	// MetricRequestsTotal is used to count the num of total requests
 	MetricRequestsTotal = "total"
 
-	// MetricRequestsSuccess used to count the num of successful requests
+	// MetricRequestsSuccess is used to count the num of successful requests
 	MetricRequestsSuccess = "success"
 
-	// ConnectEtcdMaxRetryTime used to limit the max retry time for connection etcd
+	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 1000
 )
 
 const illegalRequestErrStr = "Illegal request"
 
+// makes sure DataNode implements types.DataNode
+var _ types.DataNode = (*DataNode)(nil)
+
+// Params from config.yaml
+var Params paramtable.ComponentParam
+
 // DataNode communicates with outside services and unioun all
 // services in datanode package.
 //
 // DataNode implements `types.Component`, `types.DataNode` interfaces.
+//  `etcdCli`   is a connection of etcd
 //  `rootCoord` is a grpc client of root coordinator.
 //  `dataCoord` is a grpc client of data service.
 //  `NodeID` is unique to each datanode.
 //  `State` is current statement of this data node, indicating whether it's healthy.
 //
-//  `vchan2SyncService` is a map of vchannlName to dataSyncService, so that datanode
-//  has ability to scale flowgraph.
-//  `vchan2FlushCh` holds flush-signal channels for every flowgraph.
-
 //  `clearSignal` is a signal channel for releasing the flowgraph resources.
 //  `segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
@@ -85,17 +100,20 @@ type DataNode struct {
 	Role   string
 	State  atomic.Value // internalpb.StateCode_Initializing
 
-	chanMut           sync.RWMutex
-	vchan2SyncService map[string]*dataSyncService // vchannel name
-	vchan2FlushCh     map[string]chan<- *flushMsg // vchannel name
-	clearSignal       chan UniqueID               // collection ID
-	segmentCache      *Cache
+	flowgraphManager *flowgraphManager
+	eventManagerMap  sync.Map // vchannel name -> channelEventManager
 
+	clearSignal        chan string // vchannel name
+	segmentCache       *Cache
+	compactionExecutor *compactionExecutor
+
+	etcdCli   *clientv3.Client
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	session  *sessionutil.Session
-	kvClient *etcdkv.EtcdKV
+	session      *sessionutil.Session
+	watchKv      kv.MetaKv
+	chunkManager storage.ChunkManager
 
 	closer io.Closer
 
@@ -111,21 +129,26 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 		cancel: cancel2,
 		Role:   typeutil.DataNodeRole,
 
-		rootCoord:    nil,
-		dataCoord:    nil,
-		msFactory:    factory,
-		segmentCache: newCache(),
+		rootCoord:          nil,
+		dataCoord:          nil,
+		msFactory:          factory,
+		segmentCache:       newCache(),
+		compactionExecutor: newCompactionExecutor(),
 
-		vchan2SyncService: make(map[string]*dataSyncService),
-		vchan2FlushCh:     make(map[string]chan<- *flushMsg),
-		clearSignal:       make(chan UniqueID, 100),
+		flowgraphManager: newFlowgraphManager(),
+		clearSignal:      make(chan string, 100),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return node
 }
 
-// SetRootCoordInterface sets RootCoord's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
+// SetEtcdClient sets etcd client for DataNode
+func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
+	node.etcdCli = etcdCli
+}
+
+// SetRootCoord sets RootCoord's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 	switch {
 	case rc == nil, node.rootCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -135,8 +158,8 @@ func (node *DataNode) SetRootCoordInterface(rc types.RootCoord) error {
 	}
 }
 
-// SetDataCoordInterface sets data service's grpc client, error is returned if repeatedly set.
-func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
+// SetDataCoord sets data service's grpc client, error is returned if repeatedly set.
+func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 	switch {
 	case ds == nil, node.dataCoord != nil:
 		return errors.New("Nil parameter or repeatly set")
@@ -146,28 +169,61 @@ func (node *DataNode) SetDataCoordInterface(ds types.DataCoord) error {
 	}
 }
 
+// SetNodeID set node id for DataNode
+func (node *DataNode) SetNodeID(id UniqueID) {
+	node.NodeID = id
+}
+
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
-	node.session = sessionutil.NewSession(node.ctx, Params.MetaRootPath, Params.EtcdEndpoints)
-	node.session.Init(typeutil.DataNodeRole, Params.IP+":"+strconv.Itoa(Params.Port), false)
-	Params.NodeID = node.session.ServerID
-	node.NodeID = node.session.ServerID
-	// Start node watch node
-	go node.StartWatchChannels(node.ctx)
+	node.session.Register()
 
-	Params.initMsgChannelSubName()
-	log.Debug("DataNode Init",
-		zap.String("MsgChannelSubName", Params.MsgChannelSubName),
-	)
+	// Start liveness check
+	go node.session.LivenessCheck(node.ctx, func() {
+		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		if err := node.Stop(); err != nil {
+			log.Fatal("failed to stop server", zap.Error(err))
+		}
+		// manually send signal to starter goroutine
+		if node.session.TriggerKill {
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				p.Signal(syscall.SIGINT)
+			}
+		}
+	})
+
 	return nil
 }
 
-// Init function do nothing now.
+func (node *DataNode) initSession() error {
+	node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath, node.etcdCli)
+	if node.session == nil {
+		return errors.New("failed to initialize session")
+	}
+	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
+	Params.DataNodeCfg.NodeID = node.session.ServerID
+	node.NodeID = node.session.ServerID
+	Params.SetLogger(Params.DataNodeCfg.NodeID)
+	return nil
+}
+
+// Init function does nothing now.
 func (node *DataNode) Init() error {
-	log.Debug("DataNode Init",
-		zap.String("SegmentStatisticsChannelName", Params.SegmentStatisticsChannelName),
-		zap.String("TimeTickChannelName", Params.TimeTickChannelName),
+	log.Info("DataNode Init",
+		zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick),
 	)
+	if err := node.initSession(); err != nil {
+		log.Error("DataNode init session failed", zap.Error(err))
+		return err
+	}
+
+	if err := node.msFactory.Init(&Params); err != nil {
+		log.Warn("DataNode Init msFactory SetParams failed, use default",
+			zap.Error(err))
+		return err
+	}
+	log.Info("DataNode Init successfully",
+		zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName))
 
 	return nil
 }
@@ -176,19 +232,33 @@ func (node *DataNode) Init() error {
 func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer logutil.LogPanic()
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	watchPrefix := fmt.Sprintf("channel/%d", node.NodeID)
-	evtChan := node.kvClient.WatchWithPrefix(watchPrefix)
+	watchPrefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID))
+	evtChan := node.watchKv.WatchWithPrefix(watchPrefix)
+	// after watch, first check all exists nodes first
+	err := node.checkWatchedList()
+	if err != nil {
+		log.Warn("StartWatchChannels failed", zap.Error(err))
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("watch etcd loop quit")
+			log.Info("watch etcd loop quit")
 			return
 		case event := <-evtChan:
-			if event.Canceled { // failed to watch
-				log.Warn("Watch channel failed", zap.Error(event.Err()))
+			if event.Canceled { // event canceled
+				log.Warn("watch channel canceled", zap.Error(event.Err()))
+				// https://github.com/etcd-io/etcd/issues/8980
+				if event.Err() == v3rpc.ErrCompacted {
+					go node.StartWatchChannels(ctx)
+					return
+				}
 				// if watch loop return due to event canceled, the datanode is not functional anymore
 				// stop the datanode and wait for restart
-				node.Stop()
+				err := node.Stop()
+				if err != nil {
+					log.Warn("node stop failed", zap.Error(err))
+				}
 				return
 			}
 			for _, evt := range event.Events {
@@ -198,111 +268,175 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	}
 }
 
-// handleChannelEvt handles event from kv watch event
-func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
-	switch evt.Type {
-	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
-		watchInfo := datapb.ChannelWatchInfo{}
-		err := proto.Unmarshal(evt.Kv.Value, &watchInfo)
-		if err != nil {
-			log.Warn("fail to parse ChannelWatchInfo", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
-			return
-		}
-		if watchInfo.State == datapb.ChannelWatchState_Complete {
-			return
-		}
-		if watchInfo.Vchan == nil {
-			log.Warn("found ChannelWatchInfo with nil VChannelInfo", zap.String("key", string(evt.Kv.Key)))
-			return
-		}
-		err = node.NewDataSyncService(watchInfo.Vchan)
-		if err != nil {
-			log.Warn("fail to create DataSyncService", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
-			return
-		}
-		watchInfo.State = datapb.ChannelWatchState_Complete
-		v, _ := proto.Marshal(&watchInfo)
-		err = node.kvClient.Save(fmt.Sprintf("channel/%d/%s", node.NodeID, watchInfo.Vchan.ChannelName), string(v))
-		if err != nil {
-			log.Warn("fail to change WatchState to complete", zap.String("key", string(evt.Kv.Key)), zap.Error(err))
-			node.ReleaseDataSyncService(string(evt.Kv.Key))
-			// TODO GOOSE: maybe retry logic and exit logic
-		}
-	case clientv3.EventTypeDelete:
-		// guaranteed there is no "/" in channel name
-		parts := strings.Split(string(evt.Kv.Key), "/")
-		node.ReleaseDataSyncService(parts[len(parts)-1])
-	}
-}
-
-// NewDataSyncService adds a new dataSyncService for new dmlVchannel and starts dataSyncService.
-func (node *DataNode) NewDataSyncService(vchan *datapb.VchannelInfo) error {
-	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
-	if _, ok := node.vchan2SyncService[vchan.GetChannelName()]; ok {
-		return nil
-	}
-
-	replica := newReplica(node.rootCoord, vchan.CollectionID)
-
-	var alloc allocatorInterface = newAllocator(node.rootCoord)
-
-	log.Debug("Received Vchannel Info",
-		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
-		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegments())),
-	)
-
-	flushChan := make(chan *flushMsg, 100)
-	dataSyncService, err := newDataSyncService(node.ctx, flushChan, replica, alloc, node.msFactory, vchan, node.clearSignal, node.dataCoord)
+// checkWatchedList list all nodes under [prefix]/channel/{node_id} and make sure all nodeds are watched
+// serves the corner case for etcd connection lost and missing some events
+func (node *DataNode) checkWatchedList() error {
+	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
+	prefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID))
+	keys, values, err := node.watchKv.LoadWithPrefix(prefix)
 	if err != nil {
 		return err
 	}
-
-	node.vchan2SyncService[vchan.GetChannelName()] = dataSyncService
-	node.vchan2FlushCh[vchan.GetChannelName()] = flushChan
-
-	log.Info("Start New dataSyncService",
-		zap.Int64("Collection ID", vchan.GetCollectionID()),
-		zap.String("Vchannel name", vchan.GetChannelName()),
-	)
-	go dataSyncService.start()
-
+	for i, val := range values {
+		node.handleWatchInfo(&event{eventType: putEventType}, keys[i], []byte(val))
+	}
 	return nil
 }
 
+// handleChannelEvt handles event from kv watch event
+func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
+	var e *event
+	switch evt.Type {
+	case clientv3.EventTypePut: // datacoord shall put channels needs to be watched here
+		e = &event{
+			eventType: putEventType,
+			version:   evt.Kv.Version,
+		}
+
+	case clientv3.EventTypeDelete:
+		e = &event{
+			eventType: deleteEventType,
+			version:   evt.Kv.Version,
+		}
+	}
+	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
+}
+
+func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
+	switch e.eventType {
+	case putEventType:
+		log.Info("DataNode is handling watchInfo put event", zap.String("key", key))
+
+		watchInfo, err := parsePutEventData(data)
+		if err != nil {
+			log.Warn("fail to handle watchInfo", zap.Int("event type", e.eventType), zap.String("key", key), zap.Error(err))
+			return
+		}
+
+		if isEndWatchState(watchInfo.State) {
+			log.Warn("DataNode received a PUT event with a end State", zap.String("state", watchInfo.State.String()))
+			return
+		}
+
+		e.info = watchInfo
+		e.vChanName = watchInfo.GetVchan().GetChannelName()
+
+	case deleteEventType:
+		log.Info("DataNode is handling watchInfo delete event", zap.String("key", key))
+		e.vChanName = parseDeleteEventKey(key)
+	}
+
+	actualManager, loaded := node.eventManagerMap.LoadOrStore(e.vChanName, newChannelEventManager(
+		node.handlePutEvent, node.handleDeleteEvent, retryWatchInterval,
+	))
+
+	if !loaded {
+		actualManager.(*channelEventManager).Run()
+	}
+
+	actualManager.(*channelEventManager).handleEvent(*e)
+
+	// Whenever a delete event comes, this eventManger will be removed from map
+	if e.eventType == deleteEventType {
+		if m, loaded := node.eventManagerMap.LoadAndDelete(e.vChanName); loaded {
+			m.(*channelEventManager).Close()
+		}
+	}
+}
+
+func parsePutEventData(data []byte) (*datapb.ChannelWatchInfo, error) {
+	watchInfo := datapb.ChannelWatchInfo{}
+	err := proto.Unmarshal(data, &watchInfo)
+	if err != nil {
+		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, err: %v", err)
+	}
+
+	if watchInfo.Vchan == nil {
+		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo")
+	}
+
+	return &watchInfo, nil
+}
+
+func parseDeleteEventKey(key string) string {
+	parts := strings.Split(key, "/")
+	vChanName := parts[len(parts)-1]
+	return vChanName
+}
+
+func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version int64) (err error) {
+	vChanName := watchInfo.GetVchan().GetChannelName()
+
+	switch watchInfo.State {
+	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
+		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
+			return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
+		}
+		log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+		defer func() {
+			if err != nil {
+				node.releaseFlowgraph(vChanName)
+			}
+		}()
+		watchInfo.State = datapb.ChannelWatchState_WatchSuccess
+
+	case datapb.ChannelWatchState_ToRelease:
+		success := true
+		func() {
+			defer func() {
+				if x := recover(); x != nil {
+					log.Error("release flowgraph panic", zap.Any("recovered", x))
+					success = false
+				}
+			}()
+			node.releaseFlowgraph(vChanName)
+		}()
+		if !success {
+			watchInfo.State = datapb.ChannelWatchState_ReleaseFailure
+		} else {
+			watchInfo.State = datapb.ChannelWatchState_ReleaseSuccess
+		}
+	}
+
+	v, err := proto.Marshal(watchInfo)
+	if err != nil {
+		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
+	}
+
+	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", node.NodeID), vChanName)
+	log.Info("handle put event: try to save result state", zap.String("key", k), zap.String("state", watchInfo.State.String()))
+
+	err = node.watchKv.CompareVersionAndSwap(k, version, string(v))
+	if err != nil {
+		return fmt.Errorf("fail to update watch state to etcd, vChanName: %s, state: %s, err: %w", vChanName, watchInfo.State.String(), err)
+	}
+	return nil
+}
+
+func (node *DataNode) handleDeleteEvent(vChanName string) {
+	node.releaseFlowgraph(vChanName)
+}
+
+func (node *DataNode) releaseFlowgraph(vChanName string) {
+	node.flowgraphManager.release(vChanName)
+}
+
 // BackGroundGC runs in background to release datanode resources
-func (node *DataNode) BackGroundGC(collIDCh <-chan UniqueID) {
+func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 	log.Info("DataNode Background GC Start")
 	for {
 		select {
-		case collID := <-collIDCh:
-			log.Info("GC collection", zap.Int64("ID", collID))
-			for _, vchanName := range node.getChannelNamesbyCollectionID(collID) {
-				node.ReleaseDataSyncService(vchanName)
-			}
+		case vchanName := <-vChannelCh:
+			log.Info("GC flowgraph", zap.String("vChanName", vchanName))
+			node.releaseFlowgraph(vchanName)
 		case <-node.ctx.Done():
-			log.Info("DataNode ctx done")
+			log.Warn("DataNode context done, exiting background GC")
 			return
 		}
 	}
 }
 
-// ReleaseDataSyncService release flowgraph resources for a vchanName
-func (node *DataNode) ReleaseDataSyncService(vchanName string) {
-	log.Info("Release flowgraph resources begin", zap.String("Vchannel", vchanName))
-
-	node.chanMut.Lock()
-	defer node.chanMut.Unlock()
-	if dss, ok := node.vchan2SyncService[vchanName]; ok {
-		dss.close()
-	}
-
-	delete(node.vchan2SyncService, vchanName)
-	delete(node.vchan2FlushCh, vchanName)
-
-	log.Debug("Release flowgraph resources end", zap.String("Vchannel", vchanName))
-}
-
+// FilterThreshold is the start time ouf DataNode
 var FilterThreshold Timestamp
 
 // Start will update DataNode state to HEALTHY
@@ -323,17 +457,28 @@ func (node *DataNode) Start() error {
 	}
 
 	connectEtcdFn := func() error {
-		etcdKV, err := etcdkv.NewEtcdKV(Params.EtcdEndpoints, Params.MetaRootPath)
-		if err != nil {
-			return err
-		}
-		node.kvClient = etcdKV
+		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
+		node.watchKv = etcdKV
 		return nil
 	}
 	err = retry.Do(node.ctx, connectEtcdFn, retry.Attempts(ConnectEtcdMaxRetryTime))
 	if err != nil {
 		return errors.New("DataNode fail to connect etcd")
 	}
+
+	chunkManager, err := storage.NewMinioChunkManager(node.ctx,
+		storage.Address(Params.MinioCfg.Address),
+		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+		storage.UseSSL(Params.MinioCfg.UseSSL),
+		storage.BucketName(Params.MinioCfg.BucketName),
+		storage.CreateBucket(true))
+
+	if err != nil {
+		return err
+	}
+
+	node.chunkManager = chunkManager
 
 	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
 		return errors.New("DataNode fail to start")
@@ -342,6 +487,15 @@ func (node *DataNode) Start() error {
 	FilterThreshold = rep.GetTimestamp()
 
 	go node.BackGroundGC(node.clearSignal)
+
+	go node.compactionExecutor.start(node.ctx)
+
+	// Start node watch node
+	go node.StartWatchChannels(node.ctx)
+
+	Params.DataNodeCfg.CreatedTime = time.Now()
+	Params.DataNodeCfg.UpdatedTime = time.Now()
+
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	return nil
 }
@@ -351,51 +505,37 @@ func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
 	node.State.Store(code)
 }
 
+// GetStateCode return datanode's state code
+func (node *DataNode) GetStateCode() internalpb.StateCode {
+	return node.State.Load().(internalpb.StateCode)
+}
+
 func (node *DataNode) isHealthy() bool {
 	code := node.State.Load().(internalpb.StateCode)
 	return code == internalpb.StateCode_Healthy
 }
 
-// WatchDmChannels create a new dataSyncService for every unique dmlVchannel name, ignore if dmlVchannel existed.
+// WatchDmChannels is not in use
 func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsTotal).Inc()
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
+	log.Warn("DataNode WatchDmChannels is not in use")
 
-	switch {
-	case !node.isHealthy():
-		status.Reason = msgDataNodeIsUnhealthy(node.NodeID)
-		return status, nil
-
-	case len(in.GetVchannels()) == 0:
-		status.Reason = illegalRequestErrStr
-		return status, nil
-
-	default:
-		for _, chanInfo := range in.GetVchannels() {
-			log.Info("DataNode new dataSyncService",
-				zap.String("channel name", chanInfo.ChannelName),
-				zap.Any("channal Info", chanInfo),
-			)
-			if err := node.NewDataSyncService(chanInfo); err != nil {
-				log.Warn("Failed to new data sync service", zap.Any("channel", chanInfo))
-			}
-		}
-
-		status.ErrorCode = commonpb.ErrorCode_Success
-		log.Debug("DataNode WatchDmChannels Done")
-		metrics.DataNodeWatchDmChannelsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
-		return status, nil
-	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "watchDmChannels do nothing",
+	}, nil
 }
 
 // GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
+	nodeID := common.NotRegisteredID
+	if node.session != nil && node.session.Registered() {
+		nodeID = node.session.ServerID
+	}
 	states := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
-			NodeID:    Params.NodeID,
+			// NodeID:    Params.NodeID, // will race with DataNode.Register()
+			NodeID:    nodeID,
 			Role:      node.Role,
 			StateCode: node.State.Load().(internalpb.StateCode),
 		},
@@ -405,50 +545,10 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 	return states, nil
 }
 
-func (node *DataNode) getChannelNamebySegmentID(segID UniqueID) string {
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-	for name, dataSync := range node.vchan2SyncService {
-		if dataSync.replica.hasSegment(segID, false) {
-			return name
-		}
-	}
-	return ""
-}
-
-func (node *DataNode) getChannelNamesbyCollectionID(collID UniqueID) []string {
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-
-	channels := make([]string, 0, len(node.vchan2SyncService))
-	for name, dataSync := range node.vchan2SyncService {
-		if dataSync.collectionID == collID {
-			channels = append(channels, name)
-		}
-	}
-	return channels
-}
-
 // ReadyToFlush tells wether DataNode is ready for flushing
 func (node *DataNode) ReadyToFlush() error {
 	if node.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return errors.New("DataNode not in HEALTHY state")
-	}
-
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-	if len(node.vchan2SyncService) == 0 && len(node.vchan2FlushCh) == 0 {
-		// Healthy but Idle
-		msg := "DataNode HEALTHY but IDLE, please try WatchDmChannels to make it work"
-		log.Warn(msg)
-		return errors.New(msg)
-	}
-
-	if len(node.vchan2SyncService) != len(node.vchan2FlushCh) {
-		// TODO restart
-		msg := "DataNode HEALTHY but abnormal inside, restarting..."
-		log.Warn(msg)
-		return errors.New(msg)
 	}
 	return nil
 }
@@ -457,107 +557,99 @@ func (node *DataNode) ReadyToFlush() error {
 //   If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
 //   So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
 //
-//   There are 1 precondition: The segmentID in req is in ascending order.
+//   One precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsTotal).Inc()
+	metrics.DataNodeFlushSegmentsReqCounter.WithLabelValues(
+		fmt.Sprint(Params.DataNodeCfg.NodeID),
+		MetricRequestsTotal).Inc()
+
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	if err := node.ReadyToFlush(); err != nil {
-		status.Reason = err.Error()
+	if node.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+		status.Reason = "DataNode not in HEALTHY state"
 		return status, nil
 	}
 
-	numOfFlushingSeg := len(req.SegmentIDs)
-	log.Debug("FlushSegments ...",
-		zap.Int("num", len(req.SegmentIDs)),
+	log.Info("Receive FlushSegments req",
+		zap.Int64("collectionID", req.GetCollectionID()), zap.Int("num", len(req.SegmentIDs)),
 		zap.Int64s("segments", req.SegmentIDs),
 	)
 
-	dmlFlushedCh := make(chan []*datapb.FieldBinlog, len(req.SegmentIDs))
-	for _, id := range req.SegmentIDs {
-		chanName := node.getChannelNamebySegmentID(id)
-		log.Debug("vchannel",
-			zap.String("name", chanName),
-			zap.Int64("SegmentID", id))
+	processSegments := func(segmentIDs []UniqueID, flushed bool) bool {
+		noErr := true
+		for _, id := range segmentIDs {
+			if node.segmentCache.checkIfCached(id) {
+				// Segment in flushing, ignore
+				log.Info("Segment flushing, ignore the flush request until flush is done.",
+					zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
 
-		if len(chanName) == 0 {
-			status.Reason = fmt.Sprintf("DataNode not find segment %d!", id)
-			return status, nil
+				continue
+			}
+
+			node.segmentCache.Cache(id)
+
+			flushCh, err := node.flowgraphManager.getFlushCh(id)
+			if err != nil {
+				status.Reason = "DataNode abnormal, restarting"
+				log.Error("DataNode abnormal, no flushCh for a vchannel", zap.Error(err))
+				noErr = false
+				continue
+			}
+
+			flushCh <- flushMsg{
+				msgID:        req.Base.MsgID,
+				timestamp:    req.Base.Timestamp,
+				segmentID:    id,
+				collectionID: req.CollectionID,
+				flushed:      flushed,
+			}
 		}
+		log.Info("Flowgraph flushSegment tasks triggered", zap.Bool("flushed", flushed),
+			zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("segments", segmentIDs))
 
-		if node.segmentCache.checkIfCached(id) {
-			// Segment in flushing or flushed, ignore
-			log.Info("Segment in flushing, ignore it", zap.Int64("ID", id))
-			numOfFlushingSeg--
-			continue
-		}
-
-		node.segmentCache.Cache(id)
-
-		node.chanMut.RLock()
-		flushCh, ok := node.vchan2FlushCh[chanName]
-		node.chanMut.RUnlock()
-		if !ok {
-			// TODO restart DataNode or reshape vchan2FlushCh and vchan2SyncService
-			status.Reason = "DataNode abnormal, restarting"
-			return status, nil
-		}
-
-		flushmsg := &flushMsg{
-			msgID:        req.Base.MsgID,
-			timestamp:    req.Base.Timestamp,
-			segmentID:    id,
-			collectionID: req.CollectionID,
-			dmlFlushedCh: dmlFlushedCh,
-		}
-		flushCh <- flushmsg
-
+		return noErr
 	}
 
-	failedSegments := ""
-	for i := 0; i < numOfFlushingSeg; i++ {
-		msg := <-dmlFlushedCh
-		if len(msg) != 1 {
-			panic("flush size expect to 1")
-		}
-		if msg[0].Binlogs == nil {
-			failedSegments += fmt.Sprintf(" %d", msg[0].FieldID)
-		}
+	ok := processSegments(req.GetSegmentIDs(), true)
+	if !ok {
+		return status, nil
 	}
-	if len(failedSegments) != 0 {
-		status.Reason = fmt.Sprintf("flush failed segment list = %s", failedSegments)
+	ok = processSegments(req.GetMarkSegmentIDs(), false)
+	if !ok {
 		return status, nil
 	}
 
-	node.segmentCache.Remove(req.SegmentIDs...)
-	log.Debug("FlushSegments Done",
-		zap.Int64s("segments", req.SegmentIDs))
-
 	status.ErrorCode = commonpb.ErrorCode_Success
-	metrics.DataNodeFlushSegmentsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
+	metrics.DataNodeFlushSegmentsReqCounter.WithLabelValues(
+		fmt.Sprint(Params.DataNodeCfg.NodeID),
+		MetricRequestsSuccess).Inc()
+
 	return status, nil
 }
 
+// Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
-	node.cancel()
+	// https://github.com/milvus-io/milvus/issues/12282
+	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
-	node.chanMut.RLock()
-	defer node.chanMut.RUnlock()
-	// close services
-	for _, syncService := range node.vchan2SyncService {
-		if syncService != nil {
-			(*syncService).close()
+	node.cancel()
+	node.flowgraphManager.dropAll()
+
+	if node.closer != nil {
+		err := node.closer.Close()
+		if err != nil {
+			return err
 		}
 	}
 
-	if node.closer != nil {
-		node.closer.Close()
-	}
+	node.session.Revoke(time.Second)
+
 	return nil
 }
 
+// GetTimeTickChannel currently do nothing
 func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -568,6 +660,7 @@ func (node *DataNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringR
 	}, nil
 }
 
+// GetStatisticsChannel currently do nothing
 func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -578,22 +671,23 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
+// GetMetrics return datanode metrics
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("DataNode.GetMetrics",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 		zap.String("req", req.Request))
 
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
-			zap.Error(errDataNodeIsUnhealthy(Params.NodeID)))
+			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataNodeIsUnhealthy(Params.NodeID),
+				Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID),
 			},
 			Response: "",
 		}, nil
@@ -602,7 +696,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -622,17 +716,17 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
 
 		log.Debug("DataNode.GetMetrics",
-			zap.Int64("node_id", Params.NodeID),
+			zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
-		return systemInfoMetrics, err
+		return systemInfoMetrics, nil
 	}
 
 	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.NodeID),
+		zap.Int64("node_id", Params.DataNodeCfg.NodeID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 
@@ -643,4 +737,65 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		},
 		Response: "",
 	}, nil
+}
+
+// Compaction handles compaction request from DataCoord
+// returns status as long as compaction task enqueued or invalid
+func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+
+	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannel())
+	if !ok {
+		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channel name", req.GetChannel()))
+		status.Reason = errIllegalCompactionPlan.Error()
+		return status, nil
+	}
+
+	if !node.compactionExecutor.channelValidateForCompaction(req.GetChannel()) {
+		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channel name", req.GetChannel()))
+		status.Reason = "channel marked invalid"
+		return status, nil
+	}
+
+	binlogIO := &binlogIO{node.chunkManager, ds.idAllocator}
+	task := newCompactionTask(
+		node.ctx,
+		binlogIO, binlogIO,
+		ds.replica,
+		ds.flushManager,
+		ds.idAllocator,
+		node.dataCoord,
+		req,
+	)
+
+	node.compactionExecutor.execute(task)
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+	log.Info("receive import request")
+
+	if !node.isHealthy() {
+		log.Warn("DataNode.Import failed",
+			zap.String("collectionName", req.GetCollectionName()),
+			zap.String("partitionName", req.GetPartitionName()),
+			zap.Int64("taskID", req.GetTaskId()),
+			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)))
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID),
+		}, nil
+	}
+
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	return resp, nil
 }

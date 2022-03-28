@@ -10,10 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include "common/Types.h"
-#include "utils/Json.h"
+
 #include <map>
 #include <string>
+
+#include "common/Types.h"
+#include "exceptions/EasyAssert.h"
+#include "utils/Json.h"
 
 namespace milvus::segcore {
 
@@ -24,22 +27,27 @@ struct SmallIndexConf {
 };
 
 class SegcoreConfig {
- public:
-    static SegcoreConfig
-    parse_from(const std::string& string_path);
-    static SegcoreConfig
-    default_config() {
-        // TODO: remove this when go side is ready
-        SegcoreConfig config;
-        config.set_size_per_chunk(32 * 1024);
+ private:
+    SegcoreConfig() {
+        // hard code configurations for small index
         SmallIndexConf sub_conf;
         sub_conf.build_params["nlist"] = 100;
         sub_conf.search_params["nprobe"] = 4;
         sub_conf.index_type = "IVF";
-        config.table_[MetricType::METRIC_L2] = sub_conf;
-        config.table_[MetricType::METRIC_INNER_PRODUCT] = sub_conf;
+        table_[MetricType::METRIC_L2] = sub_conf;
+        table_[MetricType::METRIC_INNER_PRODUCT] = sub_conf;
+    }
+
+ public:
+    static SegcoreConfig&
+    default_config() {
+        // TODO: remove this when go side is ready
+        static SegcoreConfig config;
         return config;
     }
+
+    void
+    parse_from(const std::string& string_path);
 
     const SmallIndexConf&
     at(MetricType metric_type) const {
@@ -48,13 +56,13 @@ class SegcoreConfig {
     }
 
     int64_t
-    get_size_per_chunk() const {
-        return size_per_chunk_;
+    get_chunk_rows() const {
+        return chunk_rows_;
     }
 
     void
-    set_size_per_chunk(int64_t size_per_chunk) {
-        size_per_chunk_ = size_per_chunk;
+    set_chunk_rows(int64_t chunk_rows) {
+        chunk_rows_ = chunk_rows;
     }
 
     void
@@ -62,11 +70,8 @@ class SegcoreConfig {
         table_[metric_type] = small_index_conf;
     }
 
- protected:
-    SegcoreConfig() = default;
-
  private:
-    int64_t size_per_chunk_ = -1;
+    int64_t chunk_rows_ = 32 * 1024;
     std::map<MetricType, SmallIndexConf> table_;
 };
 

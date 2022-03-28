@@ -86,7 +86,7 @@ function setup_kind_registry() {
   done
 }
 
-# setup_cluster_reg is used to set up a cluster registry for multicluster testing
+# The setup_cluster_reg is used to set up a cluster registry for multicluster testing
 function setup_cluster_reg () {
     MAIN_CONFIG=""
     for context in "${CLUSTERREG_DIR}"/*; do
@@ -136,7 +136,7 @@ function gen_kubeconf_from_sa () {
 EOF
 }
 
-# gives a copy of a given topology JSON editing the given key on the entry with the given cluster name
+# Gives a copy of a given topology JSON editing the given key on the entry with the given cluster name
 function set_topology_value() {
     local JSON="$1"
     local CLUSTER_NAME="$2"

@@ -1,6 +1,7 @@
 reviewers:
   - czs007
+  - xiaofan-luan
   - scsven
 
 approvers:
-  - pr-inspection
+  - maintainers

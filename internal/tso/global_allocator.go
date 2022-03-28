@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 // Copyright 2016 TiKV Project Authors.
 //
@@ -53,6 +58,8 @@ type Allocator interface {
 	GenerateTSO(count uint32) (uint64, error)
 	// Reset is used to reset the TSO allocator.
 	Reset()
+
+	GetLastSavedTime() time.Time
 }
 
 // GlobalTSOAllocator is the global single point TSO allocator.
@@ -79,6 +86,9 @@ func (gta *GlobalTSOAllocator) Initialize() error {
 	return gta.tso.InitTimestamp()
 }
 
+// SetLimitMaxLogic is to enable or disable the maximum limit on the logical part of the hybrid timestamp.
+// When enabled, if the logical part of the hybrid timestamp exceeds the maximum limit,
+// GlobalTSOAllocator will sleep for a period and try to allocate the timestamp again.
 func (gta *GlobalTSOAllocator) SetLimitMaxLogic(flag bool) {
 	gta.LimitMaxLogic = flag
 }
@@ -125,6 +135,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (uint64, error) {
 	return 0, errors.New("can not get timestamp")
 }
 
+// Alloc allocates a batch of timestamps. What is returned is the starting timestamp.
 func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
 	//return gta.tso.SyncTimestamp()
 	start, err := gta.GenerateTSO(count)
@@ -138,6 +149,7 @@ func (gta *GlobalTSOAllocator) Alloc(count uint32) (typeutil.Timestamp, error) {
 	return start, err
 }
 
+// AllocOne only allocates one timestamp.
 func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
 	return gta.GenerateTSO(1)
 }
@@ -145,4 +157,10 @@ func (gta *GlobalTSOAllocator) AllocOne() (typeutil.Timestamp, error) {
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.tso.ResetTimestamp()
+}
+
+// GetLastSavedTime get the last saved time for tso.
+func (gta *GlobalTSOAllocator) GetLastSavedTime() time.Time {
+	ts := gta.tso.lastSavedTime.Load()
+	return ts.(time.Time)
 }

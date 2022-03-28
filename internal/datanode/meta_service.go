@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package datanode
 
@@ -33,6 +38,7 @@ type metaService struct {
 	rootCoord    types.RootCoord
 }
 
+// newMetaService creates a new metaService with provided RootCoord and collectionID.
 func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
 	return &metaService{
 		rootCoord:    rc,
@@ -40,14 +46,14 @@ func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
 	}
 }
 
+// getCollectionSchema get collection schema with provided collection id at specified timestamp.
 func (mService *metaService) getCollectionSchema(ctx context.Context, collID UniqueID, timestamp Timestamp) (*schemapb.CollectionSchema, error) {
-	// fmt.Println("Describing collection", collID)
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
 			MsgID:     0, //GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.NodeID,
+			SourceID:  Params.DataNodeCfg.NodeID,
 		},
 		DbName:       "default", // GOOSE TODO
 		CollectionID: collID,
@@ -56,16 +62,17 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 
 	response, err := mService.rootCoord.DescribeCollection(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("Grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
+		return nil, fmt.Errorf("grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
 	}
 
 	if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("Describe collection %v from rootcoord wrong: %s", collID, response.GetStatus().GetReason())
+		return nil, fmt.Errorf("describe collection %v from rootcoord wrong: %s", collID, response.GetStatus().GetReason())
 	}
 
 	return response.GetSchema(), nil
 }
 
+// printCollectionStruct util function to print schema data, used in tests only.
 func printCollectionStruct(obj *etcdpb.CollectionMeta) {
 	v := reflect.ValueOf(obj)
 	v = reflect.Indirect(v)

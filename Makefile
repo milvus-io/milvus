@@ -9,21 +9,37 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-GO		?= go
-PWD 	:= $(shell pwd)
-GOPATH 	:= $(shell $(GO) env GOPATH)
+GO		  ?= go
+PWD 	  := $(shell pwd)
+GOPATH 	  := $(shell $(GO) env GOPATH)
+OBJPREFIX := "github.com/milvus-io/milvus/cmd/milvus"
 
 INSTALL_PATH := $(PWD)/bin
 LIBRARY_PATH := $(PWD)/lib
+OS := $(shell uname -s)
+ARCH := $(shell arch)
+mode = Release
 
 all: build-cpp build-go
+
+pre-proc:
+	@echo "Running pre-processing"
+ifeq ($(OS),Darwin) # MacOS X
+	@echo "MacOS system identified. Switching to customized gorocksdb fork..."
+	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@v0.0.1
+endif
+ifeq ($(MSYSTEM), MINGW64) # MSYS
+	@echo "MSYS. Switching to customized gorocksdb fork..."
+	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@v0.0.1
+endif
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
+# attention: upgrade golangci-lint should also change Dockerfiles in build/docker/builder/cpu/<os>
 getdeps:
 	@mkdir -p ${GOPATH}/bin
-	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.27.0)
+	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.43.0)
 	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1)
 
 tools/bin/revive: tools/check/go.mod
@@ -36,7 +52,7 @@ cppcheck:
 generated-proto-go: export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
 generated-proto-go: build-cpp
 	@mkdir -p ${GOPATH}/bin
-	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && go get github.com/golang/protobuf/protoc-gen-go@v1.3.2)
+	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go get github.com/golang/protobuf/protoc-gen-go@v1.3.2)
 	@(env bash $(PWD)/scripts/proto_gen_go.sh)
 
 check-proto-product: generated-proto-go
@@ -71,64 +87,126 @@ ifdef GO_DIFF_FILES
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go $(GO_DIFF_FILES)
 else
 	@echo "Running $@ check"
+ifeq ($(OS),Darwin) # MacOS X
+ifeq ($(ARCH),arm64)
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./cmd/...
+else
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
 	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
-#	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
+endif
+else
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
+	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
+endif
+	#@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
 endif
 
 verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
 
-# Builds various components locally.
+# Build various components locally.
 binlog:
 	@echo "Building binlog ..."
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/binlog/main.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build -o $(INSTALL_PATH)/binlog $(PWD)/cmd/tools/binlog/main.go 1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
-BUILD_TIME = $(shell date --utc)
+BUILD_TIME = $(shell date -u)
 GIT_COMMIT = $(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
 
-milvus: build-cpp
+print-build-info:
+	@echo "Build Tag: $(BUILD_TAGS)"
+	@echo "Build Time: $(BUILD_TIME)"
+	@echo "Git Commit: $(GIT_COMMIT)"
+	@echo "Go Version: $(GO_VERSION)"
+
+milvus: build-cpp print-build-info
 	@echo "Building Milvus ..."
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
-		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
+		-ldflags="-X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+
+embd-milvus: build-cpp-embd print-build-info
+	@echo "Building **Embedded** Milvus ..."
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
+		-ldflags="-X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+		-buildmode=c-shared -o $(INSTALL_PATH)/embd-milvus.so $(PWD)/pkg/embedded/embedded.go 1>/dev/null
 
 build-go: milvus
 
-build-cpp:
+build-cpp: pre-proc
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_dablooms_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-with-unittest:
+build-cpp-embd: pre-proc
+	@echo "Building **Embedded** Milvus cpp library ..."
+	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+
+build-cpp-with-unittest: pre-proc
 	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -u -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t Release -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode}  -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-# Runs the tests.
+# Run the tests.
 unittest: test-cpp test-go
+
+test-indexnode:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/indexnode -v
+
+test-proxy:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/proxy -v
+
+test-datacoord:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/datacoord -v
+
+test-datanode:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/datanode -v
+
+test-querynode:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querynode -v
+
+test-querycoord:
+	@echo "Running go unittests..."
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querycoord	-v
+
 
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
-	@(env bash $(PWD)/scripts/run_go_codecov.sh)
-# 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
+	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
 test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
-# Run go-codecov
-go-codecov:
-	@echo "Running go unittests..."
+# Run code coverage.
+codecov: codecov-go codecov-cpp
+
+# Run codecov-go
+codecov-go: build-cpp-with-unittest
+	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 
-#TODO: build each component to docker
-docker: verifiers
+# Run codecov-cpp
+codecov-cpp: build-cpp-with-unittest
+	@echo "Running cpp coverage..."
+	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
-# Builds each component and installs it to $GOPATH/bin.
+# Package docker image locally.
+# TODO: fix error occur at starting up
+docker: install
+	./build/build_image.sh
+
+# Build each component and install binary to $GOPATH/bin.
 install: all
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
@@ -142,9 +220,31 @@ clean:
 	@rm -rf bin/
 	@rm -rf lib/
 	@rm -rf $(GOPATH)/bin/milvus
+	@rm -rf cmake_build
+	@rm -rf cwrapper_rocksdb_build
+	@rm -rf cwrapper_build
 
-milvus-tools: 
+milvus-tools: print-build-info
 	@echo "Building tools ..."
 	@mkdir -p $(INSTALL_PATH)/tools && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
+
+rpm-setup: 
+	@echo "Setuping rpm env ...;"
+	@build/rpm/setup-env.sh
+
+rpm: install
+	@echo "Note: run 'make rpm-setup' to setup build env for rpm builder"
+	@echo "Building rpm ...;"
+	@yum -y install rpm-build rpmdevtools wget
+	@rm -rf ~/rpmbuild/BUILD/*
+	@rpmdev-setuptree
+	@wget https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz && tar -xf etcd-v3.5.0-linux-amd64.tar.gz
+	@cp etcd-v3.5.0-linux-amd64/etcd bin/etcd
+	@wget https://dl.min.io/server/minio/release/linux-amd64/archive/minio.RELEASE.2021-02-14T04-01-33Z -O bin/minio
+	@cp -r bin ~/rpmbuild/BUILD/
+	@cp -r lib ~/rpmbuild/BUILD/
+	@cp -r configs ~/rpmbuild/BUILD/
+	@cp -r build/rpm/services ~/rpmbuild/BUILD/
+	@QA_RPATHS="$$[ 0x001|0x0002|0x0020 ]" rpmbuild -ba ./build/rpm/milvus.spec

@@ -1,13 +1,18 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package proxy
 
@@ -28,11 +33,13 @@ import (
 )
 
 const (
-	SegCountPerRPC = 20000
+	segCountPerRPC = 20000
 )
 
+// Allocator is an alias for the allocator.Allocator type
 type Allocator = allocator.Allocator
 
+// DataCoord is a narrowed interface of DataCoordinator which only provide AssignSegmentID method
 type DataCoord interface {
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
 }
@@ -130,7 +137,7 @@ func (info *assignInfo) Assign(ts Timestamp, count uint32) (map[UniqueID]uint32,
 	return result, nil
 }
 
-type SegIDAssigner struct {
+type segIDAssigner struct {
 	Allocator
 	assignInfos map[UniqueID]*list.List // collectionID -> *list.List
 	segReqs     []*datapb.SegmentIDRequest
@@ -141,15 +148,16 @@ type SegIDAssigner struct {
 	countPerRPC uint32
 }
 
-func NewSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func() Timestamp) (*SegIDAssigner, error) {
+// newSegIDAssigner creates a new segIDAssigner
+func newSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func() Timestamp) (*segIDAssigner, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	sa := &SegIDAssigner{
+	sa := &segIDAssigner{
 		Allocator: Allocator{
 			Ctx:        ctx1,
 			CancelFunc: cancel,
 			Role:       "SegmentIDAllocator",
 		},
-		countPerRPC: SegCountPerRPC,
+		countPerRPC: segCountPerRPC,
 		dataCoord:   dataCoord,
 		assignInfos: make(map[UniqueID]*list.List),
 		getTickFunc: getTickFunc,
@@ -165,7 +173,7 @@ func NewSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func
 	return sa, nil
 }
 
-func (sa *SegIDAssigner) collectExpired() {
+func (sa *segIDAssigner) collectExpired() {
 	ts := sa.getTickFunc()
 	for _, info := range sa.assignInfos {
 		for e := info.Front(); e != nil; e = e.Next() {
@@ -178,8 +186,7 @@ func (sa *SegIDAssigner) collectExpired() {
 	}
 }
 
-func (sa *SegIDAssigner) pickCanDoFunc() {
-	log.Debug("Proxy SegIDAssigner pickCanDoFunc", zap.Any("len(ToDoReqs)", len(sa.ToDoReqs)))
+func (sa *segIDAssigner) pickCanDoFunc() {
 	if sa.ToDoReqs == nil {
 		return
 	}
@@ -205,7 +212,7 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 		records[collID][partitionID][channelName] += segRequest.count
 		assign, err := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
 		if err != nil {
-			log.Debug("Proxy SegIDAssigner, pickCanDoFunc getAssign err:", zap.Any("collID", segRequest.collID),
+			log.Debug("Proxy segIDAssinger, pickCanDoFunc getAssign err:", zap.Any("collID", segRequest.collID),
 				zap.Any("partitionID", segRequest.partitionID), zap.Any("channelName", segRequest.channelName),
 				zap.Error(err))
 		}
@@ -221,13 +228,13 @@ func (sa *SegIDAssigner) pickCanDoFunc() {
 			sa.CanDoReqs = append(sa.CanDoReqs, req)
 		}
 	}
-	log.Debug("Proxy SegIDAssigner pickCanDoFunc", zap.Any("records", records),
+	log.Debug("Proxy segIDAssinger pickCanDoFunc", zap.Any("records", records),
 		zap.Any("len(newTodoReqs)", len(newTodoReqs)),
 		zap.Any("len(CanDoReqs)", len(sa.CanDoReqs)))
 	sa.ToDoReqs = newTodoReqs
 }
 
-func (sa *SegIDAssigner) getAssign(collID UniqueID, partitionID UniqueID, channelName string) (*assignInfo, error) {
+func (sa *segIDAssigner) getAssign(collID UniqueID, partitionID UniqueID, channelName string) (*assignInfo, error) {
 	assignInfos, ok := sa.assignInfos[collID]
 	if !ok {
 		return nil, fmt.Errorf("can not find collection %d", collID)
@@ -244,12 +251,12 @@ func (sa *SegIDAssigner) getAssign(collID UniqueID, partitionID UniqueID, channe
 		collID, partitionID, channelName)
 }
 
-func (sa *SegIDAssigner) checkSyncFunc(timeout bool) bool {
+func (sa *segIDAssigner) checkSyncFunc(timeout bool) bool {
 	sa.collectExpired()
 	return timeout || len(sa.segReqs) != 0
 }
 
-func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegmentIDRequest) bool {
+func (sa *segIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegmentIDRequest) bool {
 	if req1 == nil || req2 == nil {
 		return false
 	}
@@ -260,8 +267,8 @@ func (sa *SegIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegmentIDRequest) b
 	return req1.CollectionID == req2.CollectionID && req1.PartitionID == req2.PartitionID && req1.ChannelName == req2.ChannelName
 }
 
-func (sa *SegIDAssigner) reduceSegReqs() {
-	log.Debug("Proxy SegIDAssigner reduceSegReqs", zap.Any("len(segReqs)", len(sa.segReqs)))
+func (sa *segIDAssigner) reduceSegReqs() {
+	log.Debug("Proxy segIDAssinger reduceSegReqs", zap.Any("len(segReqs)", len(sa.segReqs)))
 	if len(sa.segReqs) == 0 {
 		return
 	}
@@ -269,7 +276,7 @@ func (sa *SegIDAssigner) reduceSegReqs() {
 	var newSegReqs []*datapb.SegmentIDRequest
 	for _, req1 := range sa.segReqs {
 		if req1.Count == 0 {
-			log.Debug("Proxy SegIDAssigner reduceSegReqs hit perCount == 0")
+			log.Debug("Proxy segIDAssinger reduceSegReqs hit perCount == 0")
 			req1.Count = sa.countPerRPC
 		}
 		beforeCnt += req1.Count
@@ -291,12 +298,12 @@ func (sa *SegIDAssigner) reduceSegReqs() {
 		afterCnt += req.Count
 	}
 	sa.segReqs = newSegReqs
-	log.Debug("Proxy SegIDAssigner reduceSegReqs after reduce", zap.Any("len(segReqs)", len(sa.segReqs)),
+	log.Debug("Proxy segIDAssinger reduceSegReqs after reduce", zap.Any("len(segReqs)", len(sa.segReqs)),
 		zap.Any("BeforeCnt", beforeCnt),
 		zap.Any("AfterCnt", afterCnt))
 }
 
-func (sa *SegIDAssigner) syncSegments() (bool, error) {
+func (sa *segIDAssigner) syncSegments() (bool, error) {
 	if len(sa.segReqs) == 0 {
 		return true, nil
 	}
@@ -322,22 +329,22 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 	var errMsg string
 	now := time.Now()
 	success := true
-	for _, info := range resp.SegIDAssignments {
-		if info.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Debug("proxy", zap.String("SyncSegment Error", info.Status.Reason))
-			errMsg += info.Status.Reason
+	for _, segAssign := range resp.SegIDAssignments {
+		if segAssign.Status.GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Debug("proxy", zap.String("SyncSegment Error", segAssign.Status.Reason))
+			errMsg += segAssign.Status.Reason
 			errMsg += "\n"
 			success = false
 			continue
 		}
-		assign, err := sa.getAssign(info.CollectionID, info.PartitionID, info.ChannelName)
+		assign, err := sa.getAssign(segAssign.CollectionID, segAssign.PartitionID, segAssign.ChannelName)
 		segInfo2 := &segInfo{
-			segID:      info.SegID,
-			count:      info.Count,
-			expireTime: info.ExpireTime,
+			segID:      segAssign.SegID,
+			count:      segAssign.Count,
+			expireTime: segAssign.ExpireTime,
 		}
 		if err != nil {
-			colInfos, ok := sa.assignInfos[info.CollectionID]
+			colInfos, ok := sa.assignInfos[segAssign.CollectionID]
 			if !ok {
 				colInfos = list.New()
 			}
@@ -345,13 +352,13 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 
 			segInfos.PushBack(segInfo2)
 			assign = &assignInfo{
-				collID:      info.CollectionID,
-				partitionID: info.PartitionID,
-				channelName: info.ChannelName,
+				collID:      segAssign.CollectionID,
+				partitionID: segAssign.PartitionID,
+				channelName: segAssign.ChannelName,
 				segInfos:    segInfos,
 			}
 			colInfos.PushBack(assign)
-			sa.assignInfos[info.CollectionID] = colInfos
+			sa.assignInfos[segAssign.CollectionID] = colInfos
 		} else {
 			assign.segInfos.PushBack(segInfo2)
 		}
@@ -363,7 +370,7 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 	return success, nil
 }
 
-func (sa *SegIDAssigner) processFunc(req allocator.Request) error {
+func (sa *segIDAssigner) processFunc(req allocator.Request) error {
 	segRequest := req.(*segRequest)
 	assign, err := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
 	if err != nil {
@@ -374,7 +381,7 @@ func (sa *SegIDAssigner) processFunc(req allocator.Request) error {
 	return err2
 }
 
-func (sa *SegIDAssigner) GetSegmentID(collID UniqueID, partitionID UniqueID, channelName string, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
+func (sa *segIDAssigner) GetSegmentID(collID UniqueID, partitionID UniqueID, channelName string, count uint32, ts Timestamp) (map[UniqueID]uint32, error) {
 	req := &segRequest{
 		BaseRequest: allocator.BaseRequest{Done: make(chan error), Valid: false},
 		collID:      collID,
@@ -385,7 +392,7 @@ func (sa *SegIDAssigner) GetSegmentID(collID UniqueID, partitionID UniqueID, cha
 	}
 	sa.Reqs <- req
 	if err := req.Wait(); err != nil {
-		return nil, fmt.Errorf("GetSegmentID failed: %s", err)
+		return nil, fmt.Errorf("getSegmentID failed: %s", err)
 	}
 
 	return req.segInfo, nil
