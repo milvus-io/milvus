@@ -70,7 +70,7 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
-      - -files~=^(?=.*\.(go|h|cpp)).*$
+      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - "status-success=continuous-integration/jenkins/pr-merge"
     actions:
       label:
