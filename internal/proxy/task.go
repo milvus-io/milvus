@@ -1296,11 +1296,13 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return errors.New(TopKKey + " " + topKStr + " is not invalid")
 		}
+		st.SearchRequest.Topk = int64(topK)
 
 		metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, st.query.SearchParams)
 		if err != nil {
 			return errors.New(MetricTypeKey + " not found in search_params")
 		}
+		st.SearchRequest.MetricType = metricType
 
 		searchParams, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, st.query.SearchParams)
 		if err != nil {
@@ -1372,9 +1374,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			zap.Any("plan", plan.String()))
 	}
 	travelTimestamp := st.query.TravelTimestamp
-	if travelTimestamp == 0 {
-		travelTimestamp = st.BeginTs()
-	} else {
+	if travelTimestamp != 0 {
 		durationSeconds := tsoutil.CalculateDuration(st.BeginTs(), travelTimestamp) / 1000
 		if durationSeconds > Params.CommonCfg.RetentionDuration {
 			duration := time.Second * time.Duration(durationSeconds)
@@ -1392,7 +1392,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		st.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
-	st.SearchRequest.ResultChannelID = Params.ProxyCfg.SearchResultChannelNames[0]
+	st.SearchRequest.ReqID = st.ID()
 	st.SearchRequest.DbID = 0 // todo
 	st.SearchRequest.CollectionID = collID
 	st.SearchRequest.PartitionIDs = make([]UniqueID, 0)
@@ -1427,6 +1427,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 
 	st.SearchRequest.Dsl = st.query.Dsl
 	st.SearchRequest.PlaceholderGroup = st.query.PlaceholderGroup
+	st.SearchRequest.Nq = int64(st.query.Nq)
 
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "PreExecute"),
 		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
@@ -2051,7 +2052,7 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 		qt.RetrieveRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
-	qt.ResultChannelID = Params.ProxyCfg.RetrieveResultChannelNames[0]
+	qt.ReqID = qt.ID()
 	qt.DbID = 0 // todo(yukun)
 
 	qt.CollectionID = info.collID

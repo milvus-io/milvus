@@ -79,10 +79,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	holder, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
 
-	placeholderGroups := make([]*searchRequest, 0)
-	placeholderGroups = append(placeholderGroups, holder)
-
-	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{0})
+	searchResult, err := segment.search(plan, holder, []Timestamp{0})
 	assert.NoError(t, err)
 
 	err = checkSearchResult(nq, plan, searchResult)
@@ -98,18 +95,20 @@ func TestSliceInfo(t *testing.T) {
 	originNQs := []int64{3, 2, 3}
 	nq := int64(2)
 	originReqIDs := []UniqueID{100, 200, 300}
-	sInfo, err := parseSliceInfo(originNQs, nq, originReqIDs)
-	assert.NoError(t, err)
+	sourceIDs := []UniqueID{1, 2, 3}
+	sInfo := parseSliceInfo(originNQs, nq, originReqIDs, sourceIDs)
 
 	expectedSlices := []int32{2, 1, 2, 2, 1}
 	expectedReqIDs := []UniqueID{100, 100, 200, 300, 300}
 	expectedReqNum := map[UniqueID]int64{100: 2, 200: 1, 300: 2}
+	expectedSourceIDs := []UniqueID{1, 1, 2, 3, 3}
 
 	assert.Equal(t, len(expectedSlices), len(sInfo.slices))
 	assert.Equal(t, len(expectedReqIDs), len(sInfo.reqIDs))
 	for i := 0; i < len(expectedSlices); i++ {
 		assert.Equal(t, expectedSlices[i], sInfo.slices[i])
 		assert.Equal(t, expectedReqIDs[i], sInfo.reqIDs[i])
+		assert.Equal(t, expectedSourceIDs[i], sInfo.sourceIDs[i])
 	}
 	assert.Equal(t, len(expectedReqNum), len(sInfo.reqNum))
 	for id, num := range expectedReqNum {

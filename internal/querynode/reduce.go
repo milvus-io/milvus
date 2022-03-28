@@ -36,10 +36,11 @@ import (
 )
 
 type sliceInfo struct {
-	slices   []int32
-	reqIDs   []UniqueID
-	reqNum   map[UniqueID]int64
-	reqCount map[UniqueID]int64
+	slices    []int32
+	reqIDs    []UniqueID
+	sourceIDs []UniqueID
+	reqNum    map[UniqueID]int64
+	reqCount  map[UniqueID]int64
 }
 
 // SearchResult contains a pointer to the search result in C++ memory
@@ -55,41 +56,42 @@ type RetrieveResult struct {
 	cRetrieveResult C.CRetrieveResult
 }
 
-func parseSliceInfo(originNQs []int64, nq int64, originReqIDs []UniqueID) (*sliceInfo, error) {
+func parseSliceInfo(originNQs []int64, nq int64, originReqIDs []UniqueID, sourceIDs []UniqueID) *sliceInfo {
+	sInfo := &sliceInfo{
+		slices:    make([]int32, 0),
+		reqIDs:    make([]UniqueID, 0),
+		sourceIDs: make([]UniqueID, 0),
+		reqNum:    make(map[UniqueID]int64),
+		reqCount:  make(map[UniqueID]int64),
+	}
+
 	if nq == 0 {
-		return nil, fmt.Errorf("zero nq is not allowed")
+		return sInfo
 	}
 
 	if len(originNQs) != len(originReqIDs) {
-		return nil, fmt.Errorf("unaligned originNQs and ReqIDs, len(originNQs) = %d, len(originReqIDs) = %d", len(originNQs), len(originReqIDs))
+		return sInfo
 	}
-
-	sInfo := &sliceInfo{
-		slices:   make([]int32, 0),
-		reqIDs:   make([]UniqueID, 0),
-		reqNum:   make(map[UniqueID]int64),
-		reqCount: make(map[UniqueID]int64),
+	if len(originReqIDs) != len(sourceIDs) {
+		return sInfo
 	}
 
 	for i := 0; i < len(originNQs); i++ {
 		for j := 0; j < int(originNQs[i]/nq); j++ {
 			sInfo.slices = append(sInfo.slices, int32(nq))
 			sInfo.reqIDs = append(sInfo.reqIDs, originReqIDs[i])
+			sInfo.sourceIDs = append(sInfo.sourceIDs, sourceIDs[i])
 			sInfo.reqNum[originReqIDs[i]]++
 		}
 		if tailSliceSize := originNQs[i] % nq; tailSliceSize > 0 {
 			sInfo.slices = append(sInfo.slices, int32(tailSliceSize))
 			sInfo.reqIDs = append(sInfo.reqIDs, originReqIDs[i])
+			sInfo.sourceIDs = append(sInfo.sourceIDs, sourceIDs[i])
 			sInfo.reqNum[originReqIDs[i]]++
 		}
 	}
-	if len(sInfo.slices) != len(sInfo.reqIDs) {
-		return nil, fmt.Errorf("unexpected slices and reqIDs when parseSliceInfo, len(slices) = %d, len(reqIDs) = %d", len(sInfo.slices), len(sInfo.reqIDs))
-	}
-	if len(sInfo.reqNum) != len(originReqIDs) {
-		return nil, fmt.Errorf("unexpected reqNum when parseSliceInfo, len(reqNum) = %d, len(originReqIDs) = %d", len(sInfo.reqNum), len(originReqIDs))
-	}
-	return sInfo, nil
+
+	return sInfo
 }
 
 // TODO: rename by SearchResult.SliceOffset

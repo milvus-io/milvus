@@ -1822,7 +1822,6 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 				Timestamp: 11,
 				SourceID:  reqID,
 			},
-			ResultChannelID: "0",
 		}
 		searchMsg := &SearchMsg{
 			BaseMsg:       baseMsg,
@@ -1837,8 +1836,7 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 				Timestamp: 1,
 				SourceID:  reqID,
 			},
-			Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			ResultChannelID: "0",
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		}
 		searchResultMsg := &SearchResultMsg{
 			BaseMsg:       baseMsg,

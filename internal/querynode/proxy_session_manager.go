@@ -111,6 +111,7 @@ func (c *SessionManager) SendSearchResult(ctx context.Context, nodeID UniqueID, 
 }
 
 func (c *SessionManager) SendRetrieveResult(ctx context.Context, nodeID UniqueID, result *internalpb.RetrieveResults) error {
+
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Warn("failed to send retrieve result, cannot get client", zap.Int64("nodeID", nodeID), zap.Error(err))

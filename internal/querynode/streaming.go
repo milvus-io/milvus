@@ -105,7 +105,7 @@ func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *Retrieve
 }
 
 // search will search all the target segments in streaming
-func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
+func (s *streaming) search(req *searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel,
 	plan *SearchPlan, searchTs Timestamp) ([]*SearchResult, []UniqueID, []UniqueID, error) {
 
 	searchResults := make([]*SearchResult, 0)
@@ -209,7 +209,7 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 				//}
 
 				tr := timerecord.NewTimeRecorder("searchOnGrowing")
-				searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
+				searchResult, err := seg.search(plan, req, []Timestamp{searchTs})
 				if err != nil {
 					err2 = err
 					return

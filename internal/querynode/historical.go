@@ -108,7 +108,7 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 }
 
 // search will search all the target segments in historical
-func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
+func (h *historical) search(req *searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
 	searchTs Timestamp) ([]*SearchResult, []UniqueID, []UniqueID, error) {
 
 	searchResults := make([]*SearchResult, 0)
@@ -180,7 +180,7 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 					return
 				}
 				tr := timerecord.NewTimeRecorder("searchOnSealed")
-				searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
+				searchResult, err := seg.search(plan, req, []Timestamp{searchTs})
 				if err != nil {
 					err2 = err
 					return

@@ -285,7 +285,7 @@ func (s *Segment) getMemSize() int64 {
 }
 
 func (s *Segment) search(plan *SearchPlan,
-	searchRequests []*searchRequest,
+	req *searchRequest,
 	timestamp []Timestamp) (*SearchResult, error) {
 	/*
 		CStatus
@@ -301,18 +301,11 @@ func (s *Segment) search(plan *SearchPlan,
 	if s.segmentPtr == nil {
 		return nil, errors.New("null seg core pointer")
 	}
-	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range searchRequests {
-		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
-	}
-
 	var searchResult SearchResult
 	ts := C.uint64_t(timestamp[0])
-	cPlaceHolderGroup := cPlaceholderGroups[0]
-
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
 	tr := timerecord.NewTimeRecorder("cgoSearch")
-	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult, C.int64_t(s.segmentID))
+	status := C.Search(s.segmentPtr, plan.cSearchPlan, req.cPlaceholderGroup, ts, &searchResult.cSearchResult, C.int64_t(s.segmentID))
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
