@@ -640,7 +640,7 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	// TODO: support db
-	log.Debug("Query node load segment", zap.String("loadSegmentRequest", fmt.Sprintln(l.req)))
+	log.Debug("LoadSegment start", zap.Int64("msgID", l.req.Base.MsgID))
 	var err error
 
 	// init meta
@@ -664,7 +664,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	log.Debug("LoadSegments done", zap.String("SegmentLoadInfos", fmt.Sprintln(l.req.Infos)))
+	log.Debug("LoadSegments done", zap.Int64("msgID", l.req.Base.MsgID))
 	return nil
 }
 
