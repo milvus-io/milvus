@@ -59,7 +59,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 		name := genChannelName(d.namePrefix, i)
 		ms, err := factory.NewMsgStream(ctx)
 		if err != nil {
-			log.Error("Failed to add msgstream", zap.String("name", name), zap.Error(err))
+			log.Error("Failed to create msgstream", zap.String("channel name", name), zap.Error(err))
 			panic("Failed to add msgstream")
 		}
 		d.pool.Store(name, &dmlMsgStream{
@@ -68,7 +68,7 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 			refcnt: 0,
 		})
 	}
-	log.Debug("init dml channels", zap.Int64("num", chanNum))
+	log.Debug("init dml channels finished", zap.Int64("channel num", chanNum))
 	metrics.RootCoordNumOfDMLChannel.Add(float64(chanNum))
 	return d
 }
