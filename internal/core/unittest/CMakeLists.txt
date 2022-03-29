@@ -60,7 +60,7 @@ if (LINUX)
             milvus_segcore
             milvus_indexbuilder
             milvus_index
-            log
+            milvus_log
             pthread
             )
     install(TARGETS index_builder_test DESTINATION unittest)
@@ -91,7 +91,7 @@ target_link_libraries(all_tests
         milvus_segcore
         milvus_indexbuilder
         milvus_index
-        log
+        milvus_log
         pthread
         )
 

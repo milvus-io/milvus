@@ -16,10 +16,9 @@ set(COMMON_SRC
         vector_index_c.cpp
         )
 
-add_library(milvus_common SHARED
+add_library(milvus_common STATIC
         ${COMMON_SRC}
         )
 
-target_link_libraries(milvus_common milvus_utils milvus_config log knowhere milvus_proto yaml-cpp )
+target_link_libraries(milvus_common milvus_utils milvus_config milvus_log knowhere milvus_proto yaml-cpp )
 
-install(TARGETS milvus_common DESTINATION lib)

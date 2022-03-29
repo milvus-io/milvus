@@ -16,6 +16,6 @@ set(LOG_FILES   ${MILVUS_ENGINE_SRC}/log/Log.cpp
                 ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.h
                 )
 
-add_library(log STATIC ${LOG_FILES})
-set_target_properties(log PROPERTIES RULE_LAUNCH_COMPILE "")
-set_target_properties(log PROPERTIES RULE_LAUNCH_LINK "")
+add_library(milvus_log STATIC ${LOG_FILES})
+set_target_properties(milvus_log PROPERTIES RULE_LAUNCH_COMPILE "")
+set_target_properties(milvus_log PROPERTIES RULE_LAUNCH_LINK "")
