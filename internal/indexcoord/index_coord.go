@@ -730,7 +730,8 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 						zap.Int64("Recycle the index files successfully for deleted index with indexBuildID", meta.indexMeta.IndexBuildID))
 				} else {
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
-						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID))
+						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID),
+						zap.Int64("indexMeta version", meta.indexMeta.Version))
 					for j := 1; j < int(meta.indexMeta.Version); j++ {
 						unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
 						if err := i.chunkManager.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
