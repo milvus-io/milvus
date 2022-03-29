@@ -157,3 +157,11 @@ func (client *queryNodeClientMock) GetSegmentInfo(ctx context.Context, req *quer
 func (client *queryNodeClientMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return client.grpcClient.GetMetrics(ctx, req)
 }
+
+func (client *queryNodeClientMock) Search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error) {
+	return client.grpcClient.Search(ctx, req)
+}
+
+func (client *queryNodeClientMock) Query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error) {
+	return client.grpcClient.Query(ctx, req)
+}

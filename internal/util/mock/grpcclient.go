@@ -119,9 +119,7 @@ func (c *ClientBase) Call(ctx context.Context, caller func(client interface{}) (
 }
 
 func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error) {
-	if !funcutil.CheckCtxValid(ctx) {
-		return nil, ctx.Err()
-	}
+	// omit ctx check in mock first time to let each function has failed context
 	ret, err := c.callOnce(ctx, caller)
 	if err == nil {
 		return ret, nil

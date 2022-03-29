@@ -1130,6 +1130,9 @@ type QueryNode interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 
+	Search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error)
+	Query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error)
+
 	// GetMetrics gets the metrics about QueryNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }

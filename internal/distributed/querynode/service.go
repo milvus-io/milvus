@@ -304,6 +304,16 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	return s.querynode.GetSegmentInfo(ctx, req)
 }
 
+// Search performs search of streaming/historical replica on QueryNode.
+func (s *Server) Search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error) {
+	return s.querynode.Search(ctx, req)
+}
+
+// Query performs query of streaming/historical replica on QueryNode.
+func (s *Server) Query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error) {
+	return s.querynode.Query(ctx, req)
+}
+
 // GetMetrics gets the metrics information of QueryNode.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.querynode.GetMetrics(ctx, req)
