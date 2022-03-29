@@ -147,7 +147,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
 	if err := msg.CheckAligned(); err != nil {
 		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
-		log.Warn("Error, misaligned messages detected")
+		log.Warn("misaligned messages detected", zap.Error(err))
 		return nil
 	}
 
