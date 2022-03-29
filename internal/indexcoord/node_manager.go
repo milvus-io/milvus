@@ -105,12 +105,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 func (nm *NodeManager) PeekClient(meta Meta) (UniqueID, types.IndexNode) {
 	log.Debug("IndexCoord NodeManager PeekClient")
 
-	dim, err := getDimension(meta.indexMeta.Req)
-	if err != nil {
-		log.Error(err.Error())
-		return UniqueID(-1), nil
-	}
-	dataSize, err := estimateIndexSize(dim, meta.indexMeta.Req.NumRows, meta.indexMeta.Req.FieldSchema.DataType)
+	dataSize, err := estimateIndexSizeByReq(meta.indexMeta.Req)
 	if err != nil {
 		log.Warn(err.Error())
 		return UniqueID(-1), nil
