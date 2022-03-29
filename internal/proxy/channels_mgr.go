@@ -74,7 +74,7 @@ func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFunc
 		}
 		resp, err := rc.DescribeCollection(ctx, req)
 		if err != nil {
-			log.Warn("DescribeCollection", zap.Error(err))
+			log.Warn("failed to describe collection", zap.Error(err), zap.Int64("collection", collectionID))
 			return nil, err
 		}
 		if resp.Status.ErrorCode != 0 {
