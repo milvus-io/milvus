@@ -18,15 +18,15 @@ def get_tag(url):
 
 
 latest_tag = [tag for tag in get_tag(milvus_dev) if "latest" not in tag][-1]
-latest_rc_tag = [tag for tag in get_tag(milvus) if "rc" and "v" in tag][-1]
-release_version = "-".join(latest_rc_tag.split("-")[:-2])
-print(release_version)
+latest_rc_tag = [tag for tag in get_tag(milvus) if "v" in tag][-1]
+# release_version = "-".join(latest_rc_tag.split("-")[:-2])
+# print(release_version)
 print(latest_tag, latest_rc_tag)
 
 data = {
     "latest_tag": latest_tag,
-    "latest_rc_tag": latest_rc_tag[1:],
-    "release_version": release_version
+    "latest_rc_tag": latest_rc_tag,
+    # "release_version": release_version
 }
 print(data)
 with open("tag_info.json", "w") as f:

@@ -59,14 +59,15 @@ function error_exit {
 }
 
 function replace_image_tag {
-    image_tag=$1
+    image_repo=$1
+    image_tag=$2
     if [ "$platform" == "Mac" ];
     then
         # for mac os
-        sed -i "" "s/milvusdb\/milvus.*/milvusdb\/milvus-dev\:${image_tag}/g" docker-compose.yml   
+        sed -i "" "s/milvusdb\/milvus.*/${image_repo}\:${image_tag}/g" docker-compose.yml   
     else
         #for linux os 
-        sed -i "s/milvusdb\/milvus.*/milvusdb\/milvus-dev\:${image_tag}/g" docker-compose.yml
+        sed -i "s/milvusdb\/milvus.*/${image_repo}\:${image_tag}/g" docker-compose.yml
     fi
 
 }
@@ -120,12 +121,12 @@ python scripts/get_tag.py
 
 latest_tag=$(jq -r ".latest_tag" tag_info.json)
 latest_rc_tag=$(jq -r ".latest_rc_tag" tag_info.json)
-release_version="v2.0.0"
-echo $release_version
+# release_version="v${Release}"
+echo $latest_rc_tag
 
 pushd ${Deploy_Dir}
 # download docker-compose.yml
-wget https://github.com/milvus-io/milvus/releases/download/${release_version}/milvus-${Mode}-docker-compose.yml -O docker-compose.yml
+wget https://github.com/milvus-io/milvus/releases/download/${latest_rc_tag}/milvus-${Mode}-docker-compose.yml -O docker-compose.yml
 ls
 # clean env to deploy a fresh milvus
 docker-compose down
@@ -138,12 +139,12 @@ then
     printf "download latest milvus docker-compose yaml file from github\n"
     wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
     printf "start to deploy latest rc tag milvus\n"
-    replace_image_tag $latest_tag
+    replace_image_tag "milvusdb\/milvus-dev" $latest_tag
 fi
 if [ "$Task" == "upgrade" ];
 then
     printf "start to deploy previous rc tag milvus\n"
-    replace_image_tag "master-20220125-6336e232" # replace previous rc tag
+    replace_image_tag "milvusdb\/milvus" $latest_rc_tag # replace previous rc tag
 
 fi
 cat docker-compose.yml|grep milvusdb
@@ -186,7 +187,7 @@ then
     printf "download latest milvus docker-compose yaml file from github\n"
     wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
     printf "start to deploy latest rc tag milvus\n"
-    replace_image_tag $latest_tag
+    replace_image_tag "milvusdb\/milvus-dev" $latest_tag
 
 fi
 cat docker-compose.yml|grep milvusdb
