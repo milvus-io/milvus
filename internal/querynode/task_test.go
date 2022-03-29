@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
+
 	"github.com/apache/pulsar-client-go/pulsar"
 
 	"github.com/stretchr/testify/assert"
@@ -234,6 +236,12 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	t.Run("test execute loadCollection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.Stop()
+
+		stream, err := node.msFactory.NewMsgStream(ctx)
+		assert.NoError(t, err)
+		stream.AsProducer([]string{defaultDMLChannel})
+		defer stream.Close()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -243,16 +251,28 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			{
 				CollectionID: defaultCollectionID,
 				ChannelName:  defaultDMLChannel,
+				SeekPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDMLChannel,
+					MsgID:       rmq.SerializeRmqID(0),
+				},
 			},
 		}
 		task.req.PartitionIDs = []UniqueID{0}
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
+
+		stream.Close()
 	})
 
 	t.Run("test execute loadPartition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+		defer node.Stop()
+
+		stream, err := node.msFactory.NewMsgStream(ctx)
+		assert.NoError(t, err)
+		stream.AsProducer([]string{defaultDMLChannel})
+		defer stream.Close()
 
 		task := watchDmChannelsTask{
 			req:  genWatchDMChannelsRequest(),
@@ -267,6 +287,10 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			{
 				CollectionID: defaultCollectionID,
 				ChannelName:  defaultDMLChannel,
+				SeekPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDMLChannel,
+					MsgID:       rmq.SerializeRmqID(0),
+				},
 			},
 		}
 		err = task.Execute(ctx)

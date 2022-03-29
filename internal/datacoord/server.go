@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -447,8 +446,7 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		return
 	}
-	ttMsgStream.AsConsumerWithPosition([]string{Params.CommonCfg.DataCoordTimeTick},
-		Params.CommonCfg.DataCoordSubName, mqwrapper.SubscriptionPositionLatest)
+	ttMsgStream.AsConsumer([]string{Params.CommonCfg.DataCoordTimeTick}, Params.CommonCfg.DataCoordSubName)
 	log.Info("DataCoord creates the timetick channel consumer",
 		zap.String("timeTickChannel", Params.CommonCfg.DataCoordTimeTick),
 		zap.String("subscription", Params.CommonCfg.DataCoordSubName))

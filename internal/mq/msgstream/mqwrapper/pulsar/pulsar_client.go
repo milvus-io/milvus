@@ -105,11 +105,6 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 	}
 
 	pConsumer := &Consumer{c: consumer, closeCh: make(chan struct{})}
-	// prevent seek to earliest patch applied when using latest position options
-	if options.SubscriptionInitialPosition == mqwrapper.SubscriptionPositionLatest {
-		pConsumer.AtLatest = true
-	}
-
 	return pConsumer, nil
 }
 

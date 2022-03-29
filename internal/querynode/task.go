@@ -303,12 +303,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// group channels by to seeking or consuming
 	channel2SeekPosition := make(map[string]*internalpb.MsgPosition)
-	channel2AsConsumerPosition := make(map[string]*internalpb.MsgPosition)
 	for _, info := range w.req.Infos {
-		if info.SeekPosition == nil || len(info.SeekPosition.MsgID) == 0 {
-			channel2AsConsumerPosition[info.ChannelName] = info.SeekPosition
-			continue
-		}
 		info.SeekPosition.MsgGroup = consumeSubName
 		channel2SeekPosition[info.ChannelName] = info.SeekPosition
 	}
@@ -376,15 +371,6 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 
 	// channels as consumer
 	for channel, fg := range channel2FlowGraph {
-		if _, ok := channel2AsConsumerPosition[channel]; ok {
-			// use pChannel to consume
-			err = fg.consumeFlowGraph(VPChannels[channel], consumeSubName)
-			if err != nil {
-				log.Error("msgStream as consumer failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
-				break
-			}
-		}
-
 		if pos, ok := channel2SeekPosition[channel]; ok {
 			pos.MsgGroup = consumeSubName
 			// use pChannel to seek
