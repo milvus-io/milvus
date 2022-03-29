@@ -71,7 +71,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. filter segment by bloom filter
 	for i, delMsg := range dMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
-		log.Info("Process delete request in QueryNode", zap.String("traceID", traceID))
+		log.Debug("Process delete request in QueryNode", zap.String("traceID", traceID))
 
 		if dNode.replica.getSegmentNum() != 0 {
 			log.Debug("delete in historical replica",
@@ -135,7 +135,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 
 	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
 	if err != nil {
-		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
+		log.Warn("delete segment data failed", zap.Int64("segmentID", segmentID), zap.Error(err))
 		return
 	}
 
