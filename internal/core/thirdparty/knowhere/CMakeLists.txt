@@ -58,11 +58,20 @@ macro(build_knowhere)
     endif()
 
     add_library(knowhere SHARED IMPORTED)
-    set_target_properties( knowhere
+
+    if (MSYS)
+        set_target_properties( knowhere
             PROPERTIES
+                IMPORTED_GLOBAL     TRUE
+                IMPORTED_IMPLIB     ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}.a
+                INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+    else ()
+        set_target_properties( knowhere
+                PROPERTIES
                 IMPORTED_GLOBAL     TRUE
                 IMPORTED_LOCATION   ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
                 INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+    endif ()
 
     add_dependencies(knowhere knowhere_ep)
 endmacro()
