@@ -20,6 +20,8 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -60,4 +62,24 @@ func estimateIndexSize(dim int64, numRows int64, dataType schemapb.DataType) (ui
 	// errMsg := "the field to build index must be a vector field"
 	// log.Error(errMsg)
 	// return 0, errors.New(errMsg)
+}
+
+func estimateScalarIndexSize(req *indexpb.BuildIndexRequest) (uint64, error) {
+	// TODO: optimize here.
+	return 0, nil
+}
+
+func estimateIndexSizeByReq(req *indexpb.BuildIndexRequest) (uint64, error) {
+	vecDTypes := []schemapb.DataType{
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_BinaryVector,
+	}
+	if funcutil.SliceContain(vecDTypes, req.GetFieldSchema().GetDataType()) {
+		dim, err := getDimension(req)
+		if err != nil {
+			return 0, err
+		}
+		return estimateIndexSize(dim, req.GetNumRows(), req.GetFieldSchema().GetDataType())
+	}
+	return estimateScalarIndexSize(req)
 }
