@@ -54,7 +54,7 @@ macro(build_knowhere)
     set_target_properties( knowhere
             PROPERTIES
                 IMPORTED_GLOBAL     TRUE
-                IMPORTED_LOCATION   ${INSTALL_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
+                IMPORTED_LOCATION   ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
                 INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
 
     add_dependencies(knowhere knowhere_ep)
