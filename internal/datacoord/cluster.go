@@ -44,7 +44,7 @@ func NewCluster(sessionManager *SessionManager, channelManager *ChannelManager) 
 }
 
 // Startup inits the cluster with the given data nodes.
-func (c *Cluster) Startup(nodes []*NodeInfo) error {
+func (c *Cluster) Startup(ctx context.Context, nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)
 	}
@@ -52,7 +52,7 @@ func (c *Cluster) Startup(nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		currs = append(currs, node.NodeID)
 	}
-	return c.channelManager.Startup(currs)
+	return c.channelManager.Startup(ctx, currs)
 }
 
 // Register registers a new node in cluster

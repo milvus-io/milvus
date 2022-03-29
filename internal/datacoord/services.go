@@ -434,14 +434,11 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	}
 
 	log.Info("DropVChannel plan to remove", zap.String("channel", channel))
-	err = s.channelManager.RemoveChannel(channel)
+	err = s.channelManager.Release(nodeID, channel)
 	if err != nil {
-		log.Warn("DropVChannel failed to RemoveChannel", zap.String("channel", channel), zap.Error(err))
+		log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
-
-	// clean up removal flag
-	s.meta.FinishRemoveChannel(channel)
 
 	// no compaction triggerred in Drop procedure
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success

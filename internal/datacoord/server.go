@@ -308,7 +308,7 @@ func (s *Server) initCluster() error {
 	}
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.msFactory))
+	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.msFactory), withStateChecker())
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func (s *Server) initServiceDiscovery() error {
 		datanodes = append(datanodes, info)
 	}
 
-	s.cluster.Startup(datanodes)
+	s.cluster.Startup(s.ctx, datanodes)
 
 	// TODO implement rewatch logic
 	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)

@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -1967,6 +1966,12 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 }
 
 func TestOptions(t *testing.T) {
+	kv := getMetaKv(t)
+	defer func() {
+		kv.RemoveWithPrefix("")
+		kv.Close()
+	}()
+
 	t.Run("SetRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
@@ -1983,7 +1988,8 @@ func TestOptions(t *testing.T) {
 		assert.NotNil(t, svr.rootCoordClientCreator)
 	})
 	t.Run("SetCluster", func(t *testing.T) {
-		kv := memkv.NewMemoryKV()
+		defer kv.RemoveWithPrefix("")
+
 		sessionManager := NewSessionManager()
 		channelManager, err := NewChannelManager(kv, newMockHandler())
 		assert.Nil(t, err)
@@ -2031,14 +2037,21 @@ func (p *mockPolicyFactory) NewDeregisterPolicy() DeregisterPolicy {
 }
 
 func TestHandleSessionEvent(t *testing.T) {
-	kv := memkv.NewMemoryKV()
+	kv := getMetaKv(t)
+	defer func() {
+		kv.RemoveWithPrefix("")
+		kv.Close()
+	}()
+	ctx, cancel := context.WithCancel(context.TODO())
+	defer cancel()
+
 	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
 	assert.Nil(t, err)
 	sessionManager := NewSessionManager()
 	cluster := NewCluster(sessionManager, channelManager)
 	assert.Nil(t, err)
 
-	err = cluster.Startup(nil)
+	err = cluster.Startup(ctx, nil)
 	assert.Nil(t, err)
 	defer cluster.Close()
 
@@ -2285,9 +2298,9 @@ func (ms *MockClosePanicMsgstream) Consume() *msgstream.MsgPack {
 }
 
 func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
+	var err error
 	Params.Init()
 	Params.MsgChannelCfg.DataCoordTimeTick = Params.MsgChannelCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
-	var err error
 	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"pulsarAddress":  Params.PulsarCfg.Address,
@@ -2311,6 +2324,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
+
 	assert.Nil(t, err)
 	err = svr.Init()
 	assert.Nil(t, err)
@@ -2318,6 +2332,12 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	assert.Nil(t, err)
 	err = svr.Register()
 	assert.Nil(t, err)
+
+	// Stop channal watch state watcher in tests
+	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
+		svr.channelManager.stopChecker()
+	}
+
 	return svr
 }
 
