@@ -433,7 +433,6 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemove(saves map[string]string, removals []st
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
 	}
 
-	log.Debug("MultiSaveAndRemove")
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
@@ -452,7 +451,6 @@ func (kv *EmbedEtcdKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
 	}
 
-	log.Debug("MultiSaveBytesAndRemove")
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
@@ -484,7 +482,6 @@ func (kv *EmbedEtcdKV) MultiRemoveWithPrefix(keys []string) error {
 		op := clientv3.OpDelete(path.Join(kv.rootPath, k), clientv3.WithPrefix())
 		ops = append(ops, op)
 	}
-	log.Debug("MultiRemoveWithPrefix")
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
@@ -503,7 +500,6 @@ func (kv *EmbedEtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, rem
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
 	}
 
-	log.Debug("MultiSaveAndRemove")
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
@@ -522,7 +518,6 @@ func (kv *EmbedEtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete), clientv3.WithPrefix()))
 	}
 
-	log.Debug("MultiSaveBytesAndRemoveWithPrefix")
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
