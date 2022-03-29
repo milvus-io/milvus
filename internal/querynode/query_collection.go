@@ -382,7 +382,7 @@ func (q *queryCollection) consumeQuery() {
 				case *msgstream.SealedSegmentsChangeInfoMsg:
 					q.adjustByChangeInfo(sm)
 				default:
-					log.Warn("unsupported msg type in search channel", zap.Any("msg", sm))
+					log.Warn("unsupported msg type in search channel", zap.Int64("msgID", sm.ID()))
 				}
 			}
 		}
