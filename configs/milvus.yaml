@@ -135,6 +135,8 @@ queryNode:
   # Segcore will divide a segment into multiple chunks.
   segcore:
     chunkRows: 32768 # The number of vectors in a chunk.
+  merge:
+    mergeSearchReqs: false # enable query merging
 
 
 indexCoord:

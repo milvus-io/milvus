@@ -591,6 +591,9 @@ type queryNodeConfig struct {
 
 	// memory limit
 	OverloadedMemoryThresholdPercentage float64
+
+	// query requests merge
+	MergeSearchReqs bool
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -611,6 +614,8 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initSegcoreChunkRows()
 
 	p.initOverloadedMemoryThresholdPercentage()
+
+	p.initMergeSearchReqs()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -683,6 +688,10 @@ func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {
 		panic(err)
 	}
 	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
+}
+
+func (p *queryNodeConfig) initMergeSearchReqs() {
+	p.MergeSearchReqs = p.Base.ParseBool("queryNode.merge.mergeSearchReqs", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

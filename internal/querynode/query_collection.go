@@ -92,6 +92,7 @@ type queryCollection struct {
 	publishChan     chan *pubResult
 	executeNQNum    atomic.Value
 	wg              sync.WaitGroup
+	mergeMsgs       bool
 }
 
 const (
@@ -151,6 +152,7 @@ func newQueryCollection(ctx context.Context,
 		receiveMsgChan:  make(chan bool, 1),
 		tsafeUpdateChan: make(chan bool, 1),
 		executeNQNum:    atomic.Value{},
+		mergeMsgs:       Params.QueryNodeCfg.MergeSearchReqs,
 	}
 	qc.executeNQNum.Store(int64(0))
 
@@ -1162,7 +1164,7 @@ func (q *queryCollection) mergeSearchReqsByMaxNQ(mergedMsgs []queryMsg, queryMsg
 		msg := queryMsgs[i]
 		ok, err := q.checkSearchCanDo(msg)
 		log.Debug("judge if msg can do", zap.Int64("msgID", msg.ID()), zap.Int64("collectionID", q.collectionID),
-			zap.Bool("ok", ok), zap.Error(err))
+			zap.Bool("ok", ok), zap.Error(err), zap.Bool("merge search requests", q.mergeMsgs))
 
 		if err != nil {
 			pubRet := &pubResult{
@@ -1174,18 +1176,23 @@ func (q *queryCollection) mergeSearchReqsByMaxNQ(mergedMsgs []queryMsg, queryMsg
 			continue
 		}
 		if ok {
-			merge := false
-			for j, mergedMsg := range mergedMsgs {
-				if canMerge(mergedMsg, msg) {
-					mergedMsgs[j] = mergeSearchMsg(mergedMsg, msg)
-					merge = true
-					log.Debug("Merge search message", zap.Int("num", mergedMsg.GetNumMerged()))
-					break
+			if q.mergeMsgs {
+				merge := false
+				for j, mergedMsg := range mergedMsgs {
+					if canMerge(mergedMsg, msg) {
+						mergedMsgs[j] = mergeSearchMsg(mergedMsg, msg)
+						merge = true
+						log.Debug("Merge search message", zap.Int("num", mergedMsg.GetNumMerged()))
+						break
+					}
+					if !merge {
+						mergedMsgs = append(mergedMsgs, msg)
+					}
 				}
-			}
-			if !merge {
+			} else {
 				mergedMsgs = append(mergedMsgs, msg)
 			}
+
 		} else {
 			canNotDoMsg = append(canNotDoMsg, msg)
 		}
