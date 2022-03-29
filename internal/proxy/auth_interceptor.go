@@ -4,10 +4,13 @@ import (
 	"context"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/metadata"
+
 	"github.com/milvus-io/milvus/internal/util/crypto"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
 // valid validates the authorization
@@ -36,14 +39,18 @@ func valid(ctx context.Context, authorization []string) bool {
 
 // AuthInterceptor ensures a valid token exists within a request's metadata
 func AuthInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, ErrMissingMetadata()
-	}
-	// The keys within metadata.MD are normalized to lowercase.
-	// See: https://godoc.org/google.golang.org/grpc/metadata#New
-	if !valid(ctx, md["authorization"]) {
-		return nil, ErrUnauthenticated()
+	usernames, _ := globalMetaCache.GetCredUsernames(ctx)
+	if usernames != nil && len(usernames) > 0 {
+		log.Debug("basic auth check turns on because there are credential users.", zap.Any("usernames", usernames))
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, ErrMissingMetadata()
+		}
+		// The keys within metadata.MD are normalized to lowercase.
+		// See: https://godoc.org/google.golang.org/grpc/metadata#New
+		if !valid(ctx, md["authorization"]) {
+			return nil, ErrUnauthenticated()
+		}
 	}
 	// Continue execution of handler after ensuring a valid token.
 	return handler(ctx, req)

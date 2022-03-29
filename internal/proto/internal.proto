@@ -36,6 +36,9 @@ message GetStatisticsChannelRequest {
 message GetDdChannelRequest {
 }
 
+message ClearCredUsersCacheRequest {
+}
+
 message NodeInfo {
   common.Address address = 1;
   string role = 2;

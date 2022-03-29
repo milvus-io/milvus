@@ -706,6 +706,8 @@ type Proxy interface {
 
 	UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error)
 
+	ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error)
+
 	// ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
 	//
 	// ReleaseDQLMessageStream should be called when the specific collection was released.

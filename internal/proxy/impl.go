@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/util/crypto"
 	"os"
 	"strconv"
+
+	"github.com/milvus-io/milvus/internal/util/crypto"
 
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
@@ -127,7 +128,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 
 	username := request.Username
 	if globalMetaCache != nil {
-		globalMetaCache.RemoveCredentialCache(ctx, username) // no need to return error, though credential may be not cached
+		globalMetaCache.RemoveCredential(ctx, username) // no need to return error, though credential may be not cached
 	}
 	logutil.Logger(ctx).Debug("complete to invalidate credential cache",
 		zap.String("role", typeutil.ProxyRole),
@@ -151,11 +152,28 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 		password: request.Password,
 	}
 	if globalMetaCache != nil {
-		globalMetaCache.UpdateCredentialCache(ctx, credInfo) // no need to return error, though credential may be not cached
+		globalMetaCache.UpdateCredential(ctx, credInfo) // no need to return error, though credential may be not cached
 	}
 	logutil.Logger(ctx).Debug("complete to update credential cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (node *Proxy) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error) {
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to clear credential usernames cache",
+		zap.String("role", typeutil.ProxyRole))
+
+	if globalMetaCache != nil {
+		globalMetaCache.ClearCredUsers(ctx) // no need to return error, though credential may be not cached
+	}
+	logutil.Logger(ctx).Debug("complete to clear credential usernames cache",
+		zap.String("role", typeutil.ProxyRole))
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -4085,17 +4103,17 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 	method := "ListCredUsers"
 	tr := timerecord.NewTimeRecorder(method)
-	// save to db
-	result, err := node.rootCoord.ListCredUsers(ctx, req)
+	resp := &milvuspb.ListCredUsersResponse{}
+	// get from cache
+	usernames, err := globalMetaCache.GetCredUsernames(ctx)
 	if err != nil {
-		return &milvuspb.ListCredUsersResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
+		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		resp.Status.Reason = err.Error()
+		return resp, nil
 	}
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	resp.Usernames = usernames
 	// time record
 	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, "ALL.API").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return result, nil
+	return resp, nil
 }

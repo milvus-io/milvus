@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -201,6 +203,39 @@ func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 			log.Error("Failed to call update credential cache", zap.Int64("proxy id", k), zap.Error(err))
 		} else {
 			log.Debug("send update credential cache to proxy node", zap.Int64("node id", k))
+		}
+	}
+}
+
+func (p *proxyClientManager) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) {
+	p.credLock.Lock()
+	defer p.credLock.Unlock()
+
+	if len(p.proxyClient) == 0 {
+		log.Debug("proxy client is empty, ClearCredUsersCache will not send to any client")
+		return
+	}
+
+	for k, f := range p.proxyClient {
+		err := func() error {
+			defer func() {
+				if err := recover(); err != nil {
+					log.Debug("call ClearCredUsersCache panic", zap.Int64("proxy id", k), zap.Any("msg", err))
+				}
+			}()
+			sta, err := f.ClearCredUsersCache(ctx, request)
+			if err != nil {
+				return fmt.Errorf("grpc fail, error=%w", err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("message = %s", sta.Reason)
+			}
+			return nil
+		}()
+		if err != nil {
+			log.Error("Failed to call clear credential usernames cache", zap.Int64("proxy id", k), zap.Error(err))
+		} else {
+			log.Debug("send clear credential usernames cache to proxy node", zap.Int64("node id", k))
 		}
 	}
 }

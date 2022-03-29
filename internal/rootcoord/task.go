@@ -19,8 +19,9 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"strconv"
+
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 
 	"github.com/milvus-io/milvus/internal/metrics"
 
@@ -1084,10 +1085,9 @@ func (t *CreateCredentialReqTask) Execute(ctx context.Context) error {
 		Password: t.Req.Password,
 	}
 
-	//ts, err := t.core.TSOAllocator(1)
-	//if err != nil {
-	//    return fmt.Errorf("TSO alloc fail, error = %w", err)
-	//}
+	// update proxy's local cache
+	t.core.ClearCredUsersCache(ctx)
+	// insert to db
 	err := t.core.MetaTable.AddCredential(credInfo)
 	if err != nil {
 		return fmt.Errorf("meta table add credential failed, error = %w", err)

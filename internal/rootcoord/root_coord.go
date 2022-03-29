@@ -943,6 +943,12 @@ func (c *Core) UpdateCredCache(ctx context.Context, credInfo *etcdpb.CredentialI
 	c.proxyClientManager.UpdateCredentialCache(ctx, &req)
 }
 
+// ClearCredUsersCache will call clear credential usernames cache
+func (c *Core) ClearCredUsersCache(ctx context.Context) {
+	req := internalpb.ClearCredUsersCacheRequest{}
+	c.proxyClientManager.ClearCredUsersCache(ctx, &req)
+}
+
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session.Register()

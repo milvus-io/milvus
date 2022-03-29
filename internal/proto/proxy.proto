@@ -21,6 +21,7 @@ service Proxy {
 
   rpc InvalidateCredentialCache(InvalidateCredCacheRequest) returns (common.Status) {}
   rpc UpdateCredentialCache(UpdateCredCacheRequest) returns (common.Status) {}
+  rpc ClearCredUsersCache(internal.ClearCredUsersCacheRequest) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {

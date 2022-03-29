@@ -453,6 +453,10 @@ func (s *Server) UpdateCredentialCache(ctx context.Context, request *proxypb.Upd
 	return s.proxy.UpdateCredentialCache(ctx, request)
 }
 
+func (s *Server) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error) {
+	return s.proxy.ClearCredUsersCache(ctx, request)
+}
+
 // ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	return s.proxy.ReleaseDQLMessageStream(ctx, request)
