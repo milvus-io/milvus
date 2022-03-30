@@ -20,8 +20,11 @@ import (
 	"context"
 	"log"
 	"math"
+	"math/rand"
 	"sync"
 	"testing"
+
+	"github.com/milvus-io/milvus/internal/storage"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -917,7 +920,7 @@ func TestSegment_indexInfo(t *testing.T) {
 	indexID := UniqueID(0)
 	buildID := UniqueID(0)
 
-	indexInfo := &querypb.VecFieldIndexInfo{
+	indexInfo := &querypb.FieldIndexInfo{
 		IndexName:      indexName,
 		IndexParams:    funcutil.Map2KeyValuePair(indexParam),
 		IndexFilePaths: indexPaths,
@@ -925,9 +928,9 @@ func TestSegment_indexInfo(t *testing.T) {
 		BuildID:        buildID,
 	}
 
-	seg.setVectorFieldInfo(fieldID, &VectorFieldInfo{indexInfo: indexInfo})
+	seg.setIndexedFieldInfo(fieldID, &IndexedFieldInfo{indexInfo: indexInfo})
 
-	fieldInfo, err := seg.getVectorFieldInfo(fieldID)
+	fieldInfo, err := seg.getIndexedFieldInfo(fieldID)
 	assert.Nil(t, err)
 	info := fieldInfo.indexInfo
 	assert.Equal(t, indexName, info.IndexName)
@@ -974,25 +977,25 @@ func TestSegment_BasicMetrics(t *testing.T) {
 		assert.Equal(t, false, resOnService)
 	})
 
-	t.Run("test VectorFieldInfo", func(t *testing.T) {
+	t.Run("test IndexedFieldInfo", func(t *testing.T) {
 		fieldID := rowIDFieldID
-		info := &VectorFieldInfo{
+		info := &IndexedFieldInfo{
 			fieldBinlog: &datapb.FieldBinlog{
 				FieldID: fieldID,
 				Binlogs: []*datapb.Binlog{},
 			},
 		}
-		segment.setVectorFieldInfo(fieldID, info)
-		resInfo, err := segment.getVectorFieldInfo(fieldID)
+		segment.setIndexedFieldInfo(fieldID, info)
+		resInfo, err := segment.getIndexedFieldInfo(fieldID)
 		assert.NoError(t, err)
 		assert.Equal(t, info, resInfo)
 
-		_, err = segment.getVectorFieldInfo(FieldID(1000))
+		_, err = segment.getIndexedFieldInfo(FieldID(1000))
 		assert.Error(t, err)
 	})
 }
 
-func TestSegment_fillVectorFieldsData(t *testing.T) {
+func TestSegment_fillIndexedFieldsData(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1010,17 +1013,17 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 	vecCM, err := genVectorChunkManager(ctx)
 	assert.NoError(t, err)
 
-	t.Run("test fillVectorFieldsData float-vector invalid vectorChunkManager", func(t *testing.T) {
+	t.Run("test fillIndexedFieldsData float-vector invalid vectorChunkManager", func(t *testing.T) {
 		fieldID := FieldID(100)
 		fieldName := "float-vector-field-0"
-		info := &VectorFieldInfo{
+		info := &IndexedFieldInfo{
 			fieldBinlog: &datapb.FieldBinlog{
 				FieldID: fieldID,
 				Binlogs: []*datapb.Binlog{},
 			},
-			indexInfo: &querypb.VecFieldIndexInfo{EnableIndex: true},
+			indexInfo: &querypb.FieldIndexInfo{EnableIndex: true},
 		}
-		segment.setVectorFieldInfo(fieldID, info)
+		segment.setIndexedFieldInfo(fieldID, info)
 		fieldData := []*schemapb.FieldData{
 			{
 				Type:      schemapb.DataType_FloatVector,
@@ -1043,7 +1046,488 @@ func TestSegment_fillVectorFieldsData(t *testing.T) {
 			Offset:     []int64{0},
 			FieldsData: fieldData,
 		}
-		err = segment.fillVectorFieldsData(defaultCollectionID, vecCM, result)
+		err = segment.fillIndexedFieldsData(defaultCollectionID, vecCM, result)
 		assert.Error(t, err)
 	})
+}
+
+func Test_getFieldDataPath(t *testing.T) {
+	indexedFieldInfo := &IndexedFieldInfo{
+		fieldBinlog: &datapb.FieldBinlog{
+			FieldID: 0,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogPath: funcutil.GenRandomStr(),
+				},
+				{
+					LogPath: funcutil.GenRandomStr(),
+				},
+			},
+		},
+	}
+	s := &Segment{
+		idBinlogRowSizes: []int64{10, 15},
+	}
+
+	path, offsetInBinlog := s.getFieldDataPath(indexedFieldInfo, 4)
+	assert.Equal(t, indexedFieldInfo.fieldBinlog.Binlogs[0].LogPath, path)
+	assert.Equal(t, int64(4), offsetInBinlog)
+
+	path, offsetInBinlog = s.getFieldDataPath(indexedFieldInfo, 11)
+	assert.Equal(t, indexedFieldInfo.fieldBinlog.Binlogs[1].LogPath, path)
+	assert.Equal(t, int64(1), offsetInBinlog)
+}
+
+func generateBoolArray(numRows int) []bool {
+	ret := make([]bool, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, rand.Int()%2 == 0)
+	}
+	return ret
+}
+
+func generateInt8Array(numRows int) []int8 {
+	ret := make([]int8, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, int8(rand.Int()))
+	}
+	return ret
+}
+
+func generateInt16Array(numRows int) []int16 {
+	ret := make([]int16, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, int16(rand.Int()))
+	}
+	return ret
+}
+
+func generateInt32Array(numRows int) []int32 {
+	ret := make([]int32, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, int32(rand.Int()))
+	}
+	return ret
+}
+
+func generateInt64Array(numRows int) []int64 {
+	ret := make([]int64, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, int64(rand.Int()))
+	}
+	return ret
+}
+
+func generateFloat32Array(numRows int) []float32 {
+	ret := make([]float32, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, rand.Float32())
+	}
+	return ret
+}
+
+func generateStringArray(numRows int) []string {
+	ret := make([]string, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, funcutil.GenRandomStr())
+	}
+	return ret
+}
+
+func generateFloat64Array(numRows int) []float64 {
+	ret := make([]float64, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, rand.Float64())
+	}
+	return ret
+}
+
+func generateFloatVectors(numRows, dim int) []float32 {
+	total := numRows * dim
+	ret := make([]float32, 0, total)
+	for i := 0; i < total; i++ {
+		ret = append(ret, rand.Float32())
+	}
+	return ret
+}
+
+func generateBinaryVectors(numRows, dim int) []byte {
+	total := (numRows * dim) / 8
+	ret := make([]byte, total)
+	_, err := rand.Read(ret)
+	if err != nil {
+		panic(err)
+	}
+	return ret
+}
+
+func newScalarFieldData(dType schemapb.DataType, fieldName string, numRows int) *schemapb.FieldData {
+	ret := &schemapb.FieldData{
+		Type:      dType,
+		FieldName: fieldName,
+		Field:     nil,
+	}
+
+	switch dType {
+	case schemapb.DataType_Bool:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{
+						Data: generateBoolArray(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Int8:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: generateInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Int16:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: generateInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Int32:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: generateInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Int64:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: generateInt64Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Float:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: generateFloat32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_Double:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: generateFloat64Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: generateStringArray(numRows),
+					},
+				},
+			},
+		}
+	}
+
+	return ret
+}
+
+func newFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_FloatVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: generateFloatVectors(numRows, dim),
+					},
+				},
+			},
+		},
+	}
+}
+
+func newBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_BinaryVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: generateBinaryVectors(numRows, dim),
+				},
+			},
+		},
+	}
+}
+
+func Test_fillBinVecFieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newBinaryVectorFieldData("bv", 1, 8)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	offset := int64(100)
+	endian := common.Endian
+
+	assert.NoError(t, fillBinVecFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillBinVecFieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillFloatVecFieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newFloatVectorFieldData("fv", 1, 8)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	offset := int64(100)
+	endian := common.Endian
+
+	assert.NoError(t, fillFloatVecFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillFloatVecFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillFloatVecFieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillBoolFieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withReadBool(offset))
+
+	f := newScalarFieldData(schemapb.DataType_Bool, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillBoolFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadErr())
+	assert.Error(t, fillBoolFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadIllegalBool())
+	assert.Error(t, fillBoolFieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillStringFieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withReadString(offset))
+
+	f := newScalarFieldData(schemapb.DataType_VarChar, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillStringFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadErr())
+	assert.Error(t, fillStringFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadIllegalString())
+	assert.Error(t, fillStringFieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillInt8FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_Int8, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillInt8FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillInt8FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillInt8FieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillInt16FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_Int16, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillInt16FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillInt16FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillInt16FieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillInt32FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_Int32, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillInt32FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillInt32FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillInt32FieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillInt64FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_Int64, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillInt64FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillInt64FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillInt64FieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillFloatFieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_Float, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillFloatFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillFloatFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillFloatFieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillDoubleFieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_Double, "f", 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillDoubleFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillDoubleFieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillDoubleFieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillFieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	fs := []*schemapb.FieldData{
+		newBinaryVectorFieldData("bv", 1, 8),
+		newFloatVectorFieldData("fv", 1, 8),
+		newScalarFieldData(schemapb.DataType_Bool, "f", 1),
+		newScalarFieldData(schemapb.DataType_VarChar, "f", 1),
+		newScalarFieldData(schemapb.DataType_Int8, "f", 1),
+		newScalarFieldData(schemapb.DataType_Int16, "f", 1),
+		newScalarFieldData(schemapb.DataType_Int32, "f", 1),
+		newScalarFieldData(schemapb.DataType_Int64, "f", 1),
+		newScalarFieldData(schemapb.DataType_Float, "f", 1),
+		newScalarFieldData(schemapb.DataType_Double, "f", 1),
+	}
+
+	offset := int64(100)
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	for _, f := range fs {
+		if f.Type == schemapb.DataType_Bool {
+			m = newMockChunkManager(withReadBool(offset))
+		} else if funcutil.SliceContain([]schemapb.DataType{
+			schemapb.DataType_String,
+			schemapb.DataType_VarChar,
+		}, f.Type) {
+			m = newMockChunkManager(withReadString(offset))
+		} else {
+			m = newMockChunkManager(withDefaultReadAt())
+		}
+
+		assert.NoError(t, fillFieldData(m, path, f, index, offset, endian))
+	}
+
+	assert.Error(t, fillFieldData(m, path, &schemapb.FieldData{Type: schemapb.DataType_None}, index, offset, endian))
 }

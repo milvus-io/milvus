@@ -3,12 +3,13 @@ module github.com/milvus-io/milvus
 go 1.16
 
 require (
-	github.com/BurntSushi/toml v1.0.0 // indirect
+	github.com/BurntSushi/toml v1.0.0
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/antonmedv/expr v1.8.9
+	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
-	github.com/apache/thrift/lib/go/thrift v0.0.0-20210120171102-e27e82c46ba4
+	github.com/apache/thrift v0.15.0
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/containerd/cgroups v1.0.2
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
@@ -16,14 +17,13 @@ require (
 	github.com/facebookgo/subset v0.0.0-20200203212716-c811ad88dec4 // indirect
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-basic/ipv4 v1.0.0
-	github.com/gofrs/flock v0.8.1 // indirect
+	github.com/gofrs/flock v0.8.1
 	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/jarcoal/httpmock v1.0.8
-	github.com/klauspost/compress v1.10.11 // indirect
+	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/minio/minio-go/v7 v7.0.10
 	github.com/mitchellh/mapstructure v1.4.1
@@ -47,10 +47,9 @@ require (
 	go.uber.org/atomic v1.7.0
 	go.uber.org/automaxprocs v1.4.0
 	go.uber.org/zap v1.17.0
-	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6
+	golang.org/x/exp v0.0.0-20211216164055-b2b84827b756
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/tools v0.1.7 // indirect
-	google.golang.org/grpc v1.38.0
+	google.golang.org/grpc v1.44.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	stathat.com/c/consistent v1.0.0
 )
@@ -61,4 +60,3 @@ replace (
 	github.com/keybase/go-keychain => github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4
 	google.golang.org/grpc => google.golang.org/grpc v1.38.0
 )
-

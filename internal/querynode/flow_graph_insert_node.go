@@ -186,7 +186,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("delete in streaming replica",
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
-				zap.Any("pks", delMsg.PrimaryKeys),
+				zap.Int("numPKs", len(delMsg.PrimaryKeys)),
 				zap.Any("timestamp", delMsg.Timestamps))
 			processDeleteMessages(iNode.streamingReplica, delMsg, delData)
 		}

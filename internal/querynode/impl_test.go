@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -340,8 +341,8 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		seg, err := node.historical.replica.getSegmentByID(defaultSegmentID)
 		assert.NoError(t, err)
 
-		seg.setVectorFieldInfo(simpleVecField.id, &VectorFieldInfo{
-			indexInfo: &queryPb.VecFieldIndexInfo{
+		seg.setIndexedFieldInfo(simpleVecField.id, &IndexedFieldInfo{
+			indexInfo: &queryPb.FieldIndexInfo{
 				IndexName: "query-node-test",
 				IndexID:   UniqueID(0),
 				BuildID:   UniqueID(0),
@@ -574,4 +575,26 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 	wg.Wait()
+}
+
+func TestImpl_Search(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	require.NoError(t, err)
+
+	_, err = node.Search(ctx, nil)
+	assert.Error(t, err)
+}
+
+func TestImpl_Query(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	require.NoError(t, err)
+
+	_, err = node.Query(ctx, nil)
+	assert.Error(t, err)
 }

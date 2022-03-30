@@ -569,6 +569,8 @@ type RootCoord interface {
 	// error is always nil
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 
+	DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
+
 	// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
 	//
 	// ctx is the request to control request deadline and cancellation.
@@ -1129,6 +1131,9 @@ type QueryNode interface {
 	ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
+
+	Search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error)
+	Query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error)
 
 	// GetMetrics gets the metrics about QueryNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)

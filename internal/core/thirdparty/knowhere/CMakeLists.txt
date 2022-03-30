@@ -23,9 +23,9 @@ endif ()
 
 if (MSYS)
     # TODO(matrixji) replace with official release after `support windows` merged/tagged
-    # windows adaptation + milvus-io/knowhere@v1.0.1
-    set (KNOWHERE_SOURCE_URL "https://github.com/matrixji/knowhere/archive/refs/tags/windows-int-20220310-p1.tar.gz")
-    set (KNOWHERE_SOURCE_MD5 "7a75cbaa68377f0c310e7f71bfd7becf")
+    # windows adaptation + milvus-io/knowhere@v1.1.1
+    set (KNOWHERE_SOURCE_URL "https://github.com/matrixji/knowhere/archive/refs/tags/v1.1.1-windows-adaptation.tar.gz")
+    set (KNOWHERE_SOURCE_MD5 "c7a483a9edd618e6d5519af5109fcce7")
 endif (MSYS)
 
 macro(build_knowhere)
@@ -58,12 +58,20 @@ macro(build_knowhere)
     endif()
 
     add_library(knowhere SHARED IMPORTED)
-    set_target_properties( knowhere
+
+    if (MSYS)
+        set_target_properties( knowhere
             PROPERTIES
                 IMPORTED_GLOBAL     TRUE
-                IMPORTED_LOCATION   ${INSTALL_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
-                IMPORTED_IMPLIB     ${INSTALL_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}.a
+                IMPORTED_IMPLIB     ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}.a
                 INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+    else ()
+        set_target_properties( knowhere
+                PROPERTIES
+                IMPORTED_GLOBAL     TRUE
+                IMPORTED_LOCATION   ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}knowhere${CMAKE_SHARED_LIBRARY_SUFFIX}
+                INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+    endif ()
 
     add_dependencies(knowhere knowhere_ep)
 endmacro()

@@ -37,6 +37,8 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
@@ -54,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/cgoconverter"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type segmentType = commonpb.SegmentState
@@ -69,10 +70,10 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
-// VectorFieldInfo contains binlog info of vector field
-type VectorFieldInfo struct {
+// IndexedFieldInfo contains binlog info of vector field
+type IndexedFieldInfo struct {
 	fieldBinlog *datapb.FieldBinlog
-	indexInfo   *querypb.VecFieldIndexInfo
+	indexInfo   *querypb.FieldIndexInfo
 }
 
 // Segment is a wrapper of the underlying C-structure segment.
@@ -98,8 +99,8 @@ type Segment struct {
 
 	idBinlogRowSizes []int64
 
-	vectorFieldMutex sync.RWMutex // guards vectorFieldInfos
-	vectorFieldInfos map[UniqueID]*VectorFieldInfo
+	indexedFieldMutex sync.RWMutex // guards indexedFieldInfos
+	indexedFieldInfos map[UniqueID]*IndexedFieldInfo
 
 	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 }
@@ -149,17 +150,17 @@ func (s *Segment) setOnService(onService bool) {
 	s.onService = onService
 }
 
-func (s *Segment) setVectorFieldInfo(fieldID UniqueID, info *VectorFieldInfo) {
-	s.vectorFieldMutex.Lock()
-	defer s.vectorFieldMutex.Unlock()
-	s.vectorFieldInfos[fieldID] = info
+func (s *Segment) setIndexedFieldInfo(fieldID UniqueID, info *IndexedFieldInfo) {
+	s.indexedFieldMutex.Lock()
+	defer s.indexedFieldMutex.Unlock()
+	s.indexedFieldInfos[fieldID] = info
 }
 
-func (s *Segment) getVectorFieldInfo(fieldID UniqueID) (*VectorFieldInfo, error) {
-	s.vectorFieldMutex.RLock()
-	defer s.vectorFieldMutex.RUnlock()
-	if info, ok := s.vectorFieldInfos[fieldID]; ok {
-		return &VectorFieldInfo{
+func (s *Segment) getIndexedFieldInfo(fieldID UniqueID) (*IndexedFieldInfo, error) {
+	s.indexedFieldMutex.RLock()
+	defer s.indexedFieldMutex.RUnlock()
+	if info, ok := s.indexedFieldInfos[fieldID]; ok {
+		return &IndexedFieldInfo{
 			fieldBinlog: info.fieldBinlog,
 			indexInfo:   info.indexInfo,
 		}, nil
@@ -167,11 +168,11 @@ func (s *Segment) getVectorFieldInfo(fieldID UniqueID) (*VectorFieldInfo, error)
 	return nil, errors.New("Invalid fieldID " + strconv.Itoa(int(fieldID)))
 }
 
-func (s *Segment) hasLoadIndexForVecField(fieldID int64) bool {
-	s.vectorFieldMutex.RLock()
-	defer s.vectorFieldMutex.RUnlock()
+func (s *Segment) hasLoadIndexForIndexedField(fieldID int64) bool {
+	s.indexedFieldMutex.RLock()
+	defer s.indexedFieldMutex.RUnlock()
 
-	if fieldInfo, ok := s.vectorFieldInfos[fieldID]; ok {
+	if fieldInfo, ok := s.indexedFieldInfos[fieldID]; ok {
 		return fieldInfo.indexInfo != nil && fieldInfo.indexInfo.EnableIndex
 	}
 
@@ -207,14 +208,14 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		zap.Int32("segmentType", int32(segType)))
 
 	var segment = &Segment{
-		segmentPtr:       segmentPtr,
-		segmentType:      segType,
-		segmentID:        segmentID,
-		partitionID:      partitionID,
-		collectionID:     collectionID,
-		vChannelID:       vChannelID,
-		onService:        onService,
-		vectorFieldInfos: make(map[UniqueID]*VectorFieldInfo),
+		segmentPtr:        segmentPtr,
+		segmentType:       segType,
+		segmentID:         segmentID,
+		partitionID:       partitionID,
+		collectionID:      collectionID,
+		vChannelID:        vChannelID,
+		onService:         onService,
+		indexedFieldInfos: make(map[UniqueID]*IndexedFieldInfo),
 
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
 	}
@@ -356,68 +357,206 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	return result, nil
 }
 
-func (s *Segment) fillVectorFieldsData(collectionID UniqueID,
+func (s *Segment) getFieldDataPath(indexedFieldInfo *IndexedFieldInfo, offset int64) (dataPath string, offsetInBinlog int64) {
+	offsetInBinlog = offset
+	for index, idBinlogRowSize := range s.idBinlogRowSizes {
+		if offsetInBinlog < idBinlogRowSize {
+			dataPath = indexedFieldInfo.fieldBinlog.Binlogs[index].GetLogPath()
+			break
+		} else {
+			offsetInBinlog -= idBinlogRowSize
+		}
+	}
+	return dataPath, offsetInBinlog
+}
+
+func fillBinVecFieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	dim := fieldData.GetVectors().GetDim()
+	rowBytes := dim / 8
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	x := fieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
+	resultLen := dim / 8
+	copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
+	return nil
+}
+
+func fillFloatVecFieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	dim := fieldData.GetVectors().GetDim()
+	rowBytes := dim * 4
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	x := fieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
+	floatResult := make([]float32, dim)
+	buf := bytes.NewReader(content)
+	if err = binary.Read(buf, endian, &floatResult); err != nil {
+		return err
+	}
+	resultLen := dim
+	copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
+	return nil
+}
+
+func fillBoolFieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read whole file.
+	// TODO: optimize here.
+	content, err := vcm.Read(dataPath)
+	if err != nil {
+		return err
+	}
+	var arr schemapb.BoolArray
+	err = proto.Unmarshal(content, &arr)
+	if err != nil {
+		return err
+	}
+	fieldData.GetScalars().GetBoolData().GetData()[i] = arr.Data[offset]
+	return nil
+}
+
+func fillStringFieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read whole file.
+	// TODO: optimize here.
+	content, err := vcm.Read(dataPath)
+	if err != nil {
+		return err
+	}
+	var arr schemapb.StringArray
+	err = proto.Unmarshal(content, &arr)
+	if err != nil {
+		return err
+	}
+	fieldData.GetScalars().GetStringData().GetData()[i] = arr.Data[offset]
+	return nil
+}
+
+func fillInt8FieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read by offset.
+	rowBytes := int64(1)
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	var i8 int8
+	if err := funcutil.ReadBinary(endian, content, &i8); err != nil {
+		return err
+	}
+	fieldData.GetScalars().GetIntData().GetData()[i] = int32(i8)
+	return nil
+}
+
+func fillInt16FieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read by offset.
+	rowBytes := int64(2)
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	var i16 int16
+	if err := funcutil.ReadBinary(endian, content, &i16); err != nil {
+		return err
+	}
+	fieldData.GetScalars().GetIntData().GetData()[i] = int32(i16)
+	return nil
+}
+
+func fillInt32FieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read by offset.
+	rowBytes := int64(4)
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetIntData().GetData()[i]))
+}
+
+func fillInt64FieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read by offset.
+	rowBytes := int64(8)
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetLongData().GetData()[i]))
+}
+
+func fillFloatFieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read by offset.
+	rowBytes := int64(4)
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetFloatData().GetData()[i]))
+}
+
+func fillDoubleFieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	// read by offset.
+	rowBytes := int64(8)
+	content, err := vcm.ReadAt(dataPath, offset*rowBytes, rowBytes)
+	if err != nil {
+		return err
+	}
+	return funcutil.ReadBinary(endian, content, &(fieldData.GetScalars().GetDoubleData().GetData()[i]))
+}
+
+func fillFieldData(vcm storage.ChunkManager, dataPath string, fieldData *schemapb.FieldData, i int, offset int64, endian binary.ByteOrder) error {
+	switch fieldData.Type {
+	case schemapb.DataType_BinaryVector:
+		return fillBinVecFieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_FloatVector:
+		return fillFloatVecFieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Bool:
+		return fillBoolFieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		return fillStringFieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Int8:
+		return fillInt8FieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Int16:
+		return fillInt16FieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Int32:
+		return fillInt32FieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Int64:
+		return fillInt64FieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Float:
+		return fillFloatFieldData(vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Double:
+		return fillDoubleFieldData(vcm, dataPath, fieldData, i, offset, endian)
+	default:
+		return fmt.Errorf("invalid data type: %s", fieldData.Type.String())
+	}
+}
+
+func (s *Segment) fillIndexedFieldsData(collectionID UniqueID,
 	vcm storage.ChunkManager, result *segcorepb.RetrieveResults) error {
 
 	for _, fieldData := range result.FieldsData {
-		if !typeutil.IsVectorType(fieldData.Type) {
+		// If the vector field doesn't have indexed. Vector data is in memory for
+		// brute force search. No need to download data from remote.
+		if !s.hasLoadIndexForIndexedField(fieldData.FieldId) {
 			continue
 		}
 
-		vecFieldInfo, err := s.getVectorFieldInfo(fieldData.FieldId)
+		indexedFieldInfo, err := s.getIndexedFieldInfo(fieldData.FieldId)
 		if err != nil {
 			continue
 		}
 
-		// If the vector field doesn't have indexed. Vector data is in memory for
-		// brute force search. No need to download data from remote.
-		if !s.hasLoadIndexForVecField(fieldData.FieldId) {
-			continue
-		}
-
-		dim := fieldData.GetVectors().GetDim()
-		log.Debug("FillVectorFieldData", zap.Int64("fieldId", fieldData.FieldId),
-			zap.Any("datatype", fieldData.Type), zap.Int64("dim", dim))
-
+		// TODO: optimize here. Now we'll read a whole file from storage every time we retrieve raw data by offset.
 		for i, offset := range result.Offset {
-			var vecPath string
-			for index, idBinlogRowSize := range s.idBinlogRowSizes {
-				if offset < idBinlogRowSize {
-					vecPath = vecFieldInfo.fieldBinlog.Binlogs[index].GetLogPath()
-					break
-				} else {
-					offset -= idBinlogRowSize
-				}
-			}
-			log.Debug("FillVectorFieldData", zap.String("path", vecPath))
+			dataPath, offsetInBinlog := s.getFieldDataPath(indexedFieldInfo, offset)
+			endian := common.Endian
 
-			switch fieldData.Type {
-			case schemapb.DataType_BinaryVector:
-				rowBytes := dim / 8
-				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_BinaryVector)
-				content, err := vcm.ReadAt(vecPath, offset*rowBytes, rowBytes)
-				if err != nil {
-					return err
-				}
-				resultLen := dim / 8
-				copy(x.BinaryVector[i*int(resultLen):(i+1)*int(resultLen)], content)
-			case schemapb.DataType_FloatVector:
-				x := fieldData.GetVectors().GetData().(*schemapb.VectorField_FloatVector)
-				rowBytes := dim * 4
-				content, err := vcm.ReadAt(vecPath, offset*rowBytes, rowBytes)
-				if err != nil {
-					return err
-				}
-				floatResult := make([]float32, dim)
-				buf := bytes.NewReader(content)
-				if err = binary.Read(buf, common.Endian, &floatResult); err != nil {
-					return err
-				}
-				resultLen := dim
-				copy(x.FloatVector.Data[i*int(resultLen):(i+1)*int(resultLen)], floatResult)
+			// fill field data that fieldData[i] = dataPath[offsetInBinlog*rowBytes, (offsetInBinlog+1)*rowBytes]
+			if err := fillFieldData(vcm, dataPath, fieldData, i, offsetInBinlog, endian); err != nil {
+				return err
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -677,7 +816,7 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []IntPrimaryKey, timestam
 	return nil
 }
 
-func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.VecFieldIndexInfo) error {
+func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo) error {
 	loadIndexInfo, err := newLoadIndexInfo()
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {

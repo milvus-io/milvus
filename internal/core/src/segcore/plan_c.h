@@ -28,12 +28,12 @@ CreateSearchPlan(CCollection col, const char* dsl, CSearchPlan* res_plan);
 
 // Note: serialized_expr_plan is of binary format
 CStatus
-CreateSearchPlanByExpr(CCollection col, const char* serialized_expr_plan, int64_t size, CSearchPlan* res_plan);
+CreateSearchPlanByExpr(CCollection col, const void* serialized_expr_plan, const int64_t size, CSearchPlan* res_plan);
 
 CStatus
 ParsePlaceholderGroup(CSearchPlan plan,
-                      void* placeholder_group_blob,
-                      int64_t blob_size,
+                      const void* placeholder_group_blob,
+                      const int64_t blob_size,
                       CPlaceholderGroup* res_placeholder_group);
 
 int64_t
@@ -52,10 +52,10 @@ void
 DeletePlaceholderGroup(CPlaceholderGroup placeholder_group);
 
 CStatus
-CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output);
-
-CStatus
-CreateRetrievePlanByExpr(CCollection c_col, const char* serialized_expr_plan, int64_t size, CRetrievePlan* res_plan);
+CreateRetrievePlanByExpr(CCollection c_col,
+                         const void* serialized_expr_plan,
+                         const int64_t size,
+                         CRetrievePlan* res_plan);
 
 void
 DeleteRetrievePlan(CRetrievePlan plan);

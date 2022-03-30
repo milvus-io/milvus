@@ -59,7 +59,7 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
 
-func (li *LoadIndexInfo) appendIndexInfo(bytesIndex [][]byte, indexInfo *querypb.VecFieldIndexInfo) error {
+func (li *LoadIndexInfo) appendIndexInfo(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo) error {
 	fieldID := indexInfo.FieldID
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	indexPaths := indexInfo.IndexFilePaths

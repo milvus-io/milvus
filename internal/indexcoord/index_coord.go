@@ -576,9 +576,10 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	defer sp.Finish()
 	var indexPaths []*indexpb.IndexFilePathInfo
 
-	for _, indexID := range req.IndexBuildIDs {
-		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(indexID)
+	for _, buildID := range req.IndexBuildIDs {
+		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(buildID)
 		if err != nil {
+			log.Warn("IndexCoord GetIndexFilePaths failed", zap.Int64("indexBuildID", buildID))
 			return &indexpb.GetIndexFilePathsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -596,7 +597,7 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 		},
 		FilePaths: indexPaths,
 	}
-	log.Debug("IndexCoord GetIndexFilePaths ", zap.Any("FilePaths", ret.FilePaths))
+	log.Debug("IndexCoord GetIndexFilePaths ", zap.Int("indexBuildIDs num", len(req.IndexBuildIDs)), zap.Int("file path num", len(ret.FilePaths)))
 
 	return ret, nil
 }
@@ -729,7 +730,8 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 						zap.Int64("Recycle the index files successfully for deleted index with indexBuildID", meta.indexMeta.IndexBuildID))
 				} else {
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
-						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID))
+						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID),
+						zap.Int64("indexMeta version", meta.indexMeta.Version))
 					for j := 1; j < int(meta.indexMeta.Version); j++ {
 						unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
 						if err := i.chunkManager.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {

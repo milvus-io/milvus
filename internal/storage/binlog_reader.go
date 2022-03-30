@@ -18,7 +18,12 @@ package storage
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
+
+	"github.com/milvus-io/milvus/internal/common"
 )
 
 // BinlogReader is an object to read binlog file. Binlog file's format can be
@@ -26,9 +31,9 @@ import (
 type BinlogReader struct {
 	magicNumber int32
 	descriptorEvent
-	buffer    *bytes.Buffer
-	eventList []*EventReader
-	isClose   bool
+	buffer      *bytes.Buffer
+	eventReader *EventReader
+	isClose     bool
 }
 
 // NextEventReader iters all events reader to read the binlog file.
@@ -39,12 +44,16 @@ func (reader *BinlogReader) NextEventReader() (*EventReader, error) {
 	if reader.buffer.Len() <= 0 {
 		return nil, nil
 	}
-	eventReader, err := newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer)
+	// close the previous reader
+	if reader.eventReader != nil {
+		reader.eventReader.Close()
+	}
+	var err error
+	reader.eventReader, err = newEventReader(reader.descriptorEvent.PayloadDataType, reader.buffer)
 	if err != nil {
 		return nil, err
 	}
-	reader.eventList = append(reader.eventList, eventReader)
-	return eventReader, nil
+	return reader.eventReader, nil
 }
 
 func (reader *BinlogReader) readMagicNumber() (int32, error) {
@@ -62,14 +71,42 @@ func (reader *BinlogReader) readDescriptorEvent() (*descriptorEvent, error) {
 	return &reader.descriptorEvent, nil
 }
 
+func readMagicNumber(buffer io.Reader) (int32, error) {
+	var magicNumber int32
+	if err := binary.Read(buffer, common.Endian, &magicNumber); err != nil {
+		return -1, err
+	}
+	if magicNumber != MagicNumber {
+		return -1, fmt.Errorf("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
+	}
+
+	return magicNumber, nil
+}
+
+// ReadDescriptorEvent reads a descriptorEvent from buffer
+func ReadDescriptorEvent(buffer io.Reader) (*descriptorEvent, error) {
+	header, err := readDescriptorEventHeader(buffer)
+	if err != nil {
+		return nil, err
+	}
+	data, err := readDescriptorEventData(buffer)
+	if err != nil {
+		return nil, err
+	}
+	return &descriptorEvent{
+		descriptorEventHeader: *header,
+		descriptorEventData:   *data,
+	}, nil
+}
+
 // Close closes the BinlogReader object.
 // It mainly calls the Close method of the internal events, reclaims resources, and marks itself as closed.
 func (reader *BinlogReader) Close() {
 	if reader.isClose {
 		return
 	}
-	for _, e := range reader.eventList {
-		e.Close()
+	if reader.eventReader != nil {
+		reader.eventReader.Close()
 	}
 	reader.isClose = true
 }
@@ -77,9 +114,8 @@ func (reader *BinlogReader) Close() {
 // NewBinlogReader creates binlogReader to read binlog file.
 func NewBinlogReader(data []byte) (*BinlogReader, error) {
 	reader := &BinlogReader{
-		buffer:    bytes.NewBuffer(data),
-		eventList: []*EventReader{},
-		isClose:   false,
+		buffer:  bytes.NewBuffer(data),
+		isClose: false,
 	}
 
 	if _, err := reader.readMagicNumber(); err != nil {

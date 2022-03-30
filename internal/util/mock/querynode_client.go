@@ -78,6 +78,13 @@ func (m *QueryNodeClient) GetSegmentInfo(ctx context.Context, in *querypb.GetSeg
 	return &querypb.GetSegmentInfoResponse{}, m.Err
 }
 
+func (m *QueryNodeClient) Search(ctx context.Context, in *querypb.SearchRequest, opts ...grpc.CallOption) (*milvuspb.SearchResults, error) {
+	return &milvuspb.SearchResults{}, m.Err
+}
+
+func (m *QueryNodeClient) Query(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*milvuspb.QueryResults, error) {
+	return &milvuspb.QueryResults{}, m.Err
+}
 func (m *QueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }

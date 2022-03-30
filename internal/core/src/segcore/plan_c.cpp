@@ -44,11 +44,11 @@ CreateSearchPlan(CCollection c_col, const char* dsl, CSearchPlan* res_plan) {
 
 // Note: serialized_expr_plan is of binary format
 CStatus
-CreateSearchPlanByExpr(CCollection c_col, const char* serialized_expr_plan, int64_t size, CSearchPlan* res_plan) {
+CreateSearchPlanByExpr(CCollection c_col, const void* serialized_expr_plan, const int64_t size, CSearchPlan* res_plan) {
     auto col = (milvus::segcore::Collection*)c_col;
 
     try {
-        auto res = milvus::query::CreatePlanByExpr(*col->get_schema(), serialized_expr_plan, size);
+        auto res = milvus::query::CreateSearchPlanByExpr(*col->get_schema(), serialized_expr_plan, size);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -73,14 +73,14 @@ CreateSearchPlanByExpr(CCollection c_col, const char* serialized_expr_plan, int6
 
 CStatus
 ParsePlaceholderGroup(CSearchPlan c_plan,
-                      void* placeholder_group_blob,
-                      int64_t blob_size,
+                      const void* placeholder_group_blob,
+                      const int64_t blob_size,
                       CPlaceholderGroup* res_placeholder_group) {
-    std::string blob_string((char*)placeholder_group_blob, (char*)placeholder_group_blob + blob_size);
+    std::string blob_str((char*)placeholder_group_blob, blob_size);
     auto plan = (milvus::query::Plan*)c_plan;
 
     try {
-        auto res = milvus::query::ParsePlaceholderGroup(plan, blob_string);
+        auto res = milvus::query::ParsePlaceholderGroup(plan, blob_str);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -120,45 +120,25 @@ void
 DeleteSearchPlan(CSearchPlan cPlan) {
     auto plan = (milvus::query::Plan*)cPlan;
     delete plan;
-    // std::cout << "delete plan" << std::endl;
 }
 
 void
 DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
     auto placeHolder_group = (milvus::query::PlaceholderGroup*)cPlaceholder_group;
     delete placeHolder_group;
-    // std::cout << "delete placeholder" << std::endl;
 }
 
-// CStatus
-// CreateRetrievePlan(CCollection c_col, CProto retrieve_request, CRetrievePlan* output) {
-//    auto col = (milvus::segcore::Collection*)c_col;
-//    try {
-//        milvus::proto::segcore::RetrieveRequest request;
-//        request.ParseFromArray(retrieve_request.proto_blob, retrieve_request.proto_size);
-//        auto plan = milvus::query::CreateRetrievePlan(*col->get_schema(), std::move(request));
-//        *output = plan.release();
-//
-//        auto status = CStatus();
-//        status.error_code = Success;
-//        status.error_msg = "";
-//        return status;
-//    } catch (std::exception& e) {
-//        auto status = CStatus();
-//        status.error_code = UnexpectedError;
-//        status.error_msg = strdup(e.what());
-//        return status;
-//    }
-//}
-
 CStatus
-CreateRetrievePlanByExpr(CCollection c_col, const char* serialized_expr_plan, int64_t size, CRetrievePlan* res_plan) {
+CreateRetrievePlanByExpr(CCollection c_col,
+                         const void* serialized_expr_plan,
+                         const int64_t size,
+                         CRetrievePlan* res_plan) {
     auto col = (milvus::segcore::Collection*)c_col;
 
     try {
         auto res = milvus::query::CreateRetrievePlanByExpr(*col->get_schema(), serialized_expr_plan, size);
-        auto status = CStatus();
 
+        auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
         auto plan = (CRetrievePlan)res.release();

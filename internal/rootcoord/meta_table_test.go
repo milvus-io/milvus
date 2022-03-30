@@ -1316,3 +1316,36 @@ func TestFixIssue10540(t *testing.T) {
 	_, err = NewMetaTable(txnKV, skv)
 	assert.Nil(t, err)
 }
+
+func TestMetaTable_GetSegmentIndexInfos(t *testing.T) {
+	meta := &MetaTable{
+		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo{},
+	}
+
+	segID := typeutil.UniqueID(100)
+	_, err := meta.GetSegmentIndexInfos(segID)
+	assert.Error(t, err)
+
+	meta.segID2IndexMeta[segID] = map[typeutil.UniqueID]pb.SegmentIndexInfo{
+		5: {
+			CollectionID: 1,
+			PartitionID:  2,
+			SegmentID:    segID,
+			FieldID:      4,
+			IndexID:      5,
+			BuildID:      6,
+			EnableIndex:  true,
+		},
+	}
+	infos, err := meta.GetSegmentIndexInfos(segID)
+	assert.NoError(t, err)
+	indexInfos, ok := infos[5]
+	assert.True(t, ok)
+	assert.Equal(t, typeutil.UniqueID(1), indexInfos.GetCollectionID())
+	assert.Equal(t, typeutil.UniqueID(2), indexInfos.GetPartitionID())
+	assert.Equal(t, segID, indexInfos.GetSegmentID())
+	assert.Equal(t, typeutil.UniqueID(4), indexInfos.GetFieldID())
+	assert.Equal(t, typeutil.UniqueID(5), indexInfos.GetIndexID())
+	assert.Equal(t, typeutil.UniqueID(6), indexInfos.GetBuildID())
+	assert.Equal(t, true, indexInfos.GetEnableIndex())
+}

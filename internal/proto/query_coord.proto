@@ -47,6 +47,9 @@ service QueryNode {
   rpc ReleaseSegments(ReleaseSegmentsRequest) returns (common.Status) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
 
+  rpc Search(SearchRequest) returns (milvus.SearchResults) {}
+  rpc Query(QueryRequest) returns (milvus.QueryResults) {}
+
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
@@ -99,6 +102,7 @@ message LoadPartitionsRequest {
   int64 collectionID = 3;
   repeated int64 partitionIDs = 4;
   schema.CollectionSchema schema = 5;
+  int32 replica_number = 6;
 }
 
 message ReleasePartitionsRequest {
@@ -198,11 +202,11 @@ message SegmentLoadInfo {
   repeated data.FieldBinlog statslogs = 8;
   repeated data.FieldBinlog deltalogs = 9;
   repeated int64 compactionFrom = 10; // segmentIDs compacted from
-  repeated VecFieldIndexInfo index_infos = 11;
+  repeated FieldIndexInfo index_infos = 11;
   int64 segment_size = 12;
 }
 
-message VecFieldIndexInfo {
+message FieldIndexInfo {
   int64 fieldID =1;
   bool enable_index = 2;
   string index_name = 3;
@@ -231,6 +235,18 @@ message ReleaseSegmentsRequest {
   int64 collectionID = 4;
   repeated int64 partitionIDs = 5;
   repeated int64 segmentIDs = 6;
+}
+
+message SearchRequest {
+  milvus.SearchRequest req = 1;
+  string dml_channel = 2;
+  repeated int64 segmentIDs = 3;
+}
+
+message QueryRequest {
+  milvus.QueryRequest req = 1;
+  string dml_channel = 2;
+  repeated int64 segmentIDs = 3;
 }
 
 //----------------request auto triggered by QueryCoord-----------------
@@ -305,7 +321,7 @@ message SegmentInfo {
   repeated int64 compactionFrom = 10;
   bool createdByCompaction = 11;
   common.SegmentState segment_state = 12;
-  repeated VecFieldIndexInfo index_infos = 13;
+  repeated FieldIndexInfo index_infos = 13;
   repeated int64 replica_ids = 14;
   repeated int64 node_ids = 15;
 }
@@ -356,3 +372,4 @@ message ShardReplica {
     int64 leader = 1;
     string dm_channel_name = 2;
 }
+

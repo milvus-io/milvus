@@ -283,7 +283,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 		return err
 	}
 	_, indexParams := genIndexParams(indexType, metricType)
-	indexInfo := &querypb.VecFieldIndexInfo{
+	indexInfo := &querypb.FieldIndexInfo{
 		FieldID:        simpleVecField.id,
 		EnableIndex:    true,
 		IndexName:      indexName,
@@ -307,7 +307,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 				PartitionID:  defaultPartitionID,
 				CollectionID: defaultCollectionID,
 				BinlogPaths:  fieldBinlog,
-				IndexInfos:   []*querypb.VecFieldIndexInfo{indexInfo},
+				IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
 			},
 		},
 	}
@@ -321,7 +321,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 	if err != nil {
 		return err
 	}
-	vecFieldInfo, err := segment.getVectorFieldInfo(simpleVecField.id)
+	vecFieldInfo, err := segment.getIndexedFieldInfo(simpleVecField.id)
 	if err != nil {
 		return err
 	}
@@ -355,6 +355,11 @@ func generateIndex(segmentID UniqueID) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err := index.Delete(); err != nil {
+			panic(err)
+		}
+	}()
 
 	err = index.Build(indexcgowrapper.GenFloatVecDataset(indexRowData))
 	if err != nil {
@@ -1845,4 +1850,137 @@ func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.M
 
 func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return nil, nil
+}
+
+type readAtFunc func(path string, offset int64, length int64) ([]byte, error)
+type readFunc func(path string) ([]byte, error)
+
+type mockChunkManager struct {
+	storage.ChunkManager
+	readAt readAtFunc
+	read   readFunc
+}
+
+type mockChunkManagerOpt func(*mockChunkManager)
+
+func defaultReadAt(path string, offset int64, length int64) ([]byte, error) {
+	return funcutil.RandomBytes(int(length)), nil
+}
+
+func defaultRead(path string) ([]byte, error) {
+	return []byte(path), nil
+}
+
+func readBool(maxOffset int64) ([]byte, error) {
+	var arr schemapb.BoolArray
+	for i := int64(0); i <= maxOffset; i++ {
+		arr.Data = append(arr.Data, i%2 == 0)
+	}
+	return proto.Marshal(&arr)
+}
+
+func readIllegalBool() ([]byte, error) {
+	return []byte("can convert to bool array"), nil
+}
+
+func readString(maxOffset int64) ([]byte, error) {
+	var arr schemapb.StringArray
+	for i := int64(0); i <= maxOffset; i++ {
+		arr.Data = append(arr.Data, funcutil.GenRandomStr())
+	}
+	return proto.Marshal(&arr)
+}
+
+func readIllegalString() ([]byte, error) {
+	return []byte("can convert to string array"), nil
+}
+
+func readAtEmptyContent() ([]byte, error) {
+	return []byte{}, nil
+}
+
+func withReadAt(f readAtFunc) mockChunkManagerOpt {
+	return func(manager *mockChunkManager) {
+		manager.readAt = f
+	}
+}
+
+func withRead(f readFunc) mockChunkManagerOpt {
+	return func(manager *mockChunkManager) {
+		manager.read = f
+	}
+}
+
+func withDefaultReadAt() mockChunkManagerOpt {
+	return withReadAt(defaultReadAt)
+}
+
+func withDefaultRead() mockChunkManagerOpt {
+	return withRead(defaultRead)
+}
+
+func withReadErr() mockChunkManagerOpt {
+	return withRead(func(path string) ([]byte, error) {
+		return nil, errors.New("mock")
+	})
+}
+
+func withReadAtErr() mockChunkManagerOpt {
+	return withReadAt(func(path string, offset int64, length int64) ([]byte, error) {
+		return nil, errors.New("mock")
+	})
+}
+
+func withReadBool(maxOffset int64) mockChunkManagerOpt {
+	return withRead(func(path string) ([]byte, error) {
+		return readBool(maxOffset)
+	})
+}
+
+func withReadIllegalBool() mockChunkManagerOpt {
+	return withRead(func(path string) ([]byte, error) {
+		return readIllegalBool()
+	})
+}
+
+func withReadString(maxOffset int64) mockChunkManagerOpt {
+	return withRead(func(path string) ([]byte, error) {
+		return readString(maxOffset)
+	})
+}
+
+func withReadIllegalString() mockChunkManagerOpt {
+	return withRead(func(path string) ([]byte, error) {
+		return readIllegalString()
+	})
+}
+
+func withReadAtEmptyContent() mockChunkManagerOpt {
+	return withReadAt(func(path string, offset int64, length int64) ([]byte, error) {
+		return readAtEmptyContent()
+	})
+}
+
+func newMockChunkManager(opts ...mockChunkManagerOpt) storage.ChunkManager {
+	ret := &mockChunkManager{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(ret)
+		}
+	}
+	return ret
+}
+
+func (m *mockChunkManager) ReadAt(path string, offset int64, length int64) ([]byte, error) {
+	if m.readAt != nil {
+		return m.readAt(path, offset, length)
+	}
+	return defaultReadAt(path, offset, length)
+}
+
+func (m *mockChunkManager) Read(path string) ([]byte, error) {
+	if m.read != nil {
+		return m.read(path)
+	}
+	return defaultRead(path)
 }

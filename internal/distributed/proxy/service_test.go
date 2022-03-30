@@ -186,6 +186,10 @@ func (m *MockRootCoord) ShowSegments(ctx context.Context, req *milvuspb.ShowSegm
 	return nil, nil
 }
 
+func (m *MockRootCoord) DescribeSegments(ctx context.Context, req *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
 	return nil, nil
 }

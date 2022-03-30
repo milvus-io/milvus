@@ -84,7 +84,7 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 			}
 
-			if err = seg.fillVectorFieldsData(collID, vcm, result); err != nil {
+			if err = seg.fillIndexedFieldsData(collID, vcm, result); err != nil {
 				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 			}
 			retrieveResults = append(retrieveResults, result)

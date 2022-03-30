@@ -233,6 +233,7 @@ enum MsgType : int {
   ReleaseSegments = 253,
   HandoffSegments = 254,
   LoadBalanceSegments = 255,
+  DescribeSegments = 256,
   CreateIndex = 300,
   DescribeIndex = 301,
   DropIndex = 302,

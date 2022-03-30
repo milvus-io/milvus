@@ -1222,28 +1222,21 @@ func (st *searchTask) Execute(ctx context.Context) error {
 
 func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
 	tr := timerecord.NewTimeRecorder("decodeSearchResults")
-	log.Debug("decodeSearchResults", zap.Any("lenOfSearchResults", len(searchResults)))
-
 	results := make([]*schemapb.SearchResultData, 0)
-	// necessary to parallel this?
-	for i, partialSearchResult := range searchResults {
-		log.Debug("decodeSearchResults", zap.Any("i", i), zap.Any("len(SlicedBob)", len(partialSearchResult.SlicedBlob)))
+	for _, partialSearchResult := range searchResults {
 		if partialSearchResult.SlicedBlob == nil {
 			continue
 		}
 
 		var partialResultData schemapb.SearchResultData
 		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
-		log.Debug("decodeSearchResults, Unmarshal partitalSearchResult.SliceBlob", zap.Error(err))
 		if err != nil {
 			return nil, err
 		}
 
 		results = append(results, &partialResultData)
 	}
-	log.Debug("decodeSearchResults", zap.Any("lenOfResults", len(results)))
-	tr.Elapse("done")
-
+	tr.Elapse("decodeSearchResults done")
 	return results, nil
 }
 
@@ -1598,8 +1591,8 @@ func (qt *queryTask) PreExecute(ctx context.Context) error {
 	collectionName := qt.query.CollectionName
 
 	if err := validateCollectionName(qt.query.CollectionName); err != nil {
-		log.Debug("Invalid collection name.", zap.Any("collectionName", collectionName),
-			zap.Any("requestID", qt.Base.MsgID), zap.Any("requestType", "query"))
+		log.Warn("Invalid collection name.", zap.String("collectionName", collectionName),
+			zap.Int64("requestID", qt.Base.MsgID), zap.String("requestType", "query"))
 		return err
 	}
 	log.Info("Validate collection name.", zap.Any("collectionName", collectionName),
