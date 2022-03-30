@@ -202,11 +202,11 @@ message SegmentLoadInfo {
   repeated data.FieldBinlog statslogs = 8;
   repeated data.FieldBinlog deltalogs = 9;
   repeated int64 compactionFrom = 10; // segmentIDs compacted from
-  repeated VecFieldIndexInfo index_infos = 11;
+  repeated FieldIndexInfo index_infos = 11;
   int64 segment_size = 12;
 }
 
-message VecFieldIndexInfo {
+message FieldIndexInfo {
   int64 fieldID =1;
   bool enable_index = 2;
   string index_name = 3;
@@ -321,7 +321,7 @@ message SegmentInfo {
   repeated int64 compactionFrom = 10;
   bool createdByCompaction = 11;
   common.SegmentState segment_state = 12;
-  repeated VecFieldIndexInfo index_infos = 13;
+  repeated FieldIndexInfo index_infos = 13;
   repeated int64 replica_ids = 14;
   repeated int64 node_ids = 15;
 }

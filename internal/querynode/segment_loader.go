@@ -189,48 +189,43 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID))
-	vecFieldIDs, err := loader.historicalReplica.getVecFieldIDsByCollectionID(collectionID)
-	if err != nil {
-		return err
-	}
+
 	pkFieldID, err := loader.historicalReplica.getPKFieldIDByCollectionID(collectionID)
 	if err != nil {
 		return err
 	}
 
-	var nonVecFieldBinlogs []*datapb.FieldBinlog
+	var nonIndexedFieldBinlogs []*datapb.FieldBinlog
 	if segment.getType() == segmentTypeSealed {
-		fieldID2IndexInfo := make(map[int64]*querypb.VecFieldIndexInfo)
+		fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, indexInfo := range loadInfo.IndexInfos {
 			fieldID := indexInfo.FieldID
 			fieldID2IndexInfo[fieldID] = indexInfo
 		}
 
-		vecFieldInfos := make(map[int64]*VectorFieldInfo)
+		indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
 
 		for _, fieldBinlog := range loadInfo.BinlogPaths {
 			fieldID := fieldBinlog.FieldID
-			if funcutil.SliceContain(vecFieldIDs, fieldID) {
-				fieldInfo := &VectorFieldInfo{
+			if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
+				fieldInfo := &IndexedFieldInfo{
 					fieldBinlog: fieldBinlog,
+					indexInfo:   indexInfo,
 				}
-				if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-					fieldInfo.indexInfo = indexInfo
-				}
-				vecFieldInfos[fieldID] = fieldInfo
+				indexedFieldInfos[fieldID] = fieldInfo
 			} else {
-				nonVecFieldBinlogs = append(nonVecFieldBinlogs, fieldBinlog)
+				nonIndexedFieldBinlogs = append(nonIndexedFieldBinlogs, fieldBinlog)
 			}
 		}
 
-		err = loader.loadVecFieldData(segment, vecFieldInfos)
+		err = loader.loadIndexedFieldData(segment, indexedFieldInfos)
 		if err != nil {
 			return err
 		}
 	} else {
-		nonVecFieldBinlogs = loadInfo.BinlogPaths
+		nonIndexedFieldBinlogs = loadInfo.BinlogPaths
 	}
-	err = loader.loadFiledBinlogData(segment, nonVecFieldBinlogs)
+	err = loader.loadFiledBinlogData(segment, nonIndexedFieldBinlogs)
 	if err != nil {
 		return err
 	}
@@ -302,7 +297,7 @@ func (loader *segmentLoader) loadFiledBinlogData(segment *Segment, fieldBinlogs 
 	}
 }
 
-func (loader *segmentLoader) loadVecFieldData(segment *Segment, vecFieldInfos map[int64]*VectorFieldInfo) error {
+func (loader *segmentLoader) loadIndexedFieldData(segment *Segment, vecFieldInfos map[int64]*IndexedFieldInfo) error {
 	for fieldID, fieldInfo := range vecFieldInfos {
 		if fieldInfo.indexInfo == nil || !fieldInfo.indexInfo.EnableIndex {
 			fieldBinlog := fieldInfo.fieldBinlog
@@ -313,21 +308,22 @@ func (loader *segmentLoader) loadVecFieldData(segment *Segment, vecFieldInfos ma
 			log.Debug("load vector field's binlog data done", zap.Int64("segmentID", segment.ID()), zap.Int64("fieldID", fieldID))
 		} else {
 			indexInfo := fieldInfo.indexInfo
-			err := loader.loadVecFieldIndexData(segment, indexInfo)
+			err := loader.loadFieldIndexData(segment, indexInfo)
 			if err != nil {
 				return err
 			}
 			log.Debug("load vector field's index data done", zap.Int64("segmentID", segment.ID()), zap.Int64("fieldID", fieldID))
 		}
-		segment.setVectorFieldInfo(fieldID, fieldInfo)
+		segment.setIndexedFieldInfo(fieldID, fieldInfo)
 	}
 
 	return nil
 }
 
-func (loader *segmentLoader) loadVecFieldIndexData(segment *Segment, indexInfo *querypb.VecFieldIndexInfo) error {
+func (loader *segmentLoader) loadFieldIndexData(segment *Segment, indexInfo *querypb.FieldIndexInfo) error {
 	indexBuffer := make([][]byte, 0)
 	indexCodec := storage.NewIndexFileBinlogCodec()
+	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
 	for _, p := range indexInfo.IndexFilePaths {
 		log.Debug("load index file", zap.String("path", p))
 		indexPiece, err := loader.cm.Read(p)
@@ -341,9 +337,11 @@ func (loader *segmentLoader) loadVecFieldIndexData(segment *Segment, indexInfo *
 				return err
 			}
 			indexBuffer = append(indexBuffer, data[0].Value)
+			filteredPaths = append(filteredPaths, p)
 		}
 	}
 	// 2. use index bytes and index path to update segment
+	indexInfo.IndexFilePaths = filteredPaths
 	err := segment.segmentLoadIndexData(indexBuffer, indexInfo)
 	return err
 }

@@ -569,6 +569,8 @@ type RootCoord interface {
 	// error is always nil
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 
+	DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
+
 	// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
 	//
 	// ctx is the request to control request deadline and cancellation.

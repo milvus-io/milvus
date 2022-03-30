@@ -1837,6 +1837,64 @@ func (c *Core) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegment
 	return t.Rsp, nil
 }
 
+func (c *Core) DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
+	metrics.RootCoordDescribeSegmentsCounter.WithLabelValues(metrics.TotalLabel).Inc()
+
+	if code, ok := c.checkHealthy(); !ok {
+		log.Error("failed to describe segments, rootcoord not healthy",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Int64("msgID", in.GetBase().GetMsgID()),
+			zap.Int64("collection", in.GetCollectionID()),
+			zap.Int64s("segments", in.GetSegmentIDs()))
+
+		return &rootcoordpb.DescribeSegmentsResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+
+	tr := timerecord.NewTimeRecorder("DescribeSegments")
+
+	log.Debug("received request to describe segments",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.Int64("msgID", in.GetBase().GetMsgID()),
+		zap.Int64("collection", in.GetCollectionID()),
+		zap.Int64s("segments", in.GetSegmentIDs()))
+
+	t := &DescribeSegmentsReqTask{
+		baseReqTask: baseReqTask{
+			ctx:  ctx,
+			core: c,
+		},
+		Req: in,
+		Rsp: &rootcoordpb.DescribeSegmentsResponse{},
+	}
+
+	if err := executeTask(t); err != nil {
+		log.Error("failed to describe segments",
+			zap.Error(err),
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Int64("msgID", in.GetBase().GetMsgID()),
+			zap.Int64("collection", in.GetCollectionID()),
+			zap.Int64s("segments", in.GetSegmentIDs()))
+
+		return &rootcoordpb.DescribeSegmentsResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "DescribeSegments failed: "+err.Error()),
+		}, nil
+	}
+
+	log.Debug("succeed to describe segments",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.Int64("msgID", in.GetBase().GetMsgID()),
+		zap.Int64("collection", in.GetCollectionID()),
+		zap.Int64s("segments", in.GetSegmentIDs()))
+
+	metrics.RootCoordDescribeSegmentsCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("DescribeSegments").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	t.Rsp.Status = succStatus()
+	return t.Rsp, nil
+}
+
 // ShowSegments list all segments
 func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	metrics.RootCoordShowSegmentsCounter.WithLabelValues(metrics.TotalLabel).Inc()

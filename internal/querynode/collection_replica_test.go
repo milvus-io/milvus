@@ -244,8 +244,8 @@ func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
 	fieldID := vectorFieldIDDs[0]
 
 	indexID := UniqueID(10000)
-	indexInfo := &VectorFieldInfo{
-		indexInfo: &querypb.VecFieldIndexInfo{
+	indexInfo := &IndexedFieldInfo{
+		indexInfo: &querypb.FieldIndexInfo{
 			IndexName:   "test-index-name",
 			IndexID:     indexID,
 			EnableIndex: true,
@@ -259,7 +259,7 @@ func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
 
 	segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, collectionID, "", segmentTypeSealed, true)
 	assert.NoError(t, err)
-	segment2.setVectorFieldInfo(fieldID, indexInfo)
+	segment2.setIndexedFieldInfo(fieldID, indexInfo)
 	err = node.historical.replica.setSegment(segment2)
 	assert.NoError(t, err)
 
