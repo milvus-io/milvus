@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -87,34 +86,6 @@ func (event *descriptorEvent) Write(buffer io.Writer) error {
 		return err
 	}
 	return nil
-}
-
-func readMagicNumber(buffer io.Reader) (int32, error) {
-	var magicNumber int32
-	if err := binary.Read(buffer, common.Endian, &magicNumber); err != nil {
-		return -1, err
-	}
-	if magicNumber != MagicNumber {
-		return -1, fmt.Errorf("parse magic number failed, expected: %d, actual: %d", MagicNumber, magicNumber)
-	}
-
-	return magicNumber, nil
-}
-
-// ReadDescriptorEvent reads a descriptorEvent from buffer
-func ReadDescriptorEvent(buffer io.Reader) (*descriptorEvent, error) {
-	header, err := readDescriptorEventHeader(buffer)
-	if err != nil {
-		return nil, err
-	}
-	data, err := readDescriptorEventData(buffer)
-	if err != nil {
-		return nil, err
-	}
-	return &descriptorEvent{
-		descriptorEventHeader: *header,
-		descriptorEventData:   *data,
-	}, nil
 }
 
 // EventWriter abstracts event writer

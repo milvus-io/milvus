@@ -249,6 +249,7 @@ type BlobInfo struct {
 // InsertData example row_schema: {float_field, int_field, float_vector_field, string_field}
 // Data {<0, row_id>, <1, timestamp>, <100, float_field>, <101, int_field>, <102, float_vector_field>, <103, string_field>}
 type InsertData struct {
+	// Todo, data should be zero copy by passing data directly to event reader or change Data to map[FieldID]FieldDataArray
 	Data  map[FieldID]FieldData // field id to field data
 	Infos []BlobInfo
 }
@@ -633,14 +634,14 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 				}
 				totalLength += length
 				stringFieldData.NumRows = append(stringFieldData.NumRows, int64(length))
-				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetOneStringFromPayload(i)
-					if err != nil {
-						eventReader.Close()
-						binlogReader.Close()
-						return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-					}
-					stringFieldData.Data = append(stringFieldData.Data, singleString)
+				stringPayload, err := eventReader.GetStringFromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
+				}
+				for idx := range stringPayload {
+					stringFieldData.Data = append(stringFieldData.Data, stringPayload[idx])
 				}
 				resultData.Data[fieldID] = stringFieldData
 			case schemapb.DataType_BinaryVector:
@@ -828,19 +829,18 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
 
+		stringarray, err := eventReader.GetStringFromPayload()
+		if err != nil {
+			eventReader.Close()
+			binlogReader.Close()
+			return InvalidUniqueID, InvalidUniqueID, nil, err
+		}
 		for i := 0; i < length; i++ {
-			singleString, err := eventReader.GetOneStringFromPayload(i)
-			if err != nil {
-				eventReader.Close()
-				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, nil, err
-			}
-
-			splits := strings.Split(singleString, ",")
+			splits := strings.Split(stringarray[i], ",")
 			if len(splits) != 2 {
 				eventReader.Close()
 				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect")
+				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", stringarray[i])
 			}
 
 			pk, err := strconv.ParseInt(splits[0], 10, 64)
@@ -1044,20 +1044,14 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 					resultTs = append(resultTs, Timestamp(singleTs))
 				}
 			case schemapb.DataType_String:
-				length, err := eventReader.GetPayloadLengthFromReader()
+				stringPayload, err := eventReader.GetStringFromPayload()
 				if err != nil {
 					eventReader.Close()
 					binlogReader.Close()
 					return nil, nil, err
 				}
-				for i := 0; i < length; i++ {
-					singleString, err := eventReader.GetOneStringFromPayload(i)
-					if err != nil {
-						eventReader.Close()
-						binlogReader.Close()
-						return nil, nil, err
-					}
-					requestsStrings = append(requestsStrings, singleString)
+				for idx := range stringPayload {
+					requestsStrings = append(requestsStrings, stringPayload[idx])
 				}
 			}
 			eventReader.Close()
