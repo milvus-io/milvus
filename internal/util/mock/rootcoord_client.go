@@ -99,6 +99,10 @@ func (m *RootCoordClient) ShowSegments(ctx context.Context, in *milvuspb.ShowSeg
 	return &milvuspb.ShowSegmentsResponse{}, m.Err
 }
 
+func (m *RootCoordClient) DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeSegmentsResponse, error) {
+	return &rootcoordpb.DescribeSegmentsResponse{}, m.Err
+}
+
 func (m *RootCoordClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

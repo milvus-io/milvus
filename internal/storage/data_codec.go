@@ -1071,6 +1071,57 @@ func NewIndexFileBinlogCodec() *IndexFileBinlogCodec {
 	return &IndexFileBinlogCodec{}
 }
 
+func (codec *IndexFileBinlogCodec) serializeImpl(
+	indexBuildID UniqueID,
+	version int64,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	fieldID UniqueID,
+	indexName string,
+	indexID UniqueID,
+	key string,
+	value []byte,
+	ts Timestamp,
+) (*Blob, error) {
+	writer := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, key)
+	defer writer.Close()
+
+	eventWriter, err := writer.NextIndexFileEventWriter()
+	if err != nil {
+		return nil, err
+	}
+	defer eventWriter.Close()
+
+	err = eventWriter.AddByteToPayload(value)
+	if err != nil {
+		return nil, err
+	}
+
+	eventWriter.SetEventTimestamp(ts, ts)
+
+	writer.SetEventTimeStamp(ts, ts)
+
+	// https://github.com/milvus-io/milvus/issues/9620
+	// len(params) is also not accurate, indexParams is a map
+	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", len(value)))
+
+	err = writer.Finish()
+	if err != nil {
+		return nil, err
+	}
+	buffer, err := writer.GetBuffer()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Blob{
+		Key: key,
+		//Key:   strconv.Itoa(len(datas)),
+		Value: buffer,
+	}, nil
+}
+
 // Serialize serilizes data as blobs.
 func (codec *IndexFileBinlogCodec) Serialize(
 	indexBuildID UniqueID,
@@ -1091,94 +1142,22 @@ func (codec *IndexFileBinlogCodec) Serialize(
 
 	ts := Timestamp(time.Now().UnixNano())
 
-	for pos := range datas {
-		writer := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, datas[pos].Key)
-
-		// https://github.com/milvus-io/milvus/issues/9449
-		// store index parameters to extra, in bytes format.
-		params, _ := json.Marshal(indexParams)
-		writer.descriptorEvent.AddExtra(IndexParamsKey, params)
-
-		eventWriter, err := writer.NextIndexFileEventWriter()
-		if err != nil {
-			writer.Close()
-			return nil, err
-		}
-
-		err = eventWriter.AddByteToPayload(datas[pos].Value)
-		if err != nil {
-			eventWriter.Close()
-			writer.Close()
-			return nil, err
-		}
-
-		eventWriter.SetEventTimestamp(ts, ts)
-
-		writer.SetEventTimeStamp(ts, ts)
-
-		// https://github.com/milvus-io/milvus/issues/9620
-		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", len(datas[pos].Value)))
-
-		err = writer.Finish()
-		if err != nil {
-			eventWriter.Close()
-			writer.Close()
-			return nil, err
-		}
-		buffer, err := writer.GetBuffer()
-		if err != nil {
-			eventWriter.Close()
-			writer.Close()
-			return nil, err
-		}
-
-		blobs = append(blobs, &Blob{
-			Key: datas[pos].Key,
-			//Key:   strconv.Itoa(pos),
-			Value: buffer,
-		})
-		eventWriter.Close()
-		writer.Close()
-	}
-
-	// save index params
-	writer := NewIndexFileBinlogWriter(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, IndexParamsKey)
-	eventWriter, err := writer.NextIndexFileEventWriter()
-	if err != nil {
-		writer.Close()
-		return nil, err
-	}
-	defer writer.Close()
-	defer eventWriter.Close()
-
+	// save index params.
+	// querycoord will parse index extra info from binlog, better to let this key appear first.
 	params, _ := json.Marshal(indexParams)
-	err = eventWriter.AddByteToPayload(params)
+	indexParamBlob, err := codec.serializeImpl(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, IndexParamsKey, params, ts)
 	if err != nil {
 		return nil, err
 	}
+	blobs = append(blobs, indexParamBlob)
 
-	eventWriter.SetEventTimestamp(ts, ts)
-
-	writer.SetEventTimeStamp(ts, ts)
-
-	// https://github.com/milvus-io/milvus/issues/9620
-	// len(params) is also not accurate, indexParams is a map
-	writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", len(params)))
-
-	err = writer.Finish()
-	if err != nil {
-		return nil, err
+	for pos := range datas {
+		blob, err := codec.serializeImpl(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, datas[pos].Key, datas[pos].Value, ts)
+		if err != nil {
+			return nil, err
+		}
+		blobs = append(blobs, blob)
 	}
-	buffer, err := writer.GetBuffer()
-	if err != nil {
-		return nil, err
-	}
-
-	blobs = append(blobs, &Blob{
-		Key: IndexParamsKey,
-		//Key:   strconv.Itoa(len(datas)),
-		Value: buffer,
-	})
 
 	return blobs, nil
 }

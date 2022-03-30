@@ -2992,3 +2992,88 @@ func TestCore_GetComponentStates(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }
+
+func TestCore_DescribeSegments(t *testing.T) {
+	collID := typeutil.UniqueID(1)
+	partID := typeutil.UniqueID(2)
+	segID := typeutil.UniqueID(100)
+	fieldID := typeutil.UniqueID(3)
+	buildID := typeutil.UniqueID(4)
+	indexID := typeutil.UniqueID(1000)
+	indexName := "test_describe_segments_index"
+
+	c := &Core{
+		ctx: context.Background(),
+	}
+
+	// not healthy.
+	c.stateCode.Store(internalpb.StateCode_Abnormal)
+	got1, err := c.DescribeSegments(context.Background(), &rootcoordpb.DescribeSegmentsRequest{})
+	assert.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, got1.GetStatus().GetErrorCode())
+
+	// failed to be executed.
+	c.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error) {
+		return []typeutil.UniqueID{segID}, nil
+	}
+	c.stateCode.Store(internalpb.StateCode_Healthy)
+	shortDuration := time.Nanosecond
+	shortCtx, cancel := context.WithTimeout(c.ctx, shortDuration)
+	defer cancel()
+	time.Sleep(shortDuration)
+	got2, err := c.DescribeSegments(shortCtx, &rootcoordpb.DescribeSegmentsRequest{})
+	assert.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, got2.GetStatus().GetErrorCode())
+
+	// success.
+	c.MetaTable = &MetaTable{
+		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
+			segID: {
+				indexID: {
+					CollectionID: collID,
+					PartitionID:  partID,
+					SegmentID:    segID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					BuildID:      buildID,
+					EnableIndex:  true,
+				},
+			},
+		},
+		indexID2Meta: map[typeutil.UniqueID]etcdpb.IndexInfo{
+			indexID: {
+				IndexName:   indexName,
+				IndexID:     indexID,
+				IndexParams: nil,
+			},
+		},
+	}
+	infos, err := c.DescribeSegments(context.Background(), &rootcoordpb.DescribeSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DescribeSegments,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  0,
+		},
+		CollectionID: collID,
+		SegmentIDs:   []typeutil.UniqueID{segID},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, infos.GetStatus().GetErrorCode())
+	assert.Equal(t, 1, len(infos.GetSegmentInfos()))
+	segmentInfo, ok := infos.GetSegmentInfos()[segID]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(segmentInfo.GetIndexInfos()))
+	assert.Equal(t, collID, segmentInfo.GetIndexInfos()[0].GetCollectionID())
+	assert.Equal(t, partID, segmentInfo.GetIndexInfos()[0].GetPartitionID())
+	assert.Equal(t, segID, segmentInfo.GetIndexInfos()[0].GetSegmentID())
+	assert.Equal(t, fieldID, segmentInfo.GetIndexInfos()[0].GetFieldID())
+	assert.Equal(t, indexID, segmentInfo.GetIndexInfos()[0].GetIndexID())
+	assert.Equal(t, buildID, segmentInfo.GetIndexInfos()[0].GetBuildID())
+	assert.Equal(t, true, segmentInfo.GetIndexInfos()[0].GetEnableIndex())
+
+	indexInfo, ok := segmentInfo.GetExtraIndexInfos()[indexID]
+	assert.True(t, ok)
+	assert.Equal(t, indexName, indexInfo.IndexName)
+	assert.Equal(t, indexID, indexInfo.IndexID)
+}

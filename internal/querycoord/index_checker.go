@@ -30,6 +30,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+type extraIndexInfo struct {
+	indexID        UniqueID
+	indexName      string
+	indexParams    []*commonpb.KeyValuePair
+	indexSize      uint64
+	indexFilePaths []string
+}
+
 // IndexChecker checks index
 type IndexChecker struct {
 	ctx    context.Context

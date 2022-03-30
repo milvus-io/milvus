@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -827,6 +828,88 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	}
 
 	t.Rsp.SegmentIDs = append(t.Rsp.SegmentIDs, segIDs...)
+	return nil
+}
+
+type DescribeSegmentsReqTask struct {
+	baseReqTask
+	Req *rootcoordpb.DescribeSegmentsRequest
+	Rsp *rootcoordpb.DescribeSegmentsResponse
+}
+
+func (t *DescribeSegmentsReqTask) Type() commonpb.MsgType {
+	return t.Req.GetBase().GetMsgType()
+}
+
+func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
+	collectionID := t.Req.GetCollectionID()
+	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, collectionID, -1)
+	if err != nil {
+		log.Error("failed to get flushed segments",
+			zap.Error(err),
+			zap.Int64("collection", collectionID))
+		return err
+	}
+
+	t.Rsp.CollectionID = collectionID
+	t.Rsp.SegmentInfos = make(map[typeutil.UniqueID]*rootcoordpb.SegmentInfos)
+
+	segIDsMap := make(map[typeutil.UniqueID]struct{})
+	for _, segID := range segIDs {
+		segIDsMap[segID] = struct{}{}
+	}
+
+	for _, segID := range t.Req.SegmentIDs {
+		if _, ok := segIDsMap[segID]; !ok {
+			log.Warn("requested segment not found",
+				zap.Int64("collection", collectionID),
+				zap.Int64("segment", segID))
+			return fmt.Errorf("segment not found, collection: %d, segment: %d",
+				collectionID, segID)
+		}
+
+		if _, ok := t.Rsp.SegmentInfos[segID]; !ok {
+			t.Rsp.SegmentInfos[segID] = &rootcoordpb.SegmentInfos{
+				BaseInfo: &rootcoordpb.SegmentBaseInfo{
+					CollectionID: collectionID,
+					PartitionID:  0, // TODO: change this after MetaTable.partID2SegID been fixed.
+					SegmentID:    segID,
+				},
+				IndexInfos:      nil,
+				ExtraIndexInfos: make(map[typeutil.UniqueID]*etcdpb.IndexInfo),
+			}
+		}
+
+		segmentInfo, err := t.core.MetaTable.GetSegmentIndexInfos(segID)
+		if err != nil {
+			continue
+		}
+
+		for indexID, indexInfo := range segmentInfo {
+			t.Rsp.SegmentInfos[segID].IndexInfos =
+				append(t.Rsp.SegmentInfos[segID].IndexInfos,
+					&etcdpb.SegmentIndexInfo{
+						CollectionID: indexInfo.CollectionID,
+						PartitionID:  indexInfo.PartitionID,
+						SegmentID:    indexInfo.SegmentID,
+						FieldID:      indexInfo.FieldID,
+						IndexID:      indexInfo.IndexID,
+						BuildID:      indexInfo.BuildID,
+						EnableIndex:  indexInfo.EnableIndex,
+					})
+			extraIndexInfo, err := t.core.MetaTable.GetIndexByID(indexID)
+			if err != nil {
+				log.Error("index not found in meta table",
+					zap.Error(err),
+					zap.Int64("indexID", indexID),
+					zap.Int64("collection", collectionID),
+					zap.Int64("segment", segID))
+				return err
+			}
+			t.Rsp.SegmentInfos[segID].ExtraIndexInfos[indexID] = extraIndexInfo
+		}
+	}
+
 	return nil
 }
 

@@ -114,6 +114,7 @@ enum MsgType {
     ReleaseSegments = 253;
     HandoffSegments = 254;
     LoadBalanceSegments = 255;
+    DescribeSegments = 256;
 
     /* DEFINITION REQUESTS: INDEX */
     CreateIndex = 300;

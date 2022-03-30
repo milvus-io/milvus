@@ -34,7 +34,7 @@ func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
 func estimateSegmentSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
 	segmentSize := int64(0)
 
-	vecFieldID2IndexInfo := make(map[int64]*querypb.VecFieldIndexInfo)
+	vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, fieldIndexInfo := range segmentLoadInfo.IndexInfos {
 		if fieldIndexInfo.EnableIndex {
 			fieldID := fieldIndexInfo.FieldID

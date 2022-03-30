@@ -985,6 +985,18 @@ func (mt *MetaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, fieldID in
 	return pb.SegmentIndexInfo{}, fmt.Errorf("can't find index name = %s on segment = %d, with filed id = %d", idxName, segID, fieldID)
 }
 
+func (mt *MetaTable) GetSegmentIndexInfos(segID typeutil.UniqueID) (map[typeutil.UniqueID]pb.SegmentIndexInfo, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	ret, ok := mt.segID2IndexMeta[segID]
+	if !ok {
+		return nil, fmt.Errorf("segment not found in meta, segment: %d", segID)
+	}
+
+	return ret, nil
+}
+
 // GetFieldSchema return field schema
 func (mt *MetaTable) GetFieldSchema(collName string, fieldName string) (schemapb.FieldSchema, error) {
 	mt.ddLock.RLock()
