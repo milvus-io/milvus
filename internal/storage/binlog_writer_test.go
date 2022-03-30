@@ -18,7 +18,6 @@ package storage
 
 import (
 	"fmt"
-	"strconv"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -59,7 +58,6 @@ func TestBinlogWriterReader(t *testing.T) {
 
 	buffer, err := binlogWriter.GetBuffer()
 	assert.Nil(t, err)
-	fmt.Println("reader offset : " + strconv.Itoa(len(buffer)))
 	binlogWriter.Close()
 
 	binlogReader, err := NewBinlogReader(buffer)

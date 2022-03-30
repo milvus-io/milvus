@@ -333,34 +333,21 @@ func TestInsertEvent(t *testing.T) {
 		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
 		assert.Nil(t, err)
 
-		s0, err := pR.GetOneStringFromPayload(0)
+		s, err := pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err := pR.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err := pR.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
-
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 		pR.Close()
 
 		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
 		assert.Nil(t, err)
 
-		s0, err = r.GetOneStringFromPayload(0)
+		s, err = pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err = r.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err = r.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		r.Close()
 	})
@@ -573,34 +560,22 @@ func TestDeleteEvent(t *testing.T) {
 		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
 		assert.Nil(t, err)
 
-		s0, err := pR.GetOneStringFromPayload(0)
+		s, err := pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err := pR.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err := pR.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		pR.Close()
 
 		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
 		assert.Nil(t, err)
 
-		s0, err = r.GetOneStringFromPayload(0)
+		s, err = pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err = r.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err = r.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		r.Close()
 	})
@@ -687,34 +662,22 @@ func TestCreateCollectionEvent(t *testing.T) {
 		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
 		assert.Nil(t, err)
 
-		s0, err := pR.GetOneStringFromPayload(0)
+		s, err := pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err := pR.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err := pR.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		pR.Close()
 
 		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
 		assert.Nil(t, err)
 
-		s0, err = r.GetOneStringFromPayload(0)
+		s, err = pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err = r.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err = r.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		r.Close()
 	})
@@ -801,34 +764,22 @@ func TestDropCollectionEvent(t *testing.T) {
 		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
 		assert.Nil(t, err)
 
-		s0, err := pR.GetOneStringFromPayload(0)
+		s, err := pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err := pR.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err := pR.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		pR.Close()
 
 		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
 		assert.Nil(t, err)
 
-		s0, err = r.GetOneStringFromPayload(0)
+		s, err = r.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err = r.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err = r.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		r.Close()
 	})
@@ -915,34 +866,22 @@ func TestCreatePartitionEvent(t *testing.T) {
 		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
 		assert.Nil(t, err)
 
-		s0, err := pR.GetOneStringFromPayload(0)
+		s, err := pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err := pR.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err := pR.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		pR.Close()
 
 		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
 		assert.Nil(t, err)
 
-		s0, err = r.GetOneStringFromPayload(0)
+		s, err = pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err = r.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err = r.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		r.Close()
 	})
@@ -1029,34 +968,22 @@ func TestDropPartitionEvent(t *testing.T) {
 		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
 		assert.Nil(t, err)
 
-		s0, err := pR.GetOneStringFromPayload(0)
+		s, err := pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err := pR.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err := pR.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		pR.Close()
 
 		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
 		assert.Nil(t, err)
 
-		s0, err = r.GetOneStringFromPayload(0)
+		s, err = pR.GetStringFromPayload()
 		assert.Nil(t, err)
-		assert.Equal(t, s0, "1234")
-
-		s1, err = r.GetOneStringFromPayload(1)
-		assert.Nil(t, err)
-		assert.Equal(t, s1, "567890")
-
-		s2, err = r.GetOneStringFromPayload(2)
-		assert.Nil(t, err)
-		assert.Equal(t, s2, "abcdefg")
+		assert.Equal(t, s[0], "1234")
+		assert.Equal(t, s[1], "567890")
+		assert.Equal(t, s[2], "abcdefg")
 
 		r.Close()
 	})

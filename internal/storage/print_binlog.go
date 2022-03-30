@@ -282,12 +282,13 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		if err != nil {
 			return err
 		}
+
+		val, err := reader.GetStringFromPayload()
+		if err != nil {
+			return err
+		}
 		for i := 0; i < rows; i++ {
-			val, err := reader.GetOneStringFromPayload(i)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("\t\t%d : %s\n", i, val)
+			fmt.Printf("\t\t%d : %s\n", i, val[i])
 		}
 	case schemapb.DataType_BinaryVector:
 		val, dim, err := reader.GetBinaryVectorFromPayload()
@@ -341,12 +342,13 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 		if err != nil {
 			return err
 		}
+
+		val, err := reader.GetStringFromPayload()
+		if err != nil {
+			return err
+		}
 		for i := 0; i < rows; i++ {
-			val, err := reader.GetOneStringFromPayload(i)
-			valBytes := []byte(val)
-			if err != nil {
-				return err
-			}
+			valBytes := []byte(val[i])
 			switch eventType {
 			case CreateCollectionEventType:
 				var req internalpb.CreateCollectionRequest
