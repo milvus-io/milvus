@@ -56,14 +56,16 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 	}
 
 	stats.PkType = int64(schemapb.DataType_Int64)
-	var typeValue int64
-	err = json.Unmarshal(*messageMap["pkType"], &typeValue)
-	if err != nil {
-		return err
-	}
-	// valid pkType
-	if typeValue > 0 {
-		stats.PkType = typeValue
+	if value, ok := messageMap["pkType"]; ok && value != nil {
+		var typeValue int64
+		err = json.Unmarshal(*value, &typeValue)
+		if err != nil {
+			return err
+		}
+		// valid pkType
+		if typeValue > 0 {
+			stats.PkType = typeValue
+		}
 	}
 
 	switch schemapb.DataType(stats.PkType) {
