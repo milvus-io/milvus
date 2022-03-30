@@ -215,7 +215,7 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 	s.segments = segmentsID
 }
 
-// AllocSegment allocate segment per request collcation, partication, channel and rows
+// AllocSegment allocate segment per request collection, partition, channel and rows.
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
@@ -228,7 +228,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	for _, segmentID := range s.segments {
 		segment := s.meta.GetSegment(segmentID)
 		if segment == nil {
-			log.Warn("Failed to get seginfo from meta", zap.Int64("id", segmentID))
+			log.Warn("failed to get segment info from meta", zap.Int64("segment ID", segmentID))
 			continue
 		}
 		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) {
@@ -320,11 +320,11 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		return nil, err
 	}
 	s.segments = append(s.segments, id)
-	log.Info("datacoord: estimateTotalRows: ",
-		zap.Int64("CollectionID", segmentInfo.CollectionID),
-		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.Int("Rows", maxNumOfRows),
-		zap.String("Channel", segmentInfo.InsertChannel))
+	log.Info("dataCoord estimating total # of rows",
+		zap.Int64("collection ID", segmentInfo.CollectionID),
+		zap.Int64("segment ID", segmentInfo.ID),
+		zap.Int("# of rows", maxNumOfRows),
+		zap.String("channel", segmentInfo.InsertChannel))
 
 	return segment, s.helper.afterCreateSegment(segmentInfo)
 }
@@ -360,7 +360,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 }
 
-// SealAllSegments seals all segmetns of collection with collectionID and return sealed segments
+// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
 func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
@@ -370,7 +370,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	for _, id := range s.segments {
 		info := s.meta.GetSegment(id)
 		if info == nil {
-			log.Warn("Failed to get seg info from meta", zap.Int64("id", id))
+			log.Warn("failed to get seg info from meta", zap.Int64("segment ID", id))
 			continue
 		}
 		if info.CollectionID != collectionID {

@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
-// Response response interface for verification
+// Response is response interface for verification.
 type Response interface {
 	GetStatus() *commonpb.Status
 }
