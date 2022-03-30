@@ -44,7 +44,7 @@ func TestLoadIndexInfo(t *testing.T) {
 	loadIndexInfo, err := newLoadIndexInfo()
 	assert.Nil(t, err)
 
-	indexInfo := &querypb.VecFieldIndexInfo{
+	indexInfo := &querypb.FieldIndexInfo{
 		FieldID:        UniqueID(0),
 		IndexParams:    indexParams,
 		IndexFilePaths: indexPaths,

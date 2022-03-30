@@ -144,6 +144,15 @@ var (
 			Help:      "Counter of show segments",
 		}, []string{statusLabelName})
 
+	// RootCoordDescribeSegmentsCounter counts the num of calls of DescribeSegments
+	RootCoordDescribeSegmentsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "describe_segments_total",
+			Help:      "Counter of describe segments",
+		}, []string{statusLabelName})
+
 	////////////////////////////////////////////////////////////////////////////
 	// for time tick
 
@@ -284,6 +293,7 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordDescribeIndexCounter)
 	registry.MustRegister(RootCoordDescribeSegmentCounter)
 	registry.MustRegister(RootCoordShowSegmentsCounter)
+	registry.MustRegister(RootCoordDescribeSegmentsCounter)
 
 	// for time tick
 	registry.MustRegister(RootCoordInsertChannelTimeTick)

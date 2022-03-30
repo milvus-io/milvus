@@ -18,6 +18,7 @@ package funcutil
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -398,4 +399,67 @@ func TestGetNumRowsOfBinaryVectorField(t *testing.T) {
 			assert.NotEqual(t, nil, err)
 		}
 	}
+}
+
+func Test_ReadBinary(t *testing.T) {
+	// TODO: test big endian.
+	// low byte in high address, high byte in low address.
+	endian := binary.LittleEndian
+	var bs []byte
+
+	bs = []byte{0x1f}
+	var i8 int8
+	var expectedI8 int8 = 0x1f
+	assert.NoError(t, ReadBinary(endian, bs, &i8))
+	assert.Equal(t, expectedI8, i8)
+
+	bs = []byte{0xff, 0x1f}
+	var i16 int16
+	var expectedI16 int16 = 0x1fff
+	assert.NoError(t, ReadBinary(endian, bs, &i16))
+	assert.Equal(t, expectedI16, i16)
+
+	bs = []byte{0xff, 0xff, 0xff, 0x1f}
+	var i32 int32
+	var expectedI32 int32 = 0x1fffffff
+	assert.NoError(t, ReadBinary(endian, bs, &i32))
+	assert.Equal(t, expectedI32, i32)
+
+	bs = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1f}
+	var i64 int64
+	var expectedI64 int64 = 0x1fffffffffffffff
+	assert.NoError(t, ReadBinary(endian, bs, &i64))
+	assert.Equal(t, expectedI64, i64)
+
+	// hard to compare float-pointing value.
+
+	bs = []byte{0, 0, 0, 0}
+	var f float32
+	// var expectedF32 float32 = 0
+	var expectedF32 float32
+	assert.NoError(t, ReadBinary(endian, bs, &f))
+	assert.Equal(t, expectedF32, f)
+
+	bs = []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	var d float64
+	// var expectedF64 float64 = 0
+	var expectedF64 float64
+	assert.NoError(t, ReadBinary(endian, bs, &d))
+	assert.Equal(t, expectedF64, d)
+
+	bs = []byte{0}
+	var fb bool
+	assert.NoError(t, ReadBinary(endian, bs, &fb))
+	assert.False(t, fb)
+
+	bs = []byte{1}
+	var tb bool
+	assert.NoError(t, ReadBinary(endian, bs, &tb))
+	assert.True(t, tb)
+
+	// float vector
+	bs = []byte{0, 0, 0, 0, 0, 0, 0, 0}
+	var fs = make([]float32, 2)
+	assert.NoError(t, ReadBinary(endian, bs, &fs))
+	assert.ElementsMatch(t, []float32{0, 0}, fs)
 }

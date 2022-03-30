@@ -383,6 +383,10 @@ func (m *mockRootCoordService) ShowSegments(ctx context.Context, req *milvuspb.S
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordService) DescribeSegments(ctx context.Context, req *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
+	panic("implement me")
+}
+
 func (m *mockRootCoordService) GetDdChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{

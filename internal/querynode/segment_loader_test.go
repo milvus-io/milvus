@@ -464,7 +464,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 	// generate index file for segment
 	indexPaths, err := generateIndex(segmentID)
 	assert.NoError(t, err)
-	indexInfo := &querypb.VecFieldIndexInfo{
+	indexInfo := &querypb.FieldIndexInfo{
 		FieldID:        simpleVecField.id,
 		EnableIndex:    true,
 		IndexName:      indexName,
@@ -493,7 +493,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 				PartitionID:  defaultPartitionID,
 				CollectionID: defaultCollectionID,
 				BinlogPaths:  fieldBinlog,
-				IndexInfos:   []*querypb.VecFieldIndexInfo{indexInfo},
+				IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
 			},
 		},
 	}
@@ -503,7 +503,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 
 	segment, err := node.historical.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
-	vecFieldInfo, err := segment.getVectorFieldInfo(simpleVecField.id)
+	vecFieldInfo, err := segment.getIndexedFieldInfo(simpleVecField.id)
 	assert.NoError(t, err)
 	assert.NotNil(t, vecFieldInfo)
 	assert.Equal(t, true, vecFieldInfo.indexInfo.EnableIndex)

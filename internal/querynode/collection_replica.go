@@ -296,6 +296,21 @@ func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]U
 	return collection.partitionIDs, nil
 }
 
+func (colReplica *collectionReplica) getIndexedFieldIDByCollectionIDPrivate(collectionID UniqueID, segment *Segment) ([]FieldID, error) {
+	fields, err := colReplica.getFieldsByCollectionIDPrivate(collectionID)
+	if err != nil {
+		return nil, err
+	}
+
+	fieldIDS := make([]FieldID, 0)
+	for _, field := range fields {
+		if segment.hasLoadIndexForIndexedField(field.FieldID) {
+			fieldIDS = append(fieldIDS, field.FieldID)
+		}
+	}
+	return fieldIDS, nil
+}
+
 func (colReplica *collectionReplica) getVecFieldIDsByCollectionIDPrivate(collectionID UniqueID) ([]FieldID, error) {
 	fields, err := colReplica.getFieldsByCollectionIDPrivate(collectionID)
 	if err != nil {
@@ -720,16 +735,15 @@ func newCollectionReplica(etcdKv *etcdkv.EtcdKV) ReplicaInterface {
 func (colReplica *collectionReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
 	var indexName string
 	var indexID int64
+	var indexInfos []*querypb.FieldIndexInfo
 	// TODO:: segment has multi vec column
-	vecFieldIDs, _ := colReplica.getVecFieldIDsByCollectionIDPrivate(segment.collectionID)
-	for _, fieldID := range vecFieldIDs {
-		if segment.hasLoadIndexForVecField(fieldID) {
-			fieldInfo, err := segment.getVectorFieldInfo(fieldID)
-			if err == nil {
-				indexName = fieldInfo.indexInfo.IndexName
-				indexID = fieldInfo.indexInfo.IndexID
-				break
-			}
+	indexedFieldIDs, _ := colReplica.getIndexedFieldIDByCollectionIDPrivate(segment.collectionID, segment)
+	for _, fieldID := range indexedFieldIDs {
+		fieldInfo, err := segment.getIndexedFieldInfo(fieldID)
+		if err == nil {
+			indexName = fieldInfo.indexInfo.IndexName
+			indexID = fieldInfo.indexInfo.IndexID
+			indexInfos = append(indexInfos, fieldInfo.indexInfo)
 		}
 	}
 	info := &querypb.SegmentInfo{
@@ -743,6 +757,7 @@ func (colReplica *collectionReplica) getSegmentInfo(segment *Segment) *querypb.S
 		IndexID:      indexID,
 		DmChannel:    segment.vChannelID,
 		SegmentState: segment.segmentType,
+		IndexInfos:   indexInfos,
 	}
 	return info
 }
