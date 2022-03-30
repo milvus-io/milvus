@@ -36,9 +36,9 @@ TEST(Dummy, Aha) {
 constexpr int64_t nb = 100;
 namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
+using knowhere::scalar::OperatorType;
 using milvus::indexbuilder::MapParams;
 using milvus::indexbuilder::ScalarIndexCreator;
-using knowhere::scalar::OperatorType;
 using ScalarTestParams = std::pair<MapParams, MapParams>;
 
 namespace {

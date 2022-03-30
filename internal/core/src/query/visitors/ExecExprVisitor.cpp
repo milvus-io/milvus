@@ -461,12 +461,35 @@ auto
 ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
     auto& schema = segment_.get_schema();
-
+    auto primary_offset = schema.get_primary_key_offset();
     auto field_offset = expr_raw.field_offset_;
     auto& field_meta = schema[field_offset];
+
+    bool use_pk_index = false;
+    if (primary_offset.has_value()) {
+        use_pk_index = primary_offset.value() == field_offset && field_meta.get_data_type() == engine::DataType::INT64;
+    }
+
+    if (use_pk_index) {
+        auto id_array = std::make_unique<IdArray>();
+        auto dst_ids = id_array->mutable_int_id();
+        for (const auto& id : expr.terms_) {
+            dst_ids->add_data(id);
+        }
+        auto [uids, seg_offsets] = segment_.search_ids(*id_array, timestamp_);
+        BitsetType bitset(row_count_);
+        for (const auto& offset : seg_offsets) {
+            auto _offset = (int64_t)offset.get();
+            bitset[_offset] = true;
+        }
+        AssertInfo(bitset.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+        return bitset;
+    }
+
+    // not use pk index
+    std::deque<BitsetType> bitsets;
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
-    std::deque<BitsetType> bitsets;
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         Span<T> chunk = segment_.chunk_data<T>(field_offset, chunk_id);
