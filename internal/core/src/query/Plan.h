@@ -32,7 +32,7 @@ CreatePlan(const Schema& schema, const std::string& dsl);
 
 // Note: serialized_expr_plan is of binary format
 std::unique_ptr<Plan>
-CreatePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int64_t size);
+CreateSearchPlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size);
 
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blob);
@@ -40,11 +40,8 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blo
 int64_t
 GetNumOfQueries(const PlaceholderGroup*);
 
-// std::unique_ptr<RetrievePlan>
-// CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request);
-
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int size);
+CreateRetrievePlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size);
 
 // Query Overall TopK from Plan
 // Used to alloc result memory at Go side
