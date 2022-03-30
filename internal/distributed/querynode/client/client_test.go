@@ -48,6 +48,8 @@ func Test_NewClient(t *testing.T) {
 	err = client.Register()
 	assert.Nil(t, err)
 
+	ctx, cancel := context.WithCancel(ctx)
+
 	checkFunc := func(retNotNil bool) {
 		retCheck := func(notNil bool, ret interface{}, err error) {
 			if notNil {
@@ -97,6 +99,12 @@ func Test_NewClient(t *testing.T) {
 
 		r13, err := client.WatchDeltaChannels(ctx, nil)
 		retCheck(retNotNil, r13, err)
+
+		r14, err := client.Search(ctx, nil)
+		retCheck(retNotNil, r14, err)
+
+		r15, err := client.Query(ctx, nil)
+		retCheck(retNotNil, r15, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{
@@ -132,6 +140,15 @@ func Test_NewClient(t *testing.T) {
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 
 	checkFunc(true)
+
+	// ctx canceled
+	client.grpcClient = &mock.ClientBase{
+		GetGrpcClientErr: nil,
+	}
+	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
+	cancel() // make context canceled
+	checkFunc(false)
+
 	err = client.Stop()
 	assert.Nil(t, err)
 }
