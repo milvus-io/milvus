@@ -59,7 +59,7 @@ CreatePlan(const Schema& schema, const std::string& dsl_str) {
 }
 
 std::unique_ptr<Plan>
-CreatePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int64_t size) {
+CreateSearchPlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size) {
     // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
     plan_node.ParseFromArray(serialized_expr_plan, size);
@@ -67,7 +67,7 @@ CreatePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int64_t
 }
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema, const char* serialized_expr_plan, int size) {
+CreateRetrievePlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size) {
     proto::plan::PlanNode plan_node;
     plan_node.ParseFromArray(serialized_expr_plan, size);
     return ProtoParser(schema).CreateRetrievePlan(plan_node);

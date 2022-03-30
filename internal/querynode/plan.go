@@ -64,7 +64,7 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 	}
 
 	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])), (C.int64_t)(len(expr)), &cPlan)
+	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 
 	err1 := HandleCStatus(&status, "Create Plan by expr failed")
 	if err1 != nil {
@@ -144,8 +144,7 @@ type RetrievePlan struct {
 
 func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp) (*RetrievePlan, error) {
 	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.collectionPtr, (*C.char)(unsafe.Pointer(&expr[0])),
-		(C.int64_t)(len(expr)), &cPlan)
+	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 
 	err := HandleCStatus(&status, "Create retrieve plan by expr failed")
 	if err != nil {
