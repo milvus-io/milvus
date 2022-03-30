@@ -25,7 +25,9 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -130,6 +132,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 
 // Reload restores the buffer channels and node-channels mapping from kv.
 func (c *ChannelStore) Reload() error {
+	log.Info("Reloading channelsInfo from KV store.", zap.String("prefix", Params.DataCoordCfg.ChannelWatchSubPath))
 	keys, values, err := c.store.LoadWithPrefix(Params.DataCoordCfg.ChannelWatchSubPath)
 	if err != nil {
 		return err
@@ -366,7 +369,6 @@ func parseNodeKey(key string) (int64, error) {
 // ChannelOpTypeNames implements zap log marshaller for ChannelOpSet.
 var ChannelOpTypeNames = []string{"Add", "Delete"}
 
-// TODO: NIT: ObjectMarshaler -> ObjectMarshaller
 // MarshalLogObject implements the interface ObjectMarshaler.
 func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("type", ChannelOpTypeNames[cu.Type])
@@ -384,7 +386,6 @@ func (cu *ChannelOp) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
-// TODO: NIT: ArrayMarshaler -> ArrayMarshaller
 // MarshalLogArray implements the interface of ArrayMarshaler of zap.
 func (cos ChannelOpSet) MarshalLogArray(enc zapcore.ArrayEncoder) error {
 	for _, o := range cos {
