@@ -19,6 +19,7 @@ package querycoord
 import (
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -28,17 +29,17 @@ type ReplicaInfos struct {
 	globalGuard sync.RWMutex // We have to make sure atomically update replicas and index
 
 	// Persistent Info
-	replicas map[UniqueID]*querypb.ReplicaInfo // replica_id -> *ReplicaInfo
+	replicas map[UniqueID]*querypb.ReplicaInfo // replicaID -> *ReplicaInfo
 
 	// Non-persistent info
-	nodeIndex map[UniqueID][]*querypb.ReplicaInfo // node_id -> []*ReplicaInfo
+	nodeIndex map[UniqueID]map[UniqueID]*querypb.ReplicaInfo // nodeID, replicaID -> []*ReplicaInfo
 }
 
 func NewReplicaInfos() *ReplicaInfos {
 	return &ReplicaInfos{
 		globalGuard: sync.RWMutex{},
 		replicas:    make(map[int64]*querypb.ReplicaInfo),
-		nodeIndex:   make(map[int64][]*querypb.ReplicaInfo),
+		nodeIndex:   make(map[int64]map[int64]*querypb.ReplicaInfo),
 	}
 }
 
@@ -47,7 +48,8 @@ func (rep *ReplicaInfos) Get(replicaID UniqueID) (*querypb.ReplicaInfo, bool) {
 	defer rep.globalGuard.RUnlock()
 
 	info, ok := rep.replicas[replicaID]
-	return info, ok
+	clone := proto.Clone(info).(*querypb.ReplicaInfo)
+	return clone, ok
 }
 
 // Make sure atomically update replica and index
@@ -56,23 +58,25 @@ func (rep *ReplicaInfos) Insert(info *querypb.ReplicaInfo) {
 	defer rep.globalGuard.Unlock()
 
 	old, ok := rep.replicas[info.ReplicaID]
-	// This updates ReplicaInfo, not inserts a new one
-	// No need to update nodeIndex
-	if ok {
-		*old = *info
-		return
-	}
 
+	info = proto.Clone(info).(*querypb.ReplicaInfo)
 	rep.replicas[info.ReplicaID] = info
+
+	// This updates ReplicaInfo, not inserts a new one
+	if ok {
+		for _, nodeID := range old.NodeIds {
+			nodeReplicas := rep.nodeIndex[nodeID]
+			delete(nodeReplicas, old.ReplicaID)
+		}
+	}
 
 	for _, nodeID := range info.NodeIds {
 		replicas, ok := rep.nodeIndex[nodeID]
 		if !ok {
-			replicas = make([]*querypb.ReplicaInfo, 0)
-			rep.nodeIndex[nodeID] = replicas
+			replicas = make(map[UniqueID]*querypb.ReplicaInfo)
 		}
 
-		replicas = append(replicas, info)
+		replicas[info.ReplicaID] = info
 		rep.nodeIndex[nodeID] = replicas
 	}
 }
@@ -87,5 +91,10 @@ func (rep *ReplicaInfos) GetReplicasByNodeID(nodeID UniqueID) []*querypb.Replica
 		return nil
 	}
 
-	return replicas
+	clones := make([]*querypb.ReplicaInfo, 0, len(replicas))
+	for _, replica := range replicas {
+		clones = append(clones, proto.Clone(replica).(*querypb.ReplicaInfo))
+	}
+
+	return clones
 }

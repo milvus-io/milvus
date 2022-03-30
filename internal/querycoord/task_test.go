@@ -180,7 +180,7 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	parentTask.addChildTask(watchDmChannelTask)
 	watchDmChannelTask.setParentTask(parentTask)
 
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema, nil)
 	return watchDmChannelTask
 }
 func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *loadSegmentTask {
@@ -237,7 +237,7 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 	parentTask.addChildTask(loadSegmentTask)
 	loadSegmentTask.setParentTask(parentTask)
 
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema, nil)
 	return loadSegmentTask
 }
 
@@ -1244,7 +1244,7 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false), nil)
 
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
 	loadCollectionTask := loadSegmentTask.getParentTask()
@@ -1277,7 +1277,7 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
+	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false), nil)
 
 	watchDmChannel := genWatchDmChannelTask(ctx, queryCoord, node1.queryNodeID)
 	loadCollectionTask := watchDmChannel.getParentTask()

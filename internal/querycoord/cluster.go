@@ -21,8 +21,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -74,9 +75,9 @@ type Cluster interface {
 	hasNode(nodeID int64) bool
 
 	allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
-	allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error
+	allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
 
-	assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo) error
+	assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo, collectionSize uint64) error
 
 	getSessionVersion() int64
 
@@ -700,20 +701,77 @@ func (c *queryNodeCluster) allocateSegmentsToQueryNode(ctx context.Context, reqs
 	return c.segmentAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs, includeNodeIDs)
 }
 
-func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error {
-	return c.channelAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs)
+func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
+	return c.channelAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs, includeNodeIDs)
 }
 
-func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo) error {
-	nodes := c.onlineNodeIDs()
-	if len(nodes) < len(replicas) {
-		return errors.New("no enough nodes to create replicas")
+// Return error if no enough nodes/resources to create replicas
+func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo, collectionSize uint64) error {
+	nodeIds := c.onlineNodeIDs()
+	if len(nodeIds) < len(replicas) {
+		return fmt.Errorf("no enough nodes to create replicas, node_num=%d replica_num=%d", len(nodeIds), len(replicas))
 	}
 
-	for _, node := range nodes {
-		idx := rand.Int() % len(replicas)
-		replicas[idx].NodeIds = append(replicas[idx].NodeIds, node)
+	nodeInfos, err := getNodeInfos(c, nodeIds)
+	if err != nil {
+		return err
+	}
+	if len(nodeInfos) < len(replicas) {
+		return fmt.Errorf("no enough nodes to create replicas, node_num=%d replica_num=%d", len(nodeIds), len(replicas))
+	}
+
+	sort.Slice(nodeInfos, func(i, j int) bool {
+		return nodeInfos[i].totalMem-nodeInfos[i].memUsage > nodeInfos[j].totalMem-nodeInfos[j].memUsage
+	})
+
+	memCapCount := make([]uint64, len(replicas))
+	for _, info := range nodeInfos {
+		i := 0
+		minMemCap := uint64(math.MaxUint64)
+		for j, memCap := range memCapCount {
+			if memCap < minMemCap {
+				minMemCap = memCap
+				i = j
+			}
+		}
+
+		replicas[i].NodeIds = append(replicas[i].NodeIds, info.id)
+		memCapCount[i] += info.totalMem - info.memUsage
+	}
+
+	for _, memCap := range memCapCount {
+		if memCap < collectionSize {
+			return fmt.Errorf("no enough memory to load collection/partitions, collectionSize=%v, replicasNum=%v", collectionSize, len(replicas))
+		}
 	}
 
 	return nil
+}
+
+// It's a helper method to concurrently get nodes' info
+// Remove nodes that it can't connect to
+func getNodeInfos(cluster *queryNodeCluster, nodeIds []UniqueID) ([]*queryNode, error) {
+	nodeCh := make(chan *queryNode, 3)
+
+	wg := sync.WaitGroup{}
+	for _, id := range nodeIds {
+		wg.Add(1)
+		go func(id UniqueID) {
+			defer wg.Done()
+			info, err := cluster.getNodeInfoByID(id)
+			if err != nil {
+				return
+			}
+			nodeCh <- info.(*queryNode)
+		}(id)
+	}
+	wg.Wait()
+	close(nodeCh)
+
+	nodes := make([]*queryNode, 0, len(nodeCh))
+	for node := range nodeCh {
+		nodes = append(nodes, node)
+	}
+
+	return nodes, nil
 }

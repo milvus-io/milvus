@@ -56,6 +56,8 @@ func (broker *globalMetaBroker) releaseDQLMessageStream(ctx context.Context, col
 		},
 		CollectionID: collectionID,
 	}
+	
+	// TODO(yah01): check whether RootCoord returns error if QueryChannel not exists
 	res, err := broker.rootCoord.ReleaseDQLMessageStream(ctx2, releaseDQLMessageStreamReq)
 	if err != nil {
 		log.Error("releaseDQLMessageStream occur error", zap.Int64("collectionID", collectionID), zap.Error(err))

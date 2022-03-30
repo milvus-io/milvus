@@ -73,7 +73,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	}
 	reqs := []*querypb.WatchDmChannelsRequest{firstReq, secondReq}
 
-	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, meta, false, nil)
+	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, meta, false, nil,nil)
 	assert.NotNil(t, err)
 
 	node, err := startQueryNodeServer(baseCtx)
@@ -83,7 +83,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	cluster.registerNode(baseCtx, nodeSession, nodeID, disConnect)
 	waitQueryNodeOnline(cluster, nodeID)
 
-	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, meta, false, nil)
+	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, meta, false, nil,nil)
 	assert.Nil(t, err)
 
 	assert.Equal(t, nodeID, firstReq.NodeID)

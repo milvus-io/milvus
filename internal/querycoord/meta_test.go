@@ -70,7 +70,7 @@ func TestReplica_Release(t *testing.T) {
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	meta, err := newMeta(context.Background(), etcdKV, nil, nil)
 	assert.Nil(t, err)
-	err = meta.addCollection(1, querypb.LoadType_LoadCollection, nil)
+	err = meta.addCollection(1, querypb.LoadType_LoadCollection, nil, nil)
 	require.NoError(t, err)
 
 	collections := meta.showCollections()
@@ -175,7 +175,7 @@ func TestMetaFunc(t *testing.T) {
 
 	t.Run("Test AddCollection", func(t *testing.T) {
 		schema := genDefaultCollectionSchema(false)
-		err := meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
+		err := meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema, nil)
 		assert.Nil(t, err)
 	})
 
