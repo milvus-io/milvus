@@ -63,3 +63,21 @@ func TestTSafe_TSafe(t *testing.T) {
 	timestamp = safe.get()
 	assert.Equal(t, targetTimestamp, timestamp)
 }
+
+func TestTSafe_Dup(t *testing.T) {
+	safe := newTSafe("TestTSafe-channel")
+	assert.NotNil(t, safe)
+
+	timestamp := safe.get()
+	assert.Equal(t, typeutil.ZeroTimestamp, timestamp)
+
+	watcher := newTSafeWatcher()
+	defer watcher.close()
+	assert.NotNil(t, watcher)
+
+	err := safe.registerTSafeWatcher(watcher)
+	assert.NoError(t, err)
+
+	err = safe.registerTSafeWatcher(watcher)
+	assert.Error(t, err)
+}
