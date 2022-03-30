@@ -82,9 +82,9 @@ func (p *ImportWrapper) printFieldsDataInfo(fieldsData map[string]storage.FieldD
 	for k, v := range fieldsData {
 		stats = append(stats, zap.Int(k, v.RowNum()))
 	}
-	for i := 0; i < len(files); i++ {
-		stats = append(stats, zap.String("file", files[i]))
-	}
+
+	stats = append(stats, zap.Any("files", files))
+
 	log.Debug(msg, stats...)
 }
 

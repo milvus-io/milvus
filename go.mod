@@ -60,3 +60,5 @@ replace (
 	github.com/keybase/go-keychain => github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4
 	google.golang.org/grpc => google.golang.org/grpc v1.38.0
 )
+
+replace github.com/tecbot/gorocksdb => github.com/soothing-rain/gorocksdb v0.0.1
