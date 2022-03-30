@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type tSafeWatcher struct {
@@ -67,6 +69,7 @@ func (ts *tSafe) registerTSafeWatcher(t *tSafeWatcher) error {
 	ts.tSafeMu.Lock()
 	defer ts.tSafeMu.Unlock()
 	if ts.watcher != nil {
+		log.Warn("tSafeWatcher register more than once", zap.String("channel", ts.channel))
 		return fmt.Errorf("tSafeWatcher has been existed, channel = %s", ts.channel)
 	}
 	ts.watcher = t
