@@ -321,9 +321,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		unFlushedCheckPointInfos = append(unFlushedCheckPointInfos, info.UnflushedSegments...)
 	}
 	w.node.streaming.replica.addExcludedSegments(collectionID, unFlushedCheckPointInfos)
+	unflushedSegmentIDs := make([]UniqueID, 0)
+	for i := 0; i < len(unFlushedCheckPointInfos); i++ {
+		unflushedSegmentIDs = append(unflushedSegmentIDs, unFlushedCheckPointInfos[i].GetID())
+	}
 	log.Debug("watchDMChannel, add check points info for unFlushed segments done",
 		zap.Int64("collectionID", collectionID),
-		zap.Any("unFlushedCheckPointInfos", unFlushedCheckPointInfos),
+		zap.Any("unflushedSegmentIDs", unflushedSegmentIDs),
 	)
 
 	// add excluded segments for flushed segments,
