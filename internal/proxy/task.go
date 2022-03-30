@@ -971,8 +971,9 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(showResp.Status.Reason)
 	}
-	log.Debug("QueryCoord show collections",
-		zap.Any("collID", collID),
+	log.Debug("successfully get collections from QueryCoord",
+		zap.String("target collection name", collectionName),
+		zap.Int64("target collection ID", collID),
 		zap.Any("collections", showResp.CollectionIDs),
 	)
 	collectionLoaded := false
