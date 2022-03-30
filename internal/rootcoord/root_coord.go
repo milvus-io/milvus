@@ -29,6 +29,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/crypto"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
@@ -1003,7 +1005,7 @@ func (c *Core) UpdateCredCache(ctx context.Context, credInfo *etcdpb.CredentialI
 			SourceID: c.session.ServerID,
 		},
 		Username: credInfo.Username,
-		Password: credInfo.Password,
+		Password: credInfo.EncryptedPassword,
 	}
 	c.proxyClientManager.UpdateCredentialCache(ctx, &req)
 }
@@ -2344,29 +2346,38 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 }
 
 // CreateCredential create new user and password
+// 	1. decode ciphertext password to raw password
+// 	2. encrypt raw password
+// 	3. save in to etcd
 func (c *Core) CreateCredential(ctx context.Context, in *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 	metrics.RootCoordCreateCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
-	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
-	}
-
 	tr := timerecord.NewTimeRecorder("CreateCredential")
-
 	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
 	// update proxy's local cache
 	c.ClearCredUsersCache(ctx)
 	// insert to db
-	credInfo := &etcdpb.CredentialInfo{
-		Username: in.Username,
-		Password: in.Password,
+	rawPassword, err := crypto.Base64Decode(in.Password)
+	if err != nil {
+		log.Error("decode password fail", zap.String("key", in.Username), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "decode password fail key:"+in.Username), err
 	}
-	err := c.MetaTable.AddCredential(credInfo)
+	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
+	if err != nil {
+		log.Error("encrypt password fail", zap.String("key", in.Username), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "encrypt password fail key:"+in.Username), err
+	}
+	credInfo := &etcdpb.CredentialInfo{
+		Username:          in.Username,
+		EncryptedPassword: encryptedPassword,
+	}
+	err = c.MetaTable.AddCredential(credInfo)
 	if err != nil {
 		log.Error("CreateCredential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "CreateCredential failed: "+err.Error()), nil
+		metrics.RootCoordCreateCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "CreateCredential failed: "+err.Error()), err
 	}
 	log.Debug("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
@@ -2380,63 +2391,61 @@ func (c *Core) CreateCredential(ctx context.Context, in *milvuspb.CreateCredenti
 // GetCredential get credential by username
 func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
 	metrics.RootCoordGetCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
-	if code, ok := c.checkHealthy(); !ok {
-		return &rootcoordpb.GetCredentialResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode"+internalpb.StateCode_name[int32(code)]),
-		}, nil
-	}
-
 	tr := timerecord.NewTimeRecorder("GetCredential")
-
 	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
-	t := &GetCredentialReqTask{
-		baseReqTask: baseReqTask{
-			ctx:  ctx,
-			core: c,
-		},
-		Req: in,
-	}
-	err := executeTask(t)
+
+	credInfo, err := c.MetaTable.getCredential(in.Username)
 	if err != nil {
 		log.Error("GetCredential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
+		metrics.RootCoordGetCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return &rootcoordpb.GetCredentialResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "GetCredential failed: "+err.Error()),
-		}, nil
+		}, err
 	}
 	log.Debug("GetCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
 	metrics.RootCoordGetCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordCredentialReadTypeLatency.WithLabelValues("GetCredential", in.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	t.Rsp.Status = succStatus()
-	return t.Rsp, nil
+	return &rootcoordpb.GetCredentialResponse{
+		Status:   succStatus(),
+		Username: credInfo.Username,
+		Password: credInfo.EncryptedPassword,
+	}, nil
 }
 
 // UpdateCredential update password for a user
 func (c *Core) UpdateCredential(ctx context.Context, in *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 	metrics.RootCoordUpdateCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
-	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
-	}
-
 	tr := timerecord.NewTimeRecorder("UpdateCredential")
-
 	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
-	t := &UpdateCredentialReqTask{
-		baseReqTask: baseReqTask{
-			ctx:  ctx,
-			core: c,
-		},
-		Req: in,
+
+	rawPassword, err := crypto.Base64Decode(in.Password)
+	if err != nil {
+		log.Error("decode password fail", zap.String("key", in.Username), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "decode password fail key:"+in.Username), err
 	}
-	err := executeTask(t)
+	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
+	if err != nil {
+		log.Error("encrypt password fail", zap.String("key", in.Username), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "encrypt password fail key:"+in.Username), err
+	}
+
+	credInfo := &etcdpb.CredentialInfo{
+		Username:          in.Username,
+		EncryptedPassword: encryptedPassword,
+	}
+	// update proxy's local cache
+	c.UpdateCredCache(ctx, credInfo)
+	// update data on storage
+	err = c.MetaTable.AddCredential(credInfo)
 	if err != nil {
 		log.Error("UpdateCredential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "UpdateCredential failed: "+err.Error()), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "UpdateCredential failed: "+err.Error()), err
 	}
 	log.Debug("UpdateCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
@@ -2449,26 +2458,18 @@ func (c *Core) UpdateCredential(ctx context.Context, in *milvuspb.CreateCredenti
 // DeleteCredential delete a user
 func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDeleteCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
-	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
-	}
-
 	tr := timerecord.NewTimeRecorder("DeleteCredential")
 
 	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
-	t := &DeleteCredentialReqTask{
-		baseReqTask: baseReqTask{
-			ctx:  ctx,
-			core: c,
-		},
-		Req: in,
-	}
-	err := executeTask(t)
+	// invalidate proxy's local cache
+	c.ExpireCredCache(ctx, in.Username)
+	// delete data on storage
+	err := c.MetaTable.DeleteCredential(in.Username)
 	if err != nil {
 		log.Error("DeleteCredential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "DeleteCredential failed: "+err.Error()), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "DeleteCredential failed: "+err.Error()), err
 	}
 	log.Debug("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
@@ -2482,33 +2483,22 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 // ListCredUsers list all usernames
 func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 	metrics.RootCoordListCredUsersCounter.WithLabelValues(metrics.TotalLabel).Inc()
-	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.ListCredUsersResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode"+internalpb.StateCode_name[int32(code)]),
-		}, nil
-	}
-
 	tr := timerecord.NewTimeRecorder("ListCredUsers")
 
-	t := &ListCredUsersReqTask{
-		baseReqTask: baseReqTask{
-			ctx:  ctx,
-			core: c,
-		},
-		Req: in,
-	}
-	err := executeTask(t)
+	credInfo, err := c.MetaTable.ListCredentialUsernames()
 	if err != nil {
 		log.Error("ListCredUsers failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		return &milvuspb.ListCredUsersResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ListCredUsers failed: "+err.Error()),
-		}, nil
+		}, err
 	}
 	log.Debug("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
 
 	metrics.RootCoordListCredUsersCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordCredentialReadTypeLatency.WithLabelValues("ListCredUsers", "ALL.API").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	t.Rsp.Status = succStatus()
-	return t.Rsp, nil
+	return &milvuspb.ListCredUsersResponse{
+		Status:    succStatus(),
+		Usernames: credInfo.Usernames,
+	}, nil
 }

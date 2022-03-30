@@ -65,5 +65,5 @@ message CollectionMeta {
 
 message CredentialInfo {
   string username = 1;
-  string password = 2;
+  string encrypted_password = 2;
 }

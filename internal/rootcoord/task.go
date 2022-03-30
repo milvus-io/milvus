@@ -21,10 +21,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
 	"github.com/milvus-io/milvus/internal/metrics"
 
 	"github.com/golang/protobuf/proto"
@@ -35,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -1069,120 +1066,6 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 	}
 
 	t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, ts)
-
-	return nil
-}
-
-// GetCredentialReqTask get credential request task
-type GetCredentialReqTask struct {
-	baseReqTask
-	Req *rootcoordpb.GetCredentialRequest
-	Rsp *rootcoordpb.GetCredentialResponse
-}
-
-// Type return msg type
-func (t *GetCredentialReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-// Execute task execution
-func (t *GetCredentialReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_GetCredential {
-		return fmt.Errorf("get credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-
-	credInfo, err := t.core.MetaTable.getCredential(t.Req.Username)
-	if err != nil {
-		return err
-	}
-
-	t.Rsp.Username = credInfo.Username
-	t.Rsp.Password = credInfo.Password
-
-	return nil
-}
-
-// DeleteCredentialReqTask delete credential request task
-type DeleteCredentialReqTask struct {
-	baseReqTask
-	Req *milvuspb.DeleteCredentialRequest
-}
-
-func (t *DeleteCredentialReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-func (t *DeleteCredentialReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_DeleteCredential {
-		return fmt.Errorf("delete credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-
-	// invalidate proxy's local cache
-	t.core.ExpireCredCache(ctx, t.Req.Username)
-	// delete data on storage
-	err := t.core.MetaTable.DeleteCredential(t.Req.Username)
-	if err != nil {
-		return fmt.Errorf("meta table delete credential failed, error = %w", err)
-	}
-
-	return nil
-}
-
-// UpdateCredentialReqTask update credential request task
-type UpdateCredentialReqTask struct {
-	baseReqTask
-	Req *milvuspb.CreateCredentialRequest
-}
-
-func (t *UpdateCredentialReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-func (t *UpdateCredentialReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_UpdateCredential {
-		return fmt.Errorf("delete credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-
-	credInfo := &etcdpb.CredentialInfo{
-		Username: t.Req.Username,
-		Password: t.Req.Password,
-	}
-
-	// update proxy's local cache
-	t.core.UpdateCredCache(ctx, credInfo)
-	// update data on storage
-	err := t.core.MetaTable.UpdateCredential(credInfo)
-	if err != nil {
-		return fmt.Errorf("meta table delete credential failed, error = %w", err)
-	}
-
-	return nil
-}
-
-// ListCredUsersReqTask list credential usernames request task
-type ListCredUsersReqTask struct {
-	baseReqTask
-	Req *milvuspb.ListCredUsersRequest
-	Rsp *milvuspb.ListCredUsersResponse
-}
-
-// Type return msg type
-func (t *ListCredUsersReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-// Execute task execution
-func (t *ListCredUsersReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_ListCredUsernames {
-		return fmt.Errorf("list credential usernames, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-
-	credInfo, err := t.core.MetaTable.ListCredentialUsernames()
-	if err != nil {
-		return err
-	}
-
-	t.Rsp = credInfo
 
 	return nil
 }

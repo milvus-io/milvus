@@ -4,6 +4,10 @@ import (
 	"context"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/util"
+
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 
@@ -23,12 +27,19 @@ func valid(ctx context.Context, authorization []string) bool {
 	if err != nil {
 		return false
 	}
-	secrets := strings.SplitN(rawToken, ":", 2)
+	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
 	username := secrets[0]
 	password := secrets[1]
 
+	// if rpc call from a member (like index/query/data component)
+	if username == util.MemberCredUsername && password == util.MemberCredPassword {
+		return true
+	}
+
+	// if rpc call from sdk
 	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
 	if err != nil {
+		log.Error("found no credential", zap.String("username", username), zap.Error(err))
 		return false
 	}
 

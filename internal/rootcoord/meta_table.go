@@ -19,12 +19,11 @@ package rootcoord
 import (
 	"bytes"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"path"
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/crypto"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -1343,29 +1342,14 @@ func (mt *MetaTable) AddCredential(credInfo *pb.CredentialInfo) error {
 	mt.credLock.Lock()
 	defer mt.credLock.Unlock()
 
+	if credInfo.Username == "" {
+		return fmt.Errorf("username is empty")
+	}
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credInfo.Username)
-
-	// client sends ciphertext password (using base64)
-	rawPassword, err := crypto.Base64Decode(credInfo.Password)
+	err := mt.txn.Save(k, credInfo.EncryptedPassword)
 	if err != nil {
-		log.Error("MetaTable AddCredential decode password fail",
-			zap.String("key", credInfo.Username), zap.Error(err))
-		return fmt.Errorf("MetaTable AddCredential decode password fail key:%s, err:%w", credInfo.Username, err)
-	}
-	// server:
-	// 1. decode ciphertext password to raw password
-	// 2. encrypt raw password
-	// 3. save in to etcd
-	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
-	if err != nil {
-		log.Error("MetaTable AddCredential encrypt password fail",
-			zap.String("key", credInfo.Username), zap.Error(err))
-		return fmt.Errorf("MetaTable AddCredential encrypt password fail key:%s, err:%w", credInfo.Username, err)
-	}
-	err = mt.txn.Save(k, encryptedPassword)
-	if err != nil {
-		log.Error("SnapShotKV Save fail", zap.Error(err))
-		panic("SnapShotKV Save fail")
+		log.Error("MetaTable save fail", zap.Error(err))
+		return fmt.Errorf("save credential fail key:%s, err:%w", credInfo.Username, err)
 	}
 	return nil
 }
@@ -1378,11 +1362,10 @@ func (mt *MetaTable) getCredential(username string) (*pb.CredentialInfo, error) 
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
 	v, err := mt.txn.Load(k)
 	if err != nil {
-		log.Error("MetaTable GetCredential fail",
-			zap.String("key", k), zap.Error(err))
-		return nil, err
+		log.Error("MetaTable load fail", zap.String("key", k), zap.Error(err))
+		return &pb.CredentialInfo{}, err
 	}
-	return &pb.CredentialInfo{Username: username, Password: v}, nil
+	return &pb.CredentialInfo{Username: username, EncryptedPassword: v}, nil
 }
 
 // DeleteCredential delete credential
@@ -1394,23 +1377,8 @@ func (mt *MetaTable) DeleteCredential(username string) error {
 
 	err := mt.txn.Remove(k)
 	if err != nil {
-		log.Error("SnapShotKV Delete fail", zap.Error(err))
-		panic("SnapShotKV Delete fail")
-	}
-	return nil
-}
-
-// UpdateCredential update credential
-func (mt *MetaTable) UpdateCredential(credInfo *pb.CredentialInfo) error {
-	mt.credLock.Lock()
-	defer mt.credLock.Unlock()
-
-	k := fmt.Sprintf("%s/%s", CredentialPrefix, credInfo.Username)
-
-	err := mt.txn.Save(k, credInfo.Password)
-	if err != nil {
-		log.Error("SnapShotKV Update fail", zap.Error(err))
-		panic("SnapShotKV Update fail")
+		log.Error("MetaTable remove fail", zap.Error(err))
+		return fmt.Errorf("remove credential fail key:%s, err:%w", username, err)
 	}
 	return nil
 }
@@ -1423,7 +1391,7 @@ func (mt *MetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse,
 	keys, _, err := mt.txn.LoadWithPrefix(CredentialPrefix)
 	if err != nil {
 		log.Error("MetaTable list all credential usernames fail", zap.Error(err))
-		return nil, err
+		return &milvuspb.ListCredUsersResponse{}, err
 	}
 
 	var usernames []string

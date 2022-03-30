@@ -23,8 +23,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/util/crypto"
-
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
 	"go.uber.org/zap"
@@ -4017,93 +4015,47 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
-	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", req.Username))
-	method := "CreateCredential"
-	tr := timerecord.NewTimeRecorder(method)
+	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
 	// validate params
 	username := req.Username
-	password := req.Password
 	if err := validateUsername(username); err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    err.Error(),
 		}, nil
 	}
-	_, err := crypto.Base64Decode(password)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_IllegalArgument,
-			Reason:    err.Error(),
-		}, nil
-	}
-	// save to db
 	result, err := node.rootCoord.CreateCredential(ctx, req)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
-	// time record
-	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, req.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return result, nil
+	return result, err
 }
 
 func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
-	method := "UpdateCredential"
-	tr := timerecord.NewTimeRecorder(method)
-	// validate params
-	password := req.Password
-	if _, err := crypto.Base64Decode(password); err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_IllegalArgument,
-			Reason:    err.Error(),
-		}, nil
-	}
-	// save to db
+	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
 	result, err := node.rootCoord.UpdateCredential(ctx, req)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
-	// time record
-	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, req.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return result, nil
+	return result, err
 }
 
 func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	method := "DeleteCredential"
-	tr := timerecord.NewTimeRecorder(method)
-	// save to db
+	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
 	result, err := node.rootCoord.DeleteCredential(ctx, req)
-	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
-	// time record
-	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, req.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return result, nil
+	return result, err
 }
 
 func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	method := "ListCredUsers"
-	tr := timerecord.NewTimeRecorder(method)
-	resp := &milvuspb.ListCredUsersResponse{}
+	log.Debug("ListCredUsers", zap.String("role", typeutil.RootCoordRole))
 	// get from cache
 	usernames, err := globalMetaCache.GetCredUsernames(ctx)
 	if err != nil {
-		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		resp.Status.Reason = err.Error()
-		return resp, nil
+		return &milvuspb.ListCredUsersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
 	}
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
-	resp.Usernames = usernames
-	// time record
-	metrics.ProxyCredentialReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, "ALL.API").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return resp, nil
+	return &milvuspb.ListCredUsersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Usernames: usernames,
+	}, nil
 }

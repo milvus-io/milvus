@@ -442,8 +442,8 @@ func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*cr
 			Username: username,
 		}
 		resp, err := m.client.GetCredential(ctx, req)
-		if err != nil || resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, err
+		if err != nil {
+			return &credentialInfo{}, err
 		}
 		credInfo = &credentialInfo{
 			username: resp.Username,
