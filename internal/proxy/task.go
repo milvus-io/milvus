@@ -1077,8 +1077,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 				}
 			}
 			if !hitField {
-				errMsg := "Field " + name + " not exist"
-				return errors.New(errMsg)
+				return fmt.Errorf("field %s not exist", name)
 			}
 		}
 
@@ -1126,7 +1125,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 		pattern := fmt.Sprintf("^%s$", partitionName)
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return errors.New("invalid partition names")
+			return fmt.Errorf("invalid partition name %s in partition names: %v", partitionName, st.query.PartitionNames)
 		}
 		found := false
 		for name, pID := range partitionsMap {
@@ -1139,8 +1138,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			}
 		}
 		if !found {
-			errMsg := fmt.Sprintf("PartitonName: %s not found", partitionName)
-			return errors.New(errMsg)
+			return fmt.Errorf("partition %s not found", partitionName)
 		}
 	}
 
