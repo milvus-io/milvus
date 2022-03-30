@@ -2353,22 +2353,23 @@ func (c *Core) CreateCredential(ctx context.Context, in *milvuspb.CreateCredenti
 	tr := timerecord.NewTimeRecorder("CreateCredential")
 
 	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
-	t := &CreateCredentialReqTask{
-		baseReqTask: baseReqTask{
-			ctx:  ctx,
-			core: c,
-		},
-		Req: in,
+		zap.String("username", in.Username))
+
+	// update proxy's local cache
+	c.ClearCredUsersCache(ctx)
+	// insert to db
+	credInfo := &etcdpb.CredentialInfo{
+		Username: in.Username,
+		Password: in.Password,
 	}
-	err := executeTask(t)
+	err := c.MetaTable.AddCredential(credInfo)
 	if err != nil {
 		log.Error("CreateCredential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
+			zap.String("username", in.Username), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "CreateCredential failed: "+err.Error()), nil
 	}
 	log.Debug("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("username", in.Username))
 
 	metrics.RootCoordCreateCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordCredentialWriteTypeLatency.WithLabelValues("CreateCredential").Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2388,7 +2389,7 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 	tr := timerecord.NewTimeRecorder("GetCredential")
 
 	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("username", in.Username))
 	t := &GetCredentialReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -2399,13 +2400,13 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 	err := executeTask(t)
 	if err != nil {
 		log.Error("GetCredential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
+			zap.String("username", in.Username), zap.Error(err))
 		return &rootcoordpb.GetCredentialResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "GetCredential failed: "+err.Error()),
 		}, nil
 	}
 	log.Debug("GetCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("username", in.Username))
 
 	metrics.RootCoordGetCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordCredentialReadTypeLatency.WithLabelValues("GetCredential", in.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2423,7 +2424,7 @@ func (c *Core) UpdateCredential(ctx context.Context, in *milvuspb.CreateCredenti
 	tr := timerecord.NewTimeRecorder("UpdateCredential")
 
 	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("username", in.Username))
 	t := &UpdateCredentialReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -2434,11 +2435,11 @@ func (c *Core) UpdateCredential(ctx context.Context, in *milvuspb.CreateCredenti
 	err := executeTask(t)
 	if err != nil {
 		log.Error("UpdateCredential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
+			zap.String("username", in.Username), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "UpdateCredential failed: "+err.Error()), nil
 	}
 	log.Debug("UpdateCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("username", in.Username))
 
 	metrics.RootCoordUpdateCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordCredentialWriteTypeLatency.WithLabelValues("UpdateCredential").Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2455,7 +2456,7 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	tr := timerecord.NewTimeRecorder("DeleteCredential")
 
 	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("username", in.Username))
 	t := &DeleteCredentialReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -2466,11 +2467,11 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	err := executeTask(t)
 	if err != nil {
 		log.Error("DeleteCredential failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
+			zap.String("username", in.Username), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "DeleteCredential failed: "+err.Error()), nil
 	}
 	log.Debug("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("username", in.Username))
 
 	metrics.RootCoordDeleteCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordCredentialWriteTypeLatency.WithLabelValues("DeleteCredential").Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2489,7 +2490,6 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 
 	tr := timerecord.NewTimeRecorder("ListCredUsers")
 
-	log.Debug("ListCredUsers", zap.String("role", typeutil.RootCoordRole), zap.Int64("msgID", in.Base.MsgID))
 	t := &ListCredUsersReqTask{
 		baseReqTask: baseReqTask{
 			ctx:  ctx,
@@ -2505,7 +2505,7 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ListCredUsers failed: "+err.Error()),
 		}, nil
 	}
-	log.Debug("ListCredUsers success", zap.String("role", typeutil.RootCoordRole), zap.Int64("msgID", in.Base.MsgID))
+	log.Debug("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
 
 	metrics.RootCoordListCredUsersCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordCredentialReadTypeLatency.WithLabelValues("ListCredUsers", "ALL.API").Observe(float64(tr.ElapseSpan().Milliseconds()))

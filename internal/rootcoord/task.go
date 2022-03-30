@@ -1073,37 +1073,6 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-// CreateCredentialReqTask create credential request task
-type CreateCredentialReqTask struct {
-	baseReqTask
-	Req *milvuspb.CreateCredentialRequest
-}
-
-func (t *CreateCredentialReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-func (t *CreateCredentialReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_CreateCredential {
-		return fmt.Errorf("create credential, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-
-	credInfo := &etcdpb.CredentialInfo{
-		Username: t.Req.Username,
-		Password: t.Req.Password,
-	}
-
-	// update proxy's local cache
-	t.core.ClearCredUsersCache(ctx)
-	// insert to db
-	err := t.core.MetaTable.AddCredential(credInfo)
-	if err != nil {
-		return fmt.Errorf("meta table add credential failed, error = %w", err)
-	}
-
-	return nil
-}
-
 // GetCredentialReqTask get credential request task
 type GetCredentialReqTask struct {
 	baseReqTask

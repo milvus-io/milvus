@@ -26,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -163,8 +165,15 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(ot.UnaryServerInterceptor(opts...), proxy.AuthInterceptor)),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(ot.StreamServerInterceptor(opts...)))) // TODO: add stream interceptor
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			ot.UnaryServerInterceptor(opts...),
+			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
+		)),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			ot.StreamServerInterceptor(opts...),
+			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor),
+		)),
+	)
 	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcServer, s)

@@ -4017,6 +4017,8 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", req.Username))
 	method := "CreateCredential"
 	tr := timerecord.NewTimeRecorder(method)
 	// validate params
