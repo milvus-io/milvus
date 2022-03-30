@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -68,10 +69,11 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 			return p.logError("JSON parse: " + err.Error())
 		}
 		key := t.(string)
+		keyLower := strings.ToLower(key)
 
 		// the root key should be RowRootNode
-		if key != RowRootNode {
-			return p.logError("JSON parse: invalid row-based JSON format, the key " + RowRootNode + " is not found")
+		if keyLower != RowRootNode {
+			return p.logError("JSON parse: invalid row-based JSON format, the key " + key + " is not found")
 		}
 
 		// started by '['
