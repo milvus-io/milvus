@@ -332,6 +332,24 @@ func (coord *QueryCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
+func (coord *QueryCoordMock) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
+	if !coord.healthy() {
+		return &querypb.GetShardLeadersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "unhealthy",
+			},
+		}, nil
+	}
+
+	return &querypb.GetShardLeadersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
+	}, nil
+}
+
 func NewQueryCoordMock(opts ...QueryCoordMockOption) *QueryCoordMock {
 	coord := &QueryCoordMock{
 		nodeID:              UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),

@@ -30,6 +30,9 @@ service QueryCoord {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+23+--+Multiple+memory+replication+design
+  rpc GetShardLeaders(GetShardLeadersRequest) returns (GetShardLeadersResponse) {}
 }
 
 service QueryNode {
@@ -147,6 +150,22 @@ message GetSegmentInfoResponse {
   repeated SegmentInfo infos = 2;
 }
 
+message GetShardLeadersRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+}
+
+message GetShardLeadersResponse {
+  common.Status status= 1 ;
+  repeated ShardLeaderList list = 2;
+}
+
+message ShardLeaderList {
+  string channel_name = 1;
+  int64 nodeID = 2;
+  string address = 3; // 127.0.0.1:9000
+}
+
 //-----------------query node grpc request and response proto----------------
 message AddQueryChannelRequest {
   common.MsgBase base = 1;
@@ -169,7 +188,7 @@ message RemoveQueryChannelRequest {
 message LoadMetaInfo {
   LoadType load_type = 1;
   int64 collectionID = 2;
-  repeated int64 partitionIDs = 3;  
+  repeated int64 partitionIDs = 3;
 }
 
 message WatchDmChannelsRequest {
