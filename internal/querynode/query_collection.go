@@ -900,6 +900,7 @@ func (q *queryCollection) search(qMsg queryMsg) (*pubSearchResults, error) {
 	if !ok {
 		panic("Unexpected error: qMsg is not of type searchMsg")
 	}
+	searchMsg.CombinePlaceHolderGroups()
 	q.streaming.replica.queryRLock()
 	q.historical.replica.queryRLock()
 	defer q.historical.replica.queryRUnlock()

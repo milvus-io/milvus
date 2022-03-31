@@ -156,7 +156,7 @@ test-querycoord:
 
 test-querynode:
 	@echo "Running go unittests..."
-	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querynode	-v
+	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querynode	-v --failfast
 
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."

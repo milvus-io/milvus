@@ -141,9 +141,10 @@ func (st *searchMsg) RecordSpan() time.Duration {
 
 // CombinePlaceHolderGroups combine all the placeholder groups.
 func (st *searchMsg) CombinePlaceHolderGroups() {
-	st.PlaceholderGroup = []byte{}
-	for _, grp := range st.OrigPlaceHolderGroups {
-		st.PlaceholderGroup = append(st.PlaceholderGroup, grp...)
+	if len(st.OrigPlaceHolderGroups) > 0 {
+		for _, grp := range st.OrigPlaceHolderGroups {
+			st.PlaceholderGroup = append(st.PlaceholderGroup, grp...)
+		}
 	}
 }
 
