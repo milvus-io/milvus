@@ -462,7 +462,7 @@ class TestDeleteOperation(TestcaseBase):
 
         # Just one query res and search res, because de-dup
         res, _ = collection_w.query(tmp_expr, output_fields=["*"])
-        assert len(res) == 1
+        assert len(res) == 0
 
         search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][1]],
                                             ct.default_float_vec_field_name,
