@@ -146,3 +146,23 @@ func (m *RootCoordClient) GetImportState(ctx context.Context, req *milvuspb.GetI
 func (m *RootCoordClient) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *RootCoordClient) CreateCredential(ctx context.Context, in *milvuspb.CreateCredentialRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *RootCoordClient) UpdateCredential(ctx context.Context, in *milvuspb.CreateCredentialRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *RootCoordClient) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredentialRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *RootCoordClient) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequest, opts ...grpc.CallOption) (*milvuspb.ListCredUsersResponse, error) {
+	return &milvuspb.ListCredUsersResponse{}, m.Err
+}
+
+func (m *RootCoordClient) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+	return &rootcoordpb.GetCredentialResponse{}, m.Err
+}

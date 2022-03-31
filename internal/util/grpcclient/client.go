@@ -179,7 +179,7 @@ func (c *ClientBase) connect(ctx context.Context) error {
 			},
 			MinConnectTimeout: dialTimeout,
 		}),
-		grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredUsername + util.CredentialSeperator + util.MemberCredPassword)}),
+		grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
 	)
 	cancel()
 	if err != nil {

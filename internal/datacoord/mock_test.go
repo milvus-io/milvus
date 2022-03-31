@@ -461,6 +461,26 @@ func (m *mockRootCoordService) ReportImport(ctx context.Context, req *rootcoordp
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordService) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	panic("implement me")
+}
+
 type mockCompactionHandler struct {
 	methods map[string]interface{}
 }

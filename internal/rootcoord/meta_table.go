@@ -67,9 +67,11 @@ const (
 	// DDMsgSendPrefix prefix to indicate whether DD msg has been send
 	DDMsgSendPrefix = ComponentPrefix + "/dd-msg-send"
 
-	CredentialSubPrefix = "/credential/user"
-	// CredentialPrefix prefix for credential
-	CredentialPrefix = ComponentPrefix + CredentialSubPrefix
+	// UserSubPrefix subpath for credential user
+	UserSubPrefix = "/credential/user"
+
+	// CredentialPrefix prefix for credential user
+	CredentialPrefix = ComponentPrefix + UserSubPrefix
 
 	// CreateCollectionDDType name of DD type for create collection
 	CreateCollectionDDType = "CreateCollection"
@@ -1396,7 +1398,7 @@ func (mt *MetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse,
 
 	var usernames []string
 	for _, path := range keys {
-		username := typeutil.After(path, CredentialSubPrefix)
+		username := typeutil.After(path, UserSubPrefix)
 		if len(username) == 0 {
 			log.Warn("no username extract from path:", zap.String("path", path))
 			continue

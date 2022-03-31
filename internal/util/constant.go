@@ -20,8 +20,9 @@ package util
 const (
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
-	// MemberCredUsername / MemberCredPassword credential used for grpc call between Milvus members (data/index/query node/coord component)
-	MemberCredUsername  = "@@milvus-member@@"
-	MemberCredPassword  = "##milvus-secrets##"
+	// HeaderSourceID identify requests from Milvus members and client requests
+	HeaderSourceID = "sourceId"
+	// MemberCredID id for Milvus members (data/index/query node/coord component)
+	MemberCredID        = "@@milvus-member@@"
 	CredentialSeperator = ":"
 )

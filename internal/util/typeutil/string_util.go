@@ -43,5 +43,5 @@ func After(str string, sub string) string {
 	if adjustedPos >= len(str) {
 		return ""
 	}
-	return str[adjustedPos:len(str)]
+	return str[adjustedPos:]
 }
