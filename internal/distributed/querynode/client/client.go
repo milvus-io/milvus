@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -28,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"google.golang.org/grpc"
 )
 
 var ClientParams paramtable.GrpcClientConfig
@@ -242,7 +243,7 @@ func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 }
 
 // Search performs replica search tasks in QueryNode.
-func (c *Client) Search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (c *Client) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -252,11 +253,11 @@ func (c *Client) Search(ctx context.Context, req *querypb.SearchRequest) (*milvu
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*milvuspb.SearchResults), err
+	return ret.(*internalpb.SearchResults), err
 }
 
 // Query performs replica query tasks in QueryNode.
-func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -266,7 +267,7 @@ func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest) (*milvusp
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*milvuspb.QueryResults), err
+	return ret.(*internalpb.RetrieveResults), err
 }
 
 // GetSegmentInfo gets the information of the specified segments in QueryNode.

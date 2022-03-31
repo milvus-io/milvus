@@ -556,12 +556,12 @@ func (node *QueryNode) isHealthy() bool {
 }
 
 // Search performs replica search tasks.
-func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*internalpb.SearchResults, error) {
 	return nil, errors.New("not implemented")
 }
 
 // Query performs replica query tasks.
-func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return nil, errors.New("not implemented")
 }
 
