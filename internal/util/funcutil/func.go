@@ -172,7 +172,7 @@ func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (strin
 		}
 	}
 
-	return "", errors.New("key " + key + " not found")
+	return "", fmt.Errorf("key %s not found", key)
 }
 
 // CheckCtxValid check if the context is valid
