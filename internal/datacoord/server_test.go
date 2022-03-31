@@ -2267,7 +2267,8 @@ func TestImport(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTask{
-			CollectionName: "dummy",
+			CollectionId: 100,
+			PartitionId:  100,
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
@@ -2280,7 +2281,8 @@ func TestImport(t *testing.T) {
 		closeTestServer(t, svr)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTask{
-			CollectionName: "dummy",
+			CollectionId: 100,
+			PartitionId:  100,
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
