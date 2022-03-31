@@ -48,6 +48,7 @@ type MockQueryCoord struct {
 	channelResp      *querypb.CreateQueryChannelResponse
 	infoResp         *querypb.GetSegmentInfoResponse
 	metricResp       *milvuspb.GetMetricsResponse
+	replicasResp     *querypb.GetReplicasResponse
 	shardLeadersResp *querypb.GetShardLeadersResponse
 }
 
@@ -141,6 +142,10 @@ func (m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalan
 
 func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return m.metricResp, m.err
+}
+
+func (m *MockQueryCoord) GetReplicas(ctx context.Context, req *querypb.GetReplicasRequest) (*querypb.GetReplicasResponse, error) {
+	return m.replicasResp, m.err
 }
 
 func (m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {

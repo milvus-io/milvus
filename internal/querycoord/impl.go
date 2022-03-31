@@ -1016,6 +1016,17 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	return getMetricsResponse, nil
 }
 
+// GetReplicas gets replicas of a certain collection
+func (qc *QueryCoord) GetReplicas(ctx context.Context, req *querypb.GetReplicasRequest) (*querypb.GetReplicasResponse, error) {
+	// TODO: to impl
+	return &querypb.GetReplicasResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "Not implemented",
+		},
+	}, nil
+}
+
 // GetShardLeaders gets shard leaders of a certain collection
 func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
 	// TODO: to impl
