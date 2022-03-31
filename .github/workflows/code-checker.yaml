@@ -111,6 +111,38 @@ jobs:
           fi
           brew install boost libomp ninja tbb ccache
           make check-proto-product && make verifiers
+  centos:
+    name: Code Checker CentOS 7
+    # Run in centos docker 
+    runs-on: ubuntu-18.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Cache CCache Volumes
+        uses: actions/cache@v2
+        with:
+          path: .docker/amd64-centos7-ccache
+          key: centos7-ccache-${{ hashFiles('internal/core/**') }}
+          restore-keys: centos7-ccache-
+      - name: Cache Third Party
+        uses: actions/cache@v2
+        with:
+          path: .docker/thirdparty
+          key: centos7-thirdparty-${{ hashFiles('internal/core/**') }}
+          restore-keys: centos7-thirdparty-
+      - name: Cache Go Mod Volumes
+        uses: actions/cache@v2
+        with:
+          path: .docker/amd64-centos7-go-mod
+          key: centos7-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: centos7-go-mod-
+      - name: Code Check
+        env:
+          CHECK_BUILDER: "1"
+          OS_NAME: "centos7"
+        run: |
+           ./build/builder.sh /bin/bash -c "make install"
   mingw64:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
