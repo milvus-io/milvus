@@ -24,7 +24,7 @@ if (LINUX)
             test_concurrent_vector.cpp
             test_c_api.cpp
             test_expr.cpp
-            test_get_entity_by_ids.cpp
+            test_retrieve.cpp
             test_indexing.cpp
             test_index_wrapper.cpp
             test_init.cpp

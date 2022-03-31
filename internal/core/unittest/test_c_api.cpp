@@ -186,8 +186,7 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
 }
 
 VecIndexPtr
-generate_index(
-    void* raw_data, knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, std::string index_type) {
+generate_index(void* raw_data, knowhere::Config conf, int64_t dim, int64_t topK, int64_t N, std::string index_type) {
     auto indexing = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type, knowhere::IndexMode::MODE_CPU);
 
     auto database = knowhere::GenDataset(N, dim, raw_data);
@@ -552,7 +551,7 @@ TEST(CApiTest, RetrieveTestWithExpr2) {
 
     int N = 10000;
     auto [raw_data, timestamps, uids] = generate_column_data(N);
-    
+
     int64_t offset;
     PreInsert(segment, N, &offset);
 
@@ -1074,8 +1073,7 @@ TEST(CApiTest, LoadIndex_Search) {
     index_params["index_type"] = "IVF_PQ";
     index_params["index_mode"] = "CPU";
     auto mode = knowhere::IndexMode::MODE_CPU;
-    load_index_info.index =
-        knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
+    load_index_info.index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_params["index_type"], mode);
     load_index_info.index->Load(binary_set);
 
     // search

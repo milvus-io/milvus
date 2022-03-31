@@ -40,9 +40,9 @@ int DEVICEID = 0;
 
 namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
+using knowhere::scalar::OperatorType;
 using milvus::indexbuilder::MapParams;
 using milvus::indexbuilder::ScalarIndexCreator;
-using knowhere::scalar::OperatorType;
 using ScalarTestParams = std::pair<MapParams, MapParams>;
 
 namespace {
@@ -301,11 +301,8 @@ Jaccard(const uint8_t* point_a, const uint8_t* point_b, int dim) {
 }
 
 float
-CountDistance(const void* point_a,
-              const void* point_b,
-              int dim,
-              const knowhere::MetricType& metric,
-              bool is_binary = false) {
+CountDistance(
+    const void* point_a, const void* point_b, int dim, const knowhere::MetricType& metric, bool is_binary = false) {
     if (point_a == nullptr || point_b == nullptr) {
         return std::numeric_limits<float>::max();
     }
