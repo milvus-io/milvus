@@ -33,6 +33,7 @@ pull_request_rules:
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker CentOS 7"
       - "status-success=continuous-integration/jenkins/pr-merge"
       - "status-success=codecov/patch"
       - "status-success=codecov/project"
@@ -85,6 +86,7 @@ pull_request_rules:
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker CentOS 7"
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
       label:
@@ -173,6 +175,7 @@ pull_request_rules:
       - "status-success=Code Checker AMD64 Ubuntu 18.04"
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker CentOS 7"
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
     actions:
       label:
@@ -191,6 +194,7 @@ pull_request_rules:
         - "status-success!=Code Checker AMD64 Ubuntu 18.04"
         - "status-success!=Build and test AMD64 Ubuntu 18.04" 
         - "status-success!=Code Checker MacOS 11"    
+        - "status-success!=Code Checker CentOS 7"
     actions:
       label:
         remove:
