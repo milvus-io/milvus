@@ -56,7 +56,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	mockKv.SaveWithLease(BuildImportTaskKey(1), "value", 1)
 	mockKv.SaveWithLease(BuildImportTaskKey(2), string(taskInfo1), 2)
 	mockKv.SaveWithLease(BuildImportTaskKey(3), string(taskInfo2), 3)
-	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -65,7 +65,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	}
 	mgr := newImportManager(context.TODO(), mockKv, fn)
 	assert.NotNil(t, mgr)
-	mgr.init()
+	mgr.init(context.TODO())
 }
 
 func TestImportManager_ImportJob(t *testing.T) {
@@ -74,7 +74,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	mockKv := &kv.MockMetaKV{}
 	mockKv.InMemKv = make(map[string]string)
 	mgr := newImportManager(context.TODO(), mockKv, nil)
-	resp := mgr.importJob(nil, colID)
+	resp := mgr.importJob(context.TODO(), nil, colID)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 	rowReq := &milvuspb.ImportRequest{
@@ -84,7 +84,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 		Files:          []string{"f1", "f2", "f3"},
 	}
 
-	resp = mgr.importJob(rowReq, colID)
+	resp = mgr.importJob(context.TODO(), rowReq, colID)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 	colReq := &milvuspb.ImportRequest{
@@ -100,7 +100,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 		},
 	}
 
-	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -109,16 +109,16 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(rowReq, colID)
+	resp = mgr.importJob(context.TODO(), rowReq, colID)
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(colReq, colID)
+	resp = mgr.importJob(context.TODO(), colReq, colID)
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
-	fn = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -127,17 +127,17 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(rowReq, colID)
+	resp = mgr.importJob(context.TODO(), rowReq, colID)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(colReq, colID)
+	resp = mgr.importJob(context.TODO(), colReq, colID)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
 	count := 0
-	fn = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		if count >= 2 {
 			return &datapb.ImportTaskResponse{
 				Status: &commonpb.Status{
@@ -154,7 +154,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(rowReq, colID)
+	resp = mgr.importJob(context.TODO(), rowReq, colID)
 	assert.Equal(t, len(rowReq.Files)-2, len(mgr.pendingTasks))
 	assert.Equal(t, 2, len(mgr.workingTasks))
 }
@@ -164,7 +164,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
 	mockKv.InMemKv = make(map[string]string)
-	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -180,7 +180,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	}
 
 	mgr := newImportManager(context.TODO(), mockKv, fn)
-	mgr.importJob(rowReq, colID)
+	mgr.importJob(context.TODO(), rowReq, colID)
 
 	state := &rootcoordpb.ImportResult{
 		TaskId: 10000,

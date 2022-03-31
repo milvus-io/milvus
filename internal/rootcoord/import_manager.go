@@ -55,20 +55,22 @@ type importManager struct {
 	ctx       context.Context    // reserved
 	cancel    context.CancelFunc // reserved
 	taskStore kv.MetaKv          // Persistent task info storage.
+	busyNodes map[int64]bool     // Set of all current working DataNodes.
 
 	// TODO: Make pendingTask a map to improve look up performance.
-	pendingTasks []*datapb.ImportTaskInfo         // pending tasks
-	workingTasks map[int64]*datapb.ImportTaskInfo // in-progress tasks
-	pendingLock  sync.RWMutex                     // lock pending task list
-	workingLock  sync.RWMutex                     // lock working task map
-	nextTaskID   int64                            // for generating next import task ID
-	lastReqID    int64                            // for generating a unique ID for import request
+	pendingTasks  []*datapb.ImportTaskInfo         // pending tasks
+	workingTasks  map[int64]*datapb.ImportTaskInfo // in-progress tasks
+	pendingLock   sync.RWMutex                     // lock pending task list
+	workingLock   sync.RWMutex                     // lock working task map
+	busyNodesLock sync.RWMutex                     // lock for working nodes.
+	nextTaskID    int64                            // for generating next import task ID
+	lastReqID     int64                            // for generating a unique ID for import request
 
-	callImportService func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse
+	callImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
 }
 
 // newImportManager helper function to create a importManager
-func newImportManager(ctx context.Context, client kv.MetaKv, importService func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse) *importManager {
+func newImportManager(ctx context.Context, client kv.MetaKv, importService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse) *importManager {
 	ctx, cancel := context.WithCancel(ctx)
 	mgr := &importManager{
 		ctx:               ctx,
@@ -76,8 +78,10 @@ func newImportManager(ctx context.Context, client kv.MetaKv, importService func(
 		taskStore:         client,
 		pendingTasks:      make([]*datapb.ImportTaskInfo, 0, MaxPendingCount), // currently task queue max size is 32
 		workingTasks:      make(map[int64]*datapb.ImportTaskInfo),
+		busyNodes:         make(map[int64]bool),
 		pendingLock:       sync.RWMutex{},
 		workingLock:       sync.RWMutex{},
+		busyNodesLock:     sync.RWMutex{},
 		nextTaskID:        0,
 		lastReqID:         0,
 		callImportService: importService,
@@ -86,18 +90,20 @@ func newImportManager(ctx context.Context, client kv.MetaKv, importService func(
 	return mgr
 }
 
-func (m *importManager) init() error {
+func (m *importManager) init(ctx context.Context) error {
 	//  Read tasks from etcd and save them as pendingTasks or workingTasks.
 	m.load()
-	m.sendOutTasks()
+	m.sendOutTasks(ctx)
 
 	return nil
 }
 
 // sendOutTasks pushes all pending tasks to DataCoord, gets DataCoord response and re-add these tasks as working tasks.
-func (m *importManager) sendOutTasks() error {
+func (m *importManager) sendOutTasks(ctx context.Context) error {
 	m.pendingLock.Lock()
+	m.busyNodesLock.Lock()
 	defer m.pendingLock.Unlock()
+	defer m.busyNodesLock.Unlock()
 
 	// Trigger Import() action to DataCoord.
 	for len(m.pendingTasks) > 0 {
@@ -117,8 +123,17 @@ func (m *importManager) sendOutTasks() error {
 		}
 
 		log.Debug("sending import task to DataCoord", zap.Int64("taskID", task.GetId()))
+		// Get all busy dataNodes for reference.
+		var busyNodeList []int64
+		for k := range m.busyNodes {
+			busyNodeList = append(busyNodeList, k)
+		}
+
 		// Call DataCoord.Import().
-		resp := m.callImportService(m.ctx, it)
+		resp := m.callImportService(ctx, &datapb.ImportTaskRequest{
+			ImportTask:   it,
+			WorkingNodes: busyNodeList,
+		})
 		if resp.Status.ErrorCode == commonpb.ErrorCode_UnexpectedError {
 			log.Debug("import task is rejected", zap.Int64("task ID", it.GetTaskId()))
 			break
@@ -127,6 +142,8 @@ func (m *importManager) sendOutTasks() error {
 		log.Debug("import task successfully assigned to DataNode",
 			zap.Int64("task ID", it.GetTaskId()),
 			zap.Int64("DataNode ID", task.GetDatanodeId()))
+		// Add new working dataNode to busyNodes.
+		m.busyNodes[resp.GetDatanodeId()] = true
 
 		// erase this task from head of pending list if the callImportService succeed
 		m.pendingTasks = m.pendingTasks[1:]
@@ -163,7 +180,7 @@ func (m *importManager) genReqID() int64 {
 
 // importJob processes the import request, generates import tasks, sends these tasks to DataCoord, and returns
 // immediately.
-func (m *importManager) importJob(req *milvuspb.ImportRequest, cID int64) *milvuspb.ImportResponse {
+func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportRequest, cID int64) *milvuspb.ImportResponse {
 	if req == nil || len(req.Files) == 0 {
 		return &milvuspb.ImportResponse{
 			Status: &commonpb.Status{
@@ -267,7 +284,7 @@ func (m *importManager) importJob(req *milvuspb.ImportRequest, cID int64) *milvu
 			log.Info("column-based import request processed", zap.Int64("reqID", reqID), zap.Int64("taskID", newTask.GetId()))
 		}
 	}()
-	m.sendOutTasks()
+	m.sendOutTasks(ctx)
 	return resp
 }
 

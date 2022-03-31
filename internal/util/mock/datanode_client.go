@@ -55,6 +55,6 @@ func (m *DataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionP
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *DataNodeClient) Import(ctx context.Context, req *datapb.ImportTask, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *DataNodeClient) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

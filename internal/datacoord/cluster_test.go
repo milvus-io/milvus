@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -543,4 +544,36 @@ func TestCluster_Flush(t *testing.T) {
 			[]*datapb.SegmentInfo{{ID: 2, InsertChannel: "chan-3"}})
 	})
 	//TODO add a method to verify datanode has flush request after client injection is available
+}
+
+func TestCluster_Import(t *testing.T) {
+	kv := getMetaKv(t)
+	defer func() {
+		kv.RemoveWithPrefix("")
+		kv.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.TODO(), 100*time.Millisecond)
+	defer cancel()
+	sessionManager := NewSessionManager()
+	channelManager, err := NewChannelManager(kv, newMockHandler())
+	assert.Nil(t, err)
+	cluster := NewCluster(sessionManager, channelManager)
+	defer cluster.Close()
+	addr := "localhost:8080"
+	info := &NodeInfo{
+		Address: addr,
+		NodeID:  1,
+	}
+	nodes := []*NodeInfo{info}
+	err = cluster.Startup(ctx, nodes)
+	assert.Nil(t, err)
+
+	err = cluster.Watch("chan-1", 1)
+	assert.NoError(t, err)
+
+	assert.NotPanics(t, func() {
+		cluster.Import(ctx, 1, &datapb.ImportTaskRequest{})
+	})
+	time.Sleep(500 * time.Millisecond)
 }

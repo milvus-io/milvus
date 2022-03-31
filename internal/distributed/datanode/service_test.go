@@ -111,7 +111,7 @@ func (m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPla
 func (m *MockDataNode) SetEtcdClient(client *clientv3.Client) {
 }
 
-func (m *MockDataNode) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+func (m *MockDataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	return m.status, m.err
 }
 
