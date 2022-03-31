@@ -977,6 +977,41 @@ func Test_NewServer(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("CreateCredential", func(t *testing.T) {
+		_, err := server.CreateCredential(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("UpdateCredential", func(t *testing.T) {
+		_, err := server.UpdateCredential(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("DeleteCredential", func(t *testing.T) {
+		_, err := server.DeleteCredential(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("ListCredUsers", func(t *testing.T) {
+		_, err := server.ListCredUsers(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("InvalidateCredentialCache", func(t *testing.T) {
+		_, err := server.InvalidateCredentialCache(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("UpdateCredentialCache", func(t *testing.T) {
+		_, err := server.UpdateCredentialCache(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("ClearCredUsersCache", func(t *testing.T) {
+		_, err := server.ClearCredUsersCache(ctx, nil)
+		assert.Nil(t, err)
+	})
+
 	err = server.Stop()
 	assert.Nil(t, err)
 

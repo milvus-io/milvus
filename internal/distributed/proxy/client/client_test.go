@@ -74,6 +74,12 @@ func Test_NewClient(t *testing.T) {
 
 		r6, err := client.SendRetrieveResult(ctx, nil)
 		retCheck(retNotNil, r6, err)
+
+		r7, err := client.InvalidateCredentialCache(ctx, nil)
+		retCheck(retNotNil, r7, err)
+
+		r8, err := client.UpdateCredentialCache(ctx, nil)
+		retCheck(retNotNil, r8, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{
