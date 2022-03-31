@@ -516,7 +516,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 				for _, segmentInfo := range segmentInfos {
 					leastInfo, err := qc.cluster.getSegmentInfoByID(ctx, segmentInfo.SegmentID)
 					if err != nil {
-						log.Warn("loadBalanceSegmentLoop: get segment info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+						log.Warn("[auto balance] failed to get segment information from QueryNode", zap.Int64("nodeID", nodeID), zap.Error(err))
 						updateSegmentInfoDone = false
 						break
 					}
