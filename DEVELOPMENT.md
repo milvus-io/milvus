@@ -218,7 +218,7 @@ $ cd ../../../
 $ ./scripts/start_cluster.sh
 
 # Or running Milvus standalone
-$ cd deployments/docker/standalone
+$ cd deployments/docker/dev
 $ docker-compose up -d
 $ cd ../../../
 $ ./scripts/start_standalone.sh
