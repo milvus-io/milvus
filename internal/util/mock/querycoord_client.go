@@ -27,6 +27,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+// Check if QueryCoordClient implements proto.QueryCoordClient
+var _ querypb.QueryCoordClient = &QueryCoordClient{}
+
 type QueryCoordClient struct {
 	Err error
 }
@@ -85,4 +88,8 @@ func (m *QueryCoordClient) LoadBalance(ctx context.Context, in *querypb.LoadBala
 
 func (m *QueryCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
+}
+
+func (m *QueryCoordClient) GetShardLeaders(ctx context.Context, in *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
+	return &querypb.GetShardLeadersResponse{}, m.Err
 }
