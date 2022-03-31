@@ -70,10 +70,11 @@ func TestImportManager_NewImportManager(t *testing.T) {
 
 func TestImportManager_ImportJob(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
 	mockKv.InMemKv = make(map[string]string)
 	mgr := newImportManager(context.TODO(), mockKv, nil)
-	resp := mgr.importJob(nil)
+	resp := mgr.importJob(nil, colID)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 	rowReq := &milvuspb.ImportRequest{
@@ -83,7 +84,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 		Files:          []string{"f1", "f2", "f3"},
 	}
 
-	resp = mgr.importJob(rowReq)
+	resp = mgr.importJob(rowReq, colID)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 	colReq := &milvuspb.ImportRequest{
@@ -108,12 +109,12 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(rowReq)
+	resp = mgr.importJob(rowReq, colID)
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(colReq)
+	resp = mgr.importJob(colReq, colID)
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
@@ -126,12 +127,12 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(rowReq)
+	resp = mgr.importJob(rowReq, colID)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(colReq)
+	resp = mgr.importJob(colReq, colID)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
@@ -153,13 +154,14 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, fn)
-	resp = mgr.importJob(rowReq)
+	resp = mgr.importJob(rowReq, colID)
 	assert.Equal(t, len(rowReq.Files)-2, len(mgr.pendingTasks))
 	assert.Equal(t, 2, len(mgr.workingTasks))
 }
 
 func TestImportManager_TaskState(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
 	mockKv.InMemKv = make(map[string]string)
 	fn := func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
@@ -178,12 +180,12 @@ func TestImportManager_TaskState(t *testing.T) {
 	}
 
 	mgr := newImportManager(context.TODO(), mockKv, fn)
-	mgr.importJob(rowReq)
+	mgr.importJob(rowReq, colID)
 
 	state := &rootcoordpb.ImportResult{
 		TaskId: 10000,
 	}
-	err := mgr.updateTaskState(state)
+	_, err := mgr.updateTaskState(state)
 	assert.NotNil(t, err)
 
 	state = &rootcoordpb.ImportResult{
@@ -201,8 +203,16 @@ func TestImportManager_TaskState(t *testing.T) {
 			},
 		},
 	}
-	err = mgr.updateTaskState(state)
-	assert.Nil(t, err)
+	ti, err := mgr.updateTaskState(state)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), ti.GetId())
+	assert.Equal(t, int64(100), ti.GetCollectionId())
+	assert.Equal(t, int64(100), ti.GetCollectionId())
+	assert.Equal(t, int64(0), ti.GetPartitionId())
+	assert.Equal(t, true, ti.GetRowBased())
+	assert.Equal(t, []string{"f2"}, ti.GetFiles())
+	assert.Equal(t, commonpb.ImportState_ImportCompleted, ti.GetState().GetStateCode())
+	assert.Equal(t, int64(1000), ti.GetState().GetRowCount())
 
 	resp := mgr.getTaskState(10000)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)

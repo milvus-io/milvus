@@ -283,7 +283,7 @@ func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	}
 }
 
-// StartWatch watch session change and process all channels' timetick msg
+// StartWatch watches on session changes and processes timeTick messages of all channels.
 func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	defer wg.Done()
 

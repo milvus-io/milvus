@@ -126,6 +126,8 @@ enum ErrorCode : int {
   OutOfMemory = 24,
   IndexNotExist = 25,
   EmptyCollection = 26,
+  UpdateImportTaskFailure = 27,
+  CollectionNameNotFound = 28,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
