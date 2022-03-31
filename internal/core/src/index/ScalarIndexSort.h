@@ -24,8 +24,6 @@ namespace milvus::scalar {
 
 template <typename T>
 class ScalarIndexSort : public ScalarIndex<T> {
-    static_assert(std::is_fundamental_v<T> || std::is_same_v<T, std::string>);
-
  public:
     ScalarIndexSort();
     ScalarIndexSort(size_t n, const T* values);
@@ -37,7 +35,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     Load(const BinarySet& index_binary) override;
 
     void
-    Build(const DatasetPtr& dataset) override;
+    BuildWithDataset(const DatasetPtr& dataset) override;
 
     void
     Build(size_t n, const T* values) override;
@@ -57,6 +55,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     const TargetBitmapPtr
     Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) override;
 
+ public:
     const std::vector<IndexStructure<T>>&
     GetData() {
         return data_;

@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <index/ScalarIndexSort.h>
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
@@ -20,9 +21,9 @@
 namespace milvus::query {
 
 template <typename T>
-inline std::unique_ptr<knowhere::scalar::StructuredIndex<T>>
+inline scalar::ScalarIndexPtr<T>
 generate_scalar_index(Span<T> data) {
-    auto indexing = std::make_unique<knowhere::scalar::StructuredIndexSort<T>>();
+    auto indexing = std::make_unique<scalar::ScalarIndexSort<T>>();
     indexing->Build(data.row_count(), data.data());
     return indexing;
 }

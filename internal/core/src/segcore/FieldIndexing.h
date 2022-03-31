@@ -16,6 +16,8 @@
 #include <memory>
 
 #include <tbb/concurrent_vector.h>
+#include <index/Index.h>
+#include <index/ScalarIndex.h>
 
 #include "AckResponder.h"
 #include "InsertRecord.h"
@@ -70,14 +72,14 @@ class ScalarFieldIndexing : public FieldIndexing {
     BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
 
     // concurrent
-    knowhere::scalar::StructuredIndex<T>*
+    scalar::ScalarIndex<T>*
     get_chunk_indexing(int64_t chunk_id) const override {
         Assert(!field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }
 
  private:
-    tbb::concurrent_vector<std::unique_ptr<knowhere::scalar::StructuredIndex<T>>> data_;
+    tbb::concurrent_vector<scalar::ScalarIndexPtr<T>> data_;
 };
 
 class VectorFieldIndexing : public FieldIndexing {

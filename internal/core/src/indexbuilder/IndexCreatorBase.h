@@ -27,6 +27,7 @@ class IndexCreatorBase {
     virtual knowhere::BinarySet
     Serialize() = 0;
 
+    // used for test.
     virtual void
     Load(const knowhere::BinarySet&) = 0;
 

@@ -14,7 +14,8 @@
 #include <utils/Types.h>
 #include "index/Index.h"
 #include "common/type_c.h"
-#include "ScalarIndex.h"
+#include "index/ScalarIndex.h"
+#include "index/StringIndex.h"
 #include <string>
 
 namespace milvus::scalar {
@@ -35,11 +36,11 @@ class IndexFactory {
     }
 
     IndexBasePtr
-    CreateIndex(CDataType dtype, std::string index_type);
+    CreateIndex(CDataType dtype, const std::string& index_type);
 
     template <typename T>
     ScalarIndexPtr<T>
-    CreateIndex(std::string index_type);
+    CreateIndex(const std::string& index_type);
 };
 
 }  // namespace milvus::scalar

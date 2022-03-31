@@ -9,33 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <string>
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
-#include "index/IndexType.h"
-#include "index/BoolIndex.h"
+#include <vector>
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 namespace milvus::scalar {
 
-template <typename T>
-inline ScalarIndexPtr<T>
-IndexFactory::CreateIndex(const std::string& index_type) {
-    return CreateScalarIndexSort<T>();
-}
-
-template <>
-inline ScalarIndexPtr<bool>
-IndexFactory::CreateIndex(const std::string& index_type) {
-    return CreateBoolIndex();
-}
-
-template <>
-inline ScalarIndexPtr<std::string>
-IndexFactory::CreateIndex(const std::string& index_type) {
-#ifdef __linux__
-    return CreateStringIndexMarisa();
-#endif
-    throw std::runtime_error("unsupported platform");
+size_t
+get_file_size(int fd) {
+    struct stat s;
+    fstat(fd, &s);
+    return s.st_size;
 }
 
 }  // namespace milvus::scalar

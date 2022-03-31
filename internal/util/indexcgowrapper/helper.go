@@ -4,9 +4,9 @@ package indexcgowrapper
 
 #cgo CFLAGS: -I${SRCDIR}/../../core/output/include
 
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_indexbuilder -lmilvus_common -Wl,-rpath,"${SRCDIR}/../../core/output/lib"
-#cgo linux LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_indexbuilder -lmilvus_common -Wl,-rpath=${SRCDIR}/../../core/output/lib
-#cgo windows LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_indexbuilder -lmilvus_common -Wl,-rpath=${SRCDIR}/../../core/output/lib
+#cgo darwin LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -Wl,-rpath,"${SRCDIR}/../../core/output/lib"
+#cgo linux LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -Wl,-rpath=${SRCDIR}/../../core/output/lib
+#cgo windows LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -Wl,-rpath=${SRCDIR}/../../core/output/lib
 
 #include <stdlib.h>	// free
 #include "indexbuilder/index_c.h"

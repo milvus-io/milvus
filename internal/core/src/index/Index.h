@@ -14,7 +14,8 @@
 #include <memory>
 #include <knowhere/index/Index.h>
 #include <knowhere/common/Dataset.h>
-#include <knowhere/index/structured_index_simple/StructuredIndex.h>
+#include "index/OperatorType.h"
+#include <boost/dynamic_bitset.hpp>
 
 namespace milvus::scalar {
 using Index = knowhere::Index;
@@ -22,11 +23,16 @@ using IndexPtr = std::unique_ptr<Index>;
 using BinarySet = knowhere::BinarySet;
 using Config = knowhere::Config;
 using DatasetPtr = knowhere::DatasetPtr;
-using OperatorType = knowhere::scalar::OperatorType;
+using TargetBitmap = boost::dynamic_bitset<>;
+using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 class IndexBase : public Index {
+ public:
     virtual void
-    Build(const DatasetPtr& dataset) = 0;
+    BuildWithDataset(const DatasetPtr& dataset) = 0;
+
+    virtual const TargetBitmapPtr
+    Query(const DatasetPtr& dataset) = 0;
 };
 using IndexBasePtr = std::unique_ptr<IndexBase>;
 

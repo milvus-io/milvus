@@ -11,18 +11,16 @@
 
 #pragma once
 
-#include <knowhere/index/structured_index_simple/StructuredIndexSort.h>
-#include <string>
-
-namespace milvus::indexbuilder {
-
-class StringIndexImpl : public knowhere::scalar::StructuredIndexSort<std::string> {
- public:
-    knowhere::BinarySet
-    Serialize(const knowhere::Config& config) override;
-
-    void
-    Load(const knowhere::BinarySet& index_binary) override;
+namespace milvus::scalar {
+enum OperatorType {
+    LT = 0,
+    LE = 1,
+    GT = 3,
+    GE = 4,
+    RangeOp = 5,
+    InOp = 6,
+    NotInOp = 7,
+    PrefixMatchOp = 8,
+    PostfixMatchOp = 9,
 };
-
-}  // namespace milvus::indexbuilder
+}  // namespace milvus::scalar

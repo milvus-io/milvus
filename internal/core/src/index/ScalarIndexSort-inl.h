@@ -16,6 +16,7 @@
 #include <vector>
 #include <string>
 #include "knowhere/common/Log.h"
+#include "Meta.h"
 
 namespace milvus::scalar {
 
@@ -30,7 +31,7 @@ inline ScalarIndexSort<T>::ScalarIndexSort(const size_t n, const T* values) : is
 
 template <typename T>
 inline void
-ScalarIndexSort<T>::Build(const DatasetPtr& dataset) {
+ScalarIndexSort<T>::BuildWithDataset(const DatasetPtr& dataset) {
     auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
     auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
     Build(size, reinterpret_cast<const T*>(data));
@@ -195,46 +196,6 @@ ScalarIndexSort<T>::Range(T lower_bound_value, bool lb_inclusive, T upper_bound_
         bitset->set(lb->idx_);
     }
     return bitset;
-}
-
-template <>
-inline void
-ScalarIndexSort<std::string>::Build(const milvus::scalar::DatasetPtr& dataset) {
-    auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
-    proto::schema::StringArray arr;
-    arr.ParseFromArray(data, size);
-    // TODO: optimize here. avoid memory copy.
-    std::vector<std::string> vecs{arr.data().begin(), arr.data().end()};
-    Build(arr.data().size(), vecs.data());
-}
-
-template <>
-inline BinarySet
-ScalarIndexSort<std::string>::Serialize(const Config& config) {
-    BinarySet res_set;
-    auto data = this->GetData();
-    for (const auto& record : data) {
-        auto idx = record.idx_;
-        auto str = record.a_;
-        std::shared_ptr<uint8_t[]> content(new uint8_t[str.length()]);
-        memcpy(content.get(), str.c_str(), str.length());
-        res_set.Append(std::to_string(idx), content, str.length());
-    }
-    return res_set;
-}
-
-template <>
-inline void
-ScalarIndexSort<std::string>::Load(const BinarySet& index_binary) {
-    std::vector<std::string> vecs;
-
-    for (const auto& [k, v] : index_binary.binary_map_) {
-        std::string str(reinterpret_cast<const char*>(v->data.get()), v->size);
-        vecs.emplace_back(str);
-    }
-
-    Build(vecs.size(), vecs.data());
 }
 
 }  // namespace milvus::scalar

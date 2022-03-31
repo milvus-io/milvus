@@ -41,7 +41,9 @@ if (LINUX)
             test_utils.cpp
             test_scalar_index_creator.cpp
             test_index_c_api.cpp
-            test_index.cpp
+            test_scalar_index.cpp
+            test_string_index.cpp
+            test_bool_index.cpp
             )
     # check if memory leak exists in index builder
     set(INDEX_BUILDER_TEST_FILES

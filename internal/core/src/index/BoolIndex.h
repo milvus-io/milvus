@@ -9,33 +9,30 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <string>
+#pragma once
+
+#include <vector>
+#include <memory>
 #include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
-#include "index/IndexType.h"
-#include "index/BoolIndex.h"
 
 namespace milvus::scalar {
 
-template <typename T>
-inline ScalarIndexPtr<T>
-IndexFactory::CreateIndex(const std::string& index_type) {
-    return CreateScalarIndexSort<T>();
-}
+// TODO: optimize here.
+class BoolIndex : public ScalarIndexSort<bool> {
+ public:
+    void
+    BuildWithDataset(const DatasetPtr& dataset) override {
+        auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
+        auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
+        proto::schema::BoolArray arr;
+        arr.ParseFromArray(data, size);
+        Build(arr.data().size(), arr.data().data());
+    }
+};
+using BoolIndexPtr = std::unique_ptr<BoolIndex>;
 
-template <>
-inline ScalarIndexPtr<bool>
-IndexFactory::CreateIndex(const std::string& index_type) {
-    return CreateBoolIndex();
+inline BoolIndexPtr
+CreateBoolIndex() {
+    return std::make_unique<BoolIndex>();
 }
-
-template <>
-inline ScalarIndexPtr<std::string>
-IndexFactory::CreateIndex(const std::string& index_type) {
-#ifdef __linux__
-    return CreateStringIndexMarisa();
-#endif
-    throw std::runtime_error("unsupported platform");
-}
-
 }  // namespace milvus::scalar
