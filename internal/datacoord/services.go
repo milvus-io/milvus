@@ -969,7 +969,7 @@ func (s *Server) Import(ctx context.Context, req *datapb.ImportTask) (*datapb.Im
 	}
 
 	if s.isClosed() {
-		log.Warn("failed to import because of closed server", zap.String("collectionName", req.GetCollectionName()))
+		log.Warn("failed to import because of closed server", zap.Int64("collection ID", req.GetCollectionId()))
 		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID)
 		return resp, nil
 	}

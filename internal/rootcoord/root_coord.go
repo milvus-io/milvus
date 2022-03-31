@@ -84,7 +84,11 @@ func metricProxy(v int64) string {
 	return fmt.Sprintf("client_%d", v)
 }
 
-var Params paramtable.ComponentParam
+var (
+	Params                     paramtable.ComponentParam
+	CheckCompleteIndexInterval = 3 * time.Minute
+	TaskTimeLimit              = 3 * time.Hour
+)
 
 // Core root coordinator core
 type Core struct {
@@ -833,13 +837,13 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 			log.Error("RootCoord failed to get index states from IndexCoord.", zap.Error(err))
 			return nil, err
 		}
+		log.Debug("got index states", zap.String("get index state result", res.String()))
 		if res.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Error("Get index states failed.",
 				zap.String("error_code", res.GetStatus().GetErrorCode().String()),
 				zap.String("reason", res.GetStatus().GetReason()))
 			return nil, fmt.Errorf(res.GetStatus().GetErrorCode().String())
 		}
-		log.Debug("Successfully got index states.")
 		return res.GetStates(), nil
 	}
 	return nil
@@ -2230,7 +2234,7 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 	return succStatus(), nil
 }
 
-// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+// Import imports large files (json, numpy, etc.) on MinIO/S3 storage into Milvus storage.
 func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.ImportResponse{
@@ -2238,11 +2242,25 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		}, nil
 	}
 
-	log.Info("receive import request")
-	resp := c.importManager.importJob(req)
+	// Get collection/partition ID from collection/partition name.
+	var cID int64
+	var ok bool
+	if cID, ok = c.MetaTable.collName2ID[req.GetCollectionName()]; !ok {
+		log.Error("failed to find collection ID for collection name",
+			zap.String("collection name", req.GetCollectionName()))
+		return nil, fmt.Errorf("collection ID not found for collection name %s", req.GetCollectionName())
+	}
+	log.Info("receive import request",
+		zap.String("collection name", req.GetCollectionName()),
+		zap.Int64("collection ID", cID),
+		zap.String("partition name", req.GetPartitionName()),
+		zap.Int("# of files = ", len(req.GetFiles())),
+	)
+	resp := c.importManager.importJob(req, cID)
 	return resp, nil
 }
 
+// TODO: Implement this.
 // Check import task state from datanode
 func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
@@ -2261,21 +2279,39 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 	return resp, nil
 }
 
-// Report impot task state to rootcoord
+// ReportImport reports import task state to RootCoord.
 func (c *Core) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
 	log.Info("receive import state report")
-
-	err := c.importManager.updateTaskState(req)
+	// Upon receiving ReportImport request, update the related task's state in task store.
+	ti, err := c.importManager.updateTaskState(req)
 	if err != nil {
 		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			ErrorCode: commonpb.ErrorCode_UpdateImportTaskFailure,
 			Reason:    err.Error(),
 		}, nil
 	}
+	// Reverse look up collection name on collection ID.
+	var colName string
+	for k, v := range c.MetaTable.collName2ID {
+		if v == ti.GetCollectionId() {
+			colName = k
+		}
+	}
+	if colName == "" {
+		log.Error("Collection name not found for collection ID", zap.Int64("collection ID", ti.GetCollectionId()))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNameNotFound,
+			Reason:    "Collection name not found for collection ID" + strconv.FormatInt(ti.GetCollectionId(), 10),
+		}, nil
+	}
+
+	// Start a loop to check segments' index states periodically.
+	c.wg.Add(1)
+	go c.CheckCompleteIndexLoop(ctx, ti, colName, req.Segments)
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -2300,7 +2336,7 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 	if err != nil {
 		return 0, err
 	}
-	log.Debug("Got index description", zap.String("index_description", indexDescriptionResp.String()))
+	log.Debug("got index description", zap.String("index_description", indexDescriptionResp.String()))
 
 	// Check if the target index name exists.
 	matchIndexID := int64(-1)
@@ -2315,6 +2351,7 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 	if !foundIndexID {
 		return 0, fmt.Errorf("no index is created")
 	}
+	log.Debug("found match index ID", zap.Int64("match index ID", matchIndexID))
 
 	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
 		IndexBuildIDs: make([]UniqueID, 0),
@@ -2331,6 +2368,9 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 		}
 		segmentDesc, err := c.DescribeSegment(ctx, describeSegmentRequest)
 		if err != nil {
+			log.Error("Failed to describe segment",
+				zap.Int64("collection ID", collectionID),
+				zap.Int64("segment ID", segmentID))
 			return 0, err
 		}
 		if segmentDesc.IndexID == matchIndexID {
@@ -2339,16 +2379,15 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 			}
 		}
 	}
-	log.Debug("Proxy GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
+	log.Debug("proxy GetIndexState", zap.Int("# of IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
 
-	// Return early on empty results.
 	if len(getIndexStatesRequest.IndexBuildIDs) == 0 {
-		log.Info("Empty index build IDs returned.", zap.String("collection name", collectionName), zap.Int64("collection ID", collectionID))
+		log.Info("empty index build IDs returned", zap.String("collection name", collectionName), zap.Int64("collection ID", collectionID))
 		return 0, nil
 	}
 	states, err := c.CallGetIndexStatesService(ctx, getIndexStatesRequest.IndexBuildIDs)
 	if err != nil {
-		log.Error("Failed to get index state in checkSegmentIndexStates.", zap.Error(err))
+		log.Error("failed to get index state in checkSegmentIndexStates", zap.Error(err))
 		return 0, err
 	}
 
@@ -2359,11 +2398,58 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 			ct++
 		}
 	}
-	log.Info("Segment indexing state checked.",
+	log.Info("segment indexing state checked",
 		zap.Int("# of checked segment", len(states)),
 		zap.Int("# of segments with complete index", ct),
 		zap.String("collection name", collectionName),
 		zap.Int64("collection ID", collectionID),
 	)
 	return ct, nil
+}
+
+// CheckCompleteIndexLoop checks index build states for an import task's segments and bring these segments online when
+// the criteria are met. CheckCompleteIndexLoop does the check every CheckCompleteIndexInterval and exits if:
+// (1) a certain percent of indices are built, (2) when context is done or (3) when the task is expired.
+func (c *Core) CheckCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTaskInfo, colName string, segIDs []UniqueID) {
+	defer c.wg.Done()
+	ticker := time.NewTicker(CheckCompleteIndexInterval)
+	spent := time.Duration(time.Unix(time.Now().Unix()-ti.GetCreateTs(), 0).Nanosecond())
+	log.Info("reporting task time left",
+		zap.Int64("task ID", ti.GetId()),
+		zap.Int64("minutes remaining", int64((TaskTimeLimit-spent).Minutes())))
+	// TODO: Replace with real task time limit.
+	expireTicker := time.NewTicker(TaskTimeLimit - spent)
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("(in loop)context done, exiting CheckCompleteIndexLoop", zap.Int64("task ID", ti.GetId()))
+			return
+		case <-ticker.C:
+			log.Info("(in loop)check segments' index states", zap.Int64("task ID", ti.GetId()))
+			if ct, err := c.CountCompleteIndex(ctx, colName, ti.GetCollectionId(), segIDs); err == nil &&
+				segmentsOnlineReady(ct, len(segIDs)) {
+				log.Info("(in loop)segment indices are ready",
+					zap.Int64("task ID", ti.GetId()),
+					zap.Int("total # of segments", len(segIDs)),
+					zap.Int("# of segments with index ready", ct))
+				c.importManager.bringSegmentsOnline(ti)
+				return
+			}
+		case <-expireTicker.C:
+			log.Info("(in loop)task has expired, stop waiting for segment results", zap.Int64("task ID", ti.GetId()))
+			return
+		}
+
+	}
+}
+
+// segmentsOnlineReady returns true if segments are ready to go up online (a.k.a. searchable).
+func segmentsOnlineReady(idxBuilt, segCount int) bool {
+	// Consider segments are ready when:
+	// (1) all but up to 2 segments have indices ready, or
+	// (2) over 85% of segments have indices ready.
+	if segCount-idxBuilt <= 2 || float64(idxBuilt)/float64(segCount) > 0.85 {
+		return true
+	}
+	return false
 }

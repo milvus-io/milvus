@@ -781,8 +781,8 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTask) (*comm
 
 	if !node.isHealthy() {
 		log.Warn("DataNode.Import failed",
-			zap.String("collectionName", req.GetCollectionName()),
-			zap.String("partitionName", req.GetPartitionName()),
+			zap.Int64("collection ID", req.GetCollectionId()),
+			zap.Int64("partition ID", req.GetPartitionId()),
 			zap.Int64("taskID", req.GetTaskId()),
 			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)))
 
