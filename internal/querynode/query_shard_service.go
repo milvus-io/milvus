@@ -18,6 +18,8 @@ package querynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -40,17 +42,42 @@ func newQueryShardService(ctx context.Context) *queryShardService {
 }
 
 func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel) error {
+	q.queryShardsMu.Lock()
+	defer q.queryShardsMu.Unlock()
+	if _, ok := q.queryShards[channel]; ok {
+		return errors.New(fmt.Sprintln("query shard(channel) ", channel, " already exists"))
+	}
+	qs := newQueryShard(
+		q.ctx,
+		collectionID,
+		channel,
+	)
+	q.queryShards[channel] = qs
 	return nil
 }
 
-func (q *queryShardService) removeQueryShard(collectionID UniqueID, channel Channel) error {
+func (q *queryShardService) removeQueryShard(channel Channel) error {
+	q.queryShardsMu.Lock()
+	defer q.queryShardsMu.Unlock()
+	if _, ok := q.queryShards[channel]; !ok {
+		return errors.New(fmt.Sprintln("query shard(channel) ", channel, " does not exist"))
+	}
+	delete(q.queryShards, channel)
 	return nil
 }
 
-func (q *queryShardService) hasQueryShard(collectionID UniqueID, channel Channel) bool {
-	return false
+func (q *queryShardService) hasQueryShard(channel Channel) bool {
+	q.queryShardsMu.Lock()
+	defer q.queryShardsMu.Unlock()
+	_, found := q.queryShards[channel]
+	return found
 }
 
-func (q *queryShardService) getQueryShard(collectionID UniqueID, channel Channel) (*queryShard, error) {
-	return nil, nil
+func (q *queryShardService) getQueryShard(channel Channel) (*queryShard, error) {
+	q.queryShardsMu.Lock()
+	defer q.queryShardsMu.Unlock()
+	if _, ok := q.queryShards[channel]; !ok {
+		return nil, errors.New(fmt.Sprintln("query shard(channel) ", channel, " does not exist"))
+	}
+	return q.queryShards[channel], nil
 }

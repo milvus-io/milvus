@@ -26,15 +26,13 @@ import (
 )
 
 func TestQueryShard_Search(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	qs := newQueryShard(ctx, cancel, 0, "vchan1")
+	qs := newQueryShard(context.Background(), 0, "vchan1")
 	_, err := qs.search(context.Background(), &querypb.SearchRequest{})
-	assert.NoError(t, err)
+	assert.Error(t, err)
 }
 
 func TestQueryShard_Query(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	qs := newQueryShard(ctx, cancel, 0, "vchan1")
+	qs := newQueryShard(context.Background(), 0, "vchan1")
 	_, err := qs.query(context.Background(), &querypb.QueryRequest{})
-	assert.NoError(t, err)
+	assert.Error(t, err)
 }

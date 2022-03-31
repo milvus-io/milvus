@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -33,10 +34,10 @@ type queryShard struct {
 
 func newQueryShard(
 	ctx context.Context,
-	cancel context.CancelFunc,
 	collectionID UniqueID,
 	channel Channel,
 ) *queryShard {
+	ctx, cancel := context.WithCancel(ctx)
 	qs := &queryShard{
 		ctx:          ctx,
 		cancel:       cancel,
@@ -47,9 +48,9 @@ func newQueryShard(
 }
 
 func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error) {
-	return nil, nil
+	return nil, errors.New("not implemented")
 }
 
 func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error) {
-	return nil, nil
+	return nil, errors.New("not implemented")
 }
