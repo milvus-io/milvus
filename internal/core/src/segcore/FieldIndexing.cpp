@@ -11,6 +11,7 @@
 
 #include <string>
 #include <thread>
+#include <index/ScalarIndexSort.h>
 
 #include "common/SystemProperty.h"
 #if defined(__linux__) || defined(__MINGW64__)
@@ -116,7 +117,7 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const 
         const auto& chunk = source->get_chunk(chunk_id);
         // build index for chunk
         // TODO
-        auto indexing = std::make_unique<knowhere::scalar::StructuredIndexSort<T>>();
+        auto indexing = scalar::CreateScalarIndexSort<T>();
         indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
         data_[chunk_id] = std::move(indexing);
     }

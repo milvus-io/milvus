@@ -44,32 +44,24 @@ class IndexFactory {
         auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(real_dtype);
 
         switch (real_dtype) {
-            case milvus::proto::schema::Bool:
-                return std::make_unique<ScalarIndexCreator<bool>>(type_params, index_params);
-            case milvus::proto::schema::Int8:
-                return std::make_unique<ScalarIndexCreator<int8_t>>(type_params, index_params);
-            case milvus::proto::schema::Int16:
-                return std::make_unique<ScalarIndexCreator<int16_t>>(type_params, index_params);
-            case milvus::proto::schema::Int32:
-                return std::make_unique<ScalarIndexCreator<int32_t>>(type_params, index_params);
-            case milvus::proto::schema::Int64:
-                return std::make_unique<ScalarIndexCreator<int64_t>>(type_params, index_params);
-            case milvus::proto::schema::Float:
-                return std::make_unique<ScalarIndexCreator<float_t>>(type_params, index_params);
-            case milvus::proto::schema::Double:
-                return std::make_unique<ScalarIndexCreator<double_t>>(type_params, index_params);
-
+            case proto::schema::Bool:
+            case proto::schema::Int8:
+            case proto::schema::Int16:
+            case proto::schema::Int32:
+            case proto::schema::Int64:
+            case proto::schema::Float:
+            case proto::schema::Double:
             case proto::schema::VarChar:
-            case milvus::proto::schema::String:
-                return std::make_unique<ScalarIndexCreator<std::string>>(type_params, index_params);
+            case proto::schema::String:
+                return CreateScalarIndex(dtype, type_params, index_params);
 
-            case milvus::proto::schema::BinaryVector:
-            case milvus::proto::schema::FloatVector:
+            case proto::schema::BinaryVector:
+            case proto::schema::FloatVector:
                 return std::make_unique<VecIndexCreator>(type_params, index_params);
 
-            case milvus::proto::schema::None:
-            case milvus::proto::schema::DataType_INT_MIN_SENTINEL_DO_NOT_USE_:
-            case milvus::proto::schema::DataType_INT_MAX_SENTINEL_DO_NOT_USE_:
+            case proto::schema::None:
+            case proto::schema::DataType_INT_MIN_SENTINEL_DO_NOT_USE_:
+            case proto::schema::DataType_INT_MAX_SENTINEL_DO_NOT_USE_:
             default:
                 throw std::invalid_argument(invalid_dtype_msg);
         }

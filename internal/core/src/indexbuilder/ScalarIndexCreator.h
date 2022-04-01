@@ -12,22 +12,18 @@
 #pragma once
 
 #include "indexbuilder/IndexCreatorBase.h"
-#include "knowhere/index/structured_index_simple/StructuredIndex.h"
 #include "pb/index_cgo_msg.pb.h"
 #include <string>
 #include <memory>
+#include <common/CDataType.h>
+#include "index/Index.h"
+#include "index/ScalarIndex.h"
 
 namespace milvus::indexbuilder {
 
-template <typename T>
 class ScalarIndexCreator : public IndexCreatorBase {
-    // of course, maybe we can support combination index later.
-    // for example, we can create index for combination of (field a, field b),
-    // attribute filtering on the combination can be speed up.
-    static_assert(std::is_fundamental_v<T> || std::is_same_v<T, std::string>);
-
  public:
-    ScalarIndexCreator(const char* type_params, const char* index_params);
+    ScalarIndexCreator(CDataType dtype, const char* type_params, const char* index_params);
 
     void
     Build(const knowhere::DatasetPtr& dataset) override;
@@ -39,11 +35,22 @@ class ScalarIndexCreator : public IndexCreatorBase {
     Load(const knowhere::BinarySet&) override;
 
  private:
-    std::unique_ptr<knowhere::scalar::StructuredIndex<T>> index_ = nullptr;
+    std::string
+    index_type();
+
+ private:
+    scalar::IndexBasePtr index_ = nullptr;
     proto::indexcgo::TypeParams type_params_;
     proto::indexcgo::IndexParams index_params_;
     knowhere::Config config_;
+    CDataType dtype_;
 };
-}  // namespace milvus::indexbuilder
 
-#include "ScalarIndexCreator-inl.h"
+using ScalarIndexCreatorPtr = std::unique_ptr<ScalarIndexCreator>;
+
+inline ScalarIndexCreatorPtr
+CreateScalarIndex(CDataType dtype, const char* type_params, const char* index_params) {
+    return std::make_unique<ScalarIndexCreator>(dtype, type_params, index_params);
+}
+
+}  // namespace milvus::indexbuilder

@@ -149,7 +149,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc index_
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> results;
 
-    using Index = knowhere::scalar::StructuredIndex<T>;
+    using Index = scalar::ScalarIndex<T>;
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
         const Index& indexing = segment_.chunk_scalar_index<T>(field_offset, chunk_id);
         // NOTE: knowhere is not const-ready
@@ -180,8 +180,8 @@ template <typename T>
 auto
 ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<UnaryRangeExprImpl<T>&>(expr_raw);
-    using Index = knowhere::scalar::StructuredIndex<T>;
-    using Operator = knowhere::scalar::OperatorType;
+    using Index = scalar::ScalarIndex<T>;
+    using Operator = scalar::OperatorType;
     auto op = expr.op_type_;
     auto val = expr.value_;
     switch (op) {
@@ -228,7 +228,7 @@ template <typename T>
 auto
 ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<BinaryRangeExprImpl<T>&>(expr_raw);
-    using Index = knowhere::scalar::StructuredIndex<T>;
+    using Index = scalar::ScalarIndex<T>;
     using Operator = knowhere::scalar::OperatorType;
     bool lower_inclusive = expr.lower_inclusive_;
     bool upper_inclusive = expr.upper_inclusive_;

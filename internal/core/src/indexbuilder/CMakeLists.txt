@@ -15,7 +15,7 @@ set(INDEXBUILDER_FILES
         index_c.cpp
         init_c.cpp
         utils.cpp
-        StringIndexImpl.cpp
+        ScalarIndexCreator.cpp
         )
 add_library(milvus_indexbuilder SHARED
         ${INDEXBUILDER_FILES}
@@ -29,6 +29,7 @@ endif ()
 
 # link order matters
 target_link_libraries(milvus_indexbuilder
+        milvus_index
         milvus_common
         knowhere
         ${TBB}

@@ -34,6 +34,7 @@ add_executable(indexbuilder_bench ${indexbuilder_bench_srcs})
 target_link_libraries(indexbuilder_bench
         milvus_segcore
         milvus_indexbuilder
+        milvus_index
         log
         pthread
         knowhere

@@ -16,6 +16,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <index/ScalarIndex.h>
 
 #include "FieldIndexing.h"
 #include "common/Schema.h"
@@ -74,10 +75,10 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename T>
-    const knowhere::scalar::StructuredIndex<T>&
+    const scalar::ScalarIndex<T>&
     chunk_scalar_index(FieldOffset field_offset, int64_t chunk_id) const {
         static_assert(IsScalar<T>);
-        using IndexType = knowhere::scalar::StructuredIndex<T>;
+        using IndexType = scalar::ScalarIndex<T>;
         auto base_ptr = chunk_index_impl(field_offset, chunk_id);
         auto ptr = dynamic_cast<const IndexType*>(base_ptr);
         AssertInfo(ptr, "entry mismatch");

@@ -11,11 +11,12 @@
 
 #include "index/IndexFactory.h"
 #include "index/ScalarIndexSort.h"
+#include "index/StringIndexMarisa.h"
 
 namespace milvus::scalar {
 
 IndexBasePtr
-IndexFactory::CreateIndex(CDataType dtype, std::string index_type) {
+IndexFactory::CreateIndex(CDataType dtype, const std::string& index_type) {
     switch (dtype) {
         case Bool:
             return CreateIndex<bool>(index_type);
@@ -31,9 +32,11 @@ IndexFactory::CreateIndex(CDataType dtype, std::string index_type) {
             return CreateIndex<float>(index_type);
         case Double:
             return CreateIndex<double>(index_type);
+
         case String:
         case VarChar:
             return CreateIndex<std::string>(index_type);
+
         case None:
         case BinaryVector:
         case FloatVector:
