@@ -12,10 +12,12 @@ import (
 	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -398,4 +400,9 @@ func TestSession_Registered(t *testing.T) {
 	assert.False(t, session.Registered())
 	session.UpdateRegistered(true)
 	assert.True(t, session.Registered())
+}
+
+func TestSession_String(t *testing.T) {
+	s := &Session{}
+	log.Debug("log session", zap.Any("session", s))
 }

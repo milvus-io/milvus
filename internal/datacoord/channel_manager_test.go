@@ -788,3 +788,31 @@ func TestChannelManager_RemoveChannel(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelManager_HelperFunc(t *testing.T) {
+	c := &ChannelManager{}
+	t.Run("test getOldOnlines", func(t *testing.T) {
+		tests := []struct {
+			nodes  []int64
+			oNodes []int64
+
+			expectedOut []int64
+			desription  string
+		}{
+			{[]int64{}, []int64{}, []int64{}, "empty both"},
+			{[]int64{1}, []int64{}, []int64{}, "empty oNodes"},
+			{[]int64{}, []int64{1}, []int64{}, "empty nodes"},
+			{[]int64{1}, []int64{1}, []int64{1}, "same one"},
+			{[]int64{1, 2}, []int64{1}, []int64{1}, "same one 2"},
+			{[]int64{1}, []int64{1, 2}, []int64{1}, "same one 3"},
+			{[]int64{1, 2}, []int64{1, 2}, []int64{1, 2}, "same two"},
+		}
+
+		for _, test := range tests {
+			t.Run(test.desription, func(t *testing.T) {
+				nodes := c.getOldOnlines(test.nodes, test.oNodes)
+				assert.ElementsMatch(t, test.expectedOut, nodes)
+			})
+		}
+	})
+}

@@ -101,14 +101,16 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 		select {
 		case <-time.NewTimer(time.Until(timeoutT)).C:
 			log.Info("timeout and stop timer: wait for channel ACK timeout",
-				zap.String("state", watchState.String()),
+				zap.String("watch state", watchState.String()),
+				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
 				zap.Time("timeout time", timeoutT))
 			ackType := getAckType(watchState)
 			c.notifyTimeoutWatcher(&ackEvent{ackType, channelName, nodeID})
 		case <-stop:
 			log.Debug("stop timer before timeout",
-				zap.String("state", watchState.String()),
+				zap.String("watch state", watchState.String()),
+				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
 				zap.Time("timeout time", timeoutT))
 		}

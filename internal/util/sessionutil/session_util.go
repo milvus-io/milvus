@@ -117,6 +117,11 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 	s.ServerID = serverID
 }
 
+// String makes Session struct able to be logged by zap
+func (s *Session) String() string {
+	return fmt.Sprintf("Session:<ServerID: %d, ServerName: %s>", s.ServerID, s.ServerName)
+}
+
 // Register will process keepAliveResponse to keep alive with etcd.
 func (s *Session) Register() {
 	ch, err := s.registerService()
