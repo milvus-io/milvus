@@ -82,8 +82,9 @@ func (p *ImportWrapper) printFieldsDataInfo(fieldsData map[string]storage.FieldD
 	for k, v := range fieldsData {
 		stats = append(stats, zap.Int(k, v.RowNum()))
 	}
-	for i := 0; i < len(files); i++ {
-		stats = append(stats, zap.String("file", files[i]))
+
+	if len(files) > 0 {
+		stats = append(stats, zap.Any("files", files))
 	}
 	log.Debug(msg, stats...)
 }
@@ -150,24 +151,31 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 				return nil
 			}
 
+			p.printFieldsDataInfo(fields, "imprort wrapper: combine field data", nil)
+
 			fieldNames := make([]string, 0)
 			for k, v := range fields {
+				// ignore 0 row field
+				if v.RowNum() == 0 {
+					continue
+				}
+
+				// each column should be only combined once
 				data, ok := fieldsData[k]
 				if ok && data.RowNum() > 0 {
-					return errors.New("imprort error:  the field " + k + " is duplicated")
+					return errors.New("the field " + k + " is duplicated")
 				}
 
+				// check the row count. only count non-zero row fields
+				if rowCount > 0 && rowCount != v.RowNum() {
+					return errors.New("the field " + k + " row count " + strconv.Itoa(v.RowNum()) + " doesn't equal " + strconv.Itoa(rowCount))
+				}
+				rowCount = v.RowNum()
+
+				// assign column data to fieldsData
 				fieldsData[k] = v
 				fieldNames = append(fieldNames, k)
-
-				if rowCount == 0 {
-					rowCount = v.RowNum()
-				} else if rowCount != v.RowNum() {
-					return errors.New("imprort error:  the field " + k + " row count " + strconv.Itoa(v.RowNum()) + " doesn't equal " + strconv.Itoa(rowCount))
-				}
 			}
-
-			log.Debug("imprort wrapper:  ", zap.Any("fieldNames", fieldNames), zap.Int("rowCount", rowCount))
 
 			return nil
 		}

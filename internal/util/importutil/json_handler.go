@@ -326,10 +326,6 @@ func NewJSONColumnValidator(schema *schemapb.CollectionSchema, downstream JSONCo
 	}
 	initValidators(schema, v.validators)
 
-	for k := range v.validators {
-		v.rowCounter[k] = 0
-	}
-
 	return v
 }
 
@@ -344,20 +340,17 @@ func (v *JSONColumnValidator) Handle(columns map[string][]interface{}) error {
 
 	// parse completed
 	if columns == nil {
-		// all columns are parsed?
-		maxCount := int64(0)
-		for _, counter := range v.rowCounter {
-			if counter > maxCount {
-				maxCount = counter
-			}
-		}
-		for k := range v.validators {
-			counter, ok := v.rowCounter[k]
-			if !ok || counter != maxCount {
-				return errors.New("JSON column validator: the field " + k + " row count is not equal to other fields")
+		// compare the row count of columns, should be equal
+		rowCount := int64(-1)
+		for k, counter := range v.rowCounter {
+			if rowCount == -1 {
+				rowCount = counter
+			} else if rowCount != counter {
+				return errors.New("JSON column validator: the field " + k + " row count " + strconv.Itoa(int(counter)) + " is not equal to other fields " + strconv.Itoa(int(rowCount)))
 			}
 		}
 
+		// let the downstream know parse is completed
 		log.Debug("JSON column validation finished")
 		if v.downstream != nil {
 			return v.downstream.Handle(nil)
@@ -368,7 +361,7 @@ func (v *JSONColumnValidator) Handle(columns map[string][]interface{}) error {
 	for name, values := range columns {
 		validator, ok := v.validators[name]
 		if !ok {
-			// not a valid field name
+			// not a valid field name, skip without parsing
 			break
 		}
 
@@ -658,10 +651,17 @@ func (v *JSONColumnConsumer) flush() error {
 	// check row count, should be equal
 	rowCount := 0
 	for name, field := range v.fieldsData {
+		// skip the autoid field
 		if name == v.primaryKey && v.validators[v.primaryKey].autoID {
 			continue
 		}
 		cnt := field.RowNum()
+		// skip 0 row fields since a data file may only import one column(there are several data files imported)
+		if cnt == 0 {
+			continue
+		}
+
+		// only check non-zero row fields
 		if rowCount == 0 {
 			rowCount = cnt
 		} else if rowCount != cnt {
@@ -690,6 +690,7 @@ func (v *JSONColumnConsumer) Handle(columns map[string][]interface{}) error {
 		return err
 	}
 
+	// consume columns data
 	for name, values := range columns {
 		validator, ok := v.validators[name]
 		if !ok {
