@@ -121,7 +121,8 @@ func (c *ChannelManager) Startup(ctx context.Context, nodes []int64) error {
 	}
 
 	// Process watch states for old nodes.
-	if err := c.checkOldNodes(oNodes); err != nil {
+	oldOnLines := c.getOldOnlines(nodes, oNodes)
+	if err := c.checkOldNodes(oldOnLines); err != nil {
 		return err
 	}
 
@@ -152,8 +153,9 @@ func (c *ChannelManager) Startup(ctx context.Context, nodes []int64) error {
 	}
 
 	log.Info("cluster start up",
-		zap.Any("nodes", nodes),
-		zap.Any("oNodes", oNodes),
+		zap.Int64s("nodes", nodes),
+		zap.Int64s("oNodes", oNodes),
+		zap.Int64s("old onlines", oldOnLines),
 		zap.Int64s("new onlines", newOnLines),
 		zap.Int64s("offLines", offLines))
 	return nil
@@ -175,6 +177,10 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 
 		for _, info := range watchInfos {
 			channelName := info.GetVchan().GetChannelName()
+
+			log.Debug("processing watch info",
+				zap.String("watch state", info.GetState().String()),
+				zap.String("channel name", channelName))
 
 			switch info.GetState() {
 			case datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_Uncomplete:
@@ -255,6 +261,21 @@ func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
 			c.mu.Unlock()
 		}
 	}
+}
+
+// getOldOnlines returns a list of old online node ids in `old` and in `curr`.
+func (c *ChannelManager) getOldOnlines(curr []int64, old []int64) []int64 {
+	mcurr := make(map[int64]struct{})
+	ret := make([]int64, 0, len(old))
+	for _, n := range curr {
+		mcurr[n] = struct{}{}
+	}
+	for _, n := range old {
+		if _, found := mcurr[n]; found {
+			ret = append(ret, n)
+		}
+	}
+	return ret
 }
 
 // getNewOnLines returns a list of new online node ids in `curr` but not in `old`.
@@ -571,21 +592,21 @@ func (c *ChannelManager) processAck(e *ackEvent) {
 		err := c.Release(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to set channels to release for watch failure ACKs",
-				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName))
+				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName), zap.Error(err))
 		}
 
 	case releaseFailAck, releaseTimeoutAck: // failure acks from toRelease
 		err := c.cleanUpAndDelete(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to clean and delete channels for release failure ACKs",
-				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName))
+				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName), zap.Error(err))
 		}
 
 	case releaseSuccessAck:
 		err := c.toDelete(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to response to release success ACK",
-				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName))
+				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName), zap.Error(err))
 		}
 	}
 }
