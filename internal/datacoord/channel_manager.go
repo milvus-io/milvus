@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -363,7 +364,9 @@ func (c *ChannelManager) unsubscribe(subName string, channel string) error {
 		return err
 	}
 
-	msgStream.AsConsumer([]string{channel}, subName)
+	pchannelName := funcutil.ToPhysicalChannel(channel)
+
+	msgStream.AsConsumer([]string{pchannelName}, subName)
 	msgStream.Close()
 	return nil
 }
