@@ -72,6 +72,7 @@ type mockTestTxnKV struct {
 	save                         func(key, value string) error
 	multiSave                    func(kvs map[string]string) error
 	multiSaveAndRemoveWithPrefix func(saves map[string]string, removals []string) error
+	remove                       func(key string) error
 }
 
 func (m *mockTestTxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
@@ -88,6 +89,10 @@ func (m *mockTestTxnKV) MultiSave(kvs map[string]string) error {
 
 func (m *mockTestTxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	return m.multiSaveAndRemoveWithPrefix(saves, removals)
+}
+
+func (m *mockTestTxnKV) Remove(key string) error {
+	return m.remove(key)
 }
 
 func Test_MockKV(t *testing.T) {
@@ -561,6 +566,17 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, "false", flag)
 	})
 
+	wg.Add(1)
+	t.Run("delete credential", func(t *testing.T) {
+		defer wg.Done()
+
+		err = mt.DeleteCredential("")
+		assert.Nil(t, err)
+
+		err = mt.DeleteCredential("abcxyz")
+		assert.Nil(t, err)
+	})
+
 	/////////////////////////// these tests should run at last, it only used to hit the error lines ////////////////////////
 	txnkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	mockKV := &mockTestKV{}
@@ -573,6 +589,7 @@ func TestMetaTable(t *testing.T) {
 		multiSaveAndRemoveWithPrefix: func(kvs map[string]string, removal []string) error {
 			return txnkv.MultiSaveAndRemoveWithPrefix(kvs, removal)
 		},
+		remove: func(key string) error { return txnkv.Remove(key) },
 	}
 	mt.txn = mockTxnKV
 
@@ -1116,6 +1133,16 @@ func TestMetaTable(t *testing.T) {
 		_, err = mt.GetIndexByID(idxInfo[0].IndexID)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("cannot find index, id = %d", idxInfo[0].IndexID))
+	})
+
+	wg.Add(1)
+	t.Run("delete credential failed", func(t *testing.T) {
+		defer wg.Done()
+		mockTxnKV.remove = func(key string) error {
+			return fmt.Errorf("delete error")
+		}
+		err := mt.DeleteCredential("")
+		assert.Error(t, err)
 	})
 	wg.Wait()
 }

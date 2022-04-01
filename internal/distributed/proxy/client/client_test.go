@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"google.golang.org/grpc"
@@ -74,6 +75,15 @@ func Test_NewClient(t *testing.T) {
 
 		r6, err := client.SendRetrieveResult(ctx, nil)
 		retCheck(retNotNil, r6, err)
+
+		r7, err := client.InvalidateCredentialCache(ctx, nil)
+		retCheck(retNotNil, r7, err)
+
+		r8, err := client.UpdateCredentialCache(ctx, nil)
+		retCheck(retNotNil, r8, err)
+
+		r9, err := client.ClearCredUsersCache(ctx, nil)
+		retCheck(retNotNil, r9, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{
@@ -108,6 +118,45 @@ func Test_NewClient(t *testing.T) {
 
 	checkFunc(true)
 
+	// timeout
+	timeout := time.Nanosecond
+	shortCtx, shortCancel := context.WithTimeout(ctx, timeout)
+	defer shortCancel()
+	time.Sleep(timeout)
+
+	retCheck := func(ret interface{}, err error) {
+		assert.Nil(t, ret)
+		assert.NotNil(t, err)
+	}
+
+	r1Timeout, err := client.GetComponentStates(shortCtx)
+	retCheck(r1Timeout, err)
+
+	r2Timeout, err := client.GetStatisticsChannel(shortCtx)
+	retCheck(r2Timeout, err)
+
+	r3Timeout, err := client.InvalidateCollectionMetaCache(shortCtx, nil)
+	retCheck(r3Timeout, err)
+
+	r4Timeout, err := client.ReleaseDQLMessageStream(shortCtx, nil)
+	retCheck(r4Timeout, err)
+
+	r5Timeout, err := client.SendSearchResult(shortCtx, nil)
+	retCheck(r5Timeout, err)
+
+	r6Timeout, err := client.SendRetrieveResult(shortCtx, nil)
+	retCheck(r6Timeout, err)
+
+	r7Timeout, err := client.InvalidateCredentialCache(shortCtx, nil)
+	retCheck(r7Timeout, err)
+
+	r8Timeout, err := client.UpdateCredentialCache(shortCtx, nil)
+	retCheck(r8Timeout, err)
+
+	r9Timeout, err := client.ClearCredUsersCache(shortCtx, nil)
+	retCheck(r9Timeout, err)
+
+	// cleanup
 	err = client.Stop()
 	assert.Nil(t, err)
 }

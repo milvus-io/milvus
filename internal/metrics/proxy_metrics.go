@@ -270,6 +270,16 @@ var (
 			Help:      "The latency for searching",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
+
+	// ProxyCredentialReqLatency record the latency that for credential request, like "CreateCredential".
+	ProxyCredentialReqLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "credential_call_latency",
+			Help:      "The latency that for credential request",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName, functionLabelName, usernameLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
@@ -305,4 +315,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyDDLReqLatency)
 	registry.MustRegister(ProxyDMLReqLatency)
 	registry.MustRegister(ProxyDQLReqLatency)
+
+	// for credential
+	registry.MustRegister(ProxyCredentialReqLatency)
 }

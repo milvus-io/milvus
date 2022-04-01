@@ -23,8 +23,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -38,10 +36,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -3958,4 +3958,188 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 	resp, err := node.rootCoord.GetImportState(ctx, req)
 	log.Info("received get import state response", zap.Int64("taskID", req.GetTask()), zap.Any("resp", resp), zap.Error(err))
 	return resp, err
+}
+
+// InvalidateCredentialCache invalidate the credential cache of specified username.
+func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to invalidate credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
+
+	username := request.Username
+	if globalMetaCache != nil {
+		globalMetaCache.RemoveCredential(username) // no need to return error, though credential may be not cached
+	}
+	logutil.Logger(ctx).Debug("complete to invalidate credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+// UpdateCredentialCache update the credential cache of specified username.
+func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to update credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
+
+	credInfo := &internalpb.CredentialInfo{
+		Username:          request.Username,
+		EncryptedPassword: request.Password,
+	}
+	if globalMetaCache != nil {
+		globalMetaCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
+	}
+	logutil.Logger(ctx).Debug("complete to update credential cache",
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("username", request.Username))
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (node *Proxy) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error) {
+	ctx = logutil.WithModule(ctx, moduleName)
+	logutil.Logger(ctx).Debug("received request to clear credential usernames cache",
+		zap.String("role", typeutil.ProxyRole))
+
+	if globalMetaCache != nil {
+		globalMetaCache.ClearCredUsers() // no need to return error, though credential may be not cached
+	}
+	logutil.Logger(ctx).Debug("complete to clear credential usernames cache",
+		zap.String("role", typeutil.ProxyRole))
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	// validate params
+	username := req.Username
+	if err := ValidateUsername(username); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, nil
+	}
+	rawPassword, err := crypto.Base64Decode(req.Password)
+	if err != nil {
+		log.Error("decode password fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CreateCredentialFailure,
+			Reason:    "decode password fail key:" + req.Username,
+		}, nil
+	}
+	if err = ValidatePassword(rawPassword); err != nil {
+		log.Error("illegal password", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, nil
+	}
+	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
+	if err != nil {
+		log.Error("encrypt password fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CreateCredentialFailure,
+			Reason:    "encrypt password fail key:" + req.Username,
+		}, nil
+	}
+	credInfo := &internalpb.CredentialInfo{
+		Username:          req.Username,
+		EncryptedPassword: encryptedPassword,
+	}
+	result, err := node.rootCoord.CreateCredential(ctx, credInfo)
+	if err != nil { // for error like conntext timeout etc.
+		log.Error("create credential fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	return result, err
+}
+
+func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	// validate params
+	rawPassword, err := crypto.Base64Decode(req.Password)
+	if err != nil {
+		log.Error("decode password fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
+			Reason:    "decode password fail when updating:" + req.Username,
+		}, nil
+	}
+	if err = ValidatePassword(rawPassword); err != nil {
+		log.Error("illegal password", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, nil
+	}
+	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
+	if err != nil {
+		log.Error("encrypt password fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
+			Reason:    "encrypt password fail when updating:" + req.Username,
+		}, nil
+	}
+	credInfo := &internalpb.CredentialInfo{
+		Username:          req.Username,
+		EncryptedPassword: encryptedPassword,
+	}
+	result, err := node.rootCoord.UpdateCredential(ctx, credInfo)
+	if err != nil { // for error like conntext timeout etc.
+		log.Error("update credential fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	return result, err
+}
+
+func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	result, err := node.rootCoord.DeleteCredential(ctx, req)
+	if err != nil { // for error like conntext timeout etc.
+		log.Error("delete credential fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	return result, err
+}
+
+func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	log.Debug("ListCredUsers", zap.String("role", typeutil.RootCoordRole))
+	// get from cache
+	usernames, err := globalMetaCache.GetCredUsernames(ctx)
+	if err != nil {
+		return &milvuspb.ListCredUsersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+	return &milvuspb.ListCredUsersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Usernames: usernames,
+	}, nil
 }

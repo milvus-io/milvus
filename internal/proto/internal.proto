@@ -271,3 +271,11 @@ message ChannelTimeTickMsg {
   repeated uint64 timestamps = 3;
   uint64 default_timestamp = 4;
 }
+
+message ClearCredUsersCacheRequest {
+}
+
+message CredentialInfo {
+  string username = 1;
+  string encrypted_password = 2;
+}

@@ -153,6 +153,51 @@ var (
 			Help:      "Counter of describe segments",
 		}, []string{statusLabelName})
 
+	// RootCoordCreateCredentialCounter counts the num of calls of CreateCredential
+	RootCoordCreateCredentialCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "create_credential_total",
+			Help:      "Counter of create credential",
+		}, []string{statusLabelName})
+
+	// RootCoordGetCredentialCounter counts the num of calls of GetCredential
+	RootCoordGetCredentialCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "get_credential_total",
+			Help:      "Counter of get credential",
+		}, []string{statusLabelName})
+
+	// RootCoordDeleteCredentialCounter counts the num of calls of DeleteCredential
+	RootCoordDeleteCredentialCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "delete_credential_total",
+			Help:      "Counter of delete credential",
+		}, []string{statusLabelName})
+
+	// RootCoordUpdateCredentialCounter counts the num of calls of UpdateCredential
+	RootCoordUpdateCredentialCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "update_credential_total",
+			Help:      "Counter of update credential",
+		}, []string{statusLabelName})
+
+	// RootCoordListCredUsersCounter counts the num of calls of ListCredUsers
+	RootCoordListCredUsersCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "list_cred_users_total",
+			Help:      "Counter of list cred users",
+		}, []string{statusLabelName})
+
 	////////////////////////////////////////////////////////////////////////////
 	// for time tick
 
@@ -191,6 +236,24 @@ var (
 			Name:      "sync_time_tick_latency",
 			Help:      "The latency of sync time tick",
 		})
+
+	// RootCoordCredentialWriteTypeLatency records the latency for write type of credential operations.
+	RootCoordCredentialWriteTypeLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "credential_write_type_latency",
+			Help:      "The latency for write type of credential operations",
+		}, []string{functionLabelName})
+
+	// RootCoordCredentialReadTypeLatency records the latency for read type of credential operations.
+	RootCoordCredentialReadTypeLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "credential_read_type_latency",
+			Help:      "The latency for read type of credential operations",
+		}, []string{functionLabelName, usernameLabelName})
 
 	// RootCoordIDAllocCounter records the number of global ID allocations.
 	RootCoordIDAllocCounter = prometheus.NewCounter(
@@ -272,6 +335,15 @@ var (
 			Name:      "num_of_msg_stream",
 			Help:      "The number of message streams",
 		})
+
+	// RootCoordNumOfCredentials counts the number of credentials.
+	RootCoordNumOfCredentials = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "num_of_credentials",
+			Help:      "The number of credentials",
+		})
 )
 
 //RegisterRootCoord registers RootCoord metrics
@@ -317,4 +389,14 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 
 	registry.MustRegister(RootCoordNumOfDMLChannel)
 	registry.MustRegister(RootCoordNumOfMsgStream)
+
+	// for credential
+	registry.MustRegister(RootCoordCreateCredentialCounter)
+	registry.MustRegister(RootCoordGetCredentialCounter)
+	registry.MustRegister(RootCoordDeleteCredentialCounter)
+	registry.MustRegister(RootCoordUpdateCredentialCounter)
+	registry.MustRegister(RootCoordListCredUsersCounter)
+	registry.MustRegister(RootCoordCredentialWriteTypeLatency)
+	registry.MustRegister(RootCoordCredentialReadTypeLatency)
+	registry.MustRegister(RootCoordNumOfCredentials)
 }

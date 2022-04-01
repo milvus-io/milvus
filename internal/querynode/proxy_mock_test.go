@@ -59,6 +59,18 @@ func (m *mockProxy) SendRetrieveResult(ctx context.Context, req *internalpb.Retr
 	}, nil
 }
 
+func (m *mockProxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *mockProxy) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *mockProxy) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func newMockProxy() types.Proxy {
 	return &mockProxy{}
 }

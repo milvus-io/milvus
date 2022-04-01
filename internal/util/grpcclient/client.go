@@ -22,6 +22,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util"
+
+	"github.com/milvus-io/milvus/internal/util/crypto"
+
 	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -175,6 +179,7 @@ func (c *ClientBase) connect(ctx context.Context) error {
 			},
 			MinConnectTimeout: dialTimeout,
 		}),
+		grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
 	)
 	cancel()
 	if err != nil {

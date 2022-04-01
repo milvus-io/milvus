@@ -112,6 +112,14 @@ service RootCoord {
     rpc Import(milvus.ImportRequest) returns (milvus.ImportResponse) {}
     rpc GetImportState(milvus.GetImportStateRequest) returns (milvus.GetImportStateResponse) {}
     rpc ReportImport(ImportResult) returns (common.Status) {}
+
+    // https://wiki.lfaidata.foundation/display/MIL/MEP+27+--+Support+Basic+Authentication
+    rpc CreateCredential(internal.CredentialInfo) returns (common.Status) {}
+    rpc UpdateCredential(internal.CredentialInfo) returns (common.Status) {}
+    rpc DeleteCredential(milvus.DeleteCredentialRequest) returns (common.Status) {}
+    rpc ListCredUsers(milvus.ListCredUsersRequest) returns (milvus.ListCredUsersResponse) {}
+    // userd by proxy, not exposed to sdk
+    rpc GetCredential(GetCredentialRequest) returns (GetCredentialResponse) {}
 }
 
 message AllocTimestampRequest {
@@ -171,4 +179,20 @@ message DescribeSegmentsResponse {
   common.Status status = 1;
   int64 collectionID = 2;
   map<int64, SegmentInfos> segment_infos = 3; // segment_id -> segment infos
+}
+
+message GetCredentialRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // username
+  string username = 2;
+}
+
+message GetCredentialResponse {
+  // Contain error_code and reason
+  common.Status status = 1;
+  // username
+  string username = 2;
+  // password
+  string password = 3;
 }

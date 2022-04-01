@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -171,4 +173,82 @@ func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *pr
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
+}
+
+func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	defer func() {
+		if err := recover(); err != nil {
+			log.Debug("call InvalidateCredentialCache panic", zap.Any("msg", err))
+		}
+	}()
+
+	if len(p.proxyClient) == 0 {
+		log.Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
+		return nil
+	}
+
+	for _, f := range p.proxyClient {
+		sta, err := f.InvalidateCredentialCache(ctx, request)
+		if err != nil {
+			return fmt.Errorf("grpc fail, error=%w", err)
+		}
+		if sta.ErrorCode != commonpb.ErrorCode_Success {
+			return fmt.Errorf("message = %s", sta.Reason)
+		}
+	}
+	return nil
+}
+
+func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	defer func() {
+		if err := recover(); err != nil {
+			log.Debug("call UpdateCredentialCache panic", zap.Any("msg", err))
+		}
+	}()
+
+	if len(p.proxyClient) == 0 {
+		log.Warn("proxy client is empty, UpdateCredentialCache will not send to any client")
+		return nil
+	}
+
+	for _, f := range p.proxyClient {
+		sta, err := f.UpdateCredentialCache(ctx, request)
+		if err != nil {
+			return fmt.Errorf("grpc fail, error=%w", err)
+		}
+		if sta.ErrorCode != commonpb.ErrorCode_Success {
+			return fmt.Errorf("message = %s", sta.Reason)
+		}
+	}
+	return nil
+}
+
+func (p *proxyClientManager) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	defer func() {
+		if err := recover(); err != nil {
+			log.Debug("call ClearCredUsersCache panic", zap.Any("msg", err))
+		}
+	}()
+
+	if len(p.proxyClient) == 0 {
+		log.Warn("proxy client is empty, ClearCredUsersCache will not send to any client")
+		return nil
+	}
+
+	for _, f := range p.proxyClient {
+		sta, err := f.ClearCredUsersCache(ctx, request)
+		if err != nil {
+			return fmt.Errorf("grpc fail, error=%w", err)
+		}
+		if sta.ErrorCode != commonpb.ErrorCode_Success {
+			return fmt.Errorf("message = %s", sta.Reason)
+		}
+	}
+	return nil
 }
