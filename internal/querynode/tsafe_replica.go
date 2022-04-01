@@ -17,7 +17,7 @@
 package querynode
 
 import (
-	"errors"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -59,7 +59,7 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, timestamp Timestamp) error {
 	defer t.mu.Unlock()
 	ts, err := t.getTSafePrivate(vChannel)
 	if err != nil {
-		return errors.New("set tSafe failed, err = " + err.Error())
+		return fmt.Errorf("set tSafe failed, err = %w", err)
 	}
 	ts.set(timestamp)
 	return nil
@@ -67,9 +67,7 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, timestamp Timestamp) error {
 
 func (t *tSafeReplica) getTSafePrivate(vChannel Channel) (*tSafe, error) {
 	if _, ok := t.tSafes[vChannel]; !ok {
-		err := errors.New("cannot found tSafer, vChannel = " + vChannel)
-		//log.Warn(err.Error())
-		return nil, err
+		return nil, fmt.Errorf("cannot found tSafer, vChannel = %s", vChannel)
 	}
 	return t.tSafes[vChannel], nil
 }
@@ -80,11 +78,11 @@ func (t *tSafeReplica) addTSafe(vChannel Channel) {
 	if _, ok := t.tSafes[vChannel]; !ok {
 		t.tSafes[vChannel] = newTSafe(vChannel)
 		log.Debug("add tSafe done",
-			zap.Any("channel", vChannel),
+			zap.String("channel", vChannel),
 		)
 	} else {
 		log.Debug("tSafe has been existed",
-			zap.Any("channel", vChannel),
+			zap.String("channel", vChannel),
 		)
 	}
 }
@@ -94,7 +92,7 @@ func (t *tSafeReplica) removeTSafe(vChannel Channel) {
 	defer t.mu.Unlock()
 
 	log.Debug("remove tSafe replica",
-		zap.Any("vChannel", vChannel),
+		zap.String("vChannel", vChannel),
 	)
 	delete(t.tSafes, vChannel)
 }
