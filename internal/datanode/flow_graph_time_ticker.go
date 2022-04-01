@@ -73,10 +73,11 @@ func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp, segmentIDs []int64) {
 func (mt *mergedTimeTickerSender) tick() {
 	defer mt.wg.Done()
 	// this duration might be configuable in the future
-	t := time.Tick(time.Millisecond * 100) // 100 millisecond, 1/2 of rootcoord timetick duration
+	t := time.NewTicker(time.Millisecond * 100) // 100 millisecond, 1/2 of rootcoord timetick duration
+	defer t.Stop()
 	for {
 		select {
-		case <-t:
+		case <-t.C:
 			mt.cond.L.Lock()
 			mt.cond.Signal() // allow worker to check every 0.1s
 			mt.cond.L.Unlock()
