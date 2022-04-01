@@ -776,14 +776,14 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTask) (*commonpb.Status, error) {
+func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	log.Info("receive import request")
 
 	if !node.isHealthy() {
 		log.Warn("DataNode.Import failed",
-			zap.Int64("collection ID", req.GetCollectionId()),
-			zap.Int64("partition ID", req.GetPartitionId()),
-			zap.Int64("taskID", req.GetTaskId()),
+			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
+			zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
+			zap.Int64("taskID", req.GetImportTask().GetTaskId()),
 			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)))
 
 		return &commonpb.Status{

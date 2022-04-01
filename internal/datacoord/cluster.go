@@ -19,12 +19,11 @@ package datacoord
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
 )
 
 // Cluster provides interfaces to interact with datanode cluster
@@ -135,6 +134,11 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 		log.Info("Plan to flush", zap.Int64("node_id", nodeID), zap.Int64s("segments", segments), zap.Int64s("marks", marks))
 		c.sessionManager.Flush(ctx, nodeID, req)
 	}
+}
+
+// Import sends import requests to DataNodes whose ID==nodeID.
+func (c *Cluster) Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest) {
+	c.sessionManager.Import(ctx, nodeID, it)
 }
 
 // GetSessions returns all sessions

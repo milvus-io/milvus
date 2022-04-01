@@ -152,7 +152,7 @@ type Core struct {
 	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
 	//assign import task to data service
-	CallImportService func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse
+	CallImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
 
 	//Proxy manager
 	proxyManager *proxyManager
@@ -738,7 +738,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}
 		return nil
 	}
-	c.CallImportService = func(ctx context.Context, req *datapb.ImportTask) *datapb.ImportTaskResponse {
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		resp := &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -1132,7 +1132,7 @@ func (c *Core) Init() error {
 			c.impTaskKv,
 			c.CallImportService,
 		)
-		c.importManager.init()
+		c.importManager.init(c.ctx)
 	})
 	if initError != nil {
 		log.Debug("RootCoord init error", zap.Error(initError))
@@ -2256,7 +2256,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Int("# of files = ", len(req.GetFiles())),
 	)
-	resp := c.importManager.importJob(req, cID)
+	resp := c.importManager.importJob(ctx, req, cID)
 	return resp, nil
 }
 
@@ -2280,14 +2280,14 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 }
 
 // ReportImport reports import task state to RootCoord.
-func (c *Core) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
 
-	log.Info("receive import state report")
+	log.Info("receive import state report", zap.Any("import result", ir.String()))
 	// Upon receiving ReportImport request, update the related task's state in task store.
-	ti, err := c.importManager.updateTaskState(req)
+	ti, err := c.importManager.updateTaskState(ir)
 	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateImportTaskFailure,
@@ -2311,7 +2311,19 @@ func (c *Core) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) 
 
 	// Start a loop to check segments' index states periodically.
 	c.wg.Add(1)
-	go c.CheckCompleteIndexLoop(ctx, ti, colName, req.Segments)
+	go c.checkCompleteIndexLoop(ctx, ti, colName, ir.Segments)
+
+	// When DataNode has done its thing, remove it from the busy node list.
+	c.importManager.busyNodesLock.Lock()
+	defer c.importManager.busyNodesLock.Unlock()
+	delete(c.importManager.busyNodes, ir.GetDatanodeId())
+	log.Info("dataNode is no longer busy",
+		zap.Int64("dataNode ID", ir.GetDatanodeId()),
+		zap.Int64("task ID", ir.GetTaskId()))
+
+	// Start a loop to check segments' index states periodically.
+	c.wg.Add(1)
+	go c.checkCompleteIndexLoop(ctx, ti, colName, ir.Segments)
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -2407,10 +2419,10 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 	return ct, nil
 }
 
-// CheckCompleteIndexLoop checks index build states for an import task's segments and bring these segments online when
-// the criteria are met. CheckCompleteIndexLoop does the check every CheckCompleteIndexInterval and exits if:
+// checkCompleteIndexLoop checks index build states for an import task's segments and bring these segments online when
+// the criteria are met. checkCompleteIndexLoop does the check every CheckCompleteIndexInterval and exits if:
 // (1) a certain percent of indices are built, (2) when context is done or (3) when the task is expired.
-func (c *Core) CheckCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTaskInfo, colName string, segIDs []UniqueID) {
+func (c *Core) checkCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTaskInfo, colName string, segIDs []UniqueID) {
 	defer c.wg.Done()
 	ticker := time.NewTicker(CheckCompleteIndexInterval)
 	spent := time.Duration(time.Unix(time.Now().Unix()-ti.GetCreateTs(), 0).Nanosecond())
@@ -2422,7 +2434,7 @@ func (c *Core) CheckCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTask
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("(in loop)context done, exiting CheckCompleteIndexLoop", zap.Int64("task ID", ti.GetId()))
+			log.Info("(in loop)context done, exiting checkCompleteIndexLoop", zap.Int64("task ID", ti.GetId()))
 			return
 		case <-ticker.C:
 			log.Info("(in loop)check segments' index states", zap.Int64("task ID", ti.GetId()))

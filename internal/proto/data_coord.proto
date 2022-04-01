@@ -43,7 +43,7 @@ service DataCoord {
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(ImportTask) returns (ImportTaskResponse) {}
+  rpc Import(ImportTaskRequest) returns (ImportTaskResponse) {}
 }
 
 service DataNode {
@@ -58,7 +58,7 @@ service DataNode {
   rpc Compaction(CompactionPlan) returns (common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(ImportTask) returns(common.Status) {}
+  rpc Import(ImportTaskRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -441,15 +441,21 @@ message ImportTaskInfo {
   int64 request_id = 2;          // Request ID of the import task.
   int64 datanode_id = 3;         // ID of DataNode that processes the task.
   int64 collection_id = 4;       // Collection ID for the import task.
-  int64 partition_id = 5;       // Partition ID for the import task.
+  int64 partition_id = 5;        // Partition ID for the import task.
   string bucket = 6;             // Bucket for the import task.
   bool row_based = 7;            // Boolean indicating whether import files are row-based or column-based.
   repeated string files = 8;     // A list of files to import.
   int64 create_ts = 9;           // Timestamp when the import task is created.
-  ImportTaskState state = 10;     // State of the import task.
+  ImportTaskState state = 10;    // State of the import task.
 }
 
 message ImportTaskResponse {
   common.Status status = 1;
-  int64 datanode_id = 2;                     // which datanode takes this task
+  int64 datanode_id = 2;         // which datanode takes this task
+}
+
+message ImportTaskRequest {
+  common.MsgBase base = 1;
+  ImportTask import_task = 2;          // Target import task.
+  repeated int64 working_nodes = 3;    // DataNodes that are currently working.
 }

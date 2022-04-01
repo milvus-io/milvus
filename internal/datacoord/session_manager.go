@@ -31,6 +31,8 @@ import (
 
 const (
 	flushTimeout = 5 * time.Second
+	// TODO: evaluate and update import timeout.
+	importTimeout = 3 * time.Hour
 )
 
 // SessionManager provides the grpc interfaces of cluster
@@ -146,6 +148,29 @@ func (c *SessionManager) execCompaction(nodeID int64, plan *datapb.CompactionPla
 	}
 
 	log.Info("success to execute compaction", zap.Int64("node", nodeID), zap.Any("planID", plan.GetPlanID()))
+}
+
+// Import is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.
+func (c *SessionManager) Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
+	go c.execImport(ctx, nodeID, itr)
+}
+
+// execImport gets the corresponding DataNode with its ID and calls its Import method.
+func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Warn("failed to get client for import", zap.Int64("nodeID", nodeID), zap.Error(err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, importTimeout)
+	defer cancel()
+	resp, err := cli.Import(ctx, itr)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Warn("failed to import", zap.Int64("node", nodeID), zap.Error(err))
+		return
+	}
+
+	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
 }
 
 func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNode, error) {

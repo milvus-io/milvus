@@ -2266,9 +2266,16 @@ func TestImport(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTask{
-			CollectionId: 100,
-			PartitionId:  100,
+		err := svr.channelManager.AddNode(0)
+		assert.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		assert.Nil(t, err)
+
+		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				PartitionId:  100,
+			},
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
@@ -2276,13 +2283,56 @@ func TestImport(t *testing.T) {
 		etcd.StopEtcdServer()
 
 	})
+
+	t.Run("no free node", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		err := svr.channelManager.AddNode(0)
+		assert.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		assert.Nil(t, err)
+
+		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				PartitionId:  100,
+			},
+			WorkingNodes: []int64{0},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
+
+		etcd.StopEtcdServer()
+
+	})
+
+	t.Run("no datanode available", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				PartitionId:  100,
+			},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+
+		etcd.StopEtcdServer()
+
+	})
+
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
 
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTask{
-			CollectionId: 100,
-			PartitionId:  100,
+		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				PartitionId:  100,
+			},
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
