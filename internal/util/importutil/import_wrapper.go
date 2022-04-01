@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
@@ -89,6 +90,13 @@ func (p *ImportWrapper) printFieldsDataInfo(fieldsData map[string]storage.FieldD
 	log.Debug(msg, stats...)
 }
 
+func getFileNameAndExt(filePath string) (string, string) {
+	fileName := path.Base(filePath)
+	fileType := path.Ext(fileName)
+	fileNameWithoutExt := strings.TrimSuffix(fileName, fileType)
+	return fileNameWithoutExt, fileType
+}
+
 // import process entry
 // filePath and rowBased are from ImportTask
 // if onlyValidate is true, this process only do validation, no data generated, callFlushFunc will not be called
@@ -99,8 +107,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 		// according to shard number, so the callFlushFunc will be called in the JSONRowConsumer
 		for i := 0; i < len(filePaths); i++ {
 			filePath := filePaths[i]
-			fileName := path.Base(filePath)
-			fileType := path.Ext(fileName)
+			_, fileType := getFileNameAndExt(filePath)
 			log.Debug("imprort wrapper:  row-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
 
 			if fileType == JSONFileExt {
@@ -183,8 +190,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 		// parse/validate/consume data
 		for i := 0; i < len(filePaths); i++ {
 			filePath := filePaths[i]
-			fileName := path.Base(filePath)
-			fileType := path.Ext(fileName)
+			fileName, fileType := getFileNameAndExt(filePath)
 			log.Debug("imprort wrapper:  column-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
 
 			if fileType == JSONFileExt {
@@ -218,7 +224,28 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					return err
 				}
 			} else if fileType == NumpyFileExt {
+				file, err := os.Open(filePath)
+				if err != nil {
+					log.Error("imprort error: "+err.Error(), zap.String("filePath", filePath))
+					return err
+				}
+				defer file.Close()
 
+				// the numpy parser return a storage.FieldData, here construct a map[string]storage.FieldData to combine
+				flushFunc := func(field storage.FieldData) error {
+					fields := make(map[string]storage.FieldData)
+					fields[fileName] = field
+					combineFunc(fields)
+					return nil
+				}
+
+				// for numpy file, we say the file name(without extension) is the filed name
+				parser := NewNumpyParser(p.ctx, p.collectionSchema, flushFunc)
+				err = parser.Parse(file, fileName, onlyValidate)
+				if err != nil {
+					log.Error("imprort error: "+err.Error(), zap.String("filePath", filePath))
+					return err
+				}
 			}
 		}
 
