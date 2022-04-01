@@ -2,6 +2,32 @@ name: Deploy Test
 
 on:
   workflow_dispatch:
+    inputs:
+      old_image_repo:
+        description: The image repository name to use for the deploy test
+        required: true
+        default: 'milvusdb/milvus'      
+
+      old_image_tag:
+        description: The old image tag to use for the deploy test
+        required: true
+        default: 'latest'
+
+      previous_release_version:
+        description: The previous release version to use for the deploy test
+        required: true
+        default: 'v2.0.1'
+
+      new_image_repo:
+        description: The image repository name to use for the deploy test
+        required: true
+        default: 'milvusdb/milvus-dev'
+
+      new_image_tag:
+        description: The new image tag to use for the deploy test
+        required: true
+        default: 'master-latest'
+
   schedule:
     # * is a special character in YAML so you have to quote this string
     #         ┌───────────── minute (0 - 59)
@@ -22,11 +48,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [standalone,cluster]
-        task: [reinstall,upgrade]
+        mode: [standalone, cluster]
+        task: [reinstall, upgrade]
 
     steps:
-
+      - name: Set env param
+        env:
+          DEFAULT_OLD_IMAGE_REPO: "milvusdb/milvus"
+          DEFAULT_OLD_IMAGE_TAG: "latest"
+          DEFAULT_PREVIOUS_RELEASE_VERSION: "v2.0.1"
+          DEFAULT_NEW_IMAGE_REPO: "milvusdb/milvus-dev"
+          DEFAULT_NEW_IMAGE_TAG: "master-latest"
+        run: |
+          echo "OLD_IMAGE_REPO=${{ github.event.inputs.old_image_repo || env.DEFAULT_OLD_IMAGE_REPO }}" >> $GITHUB_ENV
+          echo "OLD_IMAGE_TAG=${{ github.event.inputs.old_image_tag || env.DEFAULT_OLD_IMAGE_TAG }}" >> $GITHUB_ENV
+          echo "PREVIOUS_RELEASE_VERSION=${{ github.event.inputs.previous_release_version || env.DEFAULT_PREVIOUS_RELEASE_VERSION }}" >> $GITHUB_ENV
+          echo "NEW_IMAGE_REPO=${{ github.event.inputs.new_image_repo || env.DEFAULT_NEW_IMAGE_REPO }}" >> $GITHUB_ENV
+          echo "NEW_IMAGE_TAG=${{ github.event.inputs.new_image_tag || env.DEFAULT_NEW_IMAGE_TAG }}" >> $GITHUB_ENV
+      
       - uses: actions/checkout@v2
 
       - name: Set up Python
@@ -36,22 +75,74 @@ jobs:
       
       - name: Install dependency
         shell: bash
-        working-directory: tests/python_client/deploy
+        working-directory: tests/python_client
         run: |
-          pip install -r requirements.txt
-          # update pymilvus to latest version
-          pip install -i https://test.pypi.org/simple/ pymilvus==2.0.0rc10.dev2
+          pip install -r requirements.txt --trusted-host https://test.pypi.org
       
-      - name: Run deploy test
+      - name: First Milvus deployment
         timeout-minutes: 60
         shell: bash
-        working-directory: tests/python_client/deploy
+        working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
-          mkdir -p ${{ matrix.mode }}/logs
-          echo "test -m ${{ matrix.mode }} -t ${{ matrix.task }}" > ./${{ matrix.mode }}/logs/test_info.log
-          python scripts/get_tag.py >> ./${{ matrix.mode }}/logs/test_info.log
-          bash test.sh -m ${{ matrix.mode }} -t ${{ matrix.task }} -p ""
-
+          if [ ${{ matrix.task }} == "reinstall" ]; then  
+            wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${{ matrix.mode }}/docker-compose.yml -O docker-compose.yml;
+            MILVUS_IMAGE="${{ env.NEW_IMAGE_REPO }}:${{ env.NEW_IMAGE_TAG }}" docker-compose up -d;
+            
+          fi
+          if [ ${{ matrix.task }} == "upgrade" ]; then
+            wget https://github.com/milvus-io/milvus/releases/download/${{ env.PREVIOUS_RELEASE_VERSION }}/milvus-${{ matrix.mode }}-docker-compose.yml -O docker-compose.yml;
+            MILVUS_IMAGE="${{ env.OLD_IMAGE_REPO }}:${{ env.OLD_IMAGE_TAG }}" docker-compose up -d;
+          fi
+          bash ../check_healthy.sh
+          docker-compose ps -a
+          sleep 10s
+      - name: Run first test
+        timeout-minutes: 60
+        shell: bash
+        working-directory: tests/python_client/deploy/scripts
+        run: |
+          if [ ${{ matrix.task }} == "reinstall" ]; then  
+            python3 action_before_reinstall.py
+          fi
+          if [ ${{ matrix.task }} == "upgrade" ]; then
+            python3 action_before_upgrade.py
+          fi
+      - name: Second Milvus deployment
+        timeout-minutes: 60
+        shell: bash
+        working-directory: tests/python_client/deploy/${{ matrix.mode }}
+        run: |
+          if [ ${{ matrix.task }} == "reinstall" ]; then
+            docker-compose restart    
+          fi
+          if [ ${{ matrix.task }} == "upgrade" ]; then
+            wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${{ matrix.mode }}/docker-compose.yml -O docker-compose.yml;
+            MILVUS_IMAGE="${{ env.NEW_IMAGE_REPO }}:${{ env.NEW_IMAGE_TAG }}" docker-compose up -d; 
+          fi
+          bash ../check_healthy.sh
+          docker-compose ps -a
+          
+          echo "sleep 120s for the second deployment to be ready"
+          sleep 120s
+      - name: Run second test
+        timeout-minutes: 60
+        shell: bash
+        working-directory: tests/python_client/deploy/scripts
+        run: |
+          if [ ${{ matrix.task }} == "reinstall" ]; then  
+            python3 action_after_reinstall.py
+          fi
+          if [ ${{ matrix.task }} == "upgrade" ]; then
+            python3 action_after_upgrade.py
+          fi
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/deploy/${{ matrix.mode }}
+        run: |
+          docker-compose ps -a || true
+          mkdir -p logs
+          docker-compose logs > ./logs/test-${{ matrix.mode }}-${{ matrix.task }}.log 2>&1 || echo "export logs failed"
       - name: 'Send mail'
         if: ${{ failure() }}
         uses: dawidd6/action-send-mail@v3
@@ -66,7 +157,7 @@ jobs:
           from: GitHub Actions
 
       - name: Upload logs
-        if: ${{ always() }}
+        if: ${{ failure() }}
         uses: actions/upload-artifact@v2
         with:
           name: docker-compose-logs-${{ matrix.mode }}-${{ matrix.task }}
