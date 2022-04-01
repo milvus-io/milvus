@@ -55,7 +55,7 @@ func (rep *ReplicaInfos) Insert(info *querypb.ReplicaInfo) {
 	rep.globalGuard.Lock()
 	defer rep.globalGuard.Unlock()
 
-	old, ok := rep.replicas[info.ReplicaId]
+	old, ok := rep.replicas[info.ReplicaID]
 	// This updates ReplicaInfo, not inserts a new one
 	// No need to update nodeIndex
 	if ok {
@@ -63,7 +63,7 @@ func (rep *ReplicaInfos) Insert(info *querypb.ReplicaInfo) {
 		return
 	}
 
-	rep.replicas[info.ReplicaId] = info
+	rep.replicas[info.ReplicaID] = info
 
 	for _, nodeID := range info.NodeIds {
 		replicas, ok := rep.nodeIndex[nodeID]

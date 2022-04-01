@@ -303,7 +303,7 @@ func (m *MetaReplica) addCollection(collectionID UniqueID, loadType querypb.Load
 			PartitionStates: partitionStates,
 			LoadType:        loadType,
 			Schema:          schema,
-			// ReplicaIds:      replicas,
+			// ReplicaIDs:      replicas,
 		}
 		err := saveGlobalCollectionInfo(collectionID, newCollection, m.client)
 		if err != nil {
@@ -1032,8 +1032,8 @@ func (m *MetaReplica) generateReplica(collectionID int64, partitionIds []int64) 
 	}
 
 	return &querypb.ReplicaInfo{
-		ReplicaId:     id,
-		CollectionId:  collectionID,
+		ReplicaID:     id,
+		CollectionID:  collectionID,
 		PartitionIds:  partitionIds,
 		ShardReplicas: make([]*querypb.ShardReplica, 0),
 		NodeIds:       make([]int64, 0),
@@ -1153,7 +1153,7 @@ func saveReplicaInfo(info *querypb.ReplicaInfo, kv kv.MetaKv) error {
 		return err
 	}
 
-	key := fmt.Sprintf("%s/%d", ReplicaMetaPrefix, info.ReplicaId)
+	key := fmt.Sprintf("%s/%d", ReplicaMetaPrefix, info.ReplicaID)
 	return kv.Save(key, string(infoBytes))
 }
 

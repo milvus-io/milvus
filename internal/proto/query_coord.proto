@@ -32,6 +32,7 @@ service QueryCoord {
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+23+--+Multiple+memory+replication+design
+  rpc GetReplicas(GetReplicasRequest) returns (GetReplicasResponse) {}
   rpc GetShardLeaders(GetShardLeadersRequest) returns (GetShardLeadersResponse) {}
 }
 
@@ -150,20 +151,31 @@ message GetSegmentInfoResponse {
   repeated SegmentInfo infos = 2;
 }
 
+message GetReplicasRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  bool with_shard_nodes = 3;
+}
+
+message GetReplicasResponse {
+  common.Status status = 1;
+  repeated ReplicaInfo replicas = 2;
+}
+
 message GetShardLeadersRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
 }
 
 message GetShardLeadersResponse {
-  common.Status status= 1 ;
-  repeated ShardLeaderList list = 2;
+  common.Status status = 1;
+  repeated ShardLeadersList shards = 2;
 }
 
-message ShardLeaderList {
+message ShardLeadersList {  // All leaders of all replicas of one shard
   string channel_name = 1;
-  int64 nodeID = 2;
-  string address = 3; // 127.0.0.1:9000
+  repeated int64 node_ids = 2;
+  repeated string node_addrs = 3;
 }
 
 //-----------------query node grpc request and response proto----------------
@@ -354,6 +366,24 @@ message CollectionInfo {
   repeated int64 released_partitionIDs = 6;
   int64 inMemory_percentage = 7;
   repeated int64 replica_ids = 8;
+  int32 replica_number = 9;
+}
+
+message ReplicaInfo {    // ReplicaGroup
+  int64 replicaID = 1;
+  int64 collectionID = 2;
+  repeated int64 partition_ids = 3;    // empty indicates to load collection
+  repeated ShardReplica shard_replicas = 4;
+  repeated int64 node_ids = 5; // include leaders
+}
+
+message ShardReplica {
+    int64 leaderID = 1;
+    string leader_addr = 2; // IP:port
+    string dm_channel_name = 3;
+    // optional, DO NOT save it in meta, set it only for GetReplicas()
+    // if with_shard_nodes is true
+    repeated int64 node_ids = 4; 
 }
 
 message UnsubscribeChannels {
@@ -377,18 +407,5 @@ message SegmentChangeInfo {
 message SealedSegmentsChangeInfo {
   common.MsgBase base = 1;
   repeated SegmentChangeInfo infos = 2;
-}
-
-message ReplicaInfo {    // ReplicaGroup
-  int64 replica_id = 1;
-  int64 collection_id = 2;
-  repeated int64 partition_ids = 3;    // empty indicates to load collection
-  repeated ShardReplica shard_replicas = 4;
-  repeated int64 node_ids = 5; // include leaders
-}
-
-message ShardReplica {
-    int64 leader = 1;
-    string dm_channel_name = 2;
 }
 

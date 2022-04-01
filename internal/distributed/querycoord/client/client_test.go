@@ -108,8 +108,11 @@ func Test_NewClient(t *testing.T) {
 		r16, err := client.LoadBalance(ctx, nil)
 		retCheck(retNotNil, r16, err)
 
-		r17, err := client.GetShardLeaders(ctx, nil)
+		r17, err := client.GetReplicas(ctx, nil)
 		retCheck(retNotNil, r17, err)
+
+		r18, err := client.GetShardLeaders(ctx, nil)
+		retCheck(retNotNil, r18, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{
