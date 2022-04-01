@@ -132,7 +132,7 @@ pull_request_rules:
           - do-not-merge/missing-related-issue
       comment:
         message: |
-          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #6534”)
+          @{{author}} Please associate the related issue to the body of your Pull Request.  (eg. “issue: #<xyz>”)
 
 
   - name: Dismiss block label if related issue be added into PR
