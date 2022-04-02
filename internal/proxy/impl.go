@@ -152,7 +152,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateCollection")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
-	method := "CreateCollection"
+	method := "create collection"
 	tr := timerecord.NewTimeRecorder(method)
 
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, metrics.TotalLabel).Inc()
@@ -167,7 +167,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 	// avoid data race
 	lenOfSchema := len(request.Schema)
 
-	log.Debug(
+	log.Info(
 		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
@@ -196,7 +196,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		}, nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
@@ -232,7 +232,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		}, nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
@@ -259,7 +259,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropCollection")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
-	method := "DropCollection"
+	method := "drop collection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method, metrics.TotalLabel).Inc()
 
@@ -272,7 +272,8 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		chTicker:              node.chTicker,
 	}
 
-	log.Debug("DropCollection received",
+	log.Info(
+		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -293,7 +294,8 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		}, nil
 	}
 
-	log.Debug("DropCollection enqueued",
+	log.Info(
+		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dct.ID()),
@@ -320,7 +322,8 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		}, nil
 	}
 
-	log.Debug("DropCollection done",
+	log.Info(
+		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dct.ID()),
@@ -345,12 +348,13 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasCollection")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
-	method := "HasCollection"
+	method := "has collection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method,
 		metrics.TotalLabel).Inc()
 
-	log.Debug("HasCollection received",
+	log.Info(
+		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -364,7 +368,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	}
 
 	if err := node.sched.ddQueue.Enqueue(hct); err != nil {
-		log.Warn("HasCollection failed to enqueue",
+		log.Warn(
+			rpcFailedToEnqueue(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -381,7 +386,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	log.Debug("HasCollection enqueued",
+	log.Info(
+		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", hct.ID()),
@@ -391,7 +397,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		zap.String("collection", request.CollectionName))
 
 	if err := hct.WaitToFinish(); err != nil {
-		log.Warn("HasCollection failed to WaitToFinish",
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -411,7 +418,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	log.Debug("HasCollection done",
+	log.Info(
+		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", hct.ID()),
@@ -1726,12 +1734,12 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		rootCoord:            node.rootCoord,
 	}
 
-	method := "DescribeIndex"
+	method := "describe index"
 	// avoid data race
 	indexName := request.IndexName
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Info(
 		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
@@ -1762,7 +1770,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
@@ -1805,7 +1813,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug(
+	log.Info(
 		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
@@ -2064,7 +2072,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		rootCoord:            node.rootCoord,
 	}
 
-	method := "GetIndexState"
+	method := "get index state"
 	tr := timerecord.NewTimeRecorder(method)
 
 	log.Debug(
@@ -2147,7 +2155,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
-		zap.String("index name", request.IndexName))
+		zap.String("index name", request.IndexName),
+		zap.String("index state", dipt.result.State.String()))
 
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), method,
 		metrics.TotalLabel).Inc()
