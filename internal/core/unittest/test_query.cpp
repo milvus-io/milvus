@@ -182,7 +182,7 @@ TEST(Query, ExecWithPredicateLoader) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
     Json json = SearchResultToJson(*sr);
@@ -245,7 +245,7 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
     Json json = SearchResultToJson(*sr);
@@ -297,7 +297,7 @@ TEST(Query, ExecWithPredicate) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
     Json json = SearchResultToJson(*sr);
@@ -359,7 +359,7 @@ TEST(Query, ExecTerm) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
     auto json = SearchResultToJson(*sr);
@@ -401,7 +401,7 @@ TEST(Query, ExecEmpty) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     std::cout << SearchResultToJson(*sr);
 
     for (auto i : sr->ids_) {
@@ -450,7 +450,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
     auto json = SearchResultToJson(*sr);
@@ -494,7 +494,7 @@ TEST(Query, ExecWithoutPredicate) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     std::vector<std::vector<std::string>> results;
     int topk = 5;
     auto json = SearchResultToJson(*sr);
@@ -548,7 +548,7 @@ TEST(Indexing, InnerProduct) {
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp ts = N * 2;
-    auto sr = segment->Search(plan.get(), *ph_group, ts);
+    auto sr = segment->Search(plan.get(), ph_group.get(), ts);
     std::cout << SearchResultToJson(*sr).dump(2);
 }
 
@@ -657,7 +657,7 @@ TEST(Query, FillSegment) {
         plan->target_entries_.clear();
         plan->target_entries_.push_back(schema->get_offset(FieldName("fakevec")));
         plan->target_entries_.push_back(schema->get_offset(FieldName("the_value")));
-        auto result = segment->Search(plan.get(), *ph, ts);
+        auto result = segment->Search(plan.get(), ph.get(), ts);
         // std::cout << SearchResultToJson(result).dump(2);
         result->result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), *result);
@@ -737,7 +737,7 @@ TEST(Query, ExecWithPredicateBinary) {
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     int topk = 5;
 
     Json json = SearchResultToJson(*sr);
