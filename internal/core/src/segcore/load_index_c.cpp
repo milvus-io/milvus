@@ -9,11 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <index/IndexFactory.h>
 #include "common/LoadInfo.h"
 #include "exceptions/EasyAssert.h"
 #include "knowhere/common/BinarySet.h"
 #include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "segcore/load_index_c.h"
+#include "common/CDataType.h"
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
@@ -59,10 +61,11 @@ AppendIndexParam(CLoadIndexInfo c_load_index_info, const char* c_index_key, cons
 }
 
 CStatus
-AppendFieldInfo(CLoadIndexInfo c_load_index_info, int64_t field_id) {
+AppendFieldInfo(CLoadIndexInfo c_load_index_info, int64_t field_id, enum CDataType field_type) {
     try {
         auto load_index_info = (LoadIndexInfo*)c_load_index_info;
         load_index_info->field_id = field_id;
+        load_index_info->field_type = field_type;
 
         auto status = CStatus();
         status.error_code = Success;
@@ -77,7 +80,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info, int64_t field_id) {
 }
 
 CStatus
-AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
+appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     try {
         auto load_index_info = (LoadIndexInfo*)c_load_index_info;
         auto binary_set = (knowhere::BinarySet*)c_binary_set;
@@ -104,4 +107,38 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         status.error_msg = strdup(e.what());
         return status;
     }
+}
+
+CStatus
+appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
+    try {
+        auto load_index_info = (LoadIndexInfo*)c_load_index_info;
+        auto field_type = load_index_info->field_type;
+        auto binary_set = (knowhere::BinarySet*)c_binary_set;
+        auto& index_params = load_index_info->index_params;
+        bool find_index_type = index_params.count("index_type") > 0 ? true : false;
+        AssertInfo(find_index_type == true, "Can't find index type in index_params");
+        load_index_info->index =
+            milvus::scalar::IndexFactory::GetInstance().CreateIndex(field_type, index_params["index_type"]);
+        load_index_info->index->Load(*binary_set);
+        auto status = CStatus();
+        status.error_code = Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
+}
+
+CStatus
+AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
+    auto load_index_info = (LoadIndexInfo*)c_load_index_info;
+    auto field_type = load_index_info->field_type;
+    if (milvus::IsVectorType(field_type)) {
+        return appendVecIndex(c_load_index_info, c_binary_set);
+    }
+    return appendScalarIndex(c_load_index_info, c_binary_set);
 }

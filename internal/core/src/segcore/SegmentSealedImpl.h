@@ -165,6 +165,12 @@ class SegmentSealedImpl : public SegmentSealed {
     //    virtual void
     //    build_index_if_primary_key(FieldId field_id);
 
+    void
+    LoadVecIndex(const LoadIndexInfo& info);
+
+    void
+    LoadScalarIndex(const LoadIndexInfo& info);
+
  private:
     // segment loading state
     BitsetType field_data_ready_bitset_;
@@ -177,12 +183,13 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // TODO: use protobuf format
     // TODO: remove duplicated indexing
-    std::vector<std::unique_ptr<knowhere::Index>> scalar_indexings_;
+    std::map<FieldOffset, knowhere::IndexPtr> scalar_indexings_;
     std::unique_ptr<ScalarIndexBase> primary_key_index_;
 
     std::vector<aligned_vector<char>> fields_data_;
     mutable DeletedRecord deleted_record_;
 
+    // TODO: unify scalar & vector index in SealedIndexingRecord.
     SealedIndexingRecord vecindexs_;
     aligned_vector<idx_t> row_ids_;
     aligned_vector<Timestamp> timestamps_;

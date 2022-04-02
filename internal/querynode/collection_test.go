@@ -19,6 +19,8 @@ package querynode
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -133,4 +135,25 @@ func TestCollection_loadType(t *testing.T) {
 	collection.setLoadType(loadTypePartition)
 	lt = collection.getLoadType()
 	assert.Equal(t, loadTypePartition, lt)
+}
+
+func TestCollection_getFieldType(t *testing.T) {
+	coll := &Collection{schema: nil}
+	_, err := coll.getFieldType(100)
+	assert.Error(t, err)
+	coll.schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "test",
+				FieldID:  100,
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	// field id not found.
+	_, err = coll.getFieldType(101)
+	assert.Error(t, err)
+	fieldType, err := coll.getFieldType(100)
+	assert.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Int64, fieldType)
 }

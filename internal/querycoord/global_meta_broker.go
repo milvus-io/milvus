@@ -339,10 +339,6 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 			return nil, fmt.Errorf("segment not found, collection: %d, segment: %d", collectionID, segmentID)
 		}
 
-		if _, ok := ret[segmentID]; !ok {
-			ret[segmentID] = make([]*querypb.FieldIndexInfo, 0, len(infos.IndexInfos))
-		}
-
 		for _, info := range infos.IndexInfos {
 			extraInfo, ok := infos.GetExtraIndexInfos()[info.IndexID]
 			indexInfo := &querypb.FieldIndexInfo{
@@ -357,23 +353,27 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 			}
 
 			if !info.EnableIndex {
+				if _, ok := ret[segmentID]; !ok {
+					ret[segmentID] = make([]*querypb.FieldIndexInfo, 0, len(infos.IndexInfos))
+				}
+
 				ret[segmentID] = append(ret[segmentID], indexInfo)
 				continue
 			}
 
 			paths, err := broker.getIndexFilePaths(ctx, info.BuildID)
 			if err != nil {
-				log.Error("failed to get index file paths",
+				log.Warn("failed to get index file paths",
 					zap.Int64("collection", collectionID),
 					zap.Int64("segment", segmentID),
 					zap.Int64("buildID", info.BuildID),
 					zap.Error(err))
-				return nil, err
+				continue
 			}
 
 			if len(paths) <= 0 || len(paths[0].IndexFilePaths) <= 0 {
 				log.Warn("index not ready", zap.Int64("index_build_id", info.BuildID))
-				return nil, fmt.Errorf("index not ready, index build id: %d", info.BuildID)
+				continue
 			}
 
 			indexInfo.IndexFilePaths = paths[0].IndexFilePaths
@@ -386,15 +386,18 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 				// get index name, index params from binlog.
 				extra, err := broker.loadIndexExtraInfo(ctx, paths[0])
 				if err != nil {
-					log.Error("failed to load index extra info",
+					log.Warn("failed to load index extra info",
 						zap.Int64("index build id", info.BuildID),
 						zap.Error(err))
-					return nil, err
+					continue
 				}
 				indexInfo.IndexName = extra.indexName
 				indexInfo.IndexParams = extra.indexParams
 			}
 
+			if _, ok := ret[segmentID]; !ok {
+				ret[segmentID] = make([]*querypb.FieldIndexInfo, 0, len(infos.IndexInfos))
+			}
 			ret[segmentID] = append(ret[segmentID], indexInfo)
 		}
 	}

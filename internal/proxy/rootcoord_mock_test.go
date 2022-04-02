@@ -18,10 +18,13 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/common"
 
@@ -1003,4 +1006,58 @@ func NewRootCoordMock(opts ...RootCoordMockOption) *RootCoordMock {
 	}
 
 	return rc
+}
+
+type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
+type DescribeIndexFunc func(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+type ShowSegmentsFunc func(ctx context.Context, request *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
+type DescribeSegmentsFunc func(ctx context.Context, request *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
+
+type mockRootCoord struct {
+	types.RootCoord
+	DescribeCollectionFunc
+	ShowPartitionsFunc
+	DescribeIndexFunc
+	ShowSegmentsFunc
+	DescribeSegmentsFunc
+}
+
+func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	if m.DescribeCollectionFunc != nil {
+		return m.DescribeCollectionFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	if m.ShowPartitionsFunc != nil {
+		return m.ShowPartitionsFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+	if m.DescribeIndexFunc != nil {
+		return m.DescribeIndexFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) ShowSegments(ctx context.Context, request *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
+	if m.ShowSegmentsFunc != nil {
+		return m.ShowSegmentsFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) DescribeSegments(ctx context.Context, request *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
+	if m.DescribeSegmentsFunc != nil {
+		return m.DescribeSegmentsFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func newMockRootCoord() *mockRootCoord {
+	return &mockRootCoord{}
 }

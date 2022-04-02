@@ -311,6 +311,95 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(std_json.dump(-2), json.dump(-2));
 }
 
+TEST(Sealed, LoadScalarIndex) {
+    auto dim = 16;
+    auto N = ROW_COUNT;
+    auto metric_type = MetricType::METRIC_L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(0);
+
+    auto indexing = GenIndexing(N, dim, fakevec.data());
+
+    auto segment = CreateSealedSegment(schema);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "double": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5,
+                        "round_decimal": 3
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    Timestamp time = 1000000;
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    SealedLoader(dataset, *segment);
+
+    LoadIndexInfo vec_info;
+    vec_info.field_id = fakevec_id.get();
+    vec_info.field_type = CDataType::FloatVector;
+    vec_info.index = indexing;
+    vec_info.index_params["metric_type"] = knowhere::Metric::L2;
+    segment->LoadIndex(vec_info);
+
+    LoadIndexInfo counter_index;
+    counter_index.field_id = counter_id.get();
+    counter_index.field_type = CDataType::Int64;
+    counter_index.index_params["index_type"] = "sort";
+    auto counter_data = dataset.get_col<int64_t>(1);
+    counter_index.index = std::move(GenScalarIndexing<int64_t>(N, counter_data.data()));
+    segment->LoadIndex(counter_index);
+
+    LoadIndexInfo double_index;
+    double_index.field_id = double_id.get();
+    double_index.field_type = CDataType::Double;
+    double_index.index_params["index_type"] = "sort";
+    auto double_data = dataset.get_col<double>(1);
+    double_index.index = std::move(GenScalarIndexing<double>(N, double_data.data()));
+    segment->LoadIndex(double_index);
+
+    LoadIndexInfo nothing_index;
+    nothing_index.field_id = nothing_id.get();
+    nothing_index.field_type = CDataType::Int32;
+    nothing_index.index_params["index_type"] = "sort";
+    auto nothing_data = dataset.get_col<int32_t>(1);
+    nothing_index.index = std::move(GenScalarIndexing<int32_t>(N, nothing_data.data()));
+    segment->LoadIndex(nothing_index);
+
+    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto json = SearchResultToJson(*sr);
+    std::cout << json.dump(1);
+}
+
 TEST(Sealed, Delete) {
     auto dim = 16;
     auto topK = 5;

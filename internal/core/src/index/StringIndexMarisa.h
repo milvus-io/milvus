@@ -35,6 +35,11 @@ class StringIndexMarisa : public StringIndex {
     void
     Load(const BinarySet& set) override;
 
+    size_t
+    Count() override {
+        return str_ids_.size();
+    }
+
     void
     Build(size_t n, const std::string* values) override;
 

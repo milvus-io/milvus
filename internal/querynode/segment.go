@@ -857,14 +857,14 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 	return nil
 }
 
-func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo) error {
+func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
 	loadIndexInfo, err := newLoadIndexInfo()
 	defer deleteLoadIndexInfo(loadIndexInfo)
 	if err != nil {
 		return err
 	}
 
-	err = loadIndexInfo.appendIndexInfo(bytesIndex, indexInfo)
+	err = loadIndexInfo.appendIndexInfo(bytesIndex, indexInfo, fieldType)
 	if err != nil {
 		return err
 	}

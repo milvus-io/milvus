@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -2347,15 +2349,7 @@ func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (gist *getIndexStateTask) Execute(ctx context.Context) error {
-	collectionName := gist.CollectionName
-	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
-	if err != nil { // err is not nil if collection not exists
-		return err
-	}
-	gist.collectionID = collectionID
-
-	// Get partition result for the given collection.
+func (gist *getIndexStateTask) getPartitions(ctx context.Context, collectionName string, collectionID UniqueID) (*milvuspb.ShowPartitionsResponse, error) {
 	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowPartitions,
@@ -2367,16 +2361,17 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
 	}
-	partitions, err := gist.rootCoord.ShowPartitions(ctx, showPartitionRequest)
+	ret, err := gist.rootCoord.ShowPartitions(ctx, showPartitionRequest)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	if gist.IndexName == "" {
-		gist.IndexName = Params.CommonCfg.DefaultIndexName
+	if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return nil, errors.New(ret.GetStatus().GetReason())
 	}
+	return ret, nil
+}
 
-	// Retrieve index status and detailed index information.
+func (gist *getIndexStateTask) describeIndex(ctx context.Context) (*milvuspb.DescribeIndexResponse, error) {
 	describeIndexReq := milvuspb.DescribeIndexRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeIndex,
@@ -2388,10 +2383,91 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		CollectionName: gist.CollectionName,
 		IndexName:      gist.IndexName,
 	}
+	ret, err := gist.rootCoord.DescribeIndex(ctx, &describeIndexReq)
+	if err != nil {
+		return nil, err
+	}
+	if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return nil, errors.New(ret.GetStatus().GetReason())
+	}
+	return ret, nil
+}
 
-	indexDescriptionResp, err2 := gist.rootCoord.DescribeIndex(ctx, &describeIndexReq)
-	if err2 != nil {
-		return err2
+func (gist *getIndexStateTask) getSegmentIDs(ctx context.Context, collectionID UniqueID, partitions *milvuspb.ShowPartitionsResponse) ([]UniqueID, error) {
+	var allSegmentIDs []UniqueID
+	for _, partitionID := range partitions.PartitionIDs {
+		showSegmentsRequest := &milvuspb.ShowSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowSegments,
+				MsgID:     gist.Base.MsgID,
+				Timestamp: gist.Base.Timestamp,
+				SourceID:  Params.ProxyCfg.ProxyID,
+			},
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+		}
+		segments, err := gist.rootCoord.ShowSegments(ctx, showSegmentsRequest)
+		if err != nil {
+			return nil, err
+		}
+		if segments.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return nil, errors.New(segments.Status.Reason)
+		}
+		allSegmentIDs = append(allSegmentIDs, segments.SegmentIDs...)
+	}
+	return allSegmentIDs, nil
+}
+
+func (gist *getIndexStateTask) getIndexBuildIDs(ctx context.Context, collectionID UniqueID, allSegmentIDs []UniqueID, indexID UniqueID) ([]UniqueID, error) {
+	indexBuildIDs := make([]UniqueID, 0)
+	segmentsDesc, err := gist.rootCoord.DescribeSegments(ctx, &rootcoordpb.DescribeSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DescribeSegments,
+			MsgID:     gist.Base.MsgID,
+			Timestamp: gist.Base.Timestamp,
+			SourceID:  Params.ProxyCfg.ProxyID,
+		},
+		CollectionID: collectionID,
+		SegmentIDs:   allSegmentIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if segmentsDesc.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return nil, errors.New(segmentsDesc.GetStatus().GetReason())
+	}
+	for _, segmentDesc := range segmentsDesc.GetSegmentInfos() {
+		for _, segmentIndexInfo := range segmentDesc.GetIndexInfos() {
+			if segmentIndexInfo.IndexID == indexID && segmentIndexInfo.EnableIndex {
+				indexBuildIDs = append(indexBuildIDs, segmentIndexInfo.GetBuildID())
+			}
+		}
+	}
+	return indexBuildIDs, nil
+}
+
+func (gist *getIndexStateTask) Execute(ctx context.Context) error {
+	collectionName := gist.CollectionName
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	if err != nil { // err is not nil if collection not exists
+		return err
+	}
+	gist.collectionID = collectionID
+
+	// Get partition result for the given collection.
+	partitions, err := gist.getPartitions(ctx, collectionName, collectionID)
+	if err != nil {
+		return err
+	}
+
+	if gist.IndexName == "" {
+		gist.IndexName = Params.CommonCfg.DefaultIndexName
+	}
+
+	// Retrieve index status and detailed index information.
+	indexDescriptionResp, err := gist.describeIndex(ctx)
+	if err != nil {
+		return err
 	}
 
 	// Check if the target index name exists.
@@ -2409,54 +2485,17 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	}
 
 	// Fetch segments for partitions.
-	var allSegmentIDs []UniqueID
-	for _, partitionID := range partitions.PartitionIDs {
-		showSegmentsRequest := &milvuspb.ShowSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowSegments,
-				MsgID:     gist.Base.MsgID,
-				Timestamp: gist.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.ProxyID,
-			},
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
-		}
-		segments, err := gist.rootCoord.ShowSegments(ctx, showSegmentsRequest)
-		if err != nil {
-			return err
-		}
-		if segments.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(segments.Status.Reason)
-		}
-		allSegmentIDs = append(allSegmentIDs, segments.SegmentIDs...)
+	allSegmentIDs, err := gist.getSegmentIDs(ctx, collectionID, partitions)
+	if err != nil {
+		return err
 	}
 
-	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
-		IndexBuildIDs: make([]UniqueID, 0),
+	// Get all index build ids.
+	indexBuildIDs, err := gist.getIndexBuildIDs(ctx, collectionID, allSegmentIDs, matchIndexID)
+	if err != nil {
+		return err
 	}
-
-	// Fetch index build IDs from segments.
-	for _, segmentID := range allSegmentIDs {
-		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DescribeSegment,
-				MsgID:     gist.Base.MsgID,
-				Timestamp: gist.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.ProxyID,
-			},
-			CollectionID: collectionID,
-			SegmentID:    segmentID,
-		}
-		segmentDesc, err := gist.rootCoord.DescribeSegment(ctx, describeSegmentRequest)
-		if err != nil {
-			return err
-		}
-		if segmentDesc.IndexID == matchIndexID {
-			if segmentDesc.EnableIndex {
-				getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
-			}
-		}
-	}
+	log.Debug("get index state", zap.String("role", typeutil.ProxyRole), zap.Int64s("indexBuildIDs", indexBuildIDs))
 
 	gist.result = &milvuspb.GetIndexStateResponse{
 		Status: &commonpb.Status{
@@ -2467,10 +2506,13 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		FailReason: "",
 	}
 
-	log.Debug("Proxy GetIndexState", zap.Int("IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
-
-	if len(getIndexStatesRequest.IndexBuildIDs) == 0 {
+	if len(indexBuildIDs) <= 0 {
 		return nil
+	}
+
+	// Get index states.
+	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
+		IndexBuildIDs: indexBuildIDs,
 	}
 	states, err := gist.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
 	if err != nil {

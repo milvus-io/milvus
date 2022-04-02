@@ -15,6 +15,11 @@
 #include <string>
 
 namespace milvus {
+inline bool
+IsVectorType(CDataType dtype) {
+    return dtype == CDataType::FloatVector || dtype == CDataType::BinaryVector;
+}
+
 template <typename T, typename = std::enable_if_t<std::is_fundamental_v<T> || std::is_same_v<T, std::string>>>
 inline CDataType
 GetDType() {

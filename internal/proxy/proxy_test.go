@@ -1179,31 +1179,16 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		segmentIDs = resp.CollSegIDs[collectionName].Data
+		log.Info("flush collection", zap.Int64s("segments to be flushed", segmentIDs))
 
 		f := func() bool {
-			states := make(map[int64]commonpb.SegmentState) // segment id -> segment state
-			for _, id := range segmentIDs {
-				states[id] = commonpb.SegmentState_Sealed
-			}
-			resp, err := proxy.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{
-				Base:           nil,
-				DbName:         dbName,
-				CollectionName: collectionName,
+			resp, err := proxy.GetFlushState(ctx, &milvuspb.GetFlushStateRequest{
+				SegmentIDs: segmentIDs,
 			})
-			assert.NoError(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			for _, info := range resp.Infos {
-				states[info.SegmentID] = info.State
+			if err != nil {
+				return false
 			}
-			for id, state := range states {
-				if state != commonpb.SegmentState_Flushed {
-					log.Debug("waiting for segment to be flushed",
-						zap.Int64("segment id", id),
-						zap.Any("state", state))
-					return false
-				}
-			}
-			return true
+			return resp.GetFlushed()
 		}
 
 		// waiting for flush operation to be done

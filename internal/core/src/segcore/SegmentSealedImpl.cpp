@@ -38,25 +38,13 @@ SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto field_offset = schema_->get_offset(field_id);
+    auto& field_meta = schema_->operator[](field_offset);
 
-    AssertInfo(info.index_params.count("metric_type"), "Can't get metric_type in index_params");
-    auto metric_type_str = info.index_params.at("metric_type");
-    auto row_count = info.index->Count();
-    AssertInfo(row_count > 0, "Index count is 0");
-
-    std::unique_lock lck(mutex_);
-    AssertInfo(!get_bit(vecindex_ready_bitset_, field_offset),
-               "Can't get bitset element at " + std::to_string(field_offset.get()));
-    if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
+    if (field_meta.is_vector()) {
+        LoadVecIndex(info);
     } else {
-        row_count_opt_ = row_count;
+        LoadScalarIndex(info);
     }
-    AssertInfo(!vecindexs_.is_ready(field_offset), "vec index is not ready");
-    vecindexs_.append_field_indexing(field_offset, GetMetricType(metric_type_str), info.index);
-
-    set_bit(vecindex_ready_bitset_, field_offset, true);
-    lck.unlock();
 }
 
 void
@@ -125,18 +113,11 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // prepare data
         auto field_offset = schema_->get_offset(field_id);
         auto& field_meta = schema_->operator[](field_offset);
-        // Assert(!field_meta.is_vector());
         auto element_sizeof = field_meta.get_sizeof();
         auto span = SpanBase(info.blob, info.row_count, element_sizeof);
         auto length_in_bytes = element_sizeof * info.row_count;
         aligned_vector<char> vec_data(length_in_bytes);
         memcpy(vec_data.data(), info.blob, length_in_bytes);
-
-        // generate scalar index
-        std::unique_ptr<knowhere::Index> index;
-        if (!field_meta.is_vector()) {
-            index = query::generate_scalar_index(span, field_meta.get_data_type());
-        }
 
         std::unique_ptr<ScalarIndexBase> pk_index_;
         if (schema_->get_primary_key_offset() == field_offset) {
@@ -147,14 +128,14 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         std::unique_lock lck(mutex_);
         update_row_count(info.row_count);
         AssertInfo(fields_data_[field_offset.get()].empty(), "field data already exists");
+        fields_data_[field_offset.get()] = std::move(vec_data);
 
         if (field_meta.is_vector()) {
             AssertInfo(!vecindexs_.is_ready(field_offset), "field data can't be loaded when indexing exists");
-            fields_data_[field_offset.get()] = std::move(vec_data);
-        } else {
-            AssertInfo(!scalar_indexings_[field_offset.get()], "scalar indexing not cleared");
-            fields_data_[field_offset.get()] = std::move(vec_data);
-            scalar_indexings_[field_offset.get()] = std::move(index);
+        } else if (!scalar_indexings_.count(field_offset)) {
+            // generate scalar index
+            auto index = query::generate_scalar_index(span, field_meta.get_data_type());
+            scalar_indexings_[field_offset] = std::move(index);
         }
 
         if (schema_->get_primary_key_offset() == field_offset) {
@@ -211,7 +192,8 @@ const knowhere::Index*
 SegmentSealedImpl::chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const {
     AssertInfo(chunk_id == 0, "Chunk_id is not equal to 0");
     // TODO: support scalar index
-    auto ptr = scalar_indexings_[field_offset.get()].get();
+    AssertInfo(scalar_indexings_.count(field_offset), "cannot find index for scalar field");
+    auto ptr = scalar_indexings_.at(field_offset).get();
     AssertInfo(ptr, "Scalar index of " + std::to_string(field_offset.get()) + " is null");
     return ptr;
 }
@@ -425,7 +407,6 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
       fields_data_(schema->size()),
       field_data_ready_bitset_(schema->size()),
       vecindex_ready_bitset_(schema->size()),
-      scalar_indexings_(schema->size()),
       id_(segment_id) {
 }
 
@@ -640,6 +621,56 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk, Timestamp time
     }
     auto mask = TimestampIndex::GenerateBitset(timestamp, range, this->timestamps_.data(), this->timestamps_.size());
     bitset_chunk &= mask;
+}
+
+void
+SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
+    // NOTE: lock only when data is ready to avoid starvation
+    auto field_id = FieldId(info.field_id);
+    auto field_offset = schema_->get_offset(field_id);
+
+    auto index = std::dynamic_pointer_cast<knowhere::VecIndex>(info.index);
+    AssertInfo(info.index_params.count("metric_type"), "Can't get metric_type in index_params");
+    auto metric_type_str = info.index_params.at("metric_type");
+    auto row_count = index->Count();
+    AssertInfo(row_count > 0, "Index count is 0");
+
+    std::unique_lock lck(mutex_);
+    AssertInfo(!get_bit(vecindex_ready_bitset_, field_offset),
+               "Can't get bitset element at " + std::to_string(field_offset.get()));
+    if (row_count_opt_.has_value()) {
+        AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
+    } else {
+        row_count_opt_ = row_count;
+    }
+    AssertInfo(!vecindexs_.is_ready(field_offset), "vec index is not ready");
+    vecindexs_.append_field_indexing(field_offset, GetMetricType(metric_type_str), index);
+
+    set_bit(vecindex_ready_bitset_, field_offset, true);
+    lck.unlock();
+}
+
+void
+SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
+    // NOTE: lock only when data is ready to avoid starvation
+    auto field_id = FieldId(info.field_id);
+    auto field_offset = schema_->get_offset(field_id);
+
+    auto index = std::dynamic_pointer_cast<scalar::IndexBase>(info.index);
+    auto row_count = index->Count();
+    AssertInfo(row_count > 0, "Index count is 0");
+
+    std::unique_lock lck(mutex_);
+
+    if (row_count_opt_.has_value()) {
+        AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
+    } else {
+        row_count_opt_ = row_count;
+    }
+
+    scalar_indexings_[field_offset] = std::move(index);
+
+    lck.unlock();
 }
 
 }  // namespace milvus::segcore

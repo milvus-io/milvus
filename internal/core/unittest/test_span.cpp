@@ -42,9 +42,9 @@ TEST(Span, Naive) {
     auto row_count = interface.get_row_count();
     ASSERT_EQ(N, row_count);
     for (auto chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-        auto vec_span = interface.chunk_data<BinaryVector>(FieldOffset(0), chunk_id);
+        auto vec_span = interface.chunk_data<milvus::BinaryVector>(FieldOffset(0), chunk_id);
         auto age_span = interface.chunk_data<float>(FieldOffset(1), chunk_id);
-        auto float_span = interface.chunk_data<FloatVector>(FieldOffset(2), chunk_id);
+        auto float_span = interface.chunk_data<milvus::FloatVector>(FieldOffset(2), chunk_id);
         auto begin = chunk_id * size_per_chunk;
         auto end = std::min((chunk_id + 1) * size_per_chunk, N);
         auto size_of_chunk = end - begin;

@@ -37,6 +37,11 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     BuildWithDataset(const DatasetPtr& dataset) override;
 
+    size_t
+    Count() override {
+        return data_.size();
+    }
+
     void
     Build(size_t n, const T* values) override;
 

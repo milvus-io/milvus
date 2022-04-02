@@ -19,12 +19,15 @@
 #include <map>
 #include <string>
 
+#include "common/CDataType.h"
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "index/Index.h"
 
 struct LoadIndexInfo {
     int64_t field_id;
+    CDataType field_type;
     std::map<std::string, std::string> index_params;
-    knowhere::VecIndexPtr index;
+    knowhere::IndexPtr index;
 };
 
 // NOTE: field_id can be system field

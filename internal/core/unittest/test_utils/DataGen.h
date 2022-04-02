@@ -19,6 +19,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <knowhere/index/vector_index/IndexIVF.h>
+#include <index/ScalarIndexSort.h>
 
 #include "Constants.h"
 #include "common/Schema.h"
@@ -345,6 +346,14 @@ GenIndexing(int64_t N, int64_t dim, const float* vec) {
     auto indexing = std::make_shared<knowhere::IVF>();
     indexing->Train(database, conf);
     indexing->AddWithoutIds(database, conf);
+    return indexing;
+}
+
+template<typename T>
+inline scalar::IndexBasePtr
+GenScalarIndexing(int64_t N, const T* data) {
+    auto indexing = scalar::CreateScalarIndexSort<T>();
+    indexing->Build(N, data);
     return indexing;
 }
 

@@ -35,6 +35,8 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus/internal/metrics"
 
 	"go.uber.org/zap"
@@ -287,6 +289,19 @@ func (c *Collection) setLoadType(l loadType) {
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) getLoadType() loadType {
 	return c.loadType
+}
+
+// getFieldType get the field type according to the field id.
+func (c *Collection) getFieldType(fieldID FieldID) (schemapb.DataType, error) {
+	helper, err := typeutil.CreateSchemaHelper(c.schema)
+	if err != nil {
+		return schemapb.DataType_None, err
+	}
+	field, err := helper.GetFieldFromID(fieldID)
+	if err != nil {
+		return schemapb.DataType_None, err
+	}
+	return field.GetDataType(), nil
 }
 
 // newCollection returns a new Collection

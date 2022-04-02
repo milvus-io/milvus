@@ -665,3 +665,68 @@ func (ms *LoadDeleteMsgStream) GetLatestMsgID(channel string) (msgstream.Message
 }
 
 func (ms *LoadDeleteMsgStream) Start() {}
+
+type getCollectionByIDFunc func(collectionID UniqueID) (*Collection, error)
+
+type mockReplicaInterface struct {
+	ReplicaInterface
+	getCollectionByIDFunc
+}
+
+func (m *mockReplicaInterface) getCollectionByID(collectionID UniqueID) (*Collection, error) {
+	if m.getCollectionByIDFunc != nil {
+		return m.getCollectionByIDFunc(collectionID)
+	}
+	return nil, errors.New("mock")
+}
+
+func newMockReplicaInterface() *mockReplicaInterface {
+	return &mockReplicaInterface{}
+}
+
+func TestSegmentLoader_getFieldType_err(t *testing.T) {
+	loader := &segmentLoader{}
+	// nor growing or sealed.
+	segment := &Segment{segmentType: 200}
+	_, err := loader.getFieldType(segment, 100)
+	assert.Error(t, err)
+}
+
+func TestSegmentLoader_getFieldType(t *testing.T) {
+	replica := newMockReplicaInterface()
+	loader := &segmentLoader{streamingReplica: replica, historicalReplica: replica}
+
+	// failed to get collection.
+	segment := &Segment{segmentType: segmentTypeSealed}
+	_, err := loader.getFieldType(segment, 100)
+	assert.Error(t, err)
+
+	segment.segmentType = segmentTypeGrowing
+	_, err = loader.getFieldType(segment, 100)
+	assert.Error(t, err)
+
+	// normal case.
+	replica.getCollectionByIDFunc = func(collectionID UniqueID) (*Collection, error) {
+		return &Collection{
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:     "test",
+						FieldID:  100,
+						DataType: schemapb.DataType_Int64,
+					},
+				},
+			},
+		}, nil
+	}
+
+	segment.segmentType = segmentTypeGrowing
+	fieldType, err := loader.getFieldType(segment, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Int64, fieldType)
+
+	segment.segmentType = segmentTypeSealed
+	fieldType, err = loader.getFieldType(segment, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Int64, fieldType)
+}
