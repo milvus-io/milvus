@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -49,7 +51,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	defer cancel()
 
 	t.Run("delete valid test", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		fg, err := getFilterDeleteNode(ctx)
 		assert.NoError(t, err)
@@ -58,7 +60,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		msg.CollectionID = UniqueID(1003)
 		fg, err := getFilterDeleteNode(ctx)
@@ -68,7 +70,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete not target collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		fg, err := getFilterDeleteNode(ctx)
 		assert.NoError(t, err)
@@ -78,13 +80,16 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no data", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		fg, err := getFilterDeleteNode(ctx)
 		assert.NoError(t, err)
 		msg.Timestamps = make([]Timestamp, 0)
-		msg.PrimaryKeys = make([]IntPrimaryKey, 0)
+		msg.Int64PrimaryKeys = make([]IntPrimaryKey, 0)
 		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+		msg.PrimaryKeys = storage.ParsePrimaryKeys2IDs([]primaryKey{})
+		res = fg.filterInvalidDeleteMessage(msg)
 		assert.Nil(t, res)
 	})
 }
@@ -94,7 +99,7 @@ func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
 	defer cancel()
 
 	genFilterDeleteMsg := func() []flowgraph.Msg {
-		dMsg, err := genSimpleDeleteMsg()
+		dMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		msg := flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{dMsg}, 0, 1000, nil, nil)
 		return []flowgraph.Msg{msg}

@@ -239,6 +239,7 @@ class GenericValue :
     kBoolVal = 1,
     kInt64Val = 2,
     kFloatVal = 3,
+    kStringVal = 4,
     VAL_NOT_SET = 0,
   };
 
@@ -322,6 +323,7 @@ class GenericValue :
     kBoolValFieldNumber = 1,
     kInt64ValFieldNumber = 2,
     kFloatValFieldNumber = 3,
+    kStringValFieldNumber = 4,
   };
   // bool bool_val = 1;
   private:
@@ -347,6 +349,20 @@ class GenericValue :
   double float_val() const;
   void set_float_val(double value);
 
+  // string string_val = 4;
+  private:
+  bool has_string_val() const;
+  public:
+  void clear_string_val();
+  const std::string& string_val() const;
+  void set_string_val(const std::string& value);
+  void set_string_val(std::string&& value);
+  void set_string_val(const char* value);
+  void set_string_val(const char* value, size_t size);
+  std::string* mutable_string_val();
+  std::string* release_string_val();
+  void set_allocated_string_val(std::string* string_val);
+
   void clear_val();
   ValCase val_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.GenericValue)
@@ -355,6 +371,7 @@ class GenericValue :
   void set_has_bool_val();
   void set_has_int64_val();
   void set_has_float_val();
+  void set_has_string_val();
 
   inline bool has_val() const;
   inline void clear_has_val();
@@ -365,6 +382,7 @@ class GenericValue :
     bool bool_val_;
     ::PROTOBUF_NAMESPACE_ID::int64 int64_val_;
     double float_val_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr string_val_;
   } val_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   ::PROTOBUF_NAMESPACE_ID::uint32 _oneof_case_[1];
@@ -2311,6 +2329,96 @@ inline void GenericValue::set_float_val(double value) {
   }
   val_.float_val_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.plan.GenericValue.float_val)
+}
+
+// string string_val = 4;
+inline bool GenericValue::has_string_val() const {
+  return val_case() == kStringVal;
+}
+inline void GenericValue::set_has_string_val() {
+  _oneof_case_[0] = kStringVal;
+}
+inline void GenericValue::clear_string_val() {
+  if (has_string_val()) {
+    val_.string_val_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+    clear_has_val();
+  }
+}
+inline const std::string& GenericValue::string_val() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.GenericValue.string_val)
+  if (has_string_val()) {
+    return val_.string_val_.GetNoArena();
+  }
+  return *&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited();
+}
+inline void GenericValue::set_string_val(const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.GenericValue.string_val)
+  if (!has_string_val()) {
+    clear_val();
+    set_has_string_val();
+    val_.string_val_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  val_.string_val_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.GenericValue.string_val)
+}
+inline void GenericValue::set_string_val(std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.GenericValue.string_val)
+  if (!has_string_val()) {
+    clear_val();
+    set_has_string_val();
+    val_.string_val_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  val_.string_val_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.plan.GenericValue.string_val)
+}
+inline void GenericValue::set_string_val(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  if (!has_string_val()) {
+    clear_val();
+    set_has_string_val();
+    val_.string_val_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  val_.string_val_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.plan.GenericValue.string_val)
+}
+inline void GenericValue::set_string_val(const char* value, size_t size) {
+  if (!has_string_val()) {
+    clear_val();
+    set_has_string_val();
+    val_.string_val_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  val_.string_val_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(
+      reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.plan.GenericValue.string_val)
+}
+inline std::string* GenericValue::mutable_string_val() {
+  if (!has_string_val()) {
+    clear_val();
+    set_has_string_val();
+    val_.string_val_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.GenericValue.string_val)
+  return val_.string_val_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* GenericValue::release_string_val() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.GenericValue.string_val)
+  if (has_string_val()) {
+    clear_has_val();
+    return val_.string_val_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  } else {
+    return nullptr;
+  }
+}
+inline void GenericValue::set_allocated_string_val(std::string* string_val) {
+  if (has_val()) {
+    clear_val();
+  }
+  if (string_val != nullptr) {
+    set_has_string_val();
+    val_.string_val_.UnsafeSetDefault(string_val);
+  }
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.GenericValue.string_val)
 }
 
 inline bool GenericValue::has_val() const {

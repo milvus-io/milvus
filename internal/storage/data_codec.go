@@ -486,14 +486,8 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				boolFieldData.Data = append(boolFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				boolFieldData.NumRows = append(boolFieldData.NumRows, int64(length))
+				totalLength += len(singleData)
+				boolFieldData.NumRows = append(boolFieldData.NumRows, int64(len(singleData)))
 				resultData.Data[fieldID] = boolFieldData
 			case schemapb.DataType_Int8:
 				if resultData.Data[fieldID] == nil {
@@ -507,14 +501,8 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				int8FieldData.Data = append(int8FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int8FieldData.NumRows = append(int8FieldData.NumRows, int64(length))
+				totalLength += len(singleData)
+				int8FieldData.NumRows = append(int8FieldData.NumRows, int64(len(singleData)))
 				resultData.Data[fieldID] = int8FieldData
 			case schemapb.DataType_Int16:
 				if resultData.Data[fieldID] == nil {
@@ -528,14 +516,8 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				int16FieldData.Data = append(int16FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int16FieldData.NumRows = append(int16FieldData.NumRows, int64(length))
+				totalLength += len(singleData)
+				int16FieldData.NumRows = append(int16FieldData.NumRows, int64(len(singleData)))
 				resultData.Data[fieldID] = int16FieldData
 			case schemapb.DataType_Int32:
 				if resultData.Data[fieldID] == nil {
@@ -549,14 +531,8 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				int32FieldData.Data = append(int32FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int32FieldData.NumRows = append(int32FieldData.NumRows, int64(length))
+				totalLength += len(singleData)
+				int32FieldData.NumRows = append(int32FieldData.NumRows, int64(len(singleData)))
 				resultData.Data[fieldID] = int32FieldData
 			case schemapb.DataType_Int64:
 				if resultData.Data[fieldID] == nil {
@@ -570,14 +546,8 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				int64FieldData.Data = append(int64FieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				int64FieldData.NumRows = append(int64FieldData.NumRows, int64(length))
+				totalLength += len(singleData)
+				int64FieldData.NumRows = append(int64FieldData.NumRows, int64(len(singleData)))
 				resultData.Data[fieldID] = int64FieldData
 			case schemapb.DataType_Float:
 				if resultData.Data[fieldID] == nil {
@@ -591,14 +561,8 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				floatFieldData.Data = append(floatFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				floatFieldData.NumRows = append(floatFieldData.NumRows, int64(length))
+				totalLength += len(singleData)
+				floatFieldData.NumRows = append(floatFieldData.NumRows, int64(len(singleData)))
 				resultData.Data[fieldID] = floatFieldData
 			case schemapb.DataType_Double:
 				if resultData.Data[fieldID] == nil {
@@ -612,37 +576,24 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
 				doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				doubleFieldData.NumRows = append(doubleFieldData.NumRows, int64(length))
+				totalLength += len(singleData)
+				doubleFieldData.NumRows = append(doubleFieldData.NumRows, int64(len(singleData)))
 				resultData.Data[fieldID] = doubleFieldData
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
 				if resultData.Data[fieldID] == nil {
 					resultData.Data[fieldID] = &StringFieldData{}
 				}
 				stringFieldData := resultData.Data[fieldID].(*StringFieldData)
-				length, err := eventReader.GetPayloadLengthFromReader()
-				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
-				}
-				totalLength += length
-				stringFieldData.NumRows = append(stringFieldData.NumRows, int64(length))
 				stringPayload, err := eventReader.GetStringFromPayload()
 				if err != nil {
 					eventReader.Close()
 					binlogReader.Close()
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, nil, err
 				}
-				for idx := range stringPayload {
-					stringFieldData.Data = append(stringFieldData.Data, stringPayload[idx])
-				}
+
+				stringFieldData.Data = append(stringFieldData.Data, stringPayload...)
+				totalLength += len(stringPayload)
+				stringFieldData.NumRows = append(stringFieldData.NumRows, int64(len(stringPayload)))
 				resultData.Data[fieldID] = stringFieldData
 			case schemapb.DataType_BinaryVector:
 				if resultData.Data[fieldID] == nil {
@@ -716,16 +667,64 @@ func (insertCodec *InsertCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 	return partitionID, segmentID, data, err
 }
 
+type DeleteLog struct {
+	Pk     PrimaryKey `json:"pk"`
+	Ts     uint64     `json:"ts"`
+	PkType int64      `json:"pkType"`
+}
+
+func NewDeleteLog(pk PrimaryKey, ts Timestamp) *DeleteLog {
+	pkType := pk.Type()
+
+	return &DeleteLog{
+		Pk:     pk,
+		Ts:     ts,
+		PkType: int64(pkType),
+	}
+}
+
+func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
+	var messageMap map[string]*json.RawMessage
+	err := json.Unmarshal(data, &messageMap)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(*messageMap["pkType"], &dl.PkType)
+	if err != nil {
+		return err
+	}
+
+	switch schemapb.DataType(dl.PkType) {
+	case schemapb.DataType_Int64:
+		dl.Pk = &Int64PrimaryKey{}
+	case schemapb.DataType_VarChar:
+		dl.Pk = &VarCharPrimaryKey{}
+	}
+
+	err = json.Unmarshal(*messageMap["pk"], dl.Pk)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(*messageMap["ts"], &dl.Ts)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
 // timestamp represents the time when this instance was deleted
 type DeleteData struct {
-	Pks      []int64     // primary keys
-	Tss      []Timestamp // timestamps
+	Pks      []PrimaryKey // primary keys
+	Tss      []Timestamp  // timestamps
 	RowCount int64
 }
 
 // Append append 1 pk&ts pair to DeleteData
-func (data *DeleteData) Append(pk UniqueID, ts Timestamp) {
+func (data *DeleteData) Append(pk PrimaryKey, ts Timestamp) {
 	data.Pks = append(data.Pks, pk)
 	data.Tss = append(data.Tss, ts)
 	data.RowCount++
@@ -754,15 +753,15 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	if err != nil {
 		return nil, err
 	}
-	if len(data.Pks) != len(data.Tss) {
+	length := len(data.Pks)
+	if length != len(data.Tss) {
 		return nil, fmt.Errorf("the length of pks, and TimeStamps is not equal")
 	}
-	length := len(data.Pks)
+
 	sizeTotal := 0
 	var startTs, endTs Timestamp
 	startTs, endTs = math.MaxUint64, 0
 	for i := 0; i < length; i++ {
-		pk := data.Pks[i]
 		ts := data.Tss[i]
 		if ts < startTs {
 			startTs = ts
@@ -770,12 +769,17 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 		if ts > endTs {
 			endTs = ts
 		}
-		err := eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", pk, ts))
+
+		deleteLog := NewDeleteLog(data.Pks[i], ts)
+		serializedPayload, err := json.Marshal(deleteLog)
 		if err != nil {
 			return nil, err
 		}
-		sizeTotal += binary.Size(pk)
-		sizeTotal += binary.Size(ts)
+		err = eventWriter.AddOneStringToPayload(string(serializedPayload))
+		if err != nil {
+			return nil, err
+		}
+		sizeTotal += binary.Size(serializedPayload)
 	}
 	eventWriter.SetEventTimestamp(startTs, endTs)
 	binlogWriter.SetEventTimeStamp(startTs, endTs)
@@ -798,7 +802,6 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 		Value: buffer,
 	}
 	return blob, nil
-
 }
 
 // Deserialize deserializes the deltalog blobs into DeleteData
@@ -822,43 +825,44 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
 
-		length, err := eventReader.GetPayloadLengthFromReader()
+		stringArray, err := eventReader.GetStringFromPayload()
 		if err != nil {
 			eventReader.Close()
 			binlogReader.Close()
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
-
-		stringarray, err := eventReader.GetStringFromPayload()
-		if err != nil {
-			eventReader.Close()
-			binlogReader.Close()
-			return InvalidUniqueID, InvalidUniqueID, nil, err
-		}
-		for i := 0; i < length; i++ {
-			splits := strings.Split(stringarray[i], ",")
-			if len(splits) != 2 {
-				eventReader.Close()
-				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", stringarray[i])
+		for i := 0; i < len(stringArray); i++ {
+			deleteLog := &DeleteLog{}
+			if err = json.Unmarshal([]byte(stringArray[i]), deleteLog); err != nil {
+				// compatible with versions that only support int64 type primary keys
+				// compatible with fmt.Sprintf("%d,%d", pk, ts)
+				// compatible error info (unmarshal err invalid character ',' after top-level value)
+				splits := strings.Split(stringArray[i], ",")
+				if len(splits) != 2 {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", stringArray[i])
+				}
+				pk, err := strconv.ParseInt(splits[0], 10, 64)
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, nil, err
+				}
+				deleteLog.Pk = &Int64PrimaryKey{
+					Value: pk,
+				}
+				deleteLog.PkType = int64(schemapb.DataType_Int64)
+				deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, nil, err
+				}
 			}
 
-			pk, err := strconv.ParseInt(splits[0], 10, 64)
-			if err != nil {
-				eventReader.Close()
-				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, nil, err
-			}
-
-			ts, err := strconv.ParseUint(splits[1], 10, 64)
-			if err != nil {
-				eventReader.Close()
-				binlogReader.Close()
-				return InvalidUniqueID, InvalidUniqueID, nil, err
-			}
-
-			result.Pks = append(result.Pks, pk)
-			result.Tss = append(result.Tss, ts)
+			result.Pks = append(result.Pks, deleteLog.Pk)
+			result.Tss = append(result.Tss, deleteLog.Ts)
 		}
 		eventReader.Close()
 		binlogReader.Close()

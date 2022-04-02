@@ -336,6 +336,19 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Compatible with primary keys that only support int64 type
+	if deleteRequest.PrimaryKeys == nil {
+		deleteRequest.PrimaryKeys = &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: deleteRequest.Int64PrimaryKeys,
+				},
+			},
+		}
+		deleteRequest.NumRows = int64(len(deleteRequest.Int64PrimaryKeys))
+	}
+
 	deleteMsg := &DeleteMsg{DeleteRequest: deleteRequest}
 	for _, timestamp := range deleteMsg.Timestamps {
 		deleteMsg.BeginTimestamp = timestamp
@@ -352,6 +365,21 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	}
 
 	return deleteMsg, nil
+}
+
+func (dt *DeleteMsg) CheckAligned() error {
+	numRows := dt.GetNumRows()
+
+	if numRows != int64(len(dt.GetTimestamps())) {
+		return fmt.Errorf("the num_rows(%d) of pks  is not equal to the num_rows(%d) of timestamps", numRows, len(dt.GetTimestamps()))
+	}
+
+	numPks := int64(typeutil.GetSizeOfIDs(dt.PrimaryKeys))
+	if numRows != numPks {
+		return fmt.Errorf("the num_rows(%d) of pks is not equal to passed NumRows(%d)", numPks, numRows)
+	}
+
+	return nil
 }
 
 /////////////////////////////////////////Search//////////////////////////////////////////

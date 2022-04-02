@@ -253,6 +253,11 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
+	pks := make([]primaryKey, 0)
+	for _, id := range ids {
+		pks = append(pks, newInt64PrimaryKey(id))
+	}
+
 	timestamps := []uint64{0, 0, 0}
 
 	const DIM = 16
@@ -285,7 +290,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	var offsetDelete = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
-	err = segment.segmentDelete(offsetDelete, &ids, &timestamps)
+	err = segment.segmentDelete(offsetDelete, pks, timestamps)
 	assert.NoError(t, err)
 
 	var deletedCount = segment.getDeletedCount()
@@ -426,6 +431,10 @@ func TestSegment_segmentDelete(t *testing.T) {
 	assert.Nil(t, err)
 
 	ids := []int64{1, 2, 3}
+	pks := make([]primaryKey, 0)
+	for _, id := range ids {
+		pks = append(pks, newInt64PrimaryKey(id))
+	}
 	timestamps := []uint64{0, 0, 0}
 
 	const DIM = 16
@@ -458,7 +467,7 @@ func TestSegment_segmentDelete(t *testing.T) {
 	var offsetDelete = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
-	err = segment.segmentDelete(offsetDelete, &ids, &timestamps)
+	err = segment.segmentDelete(offsetDelete, pks, timestamps)
 	assert.NoError(t, err)
 
 	deleteCollection(collection)
@@ -682,7 +691,11 @@ func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
 		segmentTypeSealed,
 		true)
 	assert.Nil(t, err)
-	pks := []IntPrimaryKey{1, 2, 3}
+	ids := []int64{1, 2, 3}
+	pks := make([]primaryKey, 0)
+	for _, id := range ids {
+		pks = append(pks, newInt64PrimaryKey(id))
+	}
 	timestamps := []Timestamp{10, 10, 10}
 	var rowCount int64 = 3
 	error := seg.segmentLoadDeletedRecord(pks, timestamps, rowCount)
@@ -1530,4 +1543,54 @@ func Test_fillFieldData(t *testing.T) {
 	}
 
 	assert.Error(t, fillFieldData(m, path, &schemapb.FieldData{Type: schemapb.DataType_None}, index, offset, endian))
+}
+
+func TestUpdateBloomFilter(t *testing.T) {
+	t.Run("test int64 pk", func(t *testing.T) {
+		historical, err := genSimpleReplica()
+		assert.NoError(t, err)
+		err = historical.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultDMLChannel,
+			segmentTypeSealed,
+			true)
+		assert.NoError(t, err)
+		seg, err := historical.getSegmentByID(defaultSegmentID)
+		assert.Nil(t, err)
+		pkValues := []int64{1, 2}
+		pks := make([]primaryKey, len(pkValues))
+		for index, v := range pkValues {
+			pks[index] = newInt64PrimaryKey(v)
+		}
+		seg.updateBloomFilter(pks)
+		buf := make([]byte, 8)
+		for _, v := range pkValues {
+			common.Endian.PutUint64(buf, uint64(v))
+			assert.True(t, seg.pkFilter.Test(buf))
+		}
+	})
+	t.Run("test string pk", func(t *testing.T) {
+		historical, err := genSimpleReplica()
+		assert.NoError(t, err)
+		err = historical.addSegment(defaultSegmentID,
+			defaultPartitionID,
+			defaultCollectionID,
+			defaultDMLChannel,
+			segmentTypeSealed,
+			true)
+		assert.NoError(t, err)
+		seg, err := historical.getSegmentByID(defaultSegmentID)
+		assert.Nil(t, err)
+		pkValues := []string{"test1", "test2"}
+		pks := make([]primaryKey, len(pkValues))
+		for index, v := range pkValues {
+			pks[index] = newVarCharPrimaryKey(v)
+		}
+		seg.updateBloomFilter(pks)
+		for _, v := range pkValues {
+			assert.True(t, seg.pkFilter.TestString(v))
+		}
+	})
+
 }

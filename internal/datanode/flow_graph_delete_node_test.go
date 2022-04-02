@@ -129,18 +129,28 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	}
 }
 
-func genMockReplica(segIDs []int64, pks []int64, chanName string) *mockReplica {
+func genMockReplica(segIDs []int64, pks []primaryKey, chanName string) *mockReplica {
 	buf := make([]byte, 8)
 	filter0 := bloom.NewWithEstimates(1000000, 0.01)
 	for i := 0; i < 3; i++ {
-		common.Endian.PutUint64(buf, uint64(pks[i]))
-		filter0.Add(buf)
+		switch pks[i].Type() {
+		case schemapb.DataType_Int64:
+			common.Endian.PutUint64(buf, uint64(pks[i].(*int64PrimaryKey).Value))
+			filter0.Add(buf)
+		case schemapb.DataType_VarChar:
+			filter0.AddString(pks[i].(*varCharPrimaryKey).Value)
+		}
 	}
 
 	filter1 := bloom.NewWithEstimates(1000000, 0.01)
 	for i := 3; i < 5; i++ {
-		common.Endian.PutUint64(buf, uint64(pks[i]))
-		filter1.Add(buf)
+		switch pks[i].Type() {
+		case schemapb.DataType_Int64:
+			common.Endian.PutUint64(buf, uint64(pks[i].(*int64PrimaryKey).Value))
+			filter1.Add(buf)
+		case schemapb.DataType_VarChar:
+			filter1.AddString(pks[i].(*varCharPrimaryKey).Value)
+		}
 	}
 
 	seg0 := &Segment{
@@ -212,14 +222,29 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName = "channel-test"
 	)
 	var (
-		segIDs = []int64{11, 22, 33, 44, 55}
-		pks    = []int64{3, 17, 44, 190, 425}
+		segIDs   = []int64{11, 22, 33, 44, 55}
+		int64Pks = []primaryKey{
+			newInt64PrimaryKey(3),
+			newInt64PrimaryKey(17),
+			newInt64PrimaryKey(44),
+			newInt64PrimaryKey(190),
+			newInt64PrimaryKey(425),
+		}
+		varCharPks = []primaryKey{
+			newVarCharPrimaryKey("ab"),
+			newVarCharPrimaryKey("ac"),
+			newVarCharPrimaryKey("bcd"),
+			newVarCharPrimaryKey("gggg"),
+			newVarCharPrimaryKey("milvus"),
+		}
+		tss = []uint64{1, 1, 1, 1, 1}
 	)
-	replica := genMockReplica(segIDs, pks, chanName)
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
 	defer cm.RemoveWithPrefix("")
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
-	t.Run("Test get segment by primary keys", func(te *testing.T) {
+
+	t.Run("Test get segment by varChar primary keys", func(te *testing.T) {
+		replica := genMockReplica(segIDs, varCharPks, chanName)
+		fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 		c := &nodeConfig{
 			replica:      replica,
 			allocator:    &allocator{},
@@ -229,16 +254,49 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		dn, err := newDeleteNode(context.Background(), fm, make(chan string, 1), c)
 		assert.Nil(t, err)
 
-		results := dn.filterSegmentByPK(0, pks)
-		expected := map[int64][]int64{
-			pks[0]: segIDs[0:3],
-			pks[1]: segIDs[0:3],
-			pks[2]: segIDs[0:3],
-			pks[3]: segIDs[3:5],
-			pks[4]: segIDs[3:5],
+		segID2Pks, _ := dn.filterSegmentByPK(0, varCharPks, tss)
+		expected := map[int64][]primaryKey{
+			segIDs[0]: varCharPks[0:3],
+			segIDs[1]: varCharPks[0:3],
+			segIDs[2]: varCharPks[0:3],
+			segIDs[3]: varCharPks[3:5],
+			segIDs[4]: varCharPks[3:5],
 		}
-		for key, value := range expected {
-			assert.ElementsMatch(t, value, results[key])
+		for segmentID, expectedPks := range expected {
+			filterPks := segID2Pks[segmentID]
+			assert.Equal(t, len(expectedPks), len(filterPks))
+			for index, pk := range expectedPks {
+				assert.Equal(t, true, pk.EQ(filterPks[index]))
+			}
+		}
+	})
+
+	replica := genMockReplica(segIDs, int64Pks, chanName)
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	t.Run("Test get segment by int64 primary keys", func(te *testing.T) {
+		c := &nodeConfig{
+			replica:      replica,
+			allocator:    &allocator{},
+			vChannelName: chanName,
+		}
+
+		dn, err := newDeleteNode(context.Background(), fm, make(chan string, 1), c)
+		assert.Nil(t, err)
+
+		segID2Pks, _ := dn.filterSegmentByPK(0, int64Pks, tss)
+		expected := map[int64][]primaryKey{
+			segIDs[0]: int64Pks[0:3],
+			segIDs[1]: int64Pks[0:3],
+			segIDs[2]: int64Pks[0:3],
+			segIDs[3]: int64Pks[3:5],
+			segIDs[4]: int64Pks[3:5],
+		}
+		for segmentID, expectedPks := range expected {
+			filterPks := segID2Pks[segmentID]
+			assert.Equal(t, len(expectedPks), len(filterPks))
+			for index, pk := range expectedPks {
+				assert.Equal(t, true, pk.EQ(filterPks[index]))
+			}
 		}
 	})
 
@@ -260,7 +318,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
 		assert.Nil(te, err)
 
-		msg := genFlowGraphDeleteMsg(pks, chanName)
+		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
 		msg.segmentsToFlush = segIDs
 		// this will fail since ts = 0 will trigger mocked error
 		var fgMsg flowgraph.Msg = &msg
@@ -284,7 +342,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
 		assert.Nil(te, err)
 
-		msg := genFlowGraphDeleteMsg(pks, chanName)
+		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
 		msg.segmentsToFlush = segIDs
 
 		msg.endPositions[0].Timestamp = 100 // set to normal timestamp
@@ -314,7 +372,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		delNode, err := newDeleteNode(ctx, fm, sig, c)
 		assert.Nil(t, err)
 
-		msg := genFlowGraphDeleteMsg(pks, chanName)
+		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
 		msg.segmentsToFlush = segIDs
 
 		msg.endPositions[0].Timestamp = 100 // set to normal timestamp

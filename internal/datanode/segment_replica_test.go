@@ -772,9 +772,7 @@ func TestSegmentReplica_UpdatePKRange(t *testing.T) {
 			Data: []int64{c},
 		})
 
-		pk := &Int64PrimaryKey{
-			Value: c,
-		}
+		pk := newInt64PrimaryKey(c)
 
 		assert.Equal(t, true, seg.minPK.LE(pk))
 		assert.Equal(t, true, seg.maxPK.GE(pk))
@@ -820,9 +818,7 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 		replica.updateSegmentPKRange(2, &storage.Int64FieldData{Data: []int64{c}}) // normal segment
 		replica.updateSegmentPKRange(3, &storage.Int64FieldData{Data: []int64{c}}) // non-exist segment
 
-		pk := &Int64PrimaryKey{
-			Value: c,
-		}
+		pk := newInt64PrimaryKey(c)
 
 		assert.Equal(t, true, segNew.minPK.LE(pk))
 		assert.Equal(t, true, segNew.maxPK.GE(pk))

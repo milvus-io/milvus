@@ -46,9 +46,10 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		meta := f.GetCollectionMeta(UniqueID(10001), "uploads", schemapb.DataType_Int64)
 
 		iData := genInsertData()
+		pk := newInt64PrimaryKey(888)
 		dData := &DeleteData{
 			RowCount: 1,
-			Pks:      []int64{888},
+			Pks:      []primaryKey{pk},
 			Tss:      []uint64{666666},
 		}
 
@@ -80,7 +81,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10001), "uploads", schemapb.DataType_Int64)
 		dData := &DeleteData{
-			Pks: []int64{},
+			Pks: []primaryKey{},
 			Tss: []uint64{},
 		}
 
@@ -100,7 +101,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		iData = genInsertData()
 		dData = &DeleteData{
-			Pks:      []int64{},
+			Pks:      []primaryKey{},
 			Tss:      []uint64{1},
 			RowCount: 1,
 		}
@@ -111,8 +112,9 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		mkc := &mockCm{errMultiSave: true}
 		bin := &binlogIO{mkc, alloc}
 		iData = genInsertData()
+		pk := newInt64PrimaryKey(1)
 		dData = &DeleteData{
-			Pks:      []int64{1},
+			Pks:      []primaryKey{pk},
 			Tss:      []uint64{1},
 			RowCount: 1,
 		}
@@ -203,12 +205,12 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 
 		tests := []struct {
 			isvalid  bool
-			deletepk int64
+			deletepk primaryKey
 			ts       uint64
 
 			description string
 		}{
-			{true, 1, 1111111, "valid input"},
+			{true, newInt64PrimaryKey(1), 1111111, "valid input"},
 		}
 
 		for _, test := range tests {
@@ -216,7 +218,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 				if test.isvalid {
 
 					k, v, err := b.genDeltaBlobs(&DeleteData{
-						Pks: []int64{test.deletepk},
+						Pks: []primaryKey{test.deletepk},
 						Tss: []uint64{test.ts},
 					}, meta.GetID(), 10, 1)
 
@@ -231,7 +233,8 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test genDeltaBlobs error", func(t *testing.T) {
-		k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []int64{1}, Tss: []uint64{}}, 1, 1, 1)
+		pk := newInt64PrimaryKey(1)
+		k, v, err := b.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{}}, 1, 1, 1)
 		assert.Error(t, err)
 		assert.Empty(t, k)
 		assert.Empty(t, v)
@@ -240,7 +243,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		errAlloc.isvalid = false
 
 		bin := binlogIO{cm, errAlloc}
-		k, v, err = bin.genDeltaBlobs(&DeleteData{Pks: []int64{1}, Tss: []uint64{1}}, 1, 1, 1)
+		k, v, err = bin.genDeltaBlobs(&DeleteData{Pks: []primaryKey{pk}, Tss: []uint64{1}}, 1, 1, 1)
 		assert.Error(t, err)
 		assert.Empty(t, k)
 		assert.Empty(t, v)

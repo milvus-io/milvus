@@ -148,9 +148,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_Delete:
 			dmsg := msg.(*msgstream.DeleteMsg)
 			log.Debug("DDNode receive delete messages",
-				zap.Int("num", len(dmsg.GetPrimaryKeys())),
+				zap.Int64("num", dmsg.NumRows),
 				zap.String("vChannelName", ddn.vchannelName))
-			for i := 0; i < len(dmsg.PrimaryKeys); i++ {
+			for i := int64(0); i < dmsg.NumRows; i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
 			}
 			forwardMsgs = append(forwardMsgs, dmsg)

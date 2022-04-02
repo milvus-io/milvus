@@ -91,7 +91,7 @@ func TestInsertlogIterator(t *testing.T) {
 
 	t.Run("test dispose", func(t *testing.T) {
 		blobs := generateTestData(t, 1)
-		itr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
+		itr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField, schemapb.DataType_Int64)
 		assert.Nil(t, err)
 
 		itr.Dispose()
@@ -102,7 +102,7 @@ func TestInsertlogIterator(t *testing.T) {
 
 	t.Run("not empty iterator", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		itr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
+		itr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField, schemapb.DataType_Int64)
 		assert.Nil(t, err)
 
 		for i := 1; i <= 3; i++ {
@@ -116,9 +116,12 @@ func TestInsertlogIterator(t *testing.T) {
 				f102[j] = float32(i)
 			}
 
+			pk := &Int64PrimaryKey{
+				Value: int64(i),
+			}
 			expected := &Value{
 				int64(i),
-				int64(i),
+				pk,
 				int64(i),
 				false,
 				map[FieldID]interface{}{
@@ -154,7 +157,7 @@ func TestMergeIterator(t *testing.T) {
 
 	t.Run("empty and non-empty iterators", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		insertItr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
+		insertItr, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField, schemapb.DataType_Int64)
 		assert.Nil(t, err)
 		iterators := []Iterator{
 			&InsertBinlogIterator{data: &InsertData{}},
@@ -173,9 +176,12 @@ func TestMergeIterator(t *testing.T) {
 				f102[j] = float32(i)
 			}
 
+			pk := &Int64PrimaryKey{
+				Value: int64(i),
+			}
 			expected := &Value{
 				int64(i),
-				int64(i),
+				pk,
 				int64(i),
 				false,
 				map[FieldID]interface{}{
@@ -195,9 +201,9 @@ func TestMergeIterator(t *testing.T) {
 
 	t.Run("non-empty iterators", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		itr1, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
+		itr1, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField, schemapb.DataType_Int64)
 		assert.Nil(t, err)
-		itr2, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
+		itr2, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField, schemapb.DataType_Int64)
 		assert.Nil(t, err)
 		iterators := []Iterator{itr1, itr2}
 		itr := NewMergeIterator(iterators)
@@ -208,9 +214,12 @@ func TestMergeIterator(t *testing.T) {
 				f102[j] = float32(i)
 			}
 
+			pk := &Int64PrimaryKey{
+				Value: int64(i),
+			}
 			expected := &Value{
 				int64(i),
-				int64(i),
+				pk,
 				int64(i),
 				false,
 				map[FieldID]interface{}{
@@ -237,7 +246,7 @@ func TestMergeIterator(t *testing.T) {
 
 	t.Run("test dispose", func(t *testing.T) {
 		blobs := generateTestData(t, 3)
-		itr1, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField)
+		itr1, err := NewInsertBinlogIterator(blobs, rootcoord.RowIDField, schemapb.DataType_Int64)
 		assert.Nil(t, err)
 		itr := NewMergeIterator([]Iterator{itr1})
 

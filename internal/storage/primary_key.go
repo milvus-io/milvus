@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 type PrimaryKey interface {
@@ -33,10 +34,17 @@ type PrimaryKey interface {
 	MarshalJSON() ([]byte, error)
 	UnmarshalJSON(data []byte) error
 	SetValue(interface{}) error
+	Type() schemapb.DataType
 }
 
 type Int64PrimaryKey struct {
 	Value int64 `json:"pkValue"`
+}
+
+func NewInt64PrimaryKey(v int64) *Int64PrimaryKey {
+	return &Int64PrimaryKey{
+		Value: v,
+	}
 }
 
 func (ip *Int64PrimaryKey) GT(key PrimaryKey) bool {
@@ -135,76 +143,35 @@ func (ip *Int64PrimaryKey) SetValue(data interface{}) error {
 	return nil
 }
 
-type StringPrimaryKey struct {
+func (ip *Int64PrimaryKey) Type() schemapb.DataType {
+	return schemapb.DataType_Int64
+}
+
+type BaseStringPrimaryKey struct {
 	Value string
 }
 
-func (sp *StringPrimaryKey) GT(key PrimaryKey) bool {
-	pk, ok := key.(*StringPrimaryKey)
-	if !ok {
-		log.Warn("type of compared pk is not string")
-		return false
-	}
-	if strings.Compare(sp.Value, pk.Value) > 0 {
-		return true
-	}
-
-	return false
+func (sp *BaseStringPrimaryKey) GT(key BaseStringPrimaryKey) bool {
+	return strings.Compare(sp.Value, key.Value) > 0
 }
 
-func (sp *StringPrimaryKey) GE(key PrimaryKey) bool {
-	pk, ok := key.(*StringPrimaryKey)
-	if !ok {
-		log.Warn("type of compared pk is not string")
-		return false
-	}
-	if strings.Compare(sp.Value, pk.Value) >= 0 {
-		return true
-	}
-
-	return false
+func (sp *BaseStringPrimaryKey) GE(key BaseStringPrimaryKey) bool {
+	return strings.Compare(sp.Value, key.Value) >= 0
 }
 
-func (sp *StringPrimaryKey) LT(key PrimaryKey) bool {
-	pk, ok := key.(*StringPrimaryKey)
-	if !ok {
-		log.Warn("type of compared pk is not string")
-		return false
-	}
-	if strings.Compare(sp.Value, pk.Value) < 0 {
-		return true
-	}
-
-	return false
+func (sp *BaseStringPrimaryKey) LT(key BaseStringPrimaryKey) bool {
+	return strings.Compare(sp.Value, key.Value) < 0
 }
 
-func (sp *StringPrimaryKey) LE(key PrimaryKey) bool {
-	pk, ok := key.(*StringPrimaryKey)
-	if !ok {
-		log.Warn("type of compared pk is not string")
-		return false
-	}
-	if strings.Compare(sp.Value, pk.Value) <= 0 {
-		return true
-	}
-
-	return false
+func (sp *BaseStringPrimaryKey) LE(key BaseStringPrimaryKey) bool {
+	return strings.Compare(sp.Value, key.Value) <= 0
 }
 
-func (sp *StringPrimaryKey) EQ(key PrimaryKey) bool {
-	pk, ok := key.(*StringPrimaryKey)
-	if !ok {
-		log.Warn("type of compared pk is not string")
-		return false
-	}
-	if strings.Compare(sp.Value, pk.Value) == 0 {
-		return true
-	}
-
-	return false
+func (sp *BaseStringPrimaryKey) EQ(key BaseStringPrimaryKey) bool {
+	return strings.Compare(sp.Value, key.Value) == 0
 }
 
-func (sp *StringPrimaryKey) MarshalJSON() ([]byte, error) {
+func (sp *BaseStringPrimaryKey) MarshalJSON() ([]byte, error) {
 	ret, err := json.Marshal(sp.Value)
 	if err != nil {
 		return nil, err
@@ -213,7 +180,7 @@ func (sp *StringPrimaryKey) MarshalJSON() ([]byte, error) {
 	return ret, nil
 }
 
-func (sp *StringPrimaryKey) UnmarshalJSON(data []byte) error {
+func (sp *BaseStringPrimaryKey) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &sp.Value)
 	if err != nil {
 		return err
@@ -222,7 +189,7 @@ func (sp *StringPrimaryKey) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (sp *StringPrimaryKey) SetValue(data interface{}) error {
+func (sp *BaseStringPrimaryKey) SetValue(data interface{}) error {
 	value, ok := data.(string)
 	if !ok {
 		return fmt.Errorf("wrong type value when setValue for StringPrimaryKey")
@@ -230,4 +197,173 @@ func (sp *StringPrimaryKey) SetValue(data interface{}) error {
 
 	sp.Value = value
 	return nil
+}
+
+type VarCharPrimaryKey struct {
+	BaseStringPrimaryKey
+}
+
+func NewVarCharPrimaryKey(v string) *VarCharPrimaryKey {
+	return &VarCharPrimaryKey{
+		BaseStringPrimaryKey: BaseStringPrimaryKey{
+			Value: v,
+		},
+	}
+}
+
+func (vcp *VarCharPrimaryKey) GT(key PrimaryKey) bool {
+	pk, ok := key.(*VarCharPrimaryKey)
+	if !ok {
+		log.Warn("type of compared pk is not varChar")
+		return false
+	}
+
+	return vcp.BaseStringPrimaryKey.GT(pk.BaseStringPrimaryKey)
+}
+
+func (vcp *VarCharPrimaryKey) GE(key PrimaryKey) bool {
+	pk, ok := key.(*VarCharPrimaryKey)
+	if !ok {
+		log.Warn("type of compared pk is not varChar")
+		return false
+	}
+
+	return vcp.BaseStringPrimaryKey.GE(pk.BaseStringPrimaryKey)
+}
+
+func (vcp *VarCharPrimaryKey) LT(key PrimaryKey) bool {
+	pk, ok := key.(*VarCharPrimaryKey)
+	if !ok {
+		log.Warn("type of compared pk is not varChar")
+		return false
+	}
+
+	return vcp.BaseStringPrimaryKey.LT(pk.BaseStringPrimaryKey)
+}
+
+func (vcp *VarCharPrimaryKey) LE(key PrimaryKey) bool {
+	pk, ok := key.(*VarCharPrimaryKey)
+	if !ok {
+		log.Warn("type of compared pk is not varChar")
+		return false
+	}
+
+	return vcp.BaseStringPrimaryKey.LE(pk.BaseStringPrimaryKey)
+}
+
+func (vcp *VarCharPrimaryKey) EQ(key PrimaryKey) bool {
+	pk, ok := key.(*VarCharPrimaryKey)
+	if !ok {
+		log.Warn("type of compared pk is not varChar")
+		return false
+	}
+
+	return vcp.BaseStringPrimaryKey.EQ(pk.BaseStringPrimaryKey)
+}
+
+func (vcp *VarCharPrimaryKey) Type() schemapb.DataType {
+	return schemapb.DataType_VarChar
+}
+
+func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (PrimaryKey, error) {
+	var result PrimaryKey
+	switch pkType {
+	case schemapb.DataType_Int64:
+		result = &Int64PrimaryKey{
+			Value: data.(int64),
+		}
+	case schemapb.DataType_VarChar:
+		result = &VarCharPrimaryKey{
+			BaseStringPrimaryKey: BaseStringPrimaryKey{
+				Value: data.(string),
+			},
+		}
+	default:
+		return nil, fmt.Errorf("not supported primary data type")
+	}
+
+	return result, nil
+}
+
+func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) {
+	ret := make([]PrimaryKey, 0)
+	if data == nil {
+		return ret, fmt.Errorf("failed to parse pks from nil field data")
+	}
+	scalarData := data.GetScalars()
+	if scalarData == nil {
+		return ret, fmt.Errorf("failed to parse pks from nil scalar data")
+	}
+
+	switch data.Type {
+	case schemapb.DataType_Int64:
+		for _, value := range scalarData.GetLongData().GetData() {
+			pk := NewInt64PrimaryKey(value)
+			ret = append(ret, pk)
+		}
+	case schemapb.DataType_VarChar:
+		for _, value := range scalarData.GetStringData().GetData() {
+			pk := NewVarCharPrimaryKey(value)
+			ret = append(ret, pk)
+		}
+	default:
+		return ret, fmt.Errorf("not supported primary data type")
+	}
+
+	return ret, nil
+}
+
+func ParseIDs2PrimaryKeys(ids *schemapb.IDs) []PrimaryKey {
+	ret := make([]PrimaryKey, 0)
+	switch ids.IdField.(type) {
+	case *schemapb.IDs_IntId:
+		int64Pks := ids.GetIntId().GetData()
+		for _, v := range int64Pks {
+			pk := NewInt64PrimaryKey(v)
+			ret = append(ret, pk)
+		}
+	case *schemapb.IDs_StrId:
+		stringPks := ids.GetStrId().GetData()
+		for _, v := range stringPks {
+			pk := NewVarCharPrimaryKey(v)
+			ret = append(ret, pk)
+		}
+	default:
+		//TODO::
+	}
+
+	return ret
+}
+
+func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
+	ret := &schemapb.IDs{}
+	if len(pks) == 0 {
+		return ret
+	}
+	switch pks[0].Type() {
+	case schemapb.DataType_Int64:
+		int64Pks := make([]int64, 0)
+		for _, pk := range pks {
+			int64Pks = append(int64Pks, pk.(*Int64PrimaryKey).Value)
+		}
+		ret.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: int64Pks,
+			},
+		}
+	case schemapb.DataType_VarChar:
+		stringPks := make([]string, 0)
+		for _, pk := range pks {
+			stringPks = append(stringPks, pk.(*VarCharPrimaryKey).Value)
+		}
+		ret.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: stringPks,
+			},
+		}
+	default:
+		//TODO::
+	}
+
+	return ret
 }

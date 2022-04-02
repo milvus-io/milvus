@@ -52,7 +52,7 @@ const (
 	testInt64Field       = "int64"
 	testFloatField       = "float"
 	testDoubleField      = "double"
-	testStringField      = "stringField"
+	testVarCharField     = "varChar"
 	testFloatVecField    = "fvec"
 	testBinaryVecField   = "bvec"
 	testVecDim           = 128
@@ -114,6 +114,14 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 				{
 					Key:   "dim",
 					Value: strconv.Itoa(testVecDim),
+				},
+			}
+		}
+		if dataType == schemapb.DataType_VarChar {
+			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+				{
+					Key:   "max_length_per_row",
+					Value: strconv.Itoa(testMaxVarCharLength),
 				},
 			}
 		}
@@ -1602,8 +1610,7 @@ func TestShowPartitionsTask(t *testing.T) {
 	assert.NotNil(t, err)
 
 }
-
-func TestTask_all(t *testing.T) {
+func TestTask_Int64PrimaryKey(t *testing.T) {
 	var err error
 
 	Params.Init()
@@ -1625,12 +1632,11 @@ func TestTask_all(t *testing.T) {
 	partitionName := prefix + funcutil.GenRandomStr()
 
 	fieldName2Types := map[string]schemapb.DataType{
-		testBoolField:   schemapb.DataType_Bool,
-		testInt32Field:  schemapb.DataType_Int32,
-		testInt64Field:  schemapb.DataType_Int64,
-		testFloatField:  schemapb.DataType_Float,
-		testDoubleField: schemapb.DataType_Double,
-		//testStringField:   schemapb.DataType_String,
+		testBoolField:     schemapb.DataType_Bool,
+		testInt32Field:    schemapb.DataType_Int32,
+		testInt64Field:    schemapb.DataType_Int64,
+		testFloatField:    schemapb.DataType_Float,
+		testDoubleField:   schemapb.DataType_Double,
 		testFloatVecField: schemapb.DataType_FloatVector}
 	if enableMultipleVectorFields {
 		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
@@ -1782,19 +1788,228 @@ func TestTask_all(t *testing.T) {
 					PartitionName:  partitionName,
 				},
 			},
-			req: &milvuspb.DeleteRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Delete,
-					MsgID:     0,
-					Timestamp: 0,
-					SourceID:  Params.ProxyCfg.ProxyID,
+			deleteExpr: "int64 in [0, 1]",
+			ctx:        ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
 				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			chMgr:    chMgr,
+			chTicker: ticker,
+		}
+
+		assert.NoError(t, task.OnEnqueue())
+		assert.NotNil(t, task.TraceCtx())
+
+		id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
+		task.SetID(id)
+		assert.Equal(t, id, task.ID())
+
+		task.Base.MsgType = commonpb.MsgType_Delete
+		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
+
+		ts := Timestamp(time.Now().UnixNano())
+		task.SetTs(ts)
+		assert.Equal(t, ts, task.BeginTs())
+		assert.Equal(t, ts, task.EndTs())
+
+		assert.NoError(t, task.PreExecute(ctx))
+		assert.NoError(t, task.Execute(ctx))
+		assert.NoError(t, task.PostExecute(ctx))
+	})
+}
+
+func TestTask_VarCharPrimaryKey(t *testing.T) {
+	var err error
+
+	Params.Init()
+	Params.ProxyCfg.RetrieveResultChannelNames = []string{funcutil.GenRandomStr()}
+
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+
+	ctx := context.Background()
+
+	err = InitMetaCache(rc)
+	assert.NoError(t, err)
+
+	shardsNum := int32(2)
+	prefix := "TestTask_all"
+	dbName := ""
+	collectionName := prefix + funcutil.GenRandomStr()
+	partitionName := prefix + funcutil.GenRandomStr()
+
+	fieldName2Types := map[string]schemapb.DataType{
+		testBoolField:     schemapb.DataType_Bool,
+		testInt32Field:    schemapb.DataType_Int32,
+		testInt64Field:    schemapb.DataType_Int64,
+		testFloatField:    schemapb.DataType_Float,
+		testDoubleField:   schemapb.DataType_Double,
+		testVarCharField:  schemapb.DataType_VarChar,
+		testFloatVecField: schemapb.DataType_FloatVector}
+	if enableMultipleVectorFields {
+		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
+	}
+	nb := 10
+
+	t.Run("create collection", func(t *testing.T) {
+		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testVarCharField, false)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+
+		createColT := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base:           nil,
 				DbName:         dbName,
 				CollectionName: collectionName,
-				PartitionName:  partitionName,
-				Expr:           "int64 in [0, 1]",
+				Schema:         marshaledSchema,
+				ShardsNum:      shardsNum,
 			},
-			ctx: ctx,
+			ctx:       ctx,
+			rootCoord: rc,
+			result:    nil,
+			schema:    nil,
+		}
+
+		assert.NoError(t, createColT.OnEnqueue())
+		assert.NoError(t, createColT.PreExecute(ctx))
+		assert.NoError(t, createColT.Execute(ctx))
+		assert.NoError(t, createColT.PostExecute(ctx))
+
+		_, _ = rc.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreatePartition,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  Params.ProxyCfg.ProxyID,
+			},
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+		})
+	})
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	assert.NoError(t, err)
+
+	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
+	query := newMockGetChannelsService()
+	factory := newSimpleMockMsgStreamFactory()
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, query.GetChannels, nil, factory)
+	defer chMgr.removeAllDMLStream()
+	defer chMgr.removeAllDQLStream()
+
+	err = chMgr.createDMLMsgStream(collectionID)
+	assert.NoError(t, err)
+	pchans, err := chMgr.getChannels(collectionID)
+	assert.NoError(t, err)
+
+	interval := time.Millisecond * 10
+	tso := newMockTsoAllocator()
+
+	ticker := newChannelsTimeTicker(ctx, interval, []string{}, newGetStatisticsFunc(pchans), tso)
+	_ = ticker.start()
+	defer ticker.close()
+
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, Params.ProxyCfg.ProxyID)
+	assert.NoError(t, err)
+	_ = idAllocator.Start()
+	defer idAllocator.Close()
+
+	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
+	assert.NoError(t, err)
+	segAllocator.Init()
+	_ = segAllocator.Start()
+	defer segAllocator.Close()
+
+	t.Run("insert", func(t *testing.T) {
+		hash := generateHashKeys(nb)
+		task := &insertTask{
+			BaseInsertTask: BaseInsertTask{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: hash,
+				},
+				InsertRequest: internalpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:  commonpb.MsgType_Insert,
+						MsgID:    0,
+						SourceID: Params.ProxyCfg.ProxyID,
+					},
+					DbName:         dbName,
+					CollectionName: collectionName,
+					PartitionName:  partitionName,
+					NumRows:        uint64(nb),
+					Version:        internalpb.InsertDataVersion_ColumnBased,
+				},
+			},
+
+			Condition: NewTaskCondition(ctx),
+			ctx:       ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			rowIDAllocator: idAllocator,
+			segIDAssigner:  segAllocator,
+			chMgr:          chMgr,
+			chTicker:       ticker,
+			vChannels:      nil,
+			pChannels:      nil,
+			schema:         nil,
+		}
+
+		fieldID := common.StartOfUserFieldID
+		for fieldName, dataType := range fieldName2Types {
+			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), nb))
+			fieldID++
+		}
+
+		assert.NoError(t, task.OnEnqueue())
+		assert.NoError(t, task.PreExecute(ctx))
+		assert.NoError(t, task.Execute(ctx))
+		assert.NoError(t, task.PostExecute(ctx))
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		task := &deleteTask{
+			Condition: NewTaskCondition(ctx),
+			BaseDeleteTask: msgstream.DeleteMsg{
+				BaseMsg: msgstream.BaseMsg{},
+				DeleteRequest: internalpb.DeleteRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Delete,
+						MsgID:     0,
+						Timestamp: 0,
+						SourceID:  Params.ProxyCfg.ProxyID,
+					},
+					CollectionName: collectionName,
+					PartitionName:  partitionName,
+				},
+			},
+			deleteExpr: "varChar in [\"milvus\", \"test\"]",
+			ctx:        ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,

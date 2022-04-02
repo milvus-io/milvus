@@ -248,6 +248,16 @@ func IsBoolType(dataType schemapb.DataType) bool {
 	}
 }
 
+// IsStringType returns true if input is a varChar type, otherwise false
+func IsStringType(dataType schemapb.DataType) bool {
+	switch dataType {
+	case schemapb.DataType_VarChar:
+		return true
+	default:
+		return false
+	}
+}
+
 // AppendFieldData appends fields data of specified index from src to dst
 func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx int64) {
 	for i, fieldData := range src {
@@ -383,4 +393,78 @@ func GetPrimaryFieldSchema(schema *schemapb.CollectionSchema) (*schemapb.FieldSc
 	}
 
 	return nil, errors.New("primary field is not found")
+}
+
+// GetPrimaryFieldData get primary field data from all field data inserted from sdk
+func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
+	primaryFieldName := primaryFieldSchema.Name
+
+	var primaryFieldData *schemapb.FieldData
+	for _, field := range datas {
+		if field.FieldName == primaryFieldName {
+			if primaryFieldSchema.AutoID {
+				return nil, fmt.Errorf("autoID field %v does not require data", primaryFieldName)
+			}
+			primaryFieldData = field
+		}
+	}
+
+	if primaryFieldData == nil {
+		return nil, fmt.Errorf("can't find data for primary field %v", primaryFieldName)
+	}
+
+	return primaryFieldData, nil
+}
+
+func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
+	switch src.IdField.(type) {
+	case *schemapb.IDs_IntId:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: []int64{src.GetIntId().Data[idx]},
+				},
+			}
+		} else {
+			dst.GetIntId().Data = append(dst.GetIntId().Data, src.GetIntId().Data[idx])
+		}
+	case *schemapb.IDs_StrId:
+		if dst.GetIdField() == nil {
+			dst.IdField = &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: []string{src.GetStrId().Data[idx]},
+				},
+			}
+		} else {
+			dst.GetStrId().Data = append(dst.GetStrId().Data, src.GetStrId().Data[idx])
+		}
+	default:
+		//TODO
+	}
+}
+
+func GetSizeOfIDs(data *schemapb.IDs) int {
+	result := 0
+	if data.IdField == nil {
+		return result
+	}
+
+	switch data.GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		result = len(data.GetIntId().GetData())
+	case *schemapb.IDs_StrId:
+		result = len(data.GetStrId().GetData())
+	default:
+		//TODO::
+	}
+
+	return result
+}
+
+func IsPrimaryFieldType(dataType schemapb.DataType) bool {
+	if dataType == schemapb.DataType_Int64 || dataType == schemapb.DataType_VarChar {
+		return true
+	}
+
+	return false
 }

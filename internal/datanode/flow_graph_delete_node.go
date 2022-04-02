@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -121,27 +122,12 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		)
 	}
 
-	segIDToPkMap := make(map[UniqueID][]int64)
-	segIDToTsMap := make(map[UniqueID][]uint64)
+	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
+	segIDToPks, segIDToTss := dn.filterSegmentByPK(msg.PartitionID, primaryKeys, msg.Timestamps)
 
-	m := dn.filterSegmentByPK(msg.PartitionID, msg.PrimaryKeys)
-	for i, pk := range msg.PrimaryKeys {
-		segIDs, ok := m[pk]
-		if !ok {
-			log.Warn("primary key not exist in all segments",
-				zap.Int64("primary key", pk),
-				zap.String("vChannelName", dn.channelName))
-			continue
-		}
-		for _, segID := range segIDs {
-			segIDToPkMap[segID] = append(segIDToPkMap[segID], pk)
-			segIDToTsMap[segID] = append(segIDToTsMap[segID], msg.Timestamps[i])
-		}
-	}
-
-	for segID, pks := range segIDToPkMap {
+	for segID, pks := range segIDToPks {
 		rows := len(pks)
-		tss, ok := segIDToTsMap[segID]
+		tss, ok := segIDToTss[segID]
 		if !ok || rows != len(tss) {
 			// TODO: what's the expected behavior after this Error?
 			log.Error("primary keys and timestamp's element num mis-match")
@@ -161,7 +147,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 			delData.Pks = append(delData.Pks, pks[i])
 			delData.Tss = append(delData.Tss, tss[i])
 			log.Debug("delete",
-				zap.Int64("primary key", pks[i]),
+				zap.Any("primary key", pks[i]),
 				zap.Uint64("ts", tss[i]),
 				zap.Int64("segmentID", segID),
 				zap.String("vChannelName", dn.channelName))
@@ -191,7 +177,7 @@ func (dn *deleteNode) showDelBuf() {
 			length := len(delDataBuf.delData.Pks)
 			for i := 0; i < length; i++ {
 				log.Debug("del data",
-					zap.Int64("pk", delDataBuf.delData.Pks[i]),
+					zap.Any("pk", delDataBuf.delData.Pks[i]),
 					zap.Uint64("ts", delDataBuf.delData.Tss[i]),
 					zap.Int64("segmentID", segID),
 					zap.String("vchannel", dn.channelName),
@@ -279,20 +265,34 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 // filterSegmentByPK returns the bloom filter check result.
 // If the key may exists in the segment, returns it in map.
 // If the key not exists in the segment, the segment is filter out.
-func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []int64) map[int64][]int64 {
-	result := make(map[int64][]int64)
+func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss []Timestamp) (map[UniqueID][]primaryKey, map[UniqueID][]uint64) {
+	segID2Pks := make(map[UniqueID][]primaryKey)
+	segID2Tss := make(map[UniqueID][]uint64)
 	buf := make([]byte, 8)
 	segments := dn.replica.filterSegments(dn.channelName, partID)
-	for _, pk := range pks {
+	for index, pk := range pks {
 		for _, segment := range segments {
-			common.Endian.PutUint64(buf, uint64(pk))
-			exist := segment.pkFilter.Test(buf)
+			segmentID := segment.segmentID
+			exist := false
+			switch pk.Type() {
+			case schemapb.DataType_Int64:
+				int64Pk := pk.(*int64PrimaryKey)
+				common.Endian.PutUint64(buf, uint64(int64Pk.Value))
+				exist = segment.pkFilter.Test(buf)
+			case schemapb.DataType_VarChar:
+				varCharPk := pk.(*varCharPrimaryKey)
+				exist = segment.pkFilter.TestString(varCharPk.Value)
+			default:
+				//TODO::
+			}
 			if exist {
-				result[pk] = append(result[pk], segment.segmentID)
+				segID2Pks[segmentID] = append(segID2Pks[segmentID], pk)
+				segID2Tss[segmentID] = append(segID2Tss[segmentID], tss[index])
 			}
 		}
 	}
-	return result
+
+	return segID2Pks, segID2Tss
 }
 
 func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {

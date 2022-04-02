@@ -26,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -152,7 +154,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	defer cancel()
 
 	t.Run("delete valid test", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -161,7 +163,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		msg.CollectionID = UniqueID(1003)
 		fg, err := getFilterDMNode(ctx)
@@ -171,7 +173,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no partition", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		msg.PartitionID = UniqueID(1000)
 		fg, err := getFilterDMNode(ctx)
@@ -186,7 +188,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete not target collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -196,7 +198,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete misaligned messages", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -206,13 +208,17 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no data", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg()
+		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		msg.Timestamps = make([]Timestamp, 0)
-		msg.PrimaryKeys = make([]IntPrimaryKey, 0)
+		msg.NumRows = 0
+		msg.Int64PrimaryKeys = make([]IntPrimaryKey, 0)
 		res := fg.filterInvalidDeleteMessage(msg)
+		assert.Nil(t, res)
+		msg.PrimaryKeys = storage.ParsePrimaryKeys2IDs([]primaryKey{})
+		res = fg.filterInvalidDeleteMessage(msg)
 		assert.Nil(t, res)
 	})
 }

@@ -654,6 +654,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		require.NoError(t, err)
 
 		msFactory := msgstream.NewPmsFactory()
+
 		err = msFactory.Init(&Params)
 		assert.Nil(t, err)
 

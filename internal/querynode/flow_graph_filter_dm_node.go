@@ -104,6 +104,12 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 // filterInvalidDeleteMessage would filter out invalid delete messages
 func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) *msgstream.DeleteMsg {
+	if err := msg.CheckAligned(); err != nil {
+		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
+		log.Warn("misaligned delete messages detected", zap.Error(err))
+		return nil
+	}
+
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
 	defer sp.Finish()
@@ -129,11 +135,6 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 		}
 	}
 
-	if len(msg.PrimaryKeys) != len(msg.Timestamps) {
-		log.Warn("Error, misaligned messages detected")
-		return nil
-	}
-
 	if len(msg.Timestamps) <= 0 {
 		log.Debug("filter invalid delete message, no message",
 			zap.Any("collectionID", msg.CollectionID),
@@ -147,7 +148,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
 	if err := msg.CheckAligned(); err != nil {
 		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
-		log.Warn("Error, misaligned messages detected")
+		log.Warn("Error, misaligned insert messages detected")
 		return nil
 	}
 

@@ -282,10 +282,11 @@ func TestDeleteMsg(t *testing.T) {
 				SourceID:  3,
 			},
 
-			CollectionName: "test_collection",
-			ShardName:      "test-channel",
-			Timestamps:     []uint64{2, 1, 3},
-			PrimaryKeys:    []int64{1, 2, 3},
+			CollectionName:   "test_collection",
+			ShardName:        "test-channel",
+			Timestamps:       []uint64{2, 1, 3},
+			Int64PrimaryKeys: []int64{1, 2, 3},
+			NumRows:          3,
 		},
 	}
 

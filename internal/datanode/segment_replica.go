@@ -41,9 +41,12 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
-type PrimaryKey = storage.PrimaryKey
-type Int64PrimaryKey = storage.Int64PrimaryKey
-type StringPrimaryKey = storage.StringPrimaryKey
+type primaryKey = storage.PrimaryKey
+type int64PrimaryKey = storage.Int64PrimaryKey
+type varCharPrimaryKey = storage.VarCharPrimaryKey
+
+var newInt64PrimaryKey = storage.NewInt64PrimaryKey
+var newVarCharPrimaryKey = storage.NewVarCharPrimaryKey
 
 // Replica is DataNode unique replication
 type Replica interface {
@@ -90,8 +93,8 @@ type Segment struct {
 
 	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 	// TODO silverxia, needs to change to interface to support `string` type PK
-	minPK PrimaryKey //	minimal pk value, shortcut for checking whether a pk is inside this segment
-	maxPK PrimaryKey //  maximal pk value, same above
+	minPK primaryKey //	minimal pk value, shortcut for checking whether a pk is inside this segment
+	maxPK primaryKey //  maximal pk value, same above
 }
 
 // SegmentReplica is the data replication of persistent data in datanode.
@@ -110,7 +113,7 @@ type SegmentReplica struct {
 	chunkManager storage.ChunkManager
 }
 
-func (s *Segment) updatePk(pk PrimaryKey) error {
+func (s *Segment) updatePk(pk primaryKey) error {
 	if s.minPK == nil {
 		s.minPK = pk
 	} else if s.minPK.GT(pk) {
@@ -131,9 +134,7 @@ func (s *Segment) updatePKRange(ids storage.FieldData) error {
 	case *storage.Int64FieldData:
 		buf := make([]byte, 8)
 		for _, pk := range pks.Data {
-			id := &Int64PrimaryKey{
-				Value: pk,
-			}
+			id := newInt64PrimaryKey(pk)
 			err := s.updatePk(id)
 			if err != nil {
 				return err
@@ -143,14 +144,12 @@ func (s *Segment) updatePKRange(ids storage.FieldData) error {
 		}
 	case *storage.StringFieldData:
 		for _, pk := range pks.Data {
-			id := &StringPrimaryKey{
-				Value: pk,
-			}
+			id := newVarCharPrimaryKey(pk)
 			err := s.updatePk(id)
 			if err != nil {
 				return err
 			}
-			s.pkFilter.Add([]byte(pk))
+			s.pkFilter.AddString(pk)
 		}
 	default:
 		//TODO::

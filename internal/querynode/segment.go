@@ -560,11 +560,20 @@ func (s *Segment) fillIndexedFieldsData(collectionID UniqueID,
 	return nil
 }
 
-func (s *Segment) updateBloomFilter(pks []int64) {
+func (s *Segment) updateBloomFilter(pks []primaryKey) {
 	buf := make([]byte, 8)
 	for _, pk := range pks {
-		common.Endian.PutUint64(buf, uint64(pk))
-		s.pkFilter.Add(buf)
+		switch pk.Type() {
+		case schemapb.DataType_Int64:
+			int64Value := pk.(*int64PrimaryKey).Value
+			common.Endian.PutUint64(buf, uint64(int64Value))
+			s.pkFilter.Add(buf)
+		case schemapb.DataType_VarChar:
+			stringValue := pk.(*varCharPrimaryKey).Value
+			s.pkFilter.AddString(stringValue)
+		default:
+			//TODO::
+		}
 	}
 }
 
@@ -661,7 +670,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs *[]UniqueID, timestamps 
 	return nil
 }
 
-func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps *[]Timestamp) error {
+func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps []Timestamp) error {
 	/*
 		CStatus
 		Delete(CSegmentInterface c_segment,
@@ -670,24 +679,40 @@ func (s *Segment) segmentDelete(offset int64, entityIDs *[]UniqueID, timestamps 
 		           const long* primary_keys,
 		           const unsigned long* timestamps);
 	*/
+	if len(entityIDs) <= 0 {
+		return fmt.Errorf("empty pks to delete")
+	}
+
 	s.segPtrMu.RLock()
 	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
 
-	if len(*entityIDs) != len(*timestamps) {
+	if len(entityIDs) != len(timestamps) {
 		return errors.New("length of entityIDs not equal to length of timestamps")
 	}
 
 	var cOffset = C.int64_t(offset)
-	var cSize = C.int64_t(len(*entityIDs))
-	var cEntityIdsPtr = (*C.int64_t)(&(*entityIDs)[0])
-	var cTimestampsPtr = (*C.uint64_t)(&(*timestamps)[0])
+	var cSize = C.int64_t(len(entityIDs))
+	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 
-	status := C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
-	if err := HandleCStatus(&status, "Delete failed"); err != nil {
-		return err
+	pkType := entityIDs[0].Type()
+	switch pkType {
+	case schemapb.DataType_Int64:
+		int64Pks := make([]int64, len(entityIDs))
+		for index, entity := range entityIDs {
+			int64Pks[index] = entity.(*int64PrimaryKey).Value
+		}
+		var cEntityIdsPtr = (*C.int64_t)(&int64Pks[0])
+		status := C.Delete(s.segmentPtr, cOffset, cSize, cEntityIdsPtr, cTimestampsPtr)
+		if err := HandleCStatus(&status, "Delete failed"); err != nil {
+			return err
+		}
+	case schemapb.DataType_VarChar:
+		//TODO::
+	default:
+		return fmt.Errorf("invalid data type of primary keys")
 	}
 
 	return nil
@@ -786,7 +811,7 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int, data interfa
 	return nil
 }
 
-func (s *Segment) segmentLoadDeletedRecord(primaryKeys []IntPrimaryKey, timestamps []Timestamp, rowCount int64) error {
+func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps []Timestamp, rowCount int64) error {
 	s.segPtrMu.RLock()
 	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentPtr == nil {
@@ -796,18 +821,34 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []IntPrimaryKey, timestam
 		errMsg := fmt.Sprintln("segmentLoadFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
 		return errors.New(errMsg)
 	}
-	loadInfo := C.CLoadDeletedRecordInfo{
-		timestamps:   unsafe.Pointer(&timestamps[0]),
-		primary_keys: unsafe.Pointer(&primaryKeys[0]),
-		row_count:    C.int64_t(rowCount),
+
+	if len(primaryKeys) <= 0 {
+		return fmt.Errorf("empty pks to delete")
 	}
-	/*
-		CStatus
-		LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
-	*/
-	status := C.LoadDeletedRecord(s.segmentPtr, loadInfo)
-	if err := HandleCStatus(&status, "LoadDeletedRecord failed"); err != nil {
-		return err
+	pkType := primaryKeys[0].Type()
+	switch pkType {
+	case schemapb.DataType_Int64:
+		int64Pks := make([]int64, len(primaryKeys))
+		for index, pk := range primaryKeys {
+			int64Pks[index] = pk.(*int64PrimaryKey).Value
+		}
+		loadInfo := C.CLoadDeletedRecordInfo{
+			timestamps:   unsafe.Pointer(&timestamps[0]),
+			primary_keys: unsafe.Pointer(&int64Pks[0]),
+			row_count:    C.int64_t(rowCount),
+		}
+		/*
+			CStatus
+			LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info)
+		*/
+		status := C.LoadDeletedRecord(s.segmentPtr, loadInfo)
+		if err := HandleCStatus(&status, "LoadDeletedRecord failed"); err != nil {
+			return err
+		}
+	case schemapb.DataType_VarChar:
+		//TODO::
+	default:
+		return fmt.Errorf("invalid data type of primary keys")
 	}
 
 	log.Debug("load deleted record done",

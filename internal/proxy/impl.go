@@ -2297,17 +2297,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	method := "Delete"
 	tr := timerecord.NewTimeRecorder(method)
 
-	deleteReq := &milvuspb.DeleteRequest{
-		DbName:         request.DbName,
-		CollectionName: request.CollectionName,
-		PartitionName:  request.PartitionName,
-		Expr:           request.Expr,
-	}
-
 	dt := &deleteTask{
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       deleteReq,
+		ctx:        ctx,
+		Condition:  NewTaskCondition(ctx),
+		deleteExpr: request.Expr,
 		BaseDeleteTask: BaseDeleteTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
@@ -2317,6 +2310,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 					MsgType: commonpb.MsgType_Delete,
 					MsgID:   0,
 				},
+				DbName:         request.DbName,
 				CollectionName: request.CollectionName,
 				PartitionName:  request.PartitionName,
 				// RowData: transfer column based request to this

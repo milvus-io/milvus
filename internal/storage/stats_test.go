@@ -62,7 +62,7 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestStatsWriter_StringPrimaryKey(t *testing.T) {
+func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 	data := &StringFieldData{
 		Data: []string{"bc", "ac", "abd", "cd", "milvus"},
 	}
@@ -75,12 +75,8 @@ func TestStatsWriter_StringPrimaryKey(t *testing.T) {
 	sr.SetBuffer(b)
 	stats, err := sr.GetPrimaryKeyStats()
 	assert.Nil(t, err)
-	maxPk := &StringPrimaryKey{
-		Value: "milvus",
-	}
-	minPk := &StringPrimaryKey{
-		Value: "abd",
-	}
+	maxPk := NewVarCharPrimaryKey("milvus")
+	minPk := NewVarCharPrimaryKey("abd")
 	assert.Equal(t, true, stats.MaxPk.EQ(maxPk))
 	assert.Equal(t, true, stats.MinPk.EQ(minPk))
 	for _, id := range data.Data {

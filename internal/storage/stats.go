@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 
 	"github.com/bits-and-blooms/bloom/v3"
-
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -92,8 +91,8 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	case schemapb.DataType_VarChar:
-		stats.MaxPk = &StringPrimaryKey{}
-		stats.MinPk = &StringPrimaryKey{}
+		stats.MaxPk = &VarCharPrimaryKey{}
+		stats.MinPk = &VarCharPrimaryKey{}
 	}
 
 	if maxPkMessage, ok := messageMap["maxPk"]; ok && maxPkMessage != nil {
@@ -154,9 +153,9 @@ func (sw *StatsWriter) generatePrimaryKeyStats(fieldID int64, pkType schemapb.Da
 	}
 
 	stats.BF = bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive)
-	switch fieldData := msgs.(type) {
-	case *Int64FieldData:
-		data := fieldData.Data
+	switch pkType {
+	case schemapb.DataType_Int64:
+		data := msgs.(*Int64FieldData).Data
 		if len(data) < 1 {
 			// return error: msgs must has one element at least
 			return nil
@@ -164,26 +163,22 @@ func (sw *StatsWriter) generatePrimaryKeyStats(fieldID int64, pkType schemapb.Da
 
 		b := make([]byte, 8)
 		for _, int64Value := range data {
-			pk := &Int64PrimaryKey{
-				Value: int64Value,
-			}
+			pk := NewInt64PrimaryKey(int64Value)
 			stats.updatePk(pk)
 			common.Endian.PutUint64(b, uint64(int64Value))
 			stats.BF.Add(b)
 		}
-	case *StringFieldData:
-		data := fieldData.Data
+	case schemapb.DataType_VarChar:
+		data := msgs.(*StringFieldData).Data
 		if len(data) < 1 {
 			// return error: msgs must has one element at least
 			return nil
 		}
 
 		for _, str := range data {
-			pk := &StringPrimaryKey{
-				Value: str,
-			}
+			pk := NewVarCharPrimaryKey(str)
 			stats.updatePk(pk)
-			stats.BF.Add([]byte(str))
+			stats.BF.AddString(str)
 		}
 	default:
 		//TODO::

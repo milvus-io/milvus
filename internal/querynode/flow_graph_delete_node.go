@@ -23,9 +23,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
+
+type primaryKey = storage.PrimaryKey
+type int64PrimaryKey = storage.Int64PrimaryKey
+type varCharPrimaryKey = storage.VarCharPrimaryKey
+
+var newInt64PrimaryKey = storage.NewInt64PrimaryKey
+var newVarCharPrimaryKey = storage.NewVarCharPrimaryKey
 
 // deleteNode is the one of nodes in delta flow graph
 type deleteNode struct {
@@ -52,7 +60,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	delData := &deleteData{
-		deleteIDs:        map[UniqueID][]int64{},
+		deleteIDs:        map[UniqueID][]primaryKey{},
 		deleteTimestamps: map[UniqueID][]Timestamp{},
 		deleteOffset:     map[UniqueID]int64{},
 	}
@@ -77,7 +85,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("delete in historical replica",
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
-				zap.Int("numPKs", len(delMsg.PrimaryKeys)),
+				zap.Int64("numPKs", delMsg.NumRows),
 				zap.Any("timestamp", delMsg.Timestamps),
 				zap.Any("timestampBegin", delMsg.BeginTs()),
 				zap.Any("timestampEnd", delMsg.EndTs()),
@@ -133,7 +141,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
-	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
+	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
 		log.Warn("delete segment data failed", zap.Int64("segmentID", segmentID), zap.Error(err))
 		return

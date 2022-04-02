@@ -219,8 +219,10 @@ message DeleteRequest {
   int64 dbID = 6;
   int64 collectionID = 7;
   int64 partitionID = 8;
-  repeated int64 primary_keys = 9;
+  repeated int64 int64_primary_keys = 9; // deprecated
   repeated uint64 timestamps = 10;
+  int64 num_rows = 11;
+  schema.IDs primary_keys = 12;
 }
 
 message LoadIndex {

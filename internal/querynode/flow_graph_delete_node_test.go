@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -113,7 +114,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		dMsg := deleteMsg{
 			deleteMessages: []*msgstream.DeleteMsg{
@@ -123,9 +124,9 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		msg := []flowgraph.Msg{&dMsg}
 		deleteNode.Operate(msg)
 		s, err := historical.getSegmentByID(defaultSegmentID)
-		pks := make([]int64, defaultMsgLength)
+		pks := make([]primaryKey, defaultMsgLength)
 		for i := 0; i < defaultMsgLength; i++ {
-			pks[i] = int64(i)
+			pks[i] = newInt64PrimaryKey(int64(i))
 		}
 		s.updateBloomFilter(pks)
 		assert.Nil(t, err)
@@ -134,7 +135,6 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			common.Endian.PutUint64(buf, uint64(i))
 			assert.True(t, s.pkFilter.Test(buf))
 		}
-
 	})
 
 	t.Run("test invalid partitionID", func(t *testing.T) {
@@ -150,7 +150,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		msgDeleteMsg.PartitionID = common.InvalidPartitionID
 		assert.NoError(t, err)
@@ -176,7 +176,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		msgDeleteMsg.CollectionID = 9999
 		msgDeleteMsg.PartitionID = -1
 		assert.NoError(t, err)
@@ -202,7 +202,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		msgDeleteMsg.PartitionID = 9999
 		assert.NoError(t, err)
 		dMsg := deleteMsg{
@@ -227,7 +227,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		dMsg := deleteMsg{
 			deleteMessages: []*msgstream.DeleteMsg{

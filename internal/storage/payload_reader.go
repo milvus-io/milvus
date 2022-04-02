@@ -62,7 +62,7 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, int, error) {
 		return r.GetBinaryVectorFromPayload()
 	case schemapb.DataType_FloatVector:
 		return r.GetFloatVectorFromPayload()
-	case schemapb.DataType_String:
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		val, err := r.GetStringFromPayload()
 		return val, 0, err
 	default:

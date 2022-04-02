@@ -25,8 +25,6 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -35,8 +33,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // insertNode is one of the nodes in query flow graph
@@ -47,16 +47,16 @@ type insertNode struct {
 
 // insertData stores the valid insert data
 type insertData struct {
-	insertIDs        map[UniqueID][]int64
+	insertIDs        map[UniqueID][]int64 // rowIDs
 	insertTimestamps map[UniqueID][]Timestamp
 	insertRecords    map[UniqueID][]*commonpb.Blob
 	insertOffset     map[UniqueID]int64
-	insertPKs        map[UniqueID][]int64
+	insertPKs        map[UniqueID][]primaryKey // pks
 }
 
 // deleteData stores the valid delete data
 type deleteData struct {
-	deleteIDs        map[UniqueID][]int64
+	deleteIDs        map[UniqueID][]primaryKey // pks
 	deleteTimestamps map[UniqueID][]Timestamp
 	deleteOffset     map[UniqueID]int64
 }
@@ -86,7 +86,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		insertTimestamps: make(map[UniqueID][]Timestamp),
 		insertRecords:    make(map[UniqueID][]*commonpb.Blob),
 		insertOffset:     make(map[UniqueID]int64),
-		insertPKs:        make(map[UniqueID][]int64),
+		insertPKs:        make(map[UniqueID][]primaryKey),
 	}
 
 	if iMsg == nil {
@@ -176,7 +176,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	wg.Wait()
 
 	delData := &deleteData{
-		deleteIDs:        make(map[UniqueID][]int64),
+		deleteIDs:        make(map[UniqueID][]primaryKey),
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 		deleteOffset:     make(map[UniqueID]int64),
 	}
@@ -186,7 +186,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("delete in streaming replica",
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
-				zap.Int("numPKs", len(delMsg.PrimaryKeys)),
+				zap.Int64("numPKs", delMsg.NumRows),
 				zap.Any("timestamp", delMsg.Timestamps))
 			processDeleteMessages(iNode.streamingReplica, delMsg, delData)
 		}
@@ -242,44 +242,58 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 		}
 		resultSegmentIDs = append(resultSegmentIDs, segmentIDs...)
 	}
+
+	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
 	for _, segmentID := range resultSegmentIDs {
 		segment, err := replica.getSegmentByID(segmentID)
 		if err != nil {
 			log.Warn(err.Error())
 			continue
 		}
-		pks, err := filterSegmentsByPKs(msg.PrimaryKeys, segment)
+		pks, tss, err := filterSegmentsByPKs(primaryKeys, msg.Timestamps, segment)
 		if err != nil {
 			log.Warn(err.Error())
 			continue
 		}
 		if len(pks) > 0 {
 			delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], pks...)
-			// TODO(yukun) get offset of pks
-			delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], msg.Timestamps[:len(pks)]...)
+			delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], tss...)
 		}
 	}
 }
 
 // filterSegmentsByPKs would filter segments by primary keys
-func filterSegmentsByPKs(pks []int64, segment *Segment) ([]int64, error) {
+func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segment) ([]primaryKey, []Timestamp, error) {
 	if pks == nil {
-		return nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
+		return nil, nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
 	}
 	if segment == nil {
-		return nil, fmt.Errorf("segments is nil when getSegmentsByPKs")
+		return nil, nil, fmt.Errorf("segments is nil when getSegmentsByPKs")
 	}
+
+	retPks := make([]primaryKey, 0)
+	retTss := make([]Timestamp, 0)
 	buf := make([]byte, 8)
-	res := make([]int64, 0)
-	for _, pk := range pks {
-		common.Endian.PutUint64(buf, uint64(pk))
-		exist := segment.pkFilter.Test(buf)
+	for index, pk := range pks {
+		exist := false
+		switch pk.Type() {
+		case schemapb.DataType_Int64:
+			int64Pk := pk.(*int64PrimaryKey)
+			common.Endian.PutUint64(buf, uint64(int64Pk.Value))
+			exist = segment.pkFilter.Test(buf)
+		case schemapb.DataType_VarChar:
+			varCharPk := pk.(*varCharPrimaryKey)
+			exist = segment.pkFilter.TestString(varCharPk.Value)
+		default:
+			return nil, nil, fmt.Errorf("invalid data type of delete primary keys")
+		}
 		if exist {
-			res = append(res, pk)
+			retPks = append(retPks, pk)
+			retTss = append(retTss, timestamps[index])
 		}
 	}
-	log.Debug("In filterSegmentsByPKs", zap.Any("pk len", len(res)), zap.Any("segment", segment.segmentID))
-	return res, nil
+	log.Debug("In filterSegmentsByPKs", zap.Any("pk len", len(retPks)), zap.Any("segment", segment.segmentID))
+	return retPks, retTss, nil
 }
 
 // insert would execute insert operations for specific growing segment
@@ -333,7 +347,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
-	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
+	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
 		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
 		return
@@ -344,7 +358,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 
 // TODO: remove this function to proper file
 // getPrimaryKeys would get primary keys by insert messages
-func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) ([]int64, error) {
+func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) ([]primaryKey, error) {
 	if err := msg.CheckAligned(); err != nil {
 		log.Warn("misaligned messages detected")
 		return nil, errors.New("misaligned messages detected")
@@ -360,14 +374,14 @@ func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface)
 	return getPKs(msg, collection.schema)
 }
 
-func getPKs(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]int64, error) {
+func getPKs(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]primaryKey, error) {
 	if msg.IsRowBased() {
 		return getPKsFromRowBasedInsertMsg(msg, schema)
 	}
 	return getPKsFromColumnBasedInsertMsg(msg, schema)
 }
 
-func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]int64, error) {
+func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]primaryKey, error) {
 	offset := 0
 	for _, field := range schema.Fields {
 		if field.IsPrimaryKey {
@@ -419,36 +433,38 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 	for i, blob := range msg.RowData {
 		blobReaders[i] = bytes.NewReader(blob.GetValue()[offset : offset+8])
 	}
-	pks := make([]int64, len(blobReaders))
+	pks := make([]primaryKey, len(blobReaders))
 
 	for i, reader := range blobReaders {
-		err := binary.Read(reader, common.Endian, &pks[i])
+		var int64PkValue int64
+		err := binary.Read(reader, common.Endian, &int64PkValue)
 		if err != nil {
 			log.Warn("binary read blob value failed", zap.Error(err))
 			return nil, err
 		}
+		pks[i] = newInt64PrimaryKey(int64PkValue)
 	}
 
 	return pks, nil
 }
 
-func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]int64, error) {
-	loc := -1
-	for idx, field := range schema.Fields {
-		if field.IsPrimaryKey {
-			loc = idx
-			break
-		}
-	}
-	if loc == -1 {
-		return nil, errors.New("no primary field found")
+func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.CollectionSchema) ([]primaryKey, error) {
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(msg.GetFieldsData()) <= loc {
-		return nil, errors.New("insert msg mismatch the schema")
+	primaryFieldData, err := typeutil.GetPrimaryFieldData(msg.GetFieldsData(), primaryFieldSchema)
+	if err != nil {
+		return nil, err
 	}
 
-	return msg.GetFieldsData()[loc].GetScalars().GetLongData().GetData(), nil
+	pks, err := storage.ParseFieldData2PrimaryKeys(primaryFieldData)
+	if err != nil {
+		return nil, err
+	}
+
+	return pks, nil
 }
 
 // newInsertNode returns a new insertNode
