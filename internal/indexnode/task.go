@@ -238,7 +238,7 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Error(it.internalErr))
 			indexMeta.State = commonpb.IndexState_Unissued
 		} else { // TaskStateNormal
-			log.Info("IndexNode IndexBuildTask saveIndexmeta indexMeta.state to IndexState_Unissued",
+			log.Info("IndexNode IndexBuildTask saveIndexMeta indexMeta.state to IndexState_Finished",
 				zap.String("TaskState", taskState.String()),
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID))
 			indexMeta.State = commonpb.IndexState_Finished
