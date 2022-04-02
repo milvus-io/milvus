@@ -84,7 +84,7 @@ Search_SmallIndex(benchmark::State& state) {
     Timestamp time = 10000000;
 
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), *ph_group, time);
+        auto qr = segment->Search(plan.get(), ph_group.get(), time);
     }
 }
 
@@ -116,7 +116,7 @@ Search_Sealed(benchmark::State& state) {
     }
     Timestamp time = 10000000;
     for (auto _ : state) {
-        auto qr = segment->Search(plan.get(), *ph_group, time);
+        auto qr = segment->Search(plan.get(), ph_group.get(), time);
     }
 }
 

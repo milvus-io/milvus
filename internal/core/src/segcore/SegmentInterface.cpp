@@ -81,7 +81,7 @@ SegmentInternalInterface::FillTargetEntry(const query::Plan* plan, SearchResult&
 
 std::unique_ptr<SearchResult>
 SegmentInternalInterface::Search(const query::Plan* plan,
-                                 const query::PlaceholderGroup& placeholder_group,
+                                 const query::PlaceholderGroup* placeholder_group,
                                  Timestamp timestamp) const {
     std::shared_lock lck(mutex_);
     check_search(plan);
