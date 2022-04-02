@@ -74,7 +74,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     auto segment = dynamic_cast<const segcore::SegmentInternalInterface*>(&segment_);
     AssertInfo(segment, "support SegmentSmallIndex Only");
     SearchResult search_result;
-    auto& ph = placeholder_group_.at(0);
+    auto& ph = placeholder_group_->at(0);
     auto src_data = ph.get_blob<EmbeddedType<VectorType>>();
     auto num_queries = ph.num_of_queries_;
 
