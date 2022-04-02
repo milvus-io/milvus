@@ -607,7 +607,6 @@ func TestRootCoordInit(t *testing.T) {
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.Nil(t, err)
-
 }
 
 func TestRootCoord_Base(t *testing.T) {
@@ -623,12 +622,11 @@ func TestRootCoord_Base(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	CheckCompleteIndexInterval = 100 * time.Millisecond
-	TaskTimeLimit = 200 * time.Millisecond
-
 	coreFactory := msgstream.NewPmsFactory()
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.ImportIndexCheckInterval = 0.1
+	Params.RootCoordCfg.ImportIndexWaitLimit = 0.2
 	core, err := NewCore(ctx, coreFactory)
 	assert.Nil(t, err)
 	randVal := rand.Int()
@@ -1339,6 +1337,7 @@ func TestRootCoord_Base(t *testing.T) {
 			TaskId:   1,
 			RowCount: 100,
 			Segments: []int64{1003, 1004, 1005},
+			State:    commonpb.ImportState_ImportCompleted,
 		}
 
 		for _, segmentID := range []int64{1003, 1004, 1005} {
@@ -1389,11 +1388,26 @@ func TestRootCoord_Base(t *testing.T) {
 			TaskId:   3,
 			RowCount: 100,
 			Segments: []int64{1003, 1004, 1005},
+			State:    commonpb.ImportState_ImportCompleted,
 		}
-		// Case where report import request is nil.
 		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), reqIR)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_CollectionNameNotFound, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("report import with transitional state", func(t *testing.T) {
+		defer wg.Done()
+		req := &rootcoordpb.ImportResult{
+			TaskId:   0,
+			RowCount: 100,
+			Segments: []int64{1000, 1001, 1002},
+			State:    commonpb.ImportState_ImportDownloaded,
+		}
+		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		time.Sleep(500 * time.Millisecond)
 	})
 
 	wg.Add(1)
@@ -1403,11 +1417,35 @@ func TestRootCoord_Base(t *testing.T) {
 			TaskId:   0,
 			RowCount: 100,
 			Segments: []int64{1000, 1001, 1002},
+			State:    commonpb.ImportState_ImportCompleted,
 		}
 		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		time.Sleep(500 * time.Millisecond)
+	})
+
+	wg.Add(1)
+	t.Run("report import segments update already failed task", func(t *testing.T) {
+		defer wg.Done()
+		// Mark task 0 as failed.
+		core.importManager.updateTaskState(
+			&rootcoordpb.ImportResult{
+				TaskId:   0,
+				RowCount: 100,
+				State:    commonpb.ImportState_ImportFailed,
+				Segments: []int64{1000, 1001, 1002},
+			})
+		// Now try to update this task with a complete status.
+		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""),
+			&rootcoordpb.ImportResult{
+				TaskId:   0,
+				RowCount: 100,
+				State:    commonpb.ImportState_ImportCompleted,
+				Segments: []int64{1000, 1001, 1002},
+			})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UpdateImportTaskFailure, resp.ErrorCode)
 	})
 
 	wg.Add(1)

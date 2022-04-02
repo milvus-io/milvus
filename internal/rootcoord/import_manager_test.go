@@ -18,7 +18,9 @@ package rootcoord
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -35,6 +37,7 @@ type customKV struct {
 
 func TestImportManager_NewImportManager(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	Params.RootCoordCfg.ImportTaskExpiration = 1
 	mockKv := &kv.MockMetaKV{}
 	mockKv.InMemKv = make(map[string]string)
 	ti1 := &datapb.ImportTaskInfo{
@@ -63,9 +66,60 @@ func TestImportManager_NewImportManager(t *testing.T) {
 			},
 		}
 	}
-	mgr := newImportManager(context.TODO(), mockKv, fn)
-	assert.NotNil(t, mgr)
-	mgr.init(context.TODO())
+
+	time.Sleep(1 * time.Second)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	t.Run("working task expired", func(t *testing.T) {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		mgr := newImportManager(ctx, mockKv, fn)
+		assert.NotNil(t, mgr)
+		mgr.init(ctx)
+		var wgLoop sync.WaitGroup
+		wgLoop.Add(1)
+		mgr.expireOldTasksLoop(&wgLoop)
+		wgLoop.Wait()
+	})
+
+	wg.Add(1)
+	t.Run("context done", func(t *testing.T) {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+		defer cancel()
+		mgr := newImportManager(ctx, mockKv, fn)
+		assert.NotNil(t, mgr)
+		mgr.init(context.TODO())
+		var wgLoop sync.WaitGroup
+		wgLoop.Add(1)
+		mgr.expireOldTasksLoop(&wgLoop)
+		wgLoop.Wait()
+	})
+
+	wg.Add(1)
+	t.Run("pending task expired", func(t *testing.T) {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		mgr := newImportManager(ctx, mockKv, fn)
+		assert.NotNil(t, mgr)
+		mgr.pendingTasks = append(mgr.pendingTasks, &datapb.ImportTaskInfo{
+			Id: 300,
+			State: &datapb.ImportTaskState{
+				StateCode: commonpb.ImportState_ImportPending,
+			},
+			CreateTs: time.Now().Unix() - 10,
+		})
+		mgr.loadFromTaskStore()
+		var wgLoop sync.WaitGroup
+		wgLoop.Add(1)
+		mgr.expireOldTasksLoop(&wgLoop)
+		wgLoop.Wait()
+	})
+
+	wg.Wait()
 }
 
 func TestImportManager_ImportJob(t *testing.T) {

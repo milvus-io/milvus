@@ -84,11 +84,7 @@ func metricProxy(v int64) string {
 	return fmt.Sprintf("client_%d", v)
 }
 
-var (
-	Params                     paramtable.ComponentParam
-	CheckCompleteIndexInterval = 3 * time.Minute
-	TaskTimeLimit              = 3 * time.Hour
-)
+var Params paramtable.ComponentParam
 
 // Core root coordinator core
 type Core struct {
@@ -1132,7 +1128,6 @@ func (c *Core) Init() error {
 			c.impTaskKv,
 			c.CallImportService,
 		)
-		c.importManager.init(c.ctx)
 	})
 	if initError != nil {
 		log.Debug("RootCoord init error", zap.Error(initError))
@@ -1261,7 +1256,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	return c.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
 }
 
-// Start start rootcoord
+// Start starts RootCoord.
 func (c *Core) Start() error {
 	if err := c.checkInit(); err != nil {
 		log.Debug("RootCoord Start checkInit failed", zap.Error(err))
@@ -1281,11 +1276,12 @@ func (c *Core) Start() error {
 			log.Fatal("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			panic(err)
 		}
-		c.wg.Add(4)
+		c.wg.Add(5)
 		go c.startTimeTickLoop()
 		go c.tsLoop()
 		go c.chanTimeTick.startWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
+		go c.importManager.expireOldTasksLoop(&c.wg)
 		Params.RootCoordCfg.CreatedTime = time.Now()
 		Params.RootCoordCfg.UpdatedTime = time.Now()
 	})
@@ -1293,7 +1289,7 @@ func (c *Core) Start() error {
 	return nil
 }
 
-// Stop stop rootcoord
+// Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(internalpb.StateCode_Abnormal)
 
@@ -2260,8 +2256,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	return resp, nil
 }
 
-// TODO: Implement this.
-// Check import task state from datanode
+// GetImportState returns the current state of an import task.
 func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.GetImportStateResponse{
@@ -2269,23 +2264,15 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 		}, nil
 	}
 
-	log.Info("receive get import state request")
-	resp := &milvuspb.GetImportStateResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-	}
-
-	return resp, nil
+	return c.importManager.getTaskState(req.Task), nil
 }
 
 // ReportImport reports import task state to RootCoord.
 func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	log.Info("receive import state report", zap.Any("import result", ir))
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
-
-	log.Info("receive import state report", zap.Any("import result", ir.String()))
 	// Upon receiving ReportImport request, update the related task's state in task store.
 	ti, err := c.importManager.updateTaskState(ir)
 	if err != nil {
@@ -2294,6 +2281,16 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 			Reason:    err.Error(),
 		}, nil
 	}
+
+	// That's all for reporting, if task hasn't reached persisted or completed status yet.
+	if ti.GetState().GetStateCode() != commonpb.ImportState_ImportPersisted &&
+		ti.GetState().GetStateCode() != commonpb.ImportState_ImportCompleted {
+		log.Debug("transitional import state received, return immediately", zap.Any("import result", ir))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+
 	// Reverse look up collection name on collection ID.
 	var colName string
 	for k, v := range c.MetaTable.collName2ID {
@@ -2309,17 +2306,15 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		}, nil
 	}
 
-	// Start a loop to check segments' index states periodically.
-	c.wg.Add(1)
-	go c.checkCompleteIndexLoop(ctx, ti, colName, ir.Segments)
-
 	// When DataNode has done its thing, remove it from the busy node list.
-	c.importManager.busyNodesLock.Lock()
-	defer c.importManager.busyNodesLock.Unlock()
-	delete(c.importManager.busyNodes, ir.GetDatanodeId())
-	log.Info("dataNode is no longer busy",
-		zap.Int64("dataNode ID", ir.GetDatanodeId()),
-		zap.Int64("task ID", ir.GetTaskId()))
+	func() {
+		c.importManager.busyNodesLock.Lock()
+		defer c.importManager.busyNodesLock.Unlock()
+		delete(c.importManager.busyNodes, ir.GetDatanodeId())
+		log.Info("dataNode is no longer busy",
+			zap.Int64("dataNode ID", ir.GetDatanodeId()),
+			zap.Int64("task ID", ir.GetTaskId()))
+	}()
 
 	// Start a loop to check segments' index states periodically.
 	c.wg.Add(1)
@@ -2394,7 +2389,9 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 	log.Debug("proxy GetIndexState", zap.Int("# of IndexBuildIDs", len(getIndexStatesRequest.IndexBuildIDs)), zap.Error(err))
 
 	if len(getIndexStatesRequest.IndexBuildIDs) == 0 {
-		log.Info("empty index build IDs returned", zap.String("collection name", collectionName), zap.Int64("collection ID", collectionID))
+		log.Info("empty index build IDs returned",
+			zap.String("collection name", collectionName),
+			zap.Int64("collection ID", collectionID))
 		return 0, nil
 	}
 	states, err := c.CallGetIndexStatesService(ctx, getIndexStatesRequest.IndexBuildIDs)
@@ -2421,20 +2418,18 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 
 // checkCompleteIndexLoop checks index build states for an import task's segments and bring these segments online when
 // the criteria are met. checkCompleteIndexLoop does the check every CheckCompleteIndexInterval and exits if:
-// (1) a certain percent of indices are built, (2) when context is done or (3) when the task is expired.
+// (1) a certain percent of indices are built, (2) when context is done or (3) when `ImportIndexWaitLimit` has passed.
 func (c *Core) checkCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTaskInfo, colName string, segIDs []UniqueID) {
 	defer c.wg.Done()
-	ticker := time.NewTicker(CheckCompleteIndexInterval)
-	spent := time.Duration(time.Unix(time.Now().Unix()-ti.GetCreateTs(), 0).Nanosecond())
-	log.Info("reporting task time left",
-		zap.Int64("task ID", ti.GetId()),
-		zap.Int64("minutes remaining", int64((TaskTimeLimit-spent).Minutes())))
-	// TODO: Replace with real task time limit.
-	expireTicker := time.NewTicker(TaskTimeLimit - spent)
+	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportIndexCheckInterval*1000) * time.Millisecond)
+	defer ticker.Stop()
+	expireTicker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportIndexWaitLimit*1000) * time.Millisecond)
+	defer expireTicker.Stop()
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("(in loop)context done, exiting checkCompleteIndexLoop", zap.Int64("task ID", ti.GetId()))
+			log.Info("(in loop)context done, exiting checkCompleteIndexLoop",
+				zap.Int64("task ID", ti.GetId()))
 			return
 		case <-ticker.C:
 			log.Info("(in loop)check segments' index states", zap.Int64("task ID", ti.GetId()))
@@ -2448,10 +2443,11 @@ func (c *Core) checkCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTask
 				return
 			}
 		case <-expireTicker.C:
-			log.Info("(in loop)task has expired, stop waiting for segment results", zap.Int64("task ID", ti.GetId()))
+			log.Info("(in loop)waited for sufficiently long time, bring segments online",
+				zap.Int64("task ID", ti.GetId()))
+			c.importManager.bringSegmentsOnline(ti)
 			return
 		}
-
 	}
 }
 
