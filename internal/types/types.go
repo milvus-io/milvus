@@ -19,6 +19,8 @@ package types
 import (
 	"context"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -29,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -1132,8 +1133,8 @@ type QueryNode interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 
-	Search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error)
-	Query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error)
+	Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
+	Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 
 	// GetMetrics gets the metrics about QueryNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)

@@ -23,12 +23,13 @@ import (
 
 	"github.com/milvus-io/milvus/internal/types"
 
+	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -43,8 +44,8 @@ type MockQueryNode struct {
 	strResp    *milvuspb.StringResponse
 	infoResp   *querypb.GetSegmentInfoResponse
 	metricResp *milvuspb.GetMetricsResponse
-	searchResp *milvuspb.SearchResults
-	queryResp  *milvuspb.QueryResults
+	searchResp *internalpb.SearchResults
+	queryResp  *internalpb.RetrieveResults
 }
 
 func (m *MockQueryNode) Init() error {
@@ -115,11 +116,11 @@ func (m *MockQueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	return m.metricResp, m.err
 }
 
-func (m *MockQueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (m *MockQueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	return m.searchResp, m.err
 }
 
-func (m *MockQueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (m *MockQueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return m.queryResp, m.err
 }
 

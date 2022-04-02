@@ -51,8 +51,8 @@ service QueryNode {
   rpc ReleaseSegments(ReleaseSegmentsRequest) returns (common.Status) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
 
-  rpc Search(SearchRequest) returns (milvus.SearchResults) {}
-  rpc Query(QueryRequest) returns (milvus.QueryResults) {}
+  rpc Search(SearchRequest) returns (internal.SearchResults) {}
+  rpc Query(QueryRequest) returns (internal.RetrieveResults) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
@@ -269,13 +269,13 @@ message ReleaseSegmentsRequest {
 }
 
 message SearchRequest {
-  milvus.SearchRequest req = 1;
+  internal.SearchRequest req = 1;
   string dml_channel = 2;
   repeated int64 segmentIDs = 3;
 }
 
 message QueryRequest {
-  milvus.QueryRequest req = 1;
+  internal.RetrieveRequest req = 1;
   string dml_channel = 2;
   repeated int64 segmentIDs = 3;
 }
