@@ -683,7 +683,7 @@ func (df *DataFactory) GetMsgStreamInsertMsgs(n int) (msgs []*msgstream.InsertMs
 	return
 }
 
-func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgstream.DeleteMsg {
+func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) *msgstream.DeleteMsg {
 	idx := 100
 	timestamps := make([]Timestamp, len(pks))
 	for i := 0; i < len(pks); i++ {
@@ -703,8 +703,9 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []int64, chanName string) *msgs
 			CollectionName: "col1",
 			PartitionName:  "default",
 			ShardName:      chanName,
-			PrimaryKeys:    pks,
+			PrimaryKeys:    s.ParsePrimaryKeys2IDs(pks),
 			Timestamps:     timestamps,
+			NumRows:        int64(len(pks)),
 		},
 	}
 	return msg
@@ -740,7 +741,7 @@ func genFlowGraphInsertMsg(chanName string) flowGraphMsg {
 	return *fgMsg
 }
 
-func genFlowGraphDeleteMsg(pks []int64, chanName string) flowGraphMsg {
+func genFlowGraphDeleteMsg(pks []primaryKey, chanName string) flowGraphMsg {
 	timeRange := TimeRange{
 		timestampMin: 0,
 		timestampMax: math.MaxUint64,
@@ -922,10 +923,24 @@ func (f *FailMessageStreamFactory) NewTtMsgStream(ctx context.Context) (msgstrea
 	return nil, errors.New("mocked failure")
 }
 
-func genInsertDataWithPKs(PKs [2]int64) *InsertData {
+func genInsertDataWithPKs(PKs [2]primaryKey, dataType schemapb.DataType) *InsertData {
 	iD := genInsertData()
-	iD.Data[106].(*s.Int64FieldData).Data = PKs[:]
-
+	switch dataType {
+	case schemapb.DataType_Int64:
+		values := make([]int64, len(PKs))
+		for index, pk := range PKs {
+			values[index] = pk.(*int64PrimaryKey).Value
+		}
+		iD.Data[106].(*s.Int64FieldData).Data = values
+	case schemapb.DataType_VarChar:
+		values := make([]string, len(PKs))
+		for index, pk := range PKs {
+			values[index] = pk.(*varCharPrimaryKey).Value
+		}
+		iD.Data[109].(*s.StringFieldData).Data = values
+	default:
+		//TODO::
+	}
 	return iD
 }
 

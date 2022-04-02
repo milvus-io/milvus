@@ -129,3 +129,4 @@ message SearchResultData {
   IDs ids = 5;
   repeated int64 topks = 6;
 }
+

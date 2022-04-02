@@ -33,6 +33,7 @@ class GenericValueDefaultTypeInternal {
   bool bool_val_;
   ::PROTOBUF_NAMESPACE_ID::int64 int64_val_;
   double float_val_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr string_val_;
 } _GenericValue_default_instance_;
 class QueryInfoDefaultTypeInternal {
  public:
@@ -269,6 +270,7 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
   offsetof(::milvus::proto::plan::GenericValueDefaultTypeInternal, bool_val_),
   offsetof(::milvus::proto::plan::GenericValueDefaultTypeInternal, int64_val_),
   offsetof(::milvus::proto::plan::GenericValueDefaultTypeInternal, float_val_),
+  offsetof(::milvus::proto::plan::GenericValueDefaultTypeInternal, string_val_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::GenericValue, val_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryInfo, _internal_metadata_),
@@ -370,17 +372,17 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_plan_2eproto::offsets[] PROTOB
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::milvus::proto::plan::GenericValue)},
-  { 9, -1, sizeof(::milvus::proto::plan::QueryInfo)},
-  { 18, -1, sizeof(::milvus::proto::plan::ColumnInfo)},
-  { 27, -1, sizeof(::milvus::proto::plan::UnaryRangeExpr)},
-  { 35, -1, sizeof(::milvus::proto::plan::BinaryRangeExpr)},
-  { 45, -1, sizeof(::milvus::proto::plan::CompareExpr)},
-  { 53, -1, sizeof(::milvus::proto::plan::TermExpr)},
-  { 60, -1, sizeof(::milvus::proto::plan::UnaryExpr)},
-  { 67, -1, sizeof(::milvus::proto::plan::BinaryExpr)},
-  { 75, -1, sizeof(::milvus::proto::plan::Expr)},
-  { 87, -1, sizeof(::milvus::proto::plan::VectorANNS)},
-  { 97, -1, sizeof(::milvus::proto::plan::PlanNode)},
+  { 10, -1, sizeof(::milvus::proto::plan::QueryInfo)},
+  { 19, -1, sizeof(::milvus::proto::plan::ColumnInfo)},
+  { 28, -1, sizeof(::milvus::proto::plan::UnaryRangeExpr)},
+  { 36, -1, sizeof(::milvus::proto::plan::BinaryRangeExpr)},
+  { 46, -1, sizeof(::milvus::proto::plan::CompareExpr)},
+  { 54, -1, sizeof(::milvus::proto::plan::TermExpr)},
+  { 61, -1, sizeof(::milvus::proto::plan::UnaryExpr)},
+  { 68, -1, sizeof(::milvus::proto::plan::BinaryExpr)},
+  { 76, -1, sizeof(::milvus::proto::plan::Expr)},
+  { 88, -1, sizeof(::milvus::proto::plan::VectorANNS)},
+  { 98, -1, sizeof(::milvus::proto::plan::PlanNode)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -400,61 +402,61 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
 
 const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
   "\n\nplan.proto\022\021milvus.proto.plan\032\014schema."
-  "proto\"S\n\014GenericValue\022\022\n\010bool_val\030\001 \001(\010H"
+  "proto\"i\n\014GenericValue\022\022\n\010bool_val\030\001 \001(\010H"
   "\000\022\023\n\tint64_val\030\002 \001(\003H\000\022\023\n\tfloat_val\030\003 \001("
-  "\001H\000B\005\n\003val\"\\\n\tQueryInfo\022\014\n\004topk\030\001 \001(\003\022\023\n"
-  "\013metric_type\030\003 \001(\t\022\025\n\rsearch_params\030\004 \001("
-  "\t\022\025\n\rround_decimal\030\005 \001(\003\"{\n\nColumnInfo\022\020"
-  "\n\010field_id\030\001 \001(\003\0220\n\tdata_type\030\002 \001(\0162\035.mi"
-  "lvus.proto.schema.DataType\022\026\n\016is_primary"
-  "_key\030\003 \001(\010\022\021\n\tis_autoID\030\004 \001(\010\"\233\001\n\016UnaryR"
-  "angeExpr\0222\n\013column_info\030\001 \001(\0132\035.milvus.p"
-  "roto.plan.ColumnInfo\022%\n\002op\030\002 \001(\0162\031.milvu"
-  "s.proto.plan.OpType\022.\n\005value\030\003 \001(\0132\037.mil"
-  "vus.proto.plan.GenericValue\"\343\001\n\017BinaryRa"
-  "ngeExpr\0222\n\013column_info\030\001 \001(\0132\035.milvus.pr"
-  "oto.plan.ColumnInfo\022\027\n\017lower_inclusive\030\002"
-  " \001(\010\022\027\n\017upper_inclusive\030\003 \001(\010\0224\n\013lower_v"
-  "alue\030\004 \001(\0132\037.milvus.proto.plan.GenericVa"
-  "lue\0224\n\013upper_value\030\005 \001(\0132\037.milvus.proto."
-  "plan.GenericValue\"\247\001\n\013CompareExpr\0227\n\020lef"
-  "t_column_info\030\001 \001(\0132\035.milvus.proto.plan."
-  "ColumnInfo\0228\n\021right_column_info\030\002 \001(\0132\035."
-  "milvus.proto.plan.ColumnInfo\022%\n\002op\030\003 \001(\016"
-  "2\031.milvus.proto.plan.OpType\"o\n\010TermExpr\022"
-  "2\n\013column_info\030\001 \001(\0132\035.milvus.proto.plan"
-  ".ColumnInfo\022/\n\006values\030\002 \003(\0132\037.milvus.pro"
-  "to.plan.GenericValue\"\206\001\n\tUnaryExpr\0220\n\002op"
-  "\030\001 \001(\0162$.milvus.proto.plan.UnaryExpr.Una"
-  "ryOp\022&\n\005child\030\002 \001(\0132\027.milvus.proto.plan."
-  "Expr\"\037\n\007UnaryOp\022\013\n\007Invalid\020\000\022\007\n\003Not\020\001\"\307\001"
-  "\n\nBinaryExpr\0222\n\002op\030\001 \001(\0162&.milvus.proto."
-  "plan.BinaryExpr.BinaryOp\022%\n\004left\030\002 \001(\0132\027"
-  ".milvus.proto.plan.Expr\022&\n\005right\030\003 \001(\0132\027"
-  ".milvus.proto.plan.Expr\"6\n\010BinaryOp\022\013\n\007I"
-  "nvalid\020\000\022\016\n\nLogicalAnd\020\001\022\r\n\tLogicalOr\020\002\""
-  "\342\002\n\004Expr\0220\n\tterm_expr\030\001 \001(\0132\033.milvus.pro"
-  "to.plan.TermExprH\000\0222\n\nunary_expr\030\002 \001(\0132\034"
-  ".milvus.proto.plan.UnaryExprH\000\0224\n\013binary"
-  "_expr\030\003 \001(\0132\035.milvus.proto.plan.BinaryEx"
-  "prH\000\0226\n\014compare_expr\030\004 \001(\0132\036.milvus.prot"
-  "o.plan.CompareExprH\000\022=\n\020unary_range_expr"
-  "\030\005 \001(\0132!.milvus.proto.plan.UnaryRangeExp"
-  "rH\000\022\?\n\021binary_range_expr\030\006 \001(\0132\".milvus."
-  "proto.plan.BinaryRangeExprH\000B\006\n\004expr\"\251\001\n"
-  "\nVectorANNS\022\021\n\tis_binary\030\001 \001(\010\022\020\n\010field_"
-  "id\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milvus.pr"
-  "oto.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034.milv"
-  "us.proto.plan.QueryInfo\022\027\n\017placeholder_t"
-  "ag\030\005 \001(\t\"\221\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001"
-  "(\0132\035.milvus.proto.plan.VectorANNSH\000\022-\n\np"
-  "redicates\030\002 \001(\0132\027.milvus.proto.plan.Expr"
-  "H\000\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004node*n\n\006"
-  "OpType\022\013\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014"
-  "GreaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqua"
-  "l\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006B3Z1github.c"
-  "om/milvus-io/milvus/internal/proto/planp"
-  "bb\006proto3"
+  "\001H\000\022\024\n\nstring_val\030\004 \001(\tH\000B\005\n\003val\"\\\n\tQuer"
+  "yInfo\022\014\n\004topk\030\001 \001(\003\022\023\n\013metric_type\030\003 \001(\t"
+  "\022\025\n\rsearch_params\030\004 \001(\t\022\025\n\rround_decimal"
+  "\030\005 \001(\003\"{\n\nColumnInfo\022\020\n\010field_id\030\001 \001(\003\0220"
+  "\n\tdata_type\030\002 \001(\0162\035.milvus.proto.schema."
+  "DataType\022\026\n\016is_primary_key\030\003 \001(\010\022\021\n\tis_a"
+  "utoID\030\004 \001(\010\"\233\001\n\016UnaryRangeExpr\0222\n\013column"
+  "_info\030\001 \001(\0132\035.milvus.proto.plan.ColumnIn"
+  "fo\022%\n\002op\030\002 \001(\0162\031.milvus.proto.plan.OpTyp"
+  "e\022.\n\005value\030\003 \001(\0132\037.milvus.proto.plan.Gen"
+  "ericValue\"\343\001\n\017BinaryRangeExpr\0222\n\013column_"
+  "info\030\001 \001(\0132\035.milvus.proto.plan.ColumnInf"
+  "o\022\027\n\017lower_inclusive\030\002 \001(\010\022\027\n\017upper_incl"
+  "usive\030\003 \001(\010\0224\n\013lower_value\030\004 \001(\0132\037.milvu"
+  "s.proto.plan.GenericValue\0224\n\013upper_value"
+  "\030\005 \001(\0132\037.milvus.proto.plan.GenericValue\""
+  "\247\001\n\013CompareExpr\0227\n\020left_column_info\030\001 \001("
+  "\0132\035.milvus.proto.plan.ColumnInfo\0228\n\021righ"
+  "t_column_info\030\002 \001(\0132\035.milvus.proto.plan."
+  "ColumnInfo\022%\n\002op\030\003 \001(\0162\031.milvus.proto.pl"
+  "an.OpType\"o\n\010TermExpr\0222\n\013column_info\030\001 \001"
+  "(\0132\035.milvus.proto.plan.ColumnInfo\022/\n\006val"
+  "ues\030\002 \003(\0132\037.milvus.proto.plan.GenericVal"
+  "ue\"\206\001\n\tUnaryExpr\0220\n\002op\030\001 \001(\0162$.milvus.pr"
+  "oto.plan.UnaryExpr.UnaryOp\022&\n\005child\030\002 \001("
+  "\0132\027.milvus.proto.plan.Expr\"\037\n\007UnaryOp\022\013\n"
+  "\007Invalid\020\000\022\007\n\003Not\020\001\"\307\001\n\nBinaryExpr\0222\n\002op"
+  "\030\001 \001(\0162&.milvus.proto.plan.BinaryExpr.Bi"
+  "naryOp\022%\n\004left\030\002 \001(\0132\027.milvus.proto.plan"
+  ".Expr\022&\n\005right\030\003 \001(\0132\027.milvus.proto.plan"
+  ".Expr\"6\n\010BinaryOp\022\013\n\007Invalid\020\000\022\016\n\nLogica"
+  "lAnd\020\001\022\r\n\tLogicalOr\020\002\"\342\002\n\004Expr\0220\n\tterm_e"
+  "xpr\030\001 \001(\0132\033.milvus.proto.plan.TermExprH\000"
+  "\0222\n\nunary_expr\030\002 \001(\0132\034.milvus.proto.plan"
+  ".UnaryExprH\000\0224\n\013binary_expr\030\003 \001(\0132\035.milv"
+  "us.proto.plan.BinaryExprH\000\0226\n\014compare_ex"
+  "pr\030\004 \001(\0132\036.milvus.proto.plan.CompareExpr"
+  "H\000\022=\n\020unary_range_expr\030\005 \001(\0132!.milvus.pr"
+  "oto.plan.UnaryRangeExprH\000\022\?\n\021binary_rang"
+  "e_expr\030\006 \001(\0132\".milvus.proto.plan.BinaryR"
+  "angeExprH\000B\006\n\004expr\"\251\001\n\nVectorANNS\022\021\n\tis_"
+  "binary\030\001 \001(\010\022\020\n\010field_id\030\002 \001(\003\022+\n\npredic"
+  "ates\030\003 \001(\0132\027.milvus.proto.plan.Expr\0220\n\nq"
+  "uery_info\030\004 \001(\0132\034.milvus.proto.plan.Quer"
+  "yInfo\022\027\n\017placeholder_tag\030\005 \001(\t\"\221\001\n\010PlanN"
+  "ode\0224\n\013vector_anns\030\001 \001(\0132\035.milvus.proto."
+  "plan.VectorANNSH\000\022-\n\npredicates\030\002 \001(\0132\027."
+  "milvus.proto.plan.ExprH\000\022\030\n\020output_field"
+  "_ids\030\003 \003(\003B\006\n\004node*n\n\006OpType\022\013\n\007Invalid\020"
+  "\000\022\017\n\013GreaterThan\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010"
+  "LessThan\020\003\022\r\n\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010"
+  "NotEqual\020\006B3Z1github.com/milvus-io/milvu"
+  "s/internal/proto/planpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
@@ -474,7 +476,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_pla
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_plan_2eproto_once;
 static bool descriptor_table_plan_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_plan_2eproto = {
-  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 2209,
+  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 2231,
   &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_sccs, descriptor_table_plan_2eproto_deps, 10, 1,
   schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
   file_level_metadata_plan_2eproto, 12, file_level_enum_descriptors_plan_2eproto, file_level_service_descriptors_plan_2eproto,
@@ -555,6 +557,8 @@ void GenericValue::InitAsDefaultInstance() {
   ::milvus::proto::plan::_GenericValue_default_instance_.bool_val_ = false;
   ::milvus::proto::plan::_GenericValue_default_instance_.int64_val_ = PROTOBUF_LONGLONG(0);
   ::milvus::proto::plan::_GenericValue_default_instance_.float_val_ = 0;
+  ::milvus::proto::plan::_GenericValue_default_instance_.string_val_.UnsafeSetDefault(
+      &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
 }
 class GenericValue::_Internal {
  public:
@@ -583,6 +587,10 @@ GenericValue::GenericValue(const GenericValue& from)
       set_float_val(from.float_val());
       break;
     }
+    case kStringVal: {
+      set_string_val(from.string_val());
+      break;
+    }
     case VAL_NOT_SET: {
       break;
     }
@@ -591,6 +599,7 @@ GenericValue::GenericValue(const GenericValue& from)
 }
 
 void GenericValue::SharedCtor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_GenericValue_plan_2eproto.base);
   clear_has_val();
 }
 
@@ -627,6 +636,10 @@ void GenericValue::clear_val() {
     }
     case kFloatVal: {
       // No need to clear
+      break;
+    }
+    case kStringVal: {
+      val_.string_val_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
       break;
     }
     case VAL_NOT_SET: {
@@ -674,6 +687,13 @@ const char* GenericValue::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_I
         if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 25)) {
           set_float_val(::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<double>(ptr));
           ptr += sizeof(double);
+        } else goto handle_unusual;
+        continue;
+      // string string_val = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_string_val(), ptr, ctx, "milvus.proto.plan.GenericValue.string_val");
+          CHK_(ptr);
         } else goto handle_unusual;
         continue;
       default: {
@@ -748,6 +768,21 @@ bool GenericValue::MergePartialFromCodedStream(
         break;
       }
 
+      // string string_val = 4;
+      case 4: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_string_val()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->string_val().data(), static_cast<int>(this->string_val().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.plan.GenericValue.string_val"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
       default: {
       handle_unusual:
         if (tag == 0) {
@@ -790,6 +825,16 @@ void GenericValue::SerializeWithCachedSizes(
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteDouble(3, this->float_val(), output);
   }
 
+  // string string_val = 4;
+  if (has_string_val()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->string_val().data(), static_cast<int>(this->string_val().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.plan.GenericValue.string_val");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      4, this->string_val(), output);
+  }
+
   if (_internal_metadata_.have_unknown_fields()) {
     ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
         _internal_metadata_.unknown_fields(), output);
@@ -816,6 +861,17 @@ void GenericValue::SerializeWithCachedSizes(
   // double float_val = 3;
   if (has_float_val()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteDoubleToArray(3, this->float_val(), target);
+  }
+
+  // string string_val = 4;
+  if (has_string_val()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->string_val().data(), static_cast<int>(this->string_val().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.plan.GenericValue.string_val");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        4, this->string_val(), target);
   }
 
   if (_internal_metadata_.have_unknown_fields()) {
@@ -855,6 +911,13 @@ size_t GenericValue::ByteSizeLong() const {
     // double float_val = 3;
     case kFloatVal: {
       total_size += 1 + 8;
+      break;
+    }
+    // string string_val = 4;
+    case kStringVal: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+          this->string_val());
       break;
     }
     case VAL_NOT_SET: {
@@ -899,6 +962,10 @@ void GenericValue::MergeFrom(const GenericValue& from) {
     }
     case kFloatVal: {
       set_float_val(from.float_val());
+      break;
+    }
+    case kStringVal: {
+      set_string_val(from.string_val());
       break;
     }
     case VAL_NOT_SET: {

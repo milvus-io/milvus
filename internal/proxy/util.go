@@ -414,27 +414,6 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-// getPrimaryFieldData get primary field data from all field data inserted from sdk
-func getPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
-	primaryFieldName := primaryFieldSchema.Name
-
-	var primaryFieldData *schemapb.FieldData
-	for _, field := range datas {
-		if field.FieldName == primaryFieldName {
-			if primaryFieldSchema.AutoID {
-				return nil, fmt.Errorf("autoID field %v does not require data", primaryFieldName)
-			}
-			primaryFieldData = field
-		}
-	}
-
-	if primaryFieldData == nil {
-		return nil, fmt.Errorf("can't find data for primary field %v", primaryFieldName)
-	}
-
-	return primaryFieldData, nil
-}
-
 // parsePrimaryFieldData2IDs get IDs to fill grpc result, for example insert request, delete request etc.
 func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, error) {
 	primaryData := &schemapb.IDs{}

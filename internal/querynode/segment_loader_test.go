@@ -586,8 +586,8 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 	msgChan := make(chan *msgstream.MsgPack)
 	go func() {
 		msgChan <- nil
-		deleteMsg1 := genDeleteMsg(int64(1), defaultCollectionID+1)
-		deleteMsg2 := genDeleteMsg(int64(1), defaultCollectionID)
+		deleteMsg1 := genDeleteMsg(int64(1), defaultCollectionID+1, schemapb.DataType_Int64)
+		deleteMsg2 := genDeleteMsg(int64(1), defaultCollectionID, schemapb.DataType_Int64)
 		msgChan <- &msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg1, deleteMsg2}}
 	}()
 

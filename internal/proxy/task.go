@@ -241,7 +241,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	// get primaryFieldData whether autoID is true or not
 	var primaryFieldData *schemapb.FieldData
 	if !primaryFieldSchema.AutoID {
-		primaryFieldData, err = getPrimaryFieldData(it.GetFieldsData(), primaryFieldSchema)
+		primaryFieldData, err = typeutil.GetPrimaryFieldData(it.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
 			log.Error("get primary field data failed", zap.String("collection name", it.CollectionName), zap.Error(err))
 			return err
@@ -2980,8 +2980,9 @@ type BaseDeleteTask = msgstream.DeleteMsg
 type deleteTask struct {
 	Condition
 	BaseDeleteTask
-	ctx       context.Context
-	req       *milvuspb.DeleteRequest
+	ctx        context.Context
+	deleteExpr string
+	//req       *milvuspb.DeleteRequest
 	result    *milvuspb.MutationResult
 	chMgr     channelsMgr
 	chTicker  channelsTimeTicker
@@ -2989,6 +2990,7 @@ type deleteTask struct {
 	pChannels []pChan
 
 	collectionID UniqueID
+	schema       *schemapb.CollectionSchema
 }
 
 func (dt *deleteTask) TraceCtx() context.Context {
@@ -3065,7 +3067,7 @@ func (dt *deleteTask) getChannels() ([]pChan, error) {
 	return channels, err
 }
 
-func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res []int64, err error) {
+func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res *schemapb.IDs, rowNum int64, err error) {
 	if len(expr) == 0 {
 		log.Warn("empty expr")
 		return
@@ -3073,20 +3075,43 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 
 	plan, err := createExprPlan(schema, expr)
 	if err != nil {
-		return res, fmt.Errorf("failed to create expr plan, expr = %s", expr)
+		return res, 0, fmt.Errorf("failed to create expr plan, expr = %s", expr)
 	}
 
 	// delete request only support expr "id in [a, b]"
 	termExpr, ok := plan.Node.(*planpb.PlanNode_Predicates).Predicates.Expr.(*planpb.Expr_TermExpr)
 	if !ok {
-		return res, fmt.Errorf("invalid plan node type")
+		return res, 0, fmt.Errorf("invalid plan node type")
 	}
 
-	for _, v := range termExpr.TermExpr.Values {
-		res = append(res, v.GetInt64Val())
+	res = &schemapb.IDs{}
+	rowNum = int64(len(termExpr.TermExpr.Values))
+	switch termExpr.TermExpr.ColumnInfo.GetDataType() {
+	case schemapb.DataType_Int64:
+		ids := make([]int64, 0)
+		for _, v := range termExpr.TermExpr.Values {
+			ids = append(ids, v.GetInt64Val())
+		}
+		res.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: ids,
+			},
+		}
+	case schemapb.DataType_VarChar:
+		ids := make([]string, 0)
+		for _, v := range termExpr.TermExpr.Values {
+			ids = append(ids, v.GetStringVal())
+		}
+		res.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: ids,
+			},
+		}
+	default:
+		return res, 0, fmt.Errorf("invalid field data type specifyed in delete expr")
 	}
 
-	return res, nil
+	return res, rowNum, nil
 }
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
@@ -3103,7 +3128,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		Timestamp: dt.BeginTs(),
 	}
 
-	collName := dt.req.CollectionName
+	collName := dt.CollectionName
 	if err := validateCollectionName(collName); err != nil {
 		log.Error("Invalid collection name", zap.String("collectionName", collName))
 		return err
@@ -3117,8 +3142,8 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.collectionID = collID
 
 	// If partitionName is not empty, partitionID will be set.
-	if len(dt.req.PartitionName) > 0 {
-		partName := dt.req.PartitionName
+	if len(dt.PartitionName) > 0 {
+		partName := dt.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
 			log.Error("Invalid partition name", zap.String("partitionName", partName))
 			return err
@@ -3133,30 +3158,29 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		dt.DeleteRequest.PartitionID = common.InvalidPartitionID
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dt.req.CollectionName)
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, collName)
 	if err != nil {
-		log.Error("Failed to get collection schema", zap.String("collectionName", dt.req.CollectionName))
+		log.Error("Failed to get collection schema", zap.String("collectionName", collName))
 		return err
 	}
+	dt.schema = schema
 
-	primaryKeys, err := getPrimaryKeysFromExpr(schema, dt.req.Expr)
+	// get delete.primaryKeys from delete expr
+	primaryKeys, numRow, err := getPrimaryKeysFromExpr(schema, dt.deleteExpr)
 	if err != nil {
 		log.Error("Failed to get primary keys from expr", zap.Error(err))
 		return err
 	}
-	log.Debug("get primary keys from expr", zap.Int("len of primary keys", len(primaryKeys)))
+
+	dt.DeleteRequest.NumRows = numRow
 	dt.DeleteRequest.PrimaryKeys = primaryKeys
+	log.Debug("get primary keys from expr", zap.Int64("len of primary keys", dt.DeleteRequest.NumRows))
 
 	// set result
-	dt.result.IDs.IdField = &schemapb.IDs_IntId{
-		IntId: &schemapb.LongArray{
-			Data: primaryKeys,
-		},
-	}
-	dt.result.DeleteCnt = int64(len(primaryKeys))
+	dt.result.IDs = primaryKeys
+	dt.result.DeleteCnt = dt.DeleteRequest.NumRows
 
-	rowNum := len(primaryKeys)
-	dt.Timestamps = make([]uint64, rowNum)
+	dt.Timestamps = make([]uint64, numRow)
 	for index := range dt.Timestamps {
 		dt.Timestamps[index] = dt.BeginTs()
 	}
@@ -3217,6 +3241,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 				PartitionID:    partitionID,
 				CollectionName: collectionName,
 				PartitionName:  partitionName,
+				PrimaryKeys:    &schemapb.IDs{},
 			}
 			deleteMsg := &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{
@@ -3229,7 +3254,8 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		curMsg := result[key].(*msgstream.DeleteMsg)
 		curMsg.HashValues = append(curMsg.HashValues, dt.HashValues[index])
 		curMsg.Timestamps = append(curMsg.Timestamps, dt.Timestamps[index])
-		curMsg.PrimaryKeys = append(curMsg.PrimaryKeys, dt.PrimaryKeys[index])
+		typeutil.AppendIDs(curMsg.PrimaryKeys, dt.PrimaryKeys, index)
+		curMsg.NumRows++
 	}
 
 	// send delete request to log broker

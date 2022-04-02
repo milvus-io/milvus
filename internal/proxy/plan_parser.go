@@ -580,6 +580,16 @@ func (pc *parserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemap
 		} else {
 			return nil, fmt.Errorf("type mismatch")
 		}
+	case *ant_ast.StringNode:
+		if typeutil.IsStringType(dataType) {
+			gv = &planpb.GenericValue{
+				Val: &planpb.GenericValue_StringVal{
+					StringVal: node.Value,
+				},
+			}
+		} else {
+			return nil, fmt.Errorf("type mismatch")
+		}
 	default:
 		return nil, fmt.Errorf("unsupported leaf node")
 	}
@@ -611,7 +621,8 @@ func (pc *parserContext) handleExpr(nodeRaw *ant_ast.Node) (*planpb.Expr, error)
 	case *ant_ast.IdentifierNode,
 		*ant_ast.FloatNode,
 		*ant_ast.IntegerNode,
-		*ant_ast.BoolNode:
+		*ant_ast.BoolNode,
+		*ant_ast.StringNode:
 		return nil, fmt.Errorf("scalar expr is not supported yet")
 	case *ant_ast.UnaryNode:
 		expr, err := pc.handleUnaryExpr(node)

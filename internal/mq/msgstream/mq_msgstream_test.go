@@ -600,10 +600,11 @@ func TestStream_PulsarMsgStream_DeleteRepackFunc(t *testing.T) {
 			Timestamp: 1,
 			SourceID:  1,
 		},
-		CollectionName: "Collection",
-		ShardName:      "chan-1",
-		Timestamps:     []Timestamp{1},
-		PrimaryKeys:    []int64{1},
+		CollectionName:   "Collection",
+		ShardName:        "chan-1",
+		Timestamps:       []Timestamp{1},
+		Int64PrimaryKeys: []int64{1},
+		NumRows:          1,
 	}
 	deleteMsg := &DeleteMsg{
 		BaseMsg:       baseMsg,
@@ -1858,10 +1859,11 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 				Timestamp: 11,
 				SourceID:  reqID,
 			},
-			CollectionName: "Collection",
-			ShardName:      "1",
-			Timestamps:     []Timestamp{time},
-			PrimaryKeys:    []int64{1},
+			CollectionName:   "Collection",
+			ShardName:        "1",
+			Timestamps:       []Timestamp{time},
+			Int64PrimaryKeys: []int64{1},
+			NumRows:          1,
 		}
 		deleteMsg := &DeleteMsg{
 			BaseMsg:       baseMsg,

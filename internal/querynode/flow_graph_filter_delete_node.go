@@ -93,16 +93,17 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 // filterInvalidDeleteMessage would filter invalid delete messages
 func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) *msgstream.DeleteMsg {
+	if err := msg.CheckAligned(); err != nil {
+		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
+		log.Warn("misaligned delete messages detected", zap.Error(err))
+		return nil
+	}
+
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 	msg.SetTraceCtx(ctx)
 	defer sp.Finish()
 
 	if msg.CollectionID != fddNode.collectionID {
-		return nil
-	}
-
-	if len(msg.PrimaryKeys) != len(msg.Timestamps) {
-		log.Warn("Error, misaligned messages detected")
 		return nil
 	}
 

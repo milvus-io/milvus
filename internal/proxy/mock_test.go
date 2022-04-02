@@ -458,7 +458,16 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, fieldID int
 			},
 		}
 	case schemapb.DataType_VarChar:
-		//TODO::
+		fieldData.FieldName = testVarCharField
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: generateVarCharArray(numRows, maxTestStringLen),
+					},
+				},
+			},
+		}
 	case schemapb.DataType_FloatVector:
 		fieldData.FieldName = testFloatVecField
 		fieldData.Field = &schemapb.FieldData_Vectors{

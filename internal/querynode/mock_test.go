@@ -978,12 +978,34 @@ func genSimpleRowIDField() []IntPrimaryKey {
 	return ids
 }
 
-func genSimpleDeleteID() []IntPrimaryKey {
-	ids := make([]IntPrimaryKey, defaultDelLength)
-	for i := 0; i < defaultDelLength; i++ {
-		ids[0] = IntPrimaryKey(i)
+func genSimpleDeleteID(dataType schemapb.DataType) *schemapb.IDs {
+	ret := &schemapb.IDs{}
+	switch dataType {
+	case schemapb.DataType_Int64:
+		ids := make([]IntPrimaryKey, defaultDelLength)
+		for i := 0; i < defaultDelLength; i++ {
+			ids[i] = IntPrimaryKey(i)
+		}
+		ret.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: ids,
+			},
+		}
+	case schemapb.DataType_VarChar:
+		ids := make([]string, defaultDelLength)
+		for i := 0; i < defaultDelLength; i++ {
+			ids[i] = funcutil.GenRandomStr()
+		}
+		ret.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: ids,
+			},
+		}
+	default:
+		//TODO
 	}
-	return ids
+
+	return ret
 }
 
 func genMsgStreamBaseMsg() msgstream.BaseMsg {
@@ -1022,7 +1044,7 @@ func genSimpleInsertMsg() (*msgstream.InsertMsg, error) {
 	}, nil
 }
 
-func genDeleteMsg(reqID UniqueID, collectionID int64) msgstream.TsMsg {
+func genDeleteMsg(reqID UniqueID, collectionID int64, dataType schemapb.DataType) msgstream.TsMsg {
 	hashValue := uint32(reqID)
 	baseMsg := msgstream.BaseMsg{
 		BeginTimestamp: 0,
@@ -1047,13 +1069,14 @@ func genDeleteMsg(reqID UniqueID, collectionID int64) msgstream.TsMsg {
 			PartitionName:  defaultPartitionName,
 			CollectionID:   collectionID,
 			PartitionID:    defaultPartitionID,
-			PrimaryKeys:    genSimpleDeleteID(),
+			PrimaryKeys:    genSimpleDeleteID(dataType),
 			Timestamps:     genSimpleTimestampDeletedPK(),
+			NumRows:        defaultDelLength,
 		},
 	}
 }
 
-func genSimpleDeleteMsg() (*msgstream.DeleteMsg, error) {
+func genSimpleDeleteMsg(dataType schemapb.DataType) (*msgstream.DeleteMsg, error) {
 	return &msgstream.DeleteMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
 		DeleteRequest: internalpb.DeleteRequest{
@@ -1062,8 +1085,9 @@ func genSimpleDeleteMsg() (*msgstream.DeleteMsg, error) {
 			PartitionName:  defaultPartitionName,
 			CollectionID:   defaultCollectionID,
 			PartitionID:    defaultPartitionID,
-			PrimaryKeys:    genSimpleDeleteID(),
+			PrimaryKeys:    genSimpleDeleteID(dataType),
 			Timestamps:     genSimpleTimestampDeletedPK(),
+			NumRows:        defaultDelLength,
 		},
 	}, nil
 }

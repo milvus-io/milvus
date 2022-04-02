@@ -20,6 +20,7 @@ import (
 	"errors"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
@@ -43,7 +44,7 @@ type Iterator interface {
 // Value is the return value of Next
 type Value struct {
 	ID        int64
-	PK        int64
+	PK        PrimaryKey
 	Timestamp int64
 	IsDeleted bool
 	Value     interface{}
@@ -54,11 +55,12 @@ type InsertBinlogIterator struct {
 	dispose   int32 // 0: false, 1: true
 	data      *InsertData
 	PKfieldID int64
+	PkType    schemapb.DataType
 	pos       int
 }
 
 // NewInsertBinlogIterator creates a new iterator
-func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID) (*InsertBinlogIterator, error) {
+func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID, pkType schemapb.DataType) (*InsertBinlogIterator, error) {
 	// TODO: load part of file to read records other than loading all content
 	reader := NewInsertCodec(nil)
 
@@ -68,7 +70,7 @@ func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID) (*InsertBinlogIt
 		return nil, err
 	}
 
-	return &InsertBinlogIterator{data: serData, PKfieldID: PKfieldID}, nil
+	return &InsertBinlogIterator{data: serData, PKfieldID: PKfieldID, PkType: pkType}, nil
 }
 
 // HasNext returns true if the iterator have unread record
@@ -90,11 +92,15 @@ func (itr *InsertBinlogIterator) Next() (interface{}, error) {
 	for fieldID, fieldData := range itr.data.Data {
 		m[fieldID] = fieldData.GetRow(itr.pos)
 	}
+	pk, err := GenPrimaryKeyByRawData(itr.data.Data[itr.PKfieldID].GetRow(itr.pos), itr.PkType)
+	if err != nil {
+		return nil, err
+	}
 
 	v := &Value{
 		ID:        itr.data.Data[rootcoord.RowIDField].GetRow(itr.pos).(int64),
 		Timestamp: itr.data.Data[rootcoord.TimeStampField].GetRow(itr.pos).(int64),
-		PK:        itr.data.Data[itr.PKfieldID].GetRow(itr.pos).(int64),
+		PK:        pk,
 		IsDeleted: false,
 		Value:     m,
 	}

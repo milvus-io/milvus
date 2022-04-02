@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -26,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -53,13 +56,13 @@ func genFlowGraphInsertData() (*insertData, error) {
 }
 
 func genFlowGraphDeleteData() (*deleteData, error) {
-	deleteMsg, err := genSimpleDeleteMsg()
+	deleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 	if err != nil {
 		return nil, err
 	}
 	dData := &deleteData{
-		deleteIDs: map[UniqueID][]UniqueID{
-			defaultSegmentID: deleteMsg.PrimaryKeys,
+		deleteIDs: map[UniqueID][]primaryKey{
+			defaultSegmentID: storage.ParseIDs2PrimaryKeys(deleteMsg.PrimaryKeys),
 		},
 		deleteTimestamps: map[UniqueID][]Timestamp{
 			defaultSegmentID: deleteMsg.Timestamps,
@@ -237,7 +240,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 
 		msgInsertMsg, err := genSimpleInsertMsg()
 		assert.NoError(t, err)
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		iMsg := insertMsg{
 			insertMessages: []*msgstream.InsertMsg{
@@ -272,7 +275,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		msgDeleteMsg.PartitionID = common.InvalidPartitionID
 		assert.NoError(t, err)
@@ -298,7 +301,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		msgDeleteMsg.CollectionID = 9999
 		msgDeleteMsg.PartitionID = -1
 		assert.NoError(t, err)
@@ -324,7 +327,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		msgDeleteMsg.PartitionID = 9999
 		assert.NoError(t, err)
 		iMsg := insertMsg{
@@ -351,7 +354,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 
 		msgInsertMsg, err := genSimpleInsertMsg()
 		assert.NoError(t, err)
-		msgDeleteMsg, err := genSimpleDeleteMsg()
+		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		iMsg := insertMsg{
 			insertMessages: []*msgstream.InsertMsg{
@@ -366,26 +369,66 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 	})
 }
 
-func TestGetSegmentsByPKs(t *testing.T) {
-	buf := make([]byte, 8)
-	filter := bloom.NewWithEstimates(1000000, 0.01)
-	for i := 0; i < 3; i++ {
-		common.Endian.PutUint64(buf, uint64(i))
-		filter.Add(buf)
-	}
-	segment := &Segment{
-		segmentID: 1,
-		pkFilter:  filter,
-	}
-	pks, err := filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, segment)
-	assert.Nil(t, err)
-	assert.Equal(t, len(pks), 3)
+func TestFilterSegmentsByPKs(t *testing.T) {
+	t.Run("filter int64 pks", func(t *testing.T) {
+		buf := make([]byte, 8)
+		filter := bloom.NewWithEstimates(1000000, 0.01)
+		for i := 0; i < 3; i++ {
+			common.Endian.PutUint64(buf, uint64(i))
+			filter.Add(buf)
+		}
+		segment := &Segment{
+			segmentID: 1,
+			pkFilter:  filter,
+		}
 
-	pks, err = filterSegmentsByPKs([]int64{}, segment)
-	assert.Nil(t, err)
-	assert.Equal(t, len(pks), 0)
-	_, err = filterSegmentsByPKs(nil, segment)
-	assert.NotNil(t, err)
-	_, err = filterSegmentsByPKs([]int64{0, 1, 2, 3, 4}, nil)
-	assert.NotNil(t, err)
+		pk0 := newInt64PrimaryKey(0)
+		pk1 := newInt64PrimaryKey(1)
+		pk2 := newInt64PrimaryKey(2)
+		pk3 := newInt64PrimaryKey(3)
+		pk4 := newInt64PrimaryKey(4)
+
+		timestamps := []uint64{1, 1, 1, 1, 1}
+		pks, _, err := filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 3)
+
+		pks, _, err = filterSegmentsByPKs([]primaryKey{}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 0)
+		_, _, err = filterSegmentsByPKs(nil, timestamps, segment)
+		assert.NotNil(t, err)
+		_, _, err = filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, nil)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("filter varChar pks", func(t *testing.T) {
+		filter := bloom.NewWithEstimates(1000000, 0.01)
+		for i := 0; i < 3; i++ {
+			filter.AddString(fmt.Sprintf("test%d", i))
+		}
+		segment := &Segment{
+			segmentID: 1,
+			pkFilter:  filter,
+		}
+
+		pk0 := newVarCharPrimaryKey("test0")
+		pk1 := newVarCharPrimaryKey("test1")
+		pk2 := newVarCharPrimaryKey("test2")
+		pk3 := newVarCharPrimaryKey("test3")
+		pk4 := newVarCharPrimaryKey("test4")
+
+		timestamps := []uint64{1, 1, 1, 1, 1}
+		pks, _, err := filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 3)
+
+		pks, _, err = filterSegmentsByPKs([]primaryKey{}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 0)
+		_, _, err = filterSegmentsByPKs(nil, timestamps, segment)
+		assert.NotNil(t, err)
+		_, _, err = filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, nil)
+		assert.NotNil(t, err)
+	})
 }

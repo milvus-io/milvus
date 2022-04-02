@@ -545,7 +545,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	stream.Start()
 
 	delData := &deleteData{
-		deleteIDs:        make(map[UniqueID][]int64),
+		deleteIDs:        make(map[UniqueID][]primaryKey),
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
 		deleteOffset:     make(map[UniqueID]int64),
 	}
@@ -635,7 +635,7 @@ func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID Unique
 	timestamps := deleteData.deleteTimestamps[segmentID]
 	offset := deleteData.deleteOffset[segmentID]
 
-	err = targetSegment.segmentDelete(offset, &ids, &timestamps)
+	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
 		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
 		return
