@@ -72,10 +72,10 @@ TimestampIndex::GenerateBitset(Timestamp query_timestamp,
     Assert(beg < end);
     BitsetType bitset;
     bitset.reserve(size);
-    bitset.resize(beg, true);
-    bitset.resize(size, false);
+    bitset.resize(beg, false);
+    bitset.resize(size, true);
     for (int64_t i = beg; i < end; ++i) {
-        bitset[i] = timestamps[i] <= query_timestamp;
+        bitset[i] = timestamps[i] > query_timestamp;
     }
     return bitset;
 }
