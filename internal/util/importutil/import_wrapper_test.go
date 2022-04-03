@@ -126,7 +126,7 @@ func Test_ImportRowBased(t *testing.T) {
 
 }
 
-func Test_ImportColumnBased(t *testing.T) {
+func Test_ImportColumnBased_json(t *testing.T) {
 	ctx := context.Background()
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
@@ -182,6 +182,88 @@ func Test_ImportColumnBased(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
+	err = wrapper.Import(files, false, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 5, rowCount)
+
+	// parse error
+	content = []byte(`{
+		"field_bool": [true, false, true, true, true]
+	}`)
+
+	filePath = TempFilesPath + "rows_2.json"
+	fp2 := saveFile(t, filePath, content)
+	defer fp2.Close()
+
+	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+	files = make([]string, 0)
+	files = append(files, filePath)
+	err = wrapper.Import(files, false, false)
+	assert.NotNil(t, err)
+
+	// file doesn't exist
+	files = make([]string, 0)
+	files = append(files, "/dummy/dummy.json")
+	err = wrapper.Import(files, false, false)
+	assert.NotNil(t, err)
+}
+
+func Test_ImportColumnBased_numpy(t *testing.T) {
+	ctx := context.Background()
+	err := os.MkdirAll(TempFilesPath, os.ModePerm)
+	assert.Nil(t, err)
+	defer os.RemoveAll(TempFilesPath)
+
+	idAllocator := newIDAllocator(ctx, t)
+
+	content := []byte(`{
+		"field_bool": [true, false, true, true, true],
+		"field_int8": [10, 11, 12, 13, 14],
+		"field_int16": [100, 101, 102, 103, 104],
+		"field_int32": [1000, 1001, 1002, 1003, 1004],
+		"field_int64": [10000, 10001, 10002, 10003, 10004],
+		"field_float": [3.14, 3.15, 3.16, 3.17, 3.18],
+		"field_double": [5.1, 5.2, 5.3, 5.4, 5.5],
+		"field_string": ["a", "b", "c", "d", "e"]
+	}`)
+
+	files := make([]string, 0)
+
+	filePath := TempFilesPath + "scalar_fields.json"
+	fp1 := saveFile(t, filePath, content)
+	fp1.Close()
+	files = append(files, filePath)
+
+	filePath = TempFilesPath + "field_binary_vector.npy"
+	bin := [][2]uint8{{1, 2}, {3, 4}, {5, 6}, {7, 8}, {9, 10}}
+	err = CreateNumpyFile(filePath, bin)
+	assert.Nil(t, err)
+	files = append(files, filePath)
+
+	filePath = TempFilesPath + "field_float_vector.npy"
+	flo := [][4]float32{{1, 2, 3, 4}, {3, 4, 5, 6}, {5, 6, 7, 8}, {7, 8, 9, 10}, {9, 10, 11, 12}}
+	err = CreateNumpyFile(filePath, flo)
+	assert.Nil(t, err)
+	files = append(files, filePath)
+
+	rowCount := 0
+	flushFunc := func(fields map[string]storage.FieldData) error {
+		count := 0
+		for _, data := range fields {
+			assert.Less(t, 0, data.RowNum())
+			if count == 0 {
+				count = data.RowNum()
+			} else {
+				assert.Equal(t, count, data.RowNum())
+			}
+		}
+		rowCount += count
+		return nil
+	}
+
+	// success case
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+
 	err = wrapper.Import(files, false, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)

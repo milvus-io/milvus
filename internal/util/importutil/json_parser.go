@@ -24,7 +24,7 @@ type JSONParser struct {
 	fields  map[string]int64 // fields need to be parsed
 }
 
-// newImportManager helper function to create a importManager
+// NewJSONParser helper function to create a JSONParser
 func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSchema) *JSONParser {
 	fields := make(map[string]int64)
 	for i := 0; i < len(collectionSchema.Fields); i++ {

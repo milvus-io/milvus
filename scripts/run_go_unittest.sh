@@ -47,6 +47,7 @@ go test -race -cover "${MILVUS_DIR}/util/retry/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/trace/..." -failfast
 go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
+go test -race -cover "${MILVUS_DIR}/util/importutil/..." -failfast
 
 # TODO: remove to distributed
 #go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
