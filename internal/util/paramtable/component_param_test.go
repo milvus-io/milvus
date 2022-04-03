@@ -100,9 +100,16 @@ func TestComponentParam(t *testing.T) {
 
 		assert.NotEqual(t, Params.MaxPartitionNum, 0)
 		t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum)
-
 		assert.NotEqual(t, Params.MinSegmentSizeToEnableIndex, 0)
 		t.Logf("master MinSegmentSizeToEnableIndex = %d", Params.MinSegmentSizeToEnableIndex)
+		assert.NotEqual(t, Params.ImportTaskExpiration, 0)
+		t.Logf("master ImportTaskExpiration = %f", Params.ImportTaskExpiration)
+		assert.NotEqual(t, Params.ImportTaskRetention, 0)
+		t.Logf("master ImportTaskRetention = %f", Params.ImportTaskRetention)
+		assert.NotEqual(t, Params.ImportIndexCheckInterval, 0)
+		t.Logf("master ImportIndexCheckInterval = %f", Params.ImportIndexCheckInterval)
+		assert.NotEqual(t, Params.ImportIndexWaitLimit, 0)
+		t.Logf("master ImportIndexWaitLimit = %f", Params.ImportIndexWaitLimit)
 
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()

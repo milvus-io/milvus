@@ -35,10 +35,11 @@ import (
 )
 
 const (
-	Bucket          = "bucket"
-	FailedReason    = "failed_reason"
-	MaxPendingCount = 32
-	delimiter       = "/"
+	Bucket               = "bucket"
+	FailedReason         = "failed_reason"
+	MaxPendingCount      = 32
+	delimiter            = "/"
+	taskExpiredMsgPrefix = "task has expired after "
 )
 
 // import task state
@@ -52,10 +53,9 @@ type importTaskState struct {
 
 // importManager manager for import tasks
 type importManager struct {
-	ctx       context.Context    // reserved
-	cancel    context.CancelFunc // reserved
-	taskStore kv.MetaKv          // Persistent task info storage.
-	busyNodes map[int64]bool     // Set of all current working DataNodes.
+	ctx       context.Context // reserved
+	taskStore kv.MetaKv       // Persistent task info storage.
+	busyNodes map[int64]bool  // Set of all current working DataNodes.
 
 	// TODO: Make pendingTask a map to improve look up performance.
 	pendingTasks  []*datapb.ImportTaskInfo         // pending tasks
@@ -66,15 +66,16 @@ type importManager struct {
 	nextTaskID    int64                            // for generating next import task ID
 	lastReqID     int64                            // for generating a unique ID for import request
 
+	startOnce sync.Once
+
 	callImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
 }
 
 // newImportManager helper function to create a importManager
-func newImportManager(ctx context.Context, client kv.MetaKv, importService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse) *importManager {
-	ctx, cancel := context.WithCancel(ctx)
+func newImportManager(ctx context.Context, client kv.MetaKv,
+	importService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse) *importManager {
 	mgr := &importManager{
 		ctx:               ctx,
-		cancel:            cancel,
 		taskStore:         client,
 		pendingTasks:      make([]*datapb.ImportTaskInfo, 0, MaxPendingCount), // currently task queue max size is 32
 		workingTasks:      make(map[int64]*datapb.ImportTaskInfo),
@@ -86,16 +87,16 @@ func newImportManager(ctx context.Context, client kv.MetaKv, importService func(
 		lastReqID:         0,
 		callImportService: importService,
 	}
-
 	return mgr
 }
 
-func (m *importManager) init(ctx context.Context) error {
-	//  Read tasks from etcd and save them as pendingTasks or workingTasks.
-	m.load()
-	m.sendOutTasks(ctx)
-
-	return nil
+func (m *importManager) init(ctx context.Context) {
+	m.startOnce.Do(func() {
+		// Read tasks from Etcd and save them as pending tasks or working tasks.
+		m.loadFromTaskStore()
+		// Send out tasks to dataCoord.
+		m.sendOutTasks(ctx)
+	})
 }
 
 // sendOutTasks pushes all pending tasks to DataCoord, gets DataCoord response and re-add these tasks as working tasks.
@@ -108,6 +109,10 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 	// Trigger Import() action to DataCoord.
 	for len(m.pendingTasks) > 0 {
 		task := m.pendingTasks[0]
+		// Skip failed (mostly like expired) tasks.
+		if task.GetState().GetStateCode() == commonpb.ImportState_ImportFailed {
+			continue
+		}
 		it := &datapb.ImportTask{
 			CollectionId: task.GetCollectionId(),
 			PartitionId:  task.GetPartitionId(),
@@ -155,7 +160,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			log.Debug("import task added as working task", zap.Int64("task ID", it.TaskId))
 			task.State.StateCode = commonpb.ImportState_ImportPending
 			m.workingTasks[task.GetId()] = task
-			m.updateImportTask(task)
+			m.updateImportTaskStore(task)
 		}()
 	}
 
@@ -259,7 +264,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				m.nextTaskID++
 				log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 				m.pendingTasks = append(m.pendingTasks, newTask)
-				m.saveImportTask(newTask)
+				m.storeImportTask(newTask)
 			}
 			log.Info("row-based import request processed", zap.Int64("reqID", reqID), zap.Any("taskIDs", taskList))
 		} else {
@@ -280,7 +285,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			m.nextTaskID++
 			log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 			m.pendingTasks = append(m.pendingTasks, newTask)
-			m.saveImportTask(newTask)
+			m.storeImportTask(newTask)
 			log.Info("column-based import request processed", zap.Int64("reqID", reqID), zap.Int64("taskID", newTask.GetId()))
 		}
 	}()
@@ -288,8 +293,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 	return resp
 }
 
-// updateTaskState updates the task's state in task store given ImportResult result, and returns the ImportTaskInfo of
-// the given task.
+// updateTaskState updates the task's state in in-memory working tasks list and in task store, given ImportResult
+// result. It returns the ImportTaskInfo of the given task.
 func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.ImportTaskInfo, error) {
 	if ir == nil {
 		return nil, errors.New("import result is nil")
@@ -298,26 +303,29 @@ func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.I
 
 	found := false
 	var v *datapb.ImportTaskInfo
-	func() {
-		m.workingLock.Lock()
-		defer m.workingLock.Unlock()
-		ok := false
-		if v, ok = m.workingTasks[ir.TaskId]; ok {
-			found = true
-			v.State.StateCode = ir.GetState()
-			v.State.Segments = ir.GetSegments()
-			v.State.RowCount = ir.GetRowCount()
-			for _, kv := range ir.GetInfos() {
-				if kv.GetKey() == FailedReason {
-					v.State.ErrorMessage = kv.GetValue()
-					break
-				}
-			}
-			// Update task in task store.
-			m.updateImportTask(v)
+	m.workingLock.Lock()
+	defer m.workingLock.Unlock()
+	ok := false
+	if v, ok = m.workingTasks[ir.TaskId]; ok {
+		// If the task has already been marked failed. Prevent further state updating and return an error.
+		if v.GetState().GetStateCode() == commonpb.ImportState_ImportFailed {
+			log.Warn("trying to update an already failed task which will end up being a no-op")
+			return nil, errors.New("trying to update an already failed task " + strconv.FormatInt(ir.GetTaskId(), 10))
 		}
-		m.updateImportTask(v)
-	}()
+		found = true
+		v.State.StateCode = ir.GetState()
+		v.State.Segments = ir.GetSegments()
+		v.State.RowCount = ir.GetRowCount()
+		for _, kv := range ir.GetInfos() {
+			if kv.GetKey() == FailedReason {
+				v.State.ErrorMessage = kv.GetValue()
+				break
+			}
+		}
+		// Update task in task store.
+		m.updateImportTaskStore(v)
+	}
+	m.updateImportTaskStore(v)
 
 	if !found {
 		log.Debug("import manager update task import result failed", zap.Int64("taskID", ir.GetTaskId()))
@@ -379,8 +387,8 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 	return resp
 }
 
-// load Loads task info from task store when RootCoord (re)starts.
-func (m *importManager) load() error {
+// loadFromTaskStore loads task info from task store when RootCoord (re)starts.
+func (m *importManager) loadFromTaskStore() error {
 	log.Info("import manager starts loading from Etcd")
 	_, v, err := m.taskStore.LoadWithPrefix(Params.RootCoordCfg.ImportTaskSubPath)
 	if err != nil {
@@ -410,22 +418,21 @@ func (m *importManager) load() error {
 	return nil
 }
 
-// saveImportTask signs a lease and saves import task info into Etcd with this lease.
-func (m *importManager) saveImportTask(task *datapb.ImportTaskInfo) error {
-	log.Debug("saving import task to Etcd", zap.Int64("Task ID", task.GetId()))
-	// TODO: Change default lease time and read it into config, once we figure out a proper value.
-	// Sign a lease.
-	leaseID, err := m.taskStore.Grant(10800) /*3 hours*/
+// storeImportTask signs a lease and saves import task info into Etcd with this lease.
+func (m *importManager) storeImportTask(task *datapb.ImportTaskInfo) error {
+	log.Debug("saving import task to Etcd", zap.Int64("task ID", task.GetId()))
+	// Sign a lease. Tasks will be stored for at least `ImportTaskRetention` seconds.
+	leaseID, err := m.taskStore.Grant(int64(Params.RootCoordCfg.ImportTaskRetention))
 	if err != nil {
 		log.Error("failed to grant lease from Etcd for data import",
-			zap.Int64("Task ID", task.GetId()),
+			zap.Int64("task ID", task.GetId()),
 			zap.Error(err))
 		return err
 	}
-	log.Debug("lease granted for task", zap.Int64("Task ID", task.GetId()))
+	log.Debug("lease granted for task", zap.Int64("task ID", task.GetId()))
 	var taskInfo []byte
 	if taskInfo, err = proto.Marshal(task); err != nil {
-		log.Error("failed to marshall task proto", zap.Int64("Task ID", task.GetId()), zap.Error(err))
+		log.Error("failed to marshall task proto", zap.Int64("task ID", task.GetId()), zap.Error(err))
 		return err
 	} else if err = m.taskStore.SaveWithLease(BuildImportTaskKey(task.GetId()), string(taskInfo), leaseID); err != nil {
 		log.Error("failed to save import task info into Etcd",
@@ -433,12 +440,12 @@ func (m *importManager) saveImportTask(task *datapb.ImportTaskInfo) error {
 			zap.Error(err))
 		return err
 	}
-	log.Debug("task info successfully saved", zap.Int64("Task ID", task.GetId()))
+	log.Debug("task info successfully saved", zap.Int64("task ID", task.GetId()))
 	return nil
 }
 
-// updateImportTask updates the task info in Etcd according to task ID. It won't change the lease on the key.
-func (m *importManager) updateImportTask(ti *datapb.ImportTaskInfo) error {
+// updateImportTaskStore updates the task info in Etcd according to task ID. It won't change the lease on the key.
+func (m *importManager) updateImportTaskStore(ti *datapb.ImportTaskInfo) error {
 	log.Debug("updating import task info in Etcd", zap.Int64("Task ID", ti.GetId()))
 	if taskInfo, err := proto.Marshal(ti); err != nil {
 		log.Error("failed to marshall task info proto", zap.Int64("Task ID", ti.GetId()), zap.Error(err))
@@ -457,7 +464,63 @@ func (m *importManager) bringSegmentsOnline(ti *datapb.ImportTaskInfo) {
 	// TODO: Implement it.
 }
 
+// expireOldTasksLoop starts a loop that checks and expires old tasks every `ImportTaskExpiration` seconds.
+func (m *importManager) expireOldTasksLoop(wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000) * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			log.Info("(in loop) import manager context done, exit expireOldTasksLoop")
+			return
+		case <-ticker.C:
+			log.Info("(in loop) starting expiring old tasks...",
+				zap.Any("cleaning up interval", time.Duration(Params.RootCoordCfg.ImportTaskExpiration)))
+			m.expireOldTasks()
+		}
+	}
+}
+
+// expireOldTasks marks expires tasks as failed.
+func (m *importManager) expireOldTasks() {
+	// Expire old pending tasks, if any.
+	func() {
+		m.pendingLock.Lock()
+		defer m.pendingLock.Unlock()
+		for _, t := range m.pendingTasks {
+			if taskExpired(t) {
+				log.Info("a pending task has expired", zap.Any("task info", t))
+				t.State.StateCode = commonpb.ImportState_ImportFailed
+				t.State.ErrorMessage = taskExpiredMsgPrefix +
+					(time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000) * time.Millisecond).String()
+				m.updateImportTaskStore(t)
+			}
+		}
+	}()
+	// Expire old working tasks.
+	func() {
+		m.workingLock.Lock()
+		defer m.workingLock.Unlock()
+		for _, v := range m.workingTasks {
+			// Mark this expired task as failed.
+			if taskExpired(v) {
+				log.Info("a working task has expired", zap.Any("task info", v))
+				v.State.StateCode = commonpb.ImportState_ImportFailed
+				v.State.ErrorMessage = taskExpiredMsgPrefix +
+					(time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000) * time.Millisecond).String()
+				m.updateImportTaskStore(v)
+			}
+		}
+	}()
+}
+
 // BuildImportTaskKey constructs and returns an Etcd key with given task ID.
 func BuildImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s%s%d", Params.RootCoordCfg.ImportTaskSubPath, delimiter, taskID)
+}
+
+// taskExpired returns true if the task has already expired.
+func taskExpired(ti *datapb.ImportTaskInfo) bool {
+	return Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ti.GetCreateTs())
 }
