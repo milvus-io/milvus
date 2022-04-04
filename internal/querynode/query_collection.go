@@ -1333,6 +1333,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
+	log.Debug("retrieve result", zap.String("ids", result.Ids.String()))
 	reduceDuration := tr.Record(fmt.Sprintf("merge result done, msgID = %d", retrieveMsg.ID()))
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID), metrics.QueryLabel).Observe(float64(reduceDuration.Milliseconds()))
 

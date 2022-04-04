@@ -656,7 +656,7 @@ func TestQueryCollection_search(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestQueryCollection_receive(t *testing.T) {
+func TestQueryCollection_retrieve(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
@@ -676,12 +676,6 @@ func TestQueryCollection_receive(t *testing.T) {
 	assert.NoError(t, err)
 
 	queryCollection.vectorChunkManager = vecCM
-
-	err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
-	assert.NoError(t, err)
-
-	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
-	assert.NoError(t, err)
 
 	msg, err := genSimpleRetrieveMsg()
 	assert.NoError(t, err)
