@@ -241,23 +241,23 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	dsService.fg.AddNode(insertBufferNode)
 	dsService.fg.AddNode(deleteNode)
 
-	// ddStreamNode
-	err = dsService.fg.SetEdges(dmStreamNode.Name(),
+	// ddNode
+	err = dsService.fg.SetEdges(ddNode.Name(),
 		[]string{},
 		[]string{ddNode.Name()},
 	)
 	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", dmStreamNode.Name()), zap.Error(err))
+		log.Error("set edges failed in node", zap.String("name", ddNode.Name()), zap.Error(err))
 		return err
 	}
 
-	// ddNode
-	err = dsService.fg.SetEdges(ddNode.Name(),
+	// dmStreamNode
+	err = dsService.fg.SetEdges(dmStreamNode.Name(),
 		[]string{dmStreamNode.Name()},
 		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", ddNode.Name()), zap.Error(err))
+		log.Error("set edges failed in node", zap.String("name", dmStreamNode.Name()), zap.Error(err))
 		return err
 	}
 
