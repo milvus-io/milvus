@@ -13,6 +13,8 @@
 #include <chrono>
 
 class Timer {
+    using stdclock = std::chrono::high_resolution_clock;
+
  public:
     Timer() {
         reset();
@@ -20,32 +22,26 @@ class Timer {
 
     double
     get_overall_seconds() {
-        using namespace std::chrono;
-        auto now = high_resolution_clock::now();
+        auto now = stdclock::now();
         auto diff = now - init_record;
         step_record = now;
-        return (double)duration_cast<microseconds>(diff).count() * 1e-6;
+        return std::chrono::duration<double, std::micro>(diff).count() * 1e-6;
     }
 
     double
     get_step_seconds() {
-        using namespace std::chrono;
-        auto now = high_resolution_clock::now();
+        auto now = stdclock::now();
         auto diff = now - step_record;
         step_record = now;
-        return (double)duration_cast<microseconds>(diff).count() * 1e-6;
+        return std::chrono::duration<double, std::micro>(diff).count() * 1e-6;
     }
 
     void
     reset() {
-        using namespace std::chrono;
-        step_record = init_record = high_resolution_clock::now();
+        step_record = init_record = stdclock::now();
     }
 
  private:
-    using nanosecond_t = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
-
- private:
-    nanosecond_t init_record;
-    nanosecond_t step_record;
+    stdclock::time_point init_record;
+    stdclock::time_point step_record;
 };
