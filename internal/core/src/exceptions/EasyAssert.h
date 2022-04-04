@@ -35,9 +35,6 @@ EasyAssertInfo(bool value,
                std::string_view extra_info,
                ErrorCodeEnum error_code = ErrorCodeEnum::UnexpectedError);
 
-[[noreturn]] void
-ThrowWithTrace(const std::exception& exception);
-
 }  // namespace impl
 
 class SegcoreError : public std::runtime_error {
