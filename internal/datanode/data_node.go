@@ -35,12 +35,15 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -48,15 +51,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -117,11 +118,11 @@ type DataNode struct {
 
 	closer io.Closer
 
-	msFactory msgstream.Factory
+	factory dependency.Factory
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
+func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
@@ -131,7 +132,7 @@ func NewDataNode(ctx context.Context, factory msgstream.Factory) *DataNode {
 
 		rootCoord:          nil,
 		dataCoord:          nil,
-		msFactory:          factory,
+		factory:            factory,
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
@@ -217,11 +218,7 @@ func (node *DataNode) Init() error {
 		return err
 	}
 
-	if err := node.msFactory.Init(&Params); err != nil {
-		log.Warn("DataNode Init msFactory SetParams failed, use default",
-			zap.Error(err))
-		return err
-	}
+	node.factory.Init(&Params)
 	log.Info("DataNode Init successfully",
 		zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName))
 
@@ -464,13 +461,7 @@ func (node *DataNode) Start() error {
 		return errors.New("DataNode fail to connect etcd")
 	}
 
-	chunkManager, err := storage.NewMinioChunkManager(node.ctx,
-		storage.Address(Params.MinioCfg.Address),
-		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-		storage.UseSSL(Params.MinioCfg.UseSSL),
-		storage.BucketName(Params.MinioCfg.BucketName),
-		storage.CreateBucket(true))
+	chunkManager, err := node.factory.NewVectorStorageChunkManager(node.ctx)
 
 	if err != nil {
 		return err

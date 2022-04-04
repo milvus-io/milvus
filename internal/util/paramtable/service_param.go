@@ -36,15 +36,17 @@ const (
 type ServiceParam struct {
 	BaseTable
 
-	EtcdCfg    EtcdConfig
-	PulsarCfg  PulsarConfig
-	RocksmqCfg RocksmqConfig
-	MinioCfg   MinioConfig
+	LocalStorageCfg LocalStorageConfig
+	EtcdCfg         EtcdConfig
+	PulsarCfg       PulsarConfig
+	RocksmqCfg      RocksmqConfig
+	MinioCfg        MinioConfig
 }
 
 func (p *ServiceParam) Init() {
 	p.BaseTable.Init()
 
+	p.LocalStorageCfg.init(&p.BaseTable)
 	p.EtcdCfg.init(&p.BaseTable)
 	p.PulsarCfg.init(&p.BaseTable)
 	p.RocksmqCfg.init(&p.BaseTable)
@@ -143,6 +145,21 @@ func (p *EtcdConfig) initEtcdLogLevel() {
 
 func (p *EtcdConfig) initEtcdLogPath() {
 	p.EtcdLogPath = p.Base.LoadWithDefault("etcd.log.path", defaultEtcdLogPath)
+}
+
+type LocalStorageConfig struct {
+	Base *BaseTable
+
+	Path string
+}
+
+func (p *LocalStorageConfig) init(base *BaseTable) {
+	p.Base = base
+	p.initPath()
+}
+
+func (p *LocalStorageConfig) initPath() {
+	p.Path = p.Base.LoadWithDefault("localStorage.path", "/var/lib/milvus/data")
 }
 
 ///////////////////////////////////////////////////////////////////////////////

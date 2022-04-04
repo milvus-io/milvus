@@ -26,6 +26,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	"github.com/milvus-io/milvus/internal/indexnode"
@@ -35,11 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 func TestIndexCoord(t *testing.T) {
@@ -55,7 +57,8 @@ func TestIndexCoord(t *testing.T) {
 	assert.Nil(t, err)
 	err = inm0.Start()
 	assert.Nil(t, err)
-	ic, err := NewIndexCoord(ctx)
+	factory := dependency.NewDefaultFactory(true)
+	ic, err := NewIndexCoord(ctx, factory)
 	assert.Nil(t, err)
 	ic.reqTimeoutInterval = time.Second * 10
 	ic.durationInterval = time.Second
@@ -73,7 +76,7 @@ func TestIndexCoord(t *testing.T) {
 	err = inm0.Stop()
 	assert.Nil(t, err)
 
-	in, err := grpcindexnode.NewServer(ctx)
+	in, err := grpcindexnode.NewServer(ctx, factory)
 	assert.Nil(t, err)
 	assert.NotNil(t, in)
 	inm := &indexnode.Mock{

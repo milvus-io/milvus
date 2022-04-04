@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -53,8 +54,8 @@ const debug = false
 var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
 
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
-	msFactory := msgstream.NewRmsFactory()
-	node := NewDataNode(ctx, msFactory)
+	factory := dependency.NewDefaultFactory(true)
+	node := NewDataNode(ctx, factory)
 
 	rc := &RootCoordFactory{
 		ID:             0,
@@ -85,8 +86,8 @@ func newHEALTHDataNodeMock(dmChannelName string) *DataNode {
 		}()
 	}
 
-	msFactory := msgstream.NewPmsFactory()
-	node := NewDataNode(ctx, msFactory)
+	factory := dependency.NewDefaultFactory(true)
+	node := NewDataNode(ctx, factory)
 
 	ms := &RootCoordFactory{
 		ID:             0,
@@ -912,7 +913,7 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.
 
 // FailMessageStreamFactory mock MessageStreamFactory failure
 type FailMessageStreamFactory struct {
-	msgstream.Factory
+	dependency.Factory
 }
 
 func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {

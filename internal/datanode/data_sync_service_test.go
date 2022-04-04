@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
@@ -197,9 +198,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	assert.Nil(t, err)
 
 	allocFactory := NewAllocatorFactory(1)
-	msFactory := msgstream.NewPmsFactory()
-	err = msFactory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
 	insertChannelName := "data_sync_service_test_dml"
 	ddlChannelName := "data_sync_service_test_ddl"
@@ -229,7 +228,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan string, 100)
-	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, msFactory, vchan, signalCh, &DataCoordFactory{}, newCache(), cm, newCompactionExecutor())
+	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, factory, vchan, signalCh, &DataCoordFactory{}, newCache(), cm, newCompactionExecutor())
 
 	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)
@@ -276,10 +275,10 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	// pulsar produce
 	assert.NoError(t, err)
-	insertStream, _ := msFactory.NewMsgStream(ctx)
+	insertStream, _ := factory.NewMsgStream(ctx)
 	insertStream.AsProducer([]string{insertChannelName})
 
-	ddStream, _ := msFactory.NewMsgStream(ctx)
+	ddStream, _ := factory.NewMsgStream(ctx)
 	ddStream.AsProducer([]string{ddlChannelName})
 
 	var insertMsgStream msgstream.MsgStream = insertStream

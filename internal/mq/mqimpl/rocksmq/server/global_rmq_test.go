@@ -21,8 +21,9 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
 func Test_InitRmq(t *testing.T) {
@@ -51,12 +52,9 @@ func Test_InitRmq(t *testing.T) {
 }
 
 func Test_InitRocksMQ(t *testing.T) {
-	// Params.Init()
 	rmqPath := "/tmp/milvus/rdb_data_global"
-	err := os.Setenv("ROCKSMQ_PATH", rmqPath)
-	assert.Nil(t, err)
 	defer os.RemoveAll("/tmp/milvus")
-	err = InitRocksMQ()
+	err := InitRocksMQ(rmqPath)
 	defer Rmq.stopRetention()
 	assert.NoError(t, err)
 	defer CloseRocksMQ()
@@ -86,8 +84,7 @@ func Test_InitRocksMQError(t *testing.T) {
 	f, err := os.Create(dummyPath)
 	defer f.Close()
 	assert.NoError(t, err)
-	os.Setenv("ROCKSMQ_PATH", dummyPath)
 	defer os.RemoveAll(dir)
-	err = InitRocksMQ()
+	err = InitRocksMQ(dummyPath)
 	assert.Error(t, err)
 }

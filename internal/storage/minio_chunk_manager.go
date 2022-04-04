@@ -50,6 +50,10 @@ func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManag
 	for _, opt := range opts {
 		opt(c)
 	}
+
+	return newMinioChunkManagerWithConfig(ctx, c)
+}
+func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
 	minIOClient, err := minio.New(c.address, &minio.Options{
 		Creds:  credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, ""),
 		Secure: c.useSSL,

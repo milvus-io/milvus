@@ -20,15 +20,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/indexnode"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestGetSystemInfoMetrics(t *testing.T) {
 	ctx := context.Background()
-	ic, err := NewIndexCoord(ctx)
+	factory := dependency.NewDefaultFactory(true)
+	ic, err := NewIndexCoord(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()
 

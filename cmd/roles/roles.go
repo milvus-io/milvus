@@ -28,8 +28,11 @@ import (
 	"time"
 
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"go.uber.org/zap"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
@@ -38,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/querycoord"
@@ -46,12 +48,11 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/healthz"
-	logutil "github.com/milvus-io/milvus/internal/util/logutil"
+	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 var Params paramtable.ComponentParam
@@ -63,21 +64,6 @@ func init() {
 	Registry = prometheus.NewRegistry()
 	Registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	Registry.MustRegister(prometheus.NewGoCollector())
-}
-
-func newMsgFactory(localMsg bool) msgstream.Factory {
-	if localMsg {
-		if Params.RocksmqEnable() {
-			return msgstream.NewRmsFactory()
-		}
-		return msgstream.NewPmsFactory()
-	}
-	return msgstream.NewPmsFactory()
-}
-
-func initRocksmq() error {
-	err := rocksmqimpl.InitRocksMQ()
-	return err
 }
 
 func stopRocksmq() {
@@ -115,8 +101,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 		} else {
 			rootcoord.Params.SetLogConfig(typeutil.RootCoordRole)
 		}
-
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
 		if err != nil {
@@ -148,7 +133,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 			proxy.Params.SetLogConfig(typeutil.ProxyRole)
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
 		if err != nil {
@@ -179,7 +164,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 			querycoord.Params.SetLogConfig(typeutil.QueryCoordRole)
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
 		if err != nil {
@@ -211,7 +196,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 			querynode.Params.SetLogConfig(typeutil.QueryNodeRole)
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
 		if err != nil {
@@ -242,7 +227,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 			datacoord.Params.SetLogConfig(typeutil.DataCoordRole)
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 
 		dctx := logutil.WithModule(ctx, "DataCoord")
 		var err error
@@ -276,7 +261,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 			datanode.Params.SetLogConfig(typeutil.DataNodeRole)
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
 		if err != nil {
@@ -307,8 +292,10 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 			indexcoord.Params.SetLogConfig(typeutil.IndexCoordRole)
 		}
 
+		factory := dependency.NewDefaultFactory(localMsg)
+
 		var err error
-		is, err = components.NewIndexCoord(ctx)
+		is, err = components.NewIndexCoord(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -338,8 +325,10 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 			indexnode.Params.SetLogConfig(typeutil.IndexNodeRole)
 		}
 
+		factory := dependency.NewDefaultFactory(localMsg)
+
 		var err error
-		in, err = components.NewIndexNode(ctx)
+		in, err = components.NewIndexNode(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -366,7 +355,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 		Params.Init()
 
-		if err := initRocksmq(); err != nil {
+		path, _ := Params.Load("_RocksmqPath")
+		err := rocksmqimpl.InitRocksMQ(path)
+		if err != nil {
 			panic(err)
 		}
 		defer stopRocksmq()

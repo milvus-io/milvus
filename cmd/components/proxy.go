@@ -21,9 +21,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // Proxy implements Proxy grpc server
@@ -32,7 +32,7 @@ type Proxy struct {
 }
 
 // NewProxy creates a new Proxy
-func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	var err error
 	n := &Proxy{}
 

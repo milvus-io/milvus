@@ -19,11 +19,15 @@ package msgstream
 import (
 	"context"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+
 	puslarmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 )
@@ -37,12 +41,12 @@ type PmsFactory struct {
 	PulsarBufSize  int64
 }
 
-// Init is used to set parameters for PmsFactory
-func (f *PmsFactory) Init(params *paramtable.ComponentParam) error {
-	f.PulsarBufSize = 1024
-	f.ReceiveBufSize = 1024
-	f.PulsarAddress = params.PulsarCfg.Address
-	return nil
+func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
+	return &PmsFactory{
+		PulsarBufSize:  1024,
+		ReceiveBufSize: 1024,
+		PulsarAddress:  config.Address,
+	}
 }
 
 // NewMsgStream is used to generate a new Msgstream object
@@ -68,29 +72,12 @@ func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return f.NewMsgStream(ctx)
 }
 
-// NewPmsFactory is used to generate a new PmsFactory object
-func NewPmsFactory() Factory {
-	f := &PmsFactory{
-		dispatcherFactory: ProtoUDFactory{},
-		ReceiveBufSize:    64,
-		PulsarBufSize:     64,
-	}
-	return f
-}
-
 // RmsFactory is a rocksmq msgstream factory that implemented Factory interface(msgstream.go)
 type RmsFactory struct {
 	dispatcherFactory ProtoUDFactory
 	// the following members must be public, so that mapstructure.Decode() can access them
 	ReceiveBufSize int64
 	RmqBufSize     int64
-}
-
-// Init is used to set parameters for RmsFactory
-func (f *RmsFactory) Init(params *paramtable.ComponentParam) error {
-	f.RmqBufSize = 1024
-	f.ReceiveBufSize = 1024
-	return nil
 }
 
 // NewMsgStream is used to generate a new Msgstream object
@@ -121,13 +108,15 @@ func (f *RmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 }
 
 // NewRmsFactory is used to generate a new RmsFactory object
-func NewRmsFactory() Factory {
+func NewRmsFactory(path string) *RmsFactory {
 	f := &RmsFactory{
 		dispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    1024,
 		RmqBufSize:        1024,
 	}
-
-	rmqimplserver.InitRocksMQ()
+	err := rmqimplserver.InitRocksMQ(path)
+	if err != nil {
+		log.Error("init rmq error", zap.Error(err))
+	}
 	return f
 }

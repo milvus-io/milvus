@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,9 +31,8 @@ func TestStatsService_start(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, 0, 0)
 
-	msFactory := msgstream.NewPmsFactory()
-	msFactory.Init(&Params)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, msFactory)
+	factory := dependency.NewDefaultFactory(true)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, factory)
 	node.statsService.start()
 	node.Stop()
 }
@@ -48,17 +49,15 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 	// start pulsar
 	producerChannels := []string{Params.CommonCfg.QueryNodeStats}
 
-	msFactory := msgstream.NewPmsFactory()
-	err = msFactory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
-	statsStream, err := msFactory.NewMsgStream(node.queryNodeLoopCtx)
+	statsStream, err := factory.NewMsgStream(node.queryNodeLoopCtx)
 	assert.Nil(t, err)
 	statsStream.AsProducer(producerChannels)
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, msFactory)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, factory)
 	node.statsService.statsStream = statsMsgStream
 	node.statsService.statsStream.Start()
 

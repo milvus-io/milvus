@@ -63,13 +63,10 @@ func loadFields(segment *Segment, DIM int, N int) error {
 
 func sendSearchRequest(ctx context.Context, DIM int) error {
 	// init message stream
-	msFactory, err := newMessageStreamFactory()
-	if err != nil {
-		return err
-	}
+	factory := newMessageStreamFactory()
 	searchProducerChannels := []string{"test-query"}
 
-	searchStream, _ := msFactory.NewMsgStream(ctx)
+	searchStream, _ := factory.NewMsgStream(ctx)
 	searchStream.AsProducer(searchProducerChannels)
 	searchStream.Start()
 
@@ -142,17 +139,18 @@ func TestSearch_Search(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, collectionID, UniqueID(0))
 
-	msFactory, err := newMessageStreamFactory()
-	assert.NoError(t, err)
-
 	// start search service
+	fac := genFactory()
 	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
-		msFactory)
+		node.vectorStorage,
+		node.cacheStorage,
+		fac,
+	)
 
 	// load segment
-	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
+	err := node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
 	assert.NoError(t, err)
 	segment, err := node.historical.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
@@ -185,21 +183,22 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	node := newQueryNodeMock()
 	initTestMeta(t, node, collectionID, UniqueID(0))
 
-	msFactory, err := newMessageStreamFactory()
-	assert.NoError(t, err)
-
 	// start search service
+	fac := genFactory()
 	node.queryService = newQueryService(node.queryNodeLoopCtx,
 		node.historical,
 		node.streaming,
-		msFactory)
+		node.vectorStorage,
+		node.cacheStorage,
+		fac,
+	)
 	node.queryService.addQueryCollection(collectionID)
 	//err = node.queryService.addQueryCollection(collectionID)
 	//TODO: Why error
 	//assert.Error(t, err)
 
 	// load segments
-	err = node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
+	err := node.historical.replica.addSegment(segmentID1, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
 	assert.NoError(t, err)
 	segment1, err := node.historical.replica.getSegmentByID(segmentID1)
 	assert.NoError(t, err)
@@ -233,11 +232,14 @@ func TestQueryService_addQueryCollection(t *testing.T) {
 	str, err := genSimpleStreaming(ctx, tSafe)
 	assert.NoError(t, err)
 
-	fac, err := genFactory()
-	assert.NoError(t, err)
+	fac := genFactory()
 
+	vectorStorage, err := fac.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	cacheStorage, err := fac.NewCacheStorageChunkManager(ctx)
+	assert.NoError(t, err)
 	// start search service
-	qs := newQueryService(ctx, his, str, fac)
+	qs := newQueryService(ctx, his, str, vectorStorage, cacheStorage, fac)
 	assert.NotNil(t, qs)
 
 	err = qs.addQueryCollection(defaultCollectionID)

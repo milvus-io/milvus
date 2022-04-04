@@ -32,6 +32,9 @@ etcd:
   use:
     embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
 
+localStorage:
+  path: /var/lib/milvus/data/
+
 # Related configuration of minio, which is responsible for data persistence for Milvus.
 minio:
   address: localhost # Address of MinIO/S3
@@ -159,8 +162,9 @@ queryNode:
   segcore:
     chunkRows: 32768 # The number of vectors in a chunk.
 
-  chunkManager:
-    localFileCacheLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
+  cache:
+    enabled: true
+    memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
 
 
 indexCoord:
@@ -226,11 +230,6 @@ dataNode:
     # Max buffer size to flush for a single segment.
     insertBufSize: 16777216 # Bytes, 16 MB
 
-# Configure whether to store the vector and the local path when querying/searching in Querynode.
-localStorage:
-  path: /var/lib/milvus/data/
-  enabled: true
-
 # Configures the system log output.
 log:
   level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
@@ -275,3 +274,7 @@ common:
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
   simdType: auto
+
+  storage:
+    vector: minio
+

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -144,7 +145,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 
 		for _, test := range tests {
 			te.Run(test.description, func(t *testing.T) {
-				factory := msgstream.NewPmsFactory()
+				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
 				ddn := ddNode{
@@ -204,7 +205,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		for _, test := range tests {
 			te.Run(test.description, func(t *testing.T) {
 				fs := &datapb.SegmentInfo{ID: test.ddnFlushedSegment}
-				factory := msgstream.NewPmsFactory()
+				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
 				// Prepare ddNode states
@@ -250,7 +251,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 
 		for _, test := range tests {
 			te.Run(test.description, func(t *testing.T) {
-				factory := msgstream.NewPmsFactory()
+				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
 				// Prepare ddNode states
@@ -312,7 +313,7 @@ func TestFlowGraph_DDNode_filterMessages(te *testing.T) {
 				s := &datapb.SegmentInfo{ID: id}
 				fs = append(fs, s)
 			}
-			factory := msgstream.NewPmsFactory()
+			factory := dependency.NewDefaultFactory(true)
 			deltaStream, err := factory.NewMsgStream(context.Background())
 			assert.Nil(t, err)
 			// Prepare ddNode states
@@ -376,7 +377,7 @@ func TestFlowGraph_DDNode_isFlushed(te *testing.T) {
 				s := &datapb.SegmentInfo{ID: id}
 				fs = append(fs, s)
 			}
-			factory := msgstream.NewPmsFactory()
+			factory := dependency.NewDefaultFactory(true)
 			deltaStream, err := factory.NewMsgStream(context.Background())
 			assert.Nil(t, err)
 			ddn := &ddNode{flushedSegments: fs, deltaMsgStream: deltaStream}

@@ -29,7 +29,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/golang/protobuf/proto"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -57,8 +62,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // UniqueID is an alias of typeutil.UniqueID.
@@ -178,7 +181,7 @@ type Core struct {
 
 	session *sessionutil.Session
 
-	msFactory ms.Factory
+	factory dependency.Factory
 
 	//import manager
 	importManager *importManager
@@ -187,14 +190,14 @@ type Core struct {
 // --------------------- function --------------------------
 
 // NewCore creates a new rootcoord core
-func NewCore(c context.Context, factory ms.Factory) (*Core, error) {
+func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	core := &Core{
-		ctx:       ctx,
-		cancel:    cancel,
-		ddlLock:   sync.Mutex{},
-		msFactory: factory,
+		ctx:     ctx,
+		cancel:  cancel,
+		ddlLock: sync.Mutex{},
+		factory: factory,
 	}
 	core.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return core, nil
@@ -475,7 +478,7 @@ func (c *Core) setMsgStreams() error {
 	if Params.CommonCfg.RootCoordTimeTick == "" {
 		return fmt.Errorf("timeTickChannel is empty")
 	}
-	timeTickStream, _ := c.msFactory.NewMsgStream(c.ctx)
+	timeTickStream, _ := c.factory.NewMsgStream(c.ctx)
 	metrics.RootCoordNumOfMsgStream.Inc()
 	timeTickStream.AsProducer([]string{Params.CommonCfg.RootCoordTimeTick})
 	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.CommonCfg.RootCoordTimeTick))
@@ -1126,12 +1129,10 @@ func (c *Core) Init() error {
 			return tsoAllocator.GetLastSavedTime()
 		}
 
-		if initError = c.msFactory.Init(&Params); initError != nil {
-			return
-		}
+		c.factory.Init(&Params)
 
 		chanMap := c.MetaTable.ListCollectionPhysicalChannels()
-		c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.msFactory, chanMap)
+		c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
 		c.chanTimeTick.addSession(c.session)
 		c.proxyClientManager = newProxyClientManager(c)
 

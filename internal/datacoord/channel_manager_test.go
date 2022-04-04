@@ -26,9 +26,11 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"stathat.com/c/consistent"
@@ -227,7 +229,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 
 		metakv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		factory := msgstream.NewRmsFactory()
+		factory := dependency.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
 		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
@@ -445,7 +447,7 @@ func TestChannelManager(t *testing.T) {
 			{false, UniqueID(9), "invalid-chan"},
 		}
 
-		factory := msgstream.NewRmsFactory()
+		factory := dependency.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
 		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))

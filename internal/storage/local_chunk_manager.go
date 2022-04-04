@@ -25,8 +25,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"golang.org/x/exp/mmap"
+
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 )
 
 // LocalChunkManager is responsible for read and write local file.

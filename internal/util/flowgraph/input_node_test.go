@@ -21,26 +21,22 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 func TestInputNode(t *testing.T) {
 	os.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestInputNode")
-	msFactory := msgstream.NewRmsFactory()
-	var Params paramtable.ComponentParam
-	err := msFactory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
-	msgStream, _ := msFactory.NewMsgStream(context.TODO())
+	msgStream, _ := factory.NewMsgStream(context.TODO())
 	channels := []string{"cc"}
 	msgStream.AsConsumer(channels, "sub")
 	msgStream.Start()
 
 	msgPack := generateMsgPack()
-	produceStream, _ := msFactory.NewMsgStream(context.TODO())
+	produceStream, _ := factory.NewMsgStream(context.TODO())
 	produceStream.AsProducer(channels)
 	produceStream.Produce(&msgPack)
 

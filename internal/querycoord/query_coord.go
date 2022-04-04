@@ -30,23 +30,24 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -98,7 +99,7 @@ type QueryCoord struct {
 
 	stateCode atomic.Value
 
-	msFactory    msgstream.Factory
+	factory      dependency.Factory
 	chunkManager storage.ChunkManager
 }
 
@@ -160,14 +161,14 @@ func (qc *QueryCoord) Init() error {
 		}
 
 		// init meta
-		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.msFactory, qc.idAllocator)
+		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.factory, qc.idAllocator)
 		if initError != nil {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
 			return
 		}
 
 		// init channelUnsubscribeHandler
-		qc.handler, initError = newChannelUnsubscribeHandler(qc.loopCtx, qc.kvClient, qc.msFactory)
+		qc.handler, initError = newChannelUnsubscribeHandler(qc.loopCtx, qc.kvClient, qc.factory)
 		if initError != nil {
 			log.Error("query coordinator init channelUnsubscribeHandler failed", zap.Error(initError))
 			return
@@ -180,13 +181,7 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 
-		qc.chunkManager, initError = storage.NewMinioChunkManager(qc.loopCtx,
-			storage.Address(Params.MinioCfg.Address),
-			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-			storage.UseSSL(Params.MinioCfg.UseSSL),
-			storage.BucketName(Params.MinioCfg.BucketName),
-			storage.CreateBucket(true))
+		qc.chunkManager, initError = qc.factory.NewVectorStorageChunkManager(qc.loopCtx)
 
 		if initError != nil {
 			log.Error("query coordinator init cluster failed", zap.Error(initError))
@@ -222,10 +217,7 @@ func (qc *QueryCoord) Init() error {
 
 // Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
-	err := qc.msFactory.Init(&Params)
-	if err != nil {
-		return err
-	}
+	qc.factory.Init(&Params)
 	qc.scheduler.Start()
 	log.Debug("start scheduler ...")
 
@@ -289,13 +281,13 @@ func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 }
 
 // NewQueryCoord creates a QueryCoord object.
-func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	service := &QueryCoord{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
-		msFactory:  factory,
+		factory:    factory,
 		newNodeFn:  newQueryNode,
 	}
 

@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
@@ -48,7 +48,7 @@ func Test_HandlerReloadFromKV(t *testing.T) {
 	err = kv.Save(channelInfoKey, string(channelInfoBytes))
 	assert.Nil(t, err)
 
-	factory := msgstream.NewPmsFactory()
+	factory := dependency.NewDefaultFactory(true)
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(handler.downNodeChan))
@@ -63,7 +63,7 @@ func Test_AddUnsubscribeChannelInfo(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	factory := msgstream.NewPmsFactory()
+	factory := dependency.NewDefaultFactory(true)
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
 
@@ -95,8 +95,7 @@ func Test_HandleChannelUnsubscribeLoop(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	factory := msgstream.NewPmsFactory()
-	factory.Init(&Params)
+	factory := dependency.NewDefaultFactory(true)
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
 

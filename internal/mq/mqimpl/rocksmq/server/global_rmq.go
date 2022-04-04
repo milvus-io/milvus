@@ -47,16 +47,15 @@ func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 }
 
 // InitRocksMQ init global rocksmq single instance
-func InitRocksMQ() error {
+func InitRocksMQ(path string) error {
 	var finalErr error
 	once.Do(func() {
 		params.Init()
-		rocksdbName, _ := params.Load("_RocksmqPath")
-		log.Debug("initializing global rmq", zap.String("path", rocksdbName))
+		log.Debug("initializing global rmq", zap.String("path", path))
 		var fi os.FileInfo
-		fi, finalErr = os.Stat(rocksdbName)
+		fi, finalErr = os.Stat(path)
 		if os.IsNotExist(finalErr) {
-			finalErr = os.MkdirAll(rocksdbName, os.ModePerm)
+			finalErr = os.MkdirAll(path, os.ModePerm)
 			if finalErr != nil {
 				return
 			}
@@ -97,7 +96,7 @@ func InitRocksMQ() error {
 		}
 		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
 			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
-		Rmq, finalErr = NewRocksMQ(rocksdbName, nil)
+		Rmq, finalErr = NewRocksMQ(path, nil)
 	})
 	return finalErr
 }

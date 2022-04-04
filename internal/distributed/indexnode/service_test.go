@@ -20,21 +20,24 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/assert"
 )
 
 var ParamsGlobal paramtable.ComponentParam
 
 func TestIndexNodeServer(t *testing.T) {
 	ctx := context.Background()
-	server, err := NewServer(ctx)
+	factory := dependency.NewDefaultFactory(true)
+	server, err := NewServer(ctx, factory)
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 

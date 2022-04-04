@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -57,10 +58,7 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		return nil, err
 	}
 
-	fac, err := genFactory()
-	if err != nil {
-		return nil, err
-	}
+	fac := genFactory()
 
 	localCM, err := genLocalChunkManager()
 	if err != nil {
@@ -79,7 +77,7 @@ func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*
 		fac,
 		localCM,
 		remoteCM,
-		false)
+	)
 	return queryCollection, err
 }
 
@@ -125,9 +123,7 @@ func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {
 	ctx := context.Background()
-	factory := msgstream.NewPmsFactory()
-	err := factory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
@@ -168,7 +164,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 	assert.Nil(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	queryCollection, err := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil, false)
+	queryCollection, err := newQueryCollection(ctx, cancel, 0, historical, streaming, factory, nil, nil)
 	assert.NoError(t, err)
 
 	// producerChannels := []string{"testResultChannel"}
