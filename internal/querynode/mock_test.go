@@ -1459,8 +1459,8 @@ func genSimpleRetrievePlanExpr() ([]byte, error) {
 				Expr: &planpb.Expr_TermExpr{
 					TermExpr: &planpb.TermExpr{
 						ColumnInfo: &planpb.ColumnInfo{
-							FieldId:  simpleConstField.id,
-							DataType: simpleConstField.dataType,
+							FieldId:  simplePKField.id,
+							DataType: simplePKField.dataType,
 						},
 						Values: []*planpb.GenericValue{
 							{
@@ -1483,7 +1483,7 @@ func genSimpleRetrievePlanExpr() ([]byte, error) {
 				},
 			},
 		},
-		OutputFieldIds: []int64{simpleConstField.id},
+		OutputFieldIds: []int64{simplePKField.id},
 	}
 	planExpr, err := proto.Marshal(planNode)
 	return planExpr, err
