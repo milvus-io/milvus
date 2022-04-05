@@ -18,9 +18,8 @@ set(CONFIG_SRC
         ConfigKnowhere.cpp
         )
 
-add_library(milvus_config
-        ${CONFIG_SRC}
-        )
+add_library(milvus_config STATIC ${CONFIG_SRC})
+
 target_link_libraries(milvus_config
         knowhere
         milvus_proto

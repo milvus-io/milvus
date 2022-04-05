@@ -11,8 +11,6 @@
 
 #pragma once
 
-// #include <faiss/Index.h>
-
 #include <cstdint>
 #include <map>
 #include <memory>
