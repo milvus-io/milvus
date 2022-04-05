@@ -105,6 +105,9 @@ func (s *Server) startHTTPServer(port int) {
 		gin.DefaultWriter = io.Discard
 		gin.DefaultErrorWriter = io.Discard
 	}
+	if !HTTPParams.DebugMode {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	ginHandler := gin.Default()
 	apiv1 := ginHandler.Group("/api/v1")
 	httpserver.NewHandlers(s.proxy).RegisterRoutesTo(apiv1)
