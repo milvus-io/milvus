@@ -54,13 +54,4 @@ EasyAssertInfo(bool value,
     }
 }
 
-[[noreturn]] void
-ThrowWithTrace(const std::exception& exception) {
-    if (typeid(exception) == typeid(SegcoreError)) {
-        throw exception;
-    }
-    auto err_msg = exception.what() + std::string("\n") + EasyStackTrace();
-    throw SegcoreError(ErrorCodeEnum::UnexpectedError, err_msg);
-}
-
 }  // namespace milvus::impl
