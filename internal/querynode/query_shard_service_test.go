@@ -24,8 +24,8 @@ import (
 )
 
 func TestQueryShardService(t *testing.T) {
-	qss := newQueryShardService(context.Background())
-	err := qss.addQueryShard(0, "vchan1")
+	qss := newQueryShardService(context.Background(), nil, nil)
+	err := qss.addQueryShard(0, "vchan1", 0)
 	assert.NoError(t, err)
 	found1 := qss.hasQueryShard("vchan1")
 	assert.Equal(t, true, found1)

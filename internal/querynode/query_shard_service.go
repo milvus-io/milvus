@@ -20,7 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type queryShardService struct {
@@ -29,19 +32,45 @@ type queryShardService struct {
 
 	queryShardsMu sync.Mutex              // guards queryShards
 	queryShards   map[Channel]*queryShard // Virtual Channel -> *queryShard
+
+	historical *historical
+	streaming  *streaming
+
+	localChunkManager  storage.ChunkManager
+	remoteChunkManager storage.ChunkManager
+	localCacheEnabled  bool
 }
 
-func newQueryShardService(ctx context.Context) *queryShardService {
+func newQueryShardService(ctx context.Context, historical *historical, streaming *streaming) *queryShardService {
 	queryShardServiceCtx, queryShardServiceCancel := context.WithCancel(ctx)
+
+	path := Params.LoadWithDefault("localStorage.Path", "/tmp/milvus/data")
+	enabled, _ := Params.Load("localStorage.enabled")
+	localCacheEnabled, _ := strconv.ParseBool(enabled)
+	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(path))
+	remoteChunkManager, _ := storage.NewMinioChunkManager(
+		ctx,
+		storage.Address(Params.MinioCfg.Address),
+		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+		storage.UseSSL(Params.MinioCfg.UseSSL),
+		storage.BucketName(Params.MinioCfg.BucketName),
+		storage.CreateBucket(true))
+
 	qss := &queryShardService{
-		ctx:         queryShardServiceCtx,
-		cancel:      queryShardServiceCancel,
-		queryShards: make(map[Channel]*queryShard),
+		ctx:                queryShardServiceCtx,
+		cancel:             queryShardServiceCancel,
+		queryShards:        make(map[Channel]*queryShard),
+		historical:         historical,
+		streaming:          streaming,
+		localChunkManager:  localChunkManager,
+		remoteChunkManager: remoteChunkManager,
+		localCacheEnabled:  localCacheEnabled,
 	}
 	return qss
 }
 
-func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel) error {
+func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel, replicaID int64) error {
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
 	if _, ok := q.queryShards[channel]; ok {
@@ -51,6 +80,13 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 		q.ctx,
 		collectionID,
 		channel,
+		replicaID,
+		nil,
+		q.historical,
+		q.streaming,
+		q.localChunkManager,
+		q.remoteChunkManager,
+		q.localCacheEnabled,
 	)
 	q.queryShards[channel] = qs
 	return nil
