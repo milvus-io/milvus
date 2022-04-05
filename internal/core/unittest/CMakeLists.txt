@@ -99,3 +99,6 @@ target_link_libraries(all_tests
 
 install(TARGETS all_tests DESTINATION unittest)
 
+if (LINUX)
+    add_subdirectory(bench)
+endif ()
