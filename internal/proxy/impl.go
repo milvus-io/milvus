@@ -2547,6 +2547,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "server search"),
 		zap.Int64(log.BenchmarkCollectionID, qt.CollectionID),
 		zap.Int64(log.BenchmarkMsgID, qt.ID()), zap.Int64(log.BenchmarkDuration, searchDur.Microseconds()))
+
+	metrics.ProxyServerSearch.WithLabelValues(strconv.FormatInt(qt.CollectionID, 10)).Set(float64(searchDur.Microseconds()))
 	return qt.result, nil
 }
 
