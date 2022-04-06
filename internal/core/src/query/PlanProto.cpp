@@ -338,6 +338,18 @@ ProtoParser::ParseBinaryExpr(const proto::plan::BinaryExpr& expr_pb) {
 }
 
 ExprPtr
+ProtoParser::ParseMatchExpr(const proto::plan::MatchExpr& expr_pb) {
+    auto& columnInfo = expr_pb.column_info();
+    auto field_id = FieldId(columnInfo.field_id());
+    auto field_offset = schema.get_offset(field_id);
+    auto data_type = schema[field_offset].get_data_type();
+    Assert(data_type == (DataType)columnInfo.data_type());
+    AssertInfo(data_type == (DataType)(proto::schema::VarChar), "match expr only supports string");
+
+    return milvus::query::ExprPtr();
+}
+
+ExprPtr
 ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
     using ppe = proto::plan::Expr;
     switch (expr_pb.expr_case()) {
@@ -358,6 +370,9 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         }
         case ppe::kCompareExpr: {
             return ParseCompareExpr(expr_pb.compare_expr());
+        }
+        case ppe::kMatchExpr: {
+            return ParseMatchExpr(expr_pb.match_expr());
         }
         default:
             PanicInfo("unsupported expr proto node");

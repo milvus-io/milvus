@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <utility>
 #include <boost/variant.hpp>
+#include <index/StringIndex.h>
 
 #include "query/ExprImpl.h"
 #include "query/generated/ExecExprVisitor.h"
@@ -291,6 +292,7 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
             res = ExecUnaryRangeVisitorDispatcher<double>(expr);
             break;
         }
+        // TODO: string & varchar.
         default:
             PanicInfo("unsupported");
     }
@@ -332,6 +334,7 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
         case DataType::DOUBLE: {
             res = ExecBinaryRangeVisitorDispatcher<double>(expr);
             break;
+            // TODO: string & varchar.
         }
         default:
             PanicInfo("unsupported");
@@ -393,6 +396,7 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
                     auto chunk_data = segment_.chunk_data<double>(offset, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
+                // TODO: stirng & varchar.
                 default:
                     PanicInfo("unsupported datatype");
             }
@@ -541,7 +545,67 @@ ExecExprVisitor::visit(TermExpr& expr) {
             res = ExecTermVisitorImpl<double>(expr);
             break;
         }
+        // TODO: string & varchar.
         default:
+            PanicInfo("unsupported");
+    }
+    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    bitset_opt_ = std::move(res);
+}
+
+template <typename T>
+auto
+ExecExprVisitor::ExecMatchVisitorDispatcher(MatchExpr& expr_raw) -> BitsetType {
+    PanicInfo("unsupported match node");
+}
+
+static inline bool
+prefix_match(const std::string& str, const std::string& prefix) {
+    if (prefix.length() > str.length()) {
+        return false;
+    }
+    for (int i = 0; i < prefix.length(); i++) {
+        if (prefix[i] != str[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <>
+auto
+ExecExprVisitor::ExecMatchVisitorDispatcher<std::string>(MatchExpr& expr_raw) -> BitsetType {
+    using T = std::string;
+    auto& expr = static_cast<MatchExprImpl<T>&>(expr_raw);
+    using Operator = scalar::OperatorType;
+    auto op = expr.op_type_;
+    auto val = expr.value_;
+
+    if (op == OpType::PrefixMatch) {
+        using Index = scalar::ScalarIndex<T>;
+        auto index_func = [val](Index* index) {
+            auto dataset = std::make_unique<knowhere::Dataset>();
+            dataset->Set(scalar::OPERATOR_TYPE, Operator::PrefixMatchOp);
+            dataset->Set(scalar::PREFIX_VALUE, val);
+            return index->Query(std::move(dataset));
+        };
+        auto elem_func = [val](T x) { return prefix_match(x, val); };
+        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+    }
+
+    PanicInfo("unsupported match node");
+}
+
+void
+ExecExprVisitor::visit(MatchExpr& expr) {
+    auto& field_meta = segment_.get_schema()[expr.field_offset_];
+    AssertInfo(expr.data_type_ == field_meta.get_data_type(),
+               "[ExecExprVisitor]DataType of expr isn't field_meta data type ");
+    BitsetType res;
+    switch (expr.data_type_) {
+        default:
+            // TODO: string & varchar.
+            ExecMatchVisitorDispatcher<std::string>(expr);
             PanicInfo("unsupported");
     }
     AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");

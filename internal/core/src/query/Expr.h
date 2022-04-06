@@ -110,6 +110,8 @@ enum class OpType {
     LessEqual = 4,
     Equal = 5,
     NotEqual = 6,
+    PrefixMatch = 7,
+    PostfixMatch = 8,
 };
 
 static const std::map<std::string, OpType> mapping_ = {
@@ -168,6 +170,22 @@ struct CompareExpr : Expr {
     DataType left_data_type_;
     DataType right_data_type_;
     OpType op_type_;
+
+ public:
+    void
+    accept(ExprVisitor&) override;
+};
+
+struct MatchExpr : Expr {
+    const FieldOffset field_offset_;
+    const DataType data_type_;
+    const OpType op_type_;
+
+ protected:
+    MatchExpr() = delete;
+    MatchExpr(const FieldOffset field_offset, const DataType data_type, const OpType op_type)
+        : field_offset_(field_offset), data_type_(data_type), op_type_(op_type) {
+    }
 
  public:
     void

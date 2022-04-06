@@ -248,4 +248,9 @@ ShowExprVisitor::visit(CompareExpr& expr) {
     json_opt_ = res;
 }
 
+void
+ShowExprVisitor::visit(MatchExpr& expr) {
+    // TODO
+}
+
 }  // namespace milvus::query

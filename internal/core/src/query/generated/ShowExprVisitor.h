@@ -37,6 +37,9 @@ class ShowExprVisitor : public ExprVisitor {
     void
     visit(CompareExpr& expr) override;
 
+    void
+    visit(MatchExpr& expr) override;
+
  public:
     Json
     call_child(Expr& expr) {

@@ -41,6 +41,9 @@ class ExecExprVisitor : public ExprVisitor {
     void
     visit(CompareExpr& expr) override;
 
+    void
+    visit(MatchExpr& expr) override;
+
  public:
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
         : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
@@ -57,6 +60,7 @@ class ExecExprVisitor : public ExprVisitor {
     }
 
  public:
+    // TODO: rename this. In fact every expr can be executed this way.
     template <typename T, typename IndexFunc, typename ElementFunc>
     auto
     ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc func, ElementFunc element_func) -> BitsetType;
@@ -72,6 +76,10 @@ class ExecExprVisitor : public ExprVisitor {
     template <typename T>
     auto
     ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType;
+
+    template <typename T>
+    auto
+    ExecMatchVisitorDispatcher(MatchExpr& expr_raw) -> BitsetType;
 
     template <typename CmpFunc>
     auto

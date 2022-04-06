@@ -393,3 +393,164 @@ func TestPlanParseAPIs(t *testing.T) {
 		assert.Nil(t, parseBoolNode(&nodeRaw4))
 	})
 }
+
+func Test_getMatchOperator(t *testing.T) {
+	var opStr string
+
+	opStr = "startsWith"
+	assert.Equal(t, planpb.OpType_PrefixMatch, getMatchOperator(opStr))
+
+	opStr = "endsWith"
+	assert.Equal(t, planpb.OpType_PostfixMatch, getMatchOperator(opStr))
+}
+
+func Test_handleMatchExpr(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "str",
+				FieldID:  100,
+				DataType: schemapb.DataType_VarChar,
+			},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	pc := &parserContext{
+		schema: helper,
+	}
+
+	t.Run("normal case", func(t *testing.T) {
+		node := &ant_ast.BinaryNode{
+			Operator: "startsWith",
+			Left:     &ant_ast.IdentifierNode{Value: "str"},
+			Right:    &ant_ast.StringNode{Value: "prefix"},
+		}
+		expr, err := pc.handleMatchExpr(node)
+		assert.NoError(t, err)
+		matchExpr, ok := expr.GetExpr().(*planpb.Expr_MatchExpr)
+		assert.True(t, ok)
+		assert.Equal(t, planpb.OpType_PrefixMatch, matchExpr.MatchExpr.GetOp())
+		assert.Equal(t, "prefix", matchExpr.MatchExpr.GetValue().GetStringVal())
+		assert.Equal(t, int64(100), matchExpr.MatchExpr.GetColumnInfo().GetFieldId())
+		assert.Equal(t, schemapb.DataType_VarChar, matchExpr.MatchExpr.GetColumnInfo().GetDataType())
+	})
+
+	t.Run("invalid operator", func(t *testing.T) {
+		node := &ant_ast.BinaryNode{
+			Operator: "invalid",
+		}
+		_, err := pc.handleMatchExpr(node)
+		assert.Error(t, err)
+	})
+
+	t.Run("left is not identifier", func(t *testing.T) {
+		node := &ant_ast.BinaryNode{
+			Operator: "startsWith",
+			Left:     &ant_ast.StringNode{Value: "prefix"},
+		}
+		_, err := pc.handleMatchExpr(node)
+		assert.Error(t, err)
+	})
+
+	t.Run("left identifier not in schema", func(t *testing.T) {
+		node := &ant_ast.BinaryNode{
+			Operator: "startsWith",
+			Left:     &ant_ast.IdentifierNode{Value: "not_in_schema"},
+			Right:    &ant_ast.StringNode{Value: "prefix"},
+		}
+		_, err := pc.handleMatchExpr(node)
+		assert.Error(t, err)
+	})
+
+	t.Run("right node is not of string node", func(t *testing.T) {
+		node := &ant_ast.BinaryNode{
+			Operator: "startsWith",
+			Left:     &ant_ast.IdentifierNode{Value: "not_in_schema"},
+			Right:    &ant_ast.IntegerNode{Value: 1},
+		}
+		_, err := pc.handleMatchExpr(node)
+		assert.Error(t, err)
+	})
+}
+
+func Test_handleBinaryExpr_matchExpr(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "str",
+				FieldID:  100,
+				DataType: schemapb.DataType_VarChar,
+			},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	pc := &parserContext{
+		schema: helper,
+	}
+
+	node := &ant_ast.BinaryNode{
+		Operator: "startsWith",
+		Left:     &ant_ast.IdentifierNode{Value: "str"},
+		Right:    &ant_ast.StringNode{Value: "prefix"},
+	}
+	expr, err := pc.handleBinaryExpr(node)
+	assert.NoError(t, err)
+	matchExpr, ok := expr.GetExpr().(*planpb.Expr_MatchExpr)
+	assert.True(t, ok)
+	assert.Equal(t, planpb.OpType_PrefixMatch, matchExpr.MatchExpr.GetOp())
+	assert.Equal(t, "prefix", matchExpr.MatchExpr.GetValue().GetStringVal())
+	assert.Equal(t, int64(100), matchExpr.MatchExpr.GetColumnInfo().GetFieldId())
+	assert.Equal(t, schemapb.DataType_VarChar, matchExpr.MatchExpr.GetColumnInfo().GetDataType())
+}
+
+func Test_showMatchPlan(t *testing.T) {
+	var exprStr string
+	var err error
+	var expr *planpb.Expr
+	var serializedExpr string
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				Name:     "str",
+				FieldID:  100,
+				DataType: schemapb.DataType_VarChar,
+			},
+			{
+				Name:     "int64",
+				FieldID:  101,
+				DataType: schemapb.DataType_Int64,
+			},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	// only prefix match.
+	exprStr = `str startsWith "prefix"`
+	fmt.Println(exprStr)
+	expr, err = parseExpr(helper, exprStr)
+	assert.NoError(t, err)
+	serializedExpr = proto.MarshalTextString(expr)
+	fmt.Println(serializedExpr)
+
+	// prefix match && postfix match.
+	exprStr = `str startsWith "prefix" && str endsWith "postfix"`
+	fmt.Println(exprStr)
+	expr, err = parseExpr(helper, exprStr)
+	assert.NoError(t, err)
+	serializedExpr = proto.MarshalTextString(expr)
+	fmt.Println(serializedExpr)
+
+	// !((prefix match && postfix match) || in)
+	exprStr = `!((str startsWith "prefix" && str endsWith "postfix") || (int64 in [1, 2, 3]))`
+	fmt.Println(exprStr)
+	expr, err = parseExpr(helper, exprStr)
+	assert.NoError(t, err)
+	serializedExpr = proto.MarshalTextString(expr)
+	fmt.Println(serializedExpr)
+}

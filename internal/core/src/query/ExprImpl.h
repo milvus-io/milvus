@@ -59,4 +59,12 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
     }
 };
 
+template <typename T>
+struct MatchExprImpl : public MatchExpr {
+    const T value_;
+    MatchExprImpl(const FieldOffset field_offset, const DataType data_type, const OpType op_type, const T value)
+        : MatchExpr(field_offset, data_type, op_type), value_(value) {
+    }
+};
+
 }  // namespace milvus::query

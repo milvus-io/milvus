@@ -12,6 +12,8 @@ enum OpType {
   LessEqual = 4;
   Equal = 5;
   NotEqual = 6;
+  PrefixMatch = 7;  // startsWith
+  PostfixMatch = 8; // endsWith
 };
 
 message GenericValue {
@@ -62,6 +64,14 @@ message TermExpr {
   repeated GenericValue values = 2;
 }
 
+message MatchExpr {
+  ColumnInfo column_info = 1;
+  // string value = 2;
+  GenericValue value = 2;
+  // or we can define both PrefixMatchExpr and PostfixMatchExpr.
+  OpType op = 3;
+}
+
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -90,6 +100,7 @@ message Expr {
     CompareExpr compare_expr = 4;
     UnaryRangeExpr unary_range_expr = 5;
     BinaryRangeExpr binary_range_expr = 6;
+    MatchExpr match_expr = 7;
   };
 }
 

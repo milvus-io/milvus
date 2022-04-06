@@ -243,6 +243,16 @@ func getCompareOpType(opStr string, reverse bool) (op planpb.OpType) {
 	return op
 }
 
+func getMatchOperator(opStr string) (op planpb.OpType) {
+	switch opStr {
+	case "startsWith":
+		return planpb.OpType_PrefixMatch
+	case "endsWith":
+		return planpb.OpType_PostfixMatch
+	}
+	return planpb.OpType_Invalid
+}
+
 func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
 	switch opStr {
 	case "&&", "and":
@@ -516,6 +526,34 @@ func (pc *parserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 	return combinedExpr, nil
 }
 
+func (pc *parserContext) handleMatchExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+	if node.Operator != "startsWith" && node.Operator != "endsWith" {
+		return nil, fmt.Errorf("invalid operator: %s", node.Operator)
+	}
+	idNode, ok := node.Left.(*ant_ast.IdentifierNode)
+	if !ok {
+		// though impossible
+		return nil, fmt.Errorf("left operand of the MatchExpr must be identifier")
+	}
+	field, err := pc.handleIdentifier(idNode)
+	if err != nil {
+		return nil, err
+	}
+	val, err := pc.handleLeafValue(&node.Right, field.DataType)
+	if err != nil {
+		return nil, err
+	}
+	return &planpb.Expr{
+		Expr: &planpb.Expr_MatchExpr{
+			MatchExpr: &planpb.MatchExpr{
+				ColumnInfo: createColumnInfo(field),
+				Value:      val,
+				Op:         getMatchOperator(node.Operator),
+			},
+		},
+	}, nil
+}
+
 func (pc *parserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	switch node.Operator {
 	case "<", "<=", ">", ">=":
@@ -526,6 +564,8 @@ func (pc *parserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Exp
 		return pc.handleLogicalExpr(node)
 	case "in", "not in":
 		return pc.handleInExpr(node)
+	case "startsWith", "endsWith":
+		return pc.handleMatchExpr(node)
 	}
 	return nil, fmt.Errorf("unsupported binary operator %s", node.Operator)
 }

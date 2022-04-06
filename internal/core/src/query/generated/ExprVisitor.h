@@ -36,5 +36,8 @@ class ExprVisitor {
 
     virtual void
     visit(CompareExpr&) = 0;
+
+    virtual void
+    visit(MatchExpr&) = 0;
 };
 }  // namespace milvus::query
