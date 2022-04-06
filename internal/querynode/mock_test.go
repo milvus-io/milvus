@@ -1188,6 +1188,7 @@ func genSimpleSearchMsg() (*searchMsg, error) {
 		OrigNQs:            []int64{defaultNQ},
 		SourceIDs:          []UniqueID{req.Base.SourceID},
 		TopK:               defaultTopK,
+		OrigTopKs:          []int64{defaultTopK},
 	}
 	msg.SetTimeRecorder()
 	return msg, nil
