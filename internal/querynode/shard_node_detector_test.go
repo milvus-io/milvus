@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,9 +73,9 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 	type testCase struct {
 		name               string
 		ids                []int64
-		oldRecords         map[string]*querypb.ReplicaInfo
+		oldRecords         map[string]*milvuspb.ReplicaInfo
 		oldGarbage         map[string]string
-		updateRecords      map[string]*querypb.ReplicaInfo
+		updateRecords      map[string]*milvuspb.ReplicaInfo
 		updateGarbage      map[string]string
 		delRecords         []string
 		expectInitEvents   []nodeEvent
@@ -88,7 +88,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 		{
 			name: "init normal case",
 			ids:  []int64{1, 2},
-			oldRecords: map[string]*querypb.ReplicaInfo{
+			oldRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,
@@ -116,7 +116,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 		{
 			name: "normal case with other replica",
 			ids:  []int64{1, 2},
-			oldRecords: map[string]*querypb.ReplicaInfo{
+			oldRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,
@@ -146,7 +146,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 		{
 			name: "init normal missing node",
 			ids:  []int64{1},
-			oldRecords: map[string]*querypb.ReplicaInfo{
+			oldRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,
@@ -166,7 +166,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 		{
 			name: "normal updates",
 			ids:  []int64{1, 2, 3},
-			oldRecords: map[string]*querypb.ReplicaInfo{
+			oldRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,
@@ -180,7 +180,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 					eventType: nodeAdd,
 				},
 			},
-			updateRecords: map[string]*querypb.ReplicaInfo{
+			updateRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,
@@ -218,7 +218,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 		{
 			name: "normal updates with other replica",
 			ids:  []int64{1, 2},
-			oldRecords: map[string]*querypb.ReplicaInfo{
+			oldRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,
@@ -232,7 +232,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 					eventType: nodeAdd,
 				},
 			},
-			updateRecords: map[string]*querypb.ReplicaInfo{
+			updateRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,
@@ -265,7 +265,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 		{
 			name: "normal deletes",
 			ids:  []int64{1, 2},
-			oldRecords: map[string]*querypb.ReplicaInfo{
+			oldRecords: map[string]*milvuspb.ReplicaInfo{
 				"replica_1": {
 					CollectionID: 1,
 					ReplicaID:    1,

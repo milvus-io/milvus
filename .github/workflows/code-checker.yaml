@@ -82,7 +82,7 @@ jobs:
         uses: actions/setup-go@v2.2.0
         if: ${{  matrix.os == 'macos-11' }}
         with:
-          go-version: '^1.17.1'
+          go-version: '~1.17.1'
       - name: Mac Cache Go Mod Volumes
         if: ${{  matrix.os == 'macos-11' }}
         uses: actions/cache@v1
