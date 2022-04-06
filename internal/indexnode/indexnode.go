@@ -277,7 +277,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Int64("IndexID", request.IndexID),
 		zap.Int64("Version", request.Version),
 		zap.String("MetaPath", request.MetaPath),
-		zap.Strings("DataPaths", request.DataPaths),
+		zap.Int("binlog paths num", len(request.DataPaths)),
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))
 
