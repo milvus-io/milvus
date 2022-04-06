@@ -119,6 +119,10 @@ func (m *DataCoordClient) DropVirtualChannel(ctx context.Context, req *datapb.Dr
 	return &datapb.DropVirtualChannelResponse{}, m.Err
 }
 
+func (m *DataCoordClient) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest, opts ...grpc.CallOption) (*datapb.SetSegmentStateResponse, error) {
+	return &datapb.SetSegmentStateResponse{}, m.Err
+}
+
 func (m *DataCoordClient) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*datapb.ImportTaskResponse, error) {
 	return &datapb.ImportTaskResponse{}, m.Err
 }

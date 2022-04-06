@@ -458,12 +458,6 @@ func (m *importManager) updateImportTaskStore(ti *datapb.ImportTaskInfo) error {
 	return nil
 }
 
-// bringSegmentsOnline brings the segments online so that data in these segments become searchable.
-func (m *importManager) bringSegmentsOnline(ti *datapb.ImportTaskInfo) {
-	log.Info("Bringing import tasks segments online!", zap.Int64("Task ID", ti.GetId()))
-	// TODO: Implement it.
-}
-
 // expireOldTasksLoop starts a loop that checks and expires old tasks every `ImportTaskExpiration` seconds.
 func (m *importManager) expireOldTasksLoop(wg *sync.WaitGroup) {
 	defer wg.Done()
@@ -476,7 +470,8 @@ func (m *importManager) expireOldTasksLoop(wg *sync.WaitGroup) {
 			return
 		case <-ticker.C:
 			log.Info("(in loop) starting expiring old tasks...",
-				zap.Any("cleaning up interval", time.Duration(Params.RootCoordCfg.ImportTaskExpiration)))
+				zap.Duration("cleaning up interval",
+					time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000)*time.Millisecond))
 			m.expireOldTasks()
 		}
 	}
@@ -490,7 +485,7 @@ func (m *importManager) expireOldTasks() {
 		defer m.pendingLock.Unlock()
 		for _, t := range m.pendingTasks {
 			if taskExpired(t) {
-				log.Info("a pending task has expired", zap.Any("task info", t))
+				log.Info("a pending task has expired", zap.Int64("task ID", t.GetId()))
 				t.State.StateCode = commonpb.ImportState_ImportFailed
 				t.State.ErrorMessage = taskExpiredMsgPrefix +
 					(time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000) * time.Millisecond).String()
@@ -505,7 +500,7 @@ func (m *importManager) expireOldTasks() {
 		for _, v := range m.workingTasks {
 			// Mark this expired task as failed.
 			if taskExpired(v) {
-				log.Info("a working task has expired", zap.Any("task info", v))
+				log.Info("a working task has expired", zap.Int64("task ID", v.GetId()))
 				v.State.StateCode = commonpb.ImportState_ImportFailed
 				v.State.ErrorMessage = taskExpiredMsgPrefix +
 					(time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000) * time.Millisecond).String()

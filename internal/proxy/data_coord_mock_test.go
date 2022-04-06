@@ -206,6 +206,10 @@ func (coord *DataCoordMock) DropVirtualChannel(ctx context.Context, req *datapb.
 	return &datapb.DropVirtualChannelResponse{}, nil
 }
 
+func (coord *DataCoordMock) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
+	return &datapb.SetSegmentStateResponse{}, nil
+}
+
 func (coord *DataCoordMock) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	return &datapb.ImportTaskResponse{}, nil
 }

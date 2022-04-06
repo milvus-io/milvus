@@ -93,8 +93,8 @@ var _ types.DataCoord = (*Server)(nil)
 
 var Params paramtable.ComponentParam
 
-// Server implements `types.Datacoord`
-// handles Data Cooridinator related jobs
+// Server implements `types.DataCoord`
+// handles Data Coordinator related jobs
 type Server struct {
 	ctx              context.Context
 	serverLoopCtx    context.Context

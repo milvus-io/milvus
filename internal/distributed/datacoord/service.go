@@ -325,6 +325,11 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	return s.dataCoord.DropVirtualChannel(ctx, req)
 }
 
+// SetSegmentState sets the state of a segment.
+func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
+	return s.dataCoord.SetSegmentState(ctx, req)
+}
+
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	return s.dataCoord.Import(ctx, req)
