@@ -22,7 +22,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -155,7 +155,7 @@ func (nd *etcdShardNodeDetector) watch(ch clientv3.WatchChan, collectionID, repl
 
 func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID, replicaID int64) {
 	var err error
-	var info, prevInfo *querypb.ReplicaInfo
+	var info, prevInfo *milvuspb.ReplicaInfo
 	info, err = nd.parseReplicaInfo(e.Kv.Value)
 	if err != nil {
 		log.Warn("failed to handle node event", zap.Any("event", e), zap.Error(err))
@@ -261,8 +261,8 @@ func (nd *etcdShardNodeDetector) handleDelEvent(e *clientv3.Event, collectionID,
 	}
 }
 
-func (nd *etcdShardNodeDetector) parseReplicaInfo(bs []byte) (*querypb.ReplicaInfo, error) {
-	info := &querypb.ReplicaInfo{}
+func (nd *etcdShardNodeDetector) parseReplicaInfo(bs []byte) (*milvuspb.ReplicaInfo, error) {
+	info := &milvuspb.ReplicaInfo{}
 	err := proto.Unmarshal(bs, info)
 	return info, err
 }
