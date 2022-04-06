@@ -143,10 +143,10 @@ func CreateSchemaHelper(schema *schemapb.CollectionSchema) (*SchemaHelper, error
 	schemaHelper := SchemaHelper{schema: schema, nameOffset: make(map[string]int), idOffset: make(map[int64]int), primaryKeyOffset: -1}
 	for offset, field := range schema.Fields {
 		if _, ok := schemaHelper.nameOffset[field.Name]; ok {
-			return nil, errors.New("duplicated fieldName: " + field.Name)
+			return nil, fmt.Errorf("duplicated fieldName: %s", field.Name)
 		}
 		if _, ok := schemaHelper.idOffset[field.FieldID]; ok {
-			return nil, errors.New("duplicated fieldID: " + strconv.FormatInt(field.FieldID, 10))
+			return nil, fmt.Errorf("duplicated fieldID: %d", field.FieldID)
 		}
 		schemaHelper.nameOffset[field.Name] = offset
 		schemaHelper.idOffset[field.FieldID] = offset
