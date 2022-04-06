@@ -55,7 +55,7 @@ func TestConnectionManager(t *testing.T) {
 	cm.Start()
 
 	t.Run("rootCoord", func(t *testing.T) {
-		lis, err := net.Listen("tcp", ":9999")
+		lis, err := net.Listen("tcp", "127.0.0.1:")
 		assert.Nil(t, err)
 		defer lis.Close()
 		rootCoord := &testRootCoord{}
@@ -63,7 +63,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		rootcoordpb.RegisterRootCoordServer(grpcServer, rootCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.RootCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.RootCoordRole, lis.Addr().String(), true, false)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			rootCoord, ok := cm.GetRootCoordClient()
@@ -72,7 +72,7 @@ func TestConnectionManager(t *testing.T) {
 	})
 
 	t.Run("queryCoord", func(t *testing.T) {
-		lis, err := net.Listen("tcp", ":9999")
+		lis, err := net.Listen("tcp", "127.0.0.1:")
 		assert.Nil(t, err)
 		defer lis.Close()
 		queryCoord := &testQueryCoord{}
@@ -80,7 +80,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		querypb.RegisterQueryCoordServer(grpcServer, queryCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.QueryCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.QueryCoordRole, lis.Addr().String(), true, false)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			queryCoord, ok := cm.GetQueryCoordClient()
@@ -89,7 +89,7 @@ func TestConnectionManager(t *testing.T) {
 	})
 
 	t.Run("dataCoord", func(t *testing.T) {
-		lis, err := net.Listen("tcp", ":9999")
+		lis, err := net.Listen("tcp", "127.0.0.1:")
 		assert.Nil(t, err)
 		defer lis.Close()
 		dataCoord := &testDataCoord{}
@@ -97,7 +97,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		datapb.RegisterDataCoordServer(grpcServer, dataCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.DataCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.DataCoordRole, lis.Addr().String(), true, false)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			dataCoord, ok := cm.GetDataCoordClient()
@@ -106,7 +106,7 @@ func TestConnectionManager(t *testing.T) {
 	})
 
 	t.Run("indexCoord", func(t *testing.T) {
-		lis, err := net.Listen("tcp", ":9999")
+		lis, err := net.Listen("tcp", "127.0.0.1:")
 		assert.Nil(t, err)
 		defer lis.Close()
 		indexCoord := &testIndexCoord{}
@@ -114,7 +114,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		indexpb.RegisterIndexCoordServer(grpcServer, indexCoord)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.IndexCoordRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.IndexCoordRole, lis.Addr().String(), true, false)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			indexCoord, ok := cm.GetIndexCoordClient()
@@ -123,7 +123,7 @@ func TestConnectionManager(t *testing.T) {
 	})
 
 	t.Run("queryNode", func(t *testing.T) {
-		lis, err := net.Listen("tcp", ":9999")
+		lis, err := net.Listen("tcp", "127.0.0.1:")
 		assert.Nil(t, err)
 		defer lis.Close()
 		queryNode := &testQueryNode{}
@@ -131,7 +131,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		querypb.RegisterQueryNodeServer(grpcServer, queryNode)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.QueryNodeRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.QueryNodeRole, lis.Addr().String(), true, false)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			queryNodes, ok := cm.GetQueryNodeClients()
@@ -140,7 +140,7 @@ func TestConnectionManager(t *testing.T) {
 	})
 
 	t.Run("dataNode", func(t *testing.T) {
-		lis, err := net.Listen("tcp", ":9999")
+		lis, err := net.Listen("tcp", "127.0.0.1:")
 		assert.Nil(t, err)
 		defer lis.Close()
 		dataNode := &testDataNode{}
@@ -148,7 +148,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		datapb.RegisterDataNodeServer(grpcServer, dataNode)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.DataNodeRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.DataNodeRole, lis.Addr().String(), true, false)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			dataNodes, ok := cm.GetDataNodeClients()
@@ -157,7 +157,7 @@ func TestConnectionManager(t *testing.T) {
 	})
 
 	t.Run("indexNode", func(t *testing.T) {
-		lis, err := net.Listen("tcp", ":9999")
+		lis, err := net.Listen("tcp", "127.0.0.1:")
 		assert.Nil(t, err)
 		defer lis.Close()
 		indexNode := &testIndexNode{}
@@ -165,7 +165,7 @@ func TestConnectionManager(t *testing.T) {
 		defer grpcServer.Stop()
 		indexpb.RegisterIndexNodeServer(grpcServer, indexNode)
 		go grpcServer.Serve(lis)
-		session.Init(typeutil.IndexNodeRole, "127.0.0.1:9999", true, false)
+		session.Init(typeutil.IndexNodeRole, lis.Addr().String(), true, false)
 		session.Register()
 		assert.Eventually(t, func() bool {
 			indexNodes, ok := cm.GetIndexNodeClients()
