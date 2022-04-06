@@ -212,7 +212,7 @@ func (sa *segIDAssigner) pickCanDoFunc() {
 		records[collID][partitionID][channelName] += segRequest.count
 		assign, err := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
 		if err != nil {
-			log.Debug("Proxy segIDAssinger, pickCanDoFunc getAssign err:", zap.Any("collID", segRequest.collID),
+			log.Debug("Proxy segIDAssigner, pickCanDoFunc getAssign err:", zap.Any("collID", segRequest.collID),
 				zap.Any("partitionID", segRequest.partitionID), zap.Any("channelName", segRequest.channelName),
 				zap.Error(err))
 		}
@@ -228,7 +228,7 @@ func (sa *segIDAssigner) pickCanDoFunc() {
 			sa.CanDoReqs = append(sa.CanDoReqs, req)
 		}
 	}
-	log.Debug("Proxy segIDAssinger pickCanDoFunc", zap.Any("records", records),
+	log.Debug("Proxy segIDAssigner pickCanDoFunc", zap.Any("records", records),
 		zap.Any("len(newTodoReqs)", len(newTodoReqs)),
 		zap.Any("len(CanDoReqs)", len(sa.CanDoReqs)))
 	sa.ToDoReqs = newTodoReqs
@@ -268,7 +268,7 @@ func (sa *segIDAssigner) checkSegReqEqual(req1, req2 *datapb.SegmentIDRequest) b
 }
 
 func (sa *segIDAssigner) reduceSegReqs() {
-	log.Debug("Proxy segIDAssinger reduceSegReqs", zap.Any("len(segReqs)", len(sa.segReqs)))
+	log.Debug("Proxy segIDAssigner reduceSegReqs", zap.Any("len(segReqs)", len(sa.segReqs)))
 	if len(sa.segReqs) == 0 {
 		return
 	}
@@ -276,7 +276,7 @@ func (sa *segIDAssigner) reduceSegReqs() {
 	var newSegReqs []*datapb.SegmentIDRequest
 	for _, req1 := range sa.segReqs {
 		if req1.Count == 0 {
-			log.Debug("Proxy segIDAssinger reduceSegReqs hit perCount == 0")
+			log.Debug("Proxy segIDAssigner reduceSegReqs hit perCount == 0")
 			req1.Count = sa.countPerRPC
 		}
 		beforeCnt += req1.Count
@@ -298,7 +298,7 @@ func (sa *segIDAssigner) reduceSegReqs() {
 		afterCnt += req.Count
 	}
 	sa.segReqs = newSegReqs
-	log.Debug("Proxy segIDAssinger reduceSegReqs after reduce", zap.Any("len(segReqs)", len(sa.segReqs)),
+	log.Debug("Proxy segIDAssigner reduceSegReqs after reduce", zap.Any("len(segReqs)", len(sa.segReqs)),
 		zap.Any("BeforeCnt", beforeCnt),
 		zap.Any("AfterCnt", afterCnt))
 }
