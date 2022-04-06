@@ -823,8 +823,12 @@ func (i *IndexCoord) watchMetaLoop() {
 				indexMeta := &indexpb.IndexMeta{}
 				err := proto.Unmarshal(event.Kv.Value, indexMeta)
 				indexBuildID := indexMeta.IndexBuildID
-				log.Debug("IndexCoord watchMetaLoop", zap.Any("event.Key", event.Kv.Key),
-					zap.Any("event.V", indexMeta), zap.Int64("IndexBuildID", indexBuildID), zap.Error(err))
+				log.Debug("IndexCoord watchMetaLoop", zap.Int64("IndexBuildID", indexBuildID))
+				if err != nil {
+					log.Warn("IndexCoord unmarshal indexMeta failed", zap.Int64("IndexBuildID", indexBuildID),
+						zap.Error(err))
+					continue
+				}
 				switch event.Type {
 				case mvccpb.PUT:
 					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
