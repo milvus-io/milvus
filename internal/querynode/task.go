@@ -171,7 +171,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("querynode seek query channel: ", zap.Any("consumeChannels", consumeChannels),
+		log.Debug("QueryNode seek query channel: ", zap.Any("consumeChannels", consumeChannels),
 			zap.String("seek position", string(r.req.SeekPosition.MsgID)))
 	}
 

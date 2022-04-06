@@ -492,7 +492,7 @@ func (node *QueryNode) waitChangeInfo(segmentChangeInfos *querypb.SealedSegments
 	return retry.Do(node.queryNodeLoopCtx, fn, retry.Attempts(50))
 }
 
-// remove the segments since it's already compacted or balanced to other querynodes
+// remove the segments since it's already compacted or balanced to other QueryNodes
 func (node *QueryNode) removeSegments(segmentChangeInfos *querypb.SealedSegmentsChangeInfo) error {
 	err := node.waitChangeInfo(segmentChangeInfos)
 	if err != nil {
