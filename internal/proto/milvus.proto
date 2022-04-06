@@ -49,6 +49,7 @@ service MilvusService {
   rpc GetFlushState(GetFlushStateRequest) returns (GetFlushStateResponse) {}
   rpc GetPersistentSegmentInfo(GetPersistentSegmentInfoRequest) returns (GetPersistentSegmentInfoResponse) {}
   rpc GetQuerySegmentInfo(GetQuerySegmentInfoRequest) returns (GetQuerySegmentInfoResponse) {}
+  rpc GetReplicas(GetReplicasRequest) returns (GetReplicasResponse) {}
 
   rpc Dummy(DummyRequest) returns (DummyResponse) {}
 
@@ -821,6 +822,37 @@ message GetImportStateResponse {
   repeated common.KeyValuePair infos = 5;  // more informations about the task, progress percent, file path, failed reason, etc.
 }
 
+message GetReplicasRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  bool with_shard_nodes = 3;
+}
+
+message GetReplicasResponse {
+  common.Status status = 1;
+  repeated ReplicaInfo replicas = 2;
+}
+
+message ReplicaInfo {    // ReplicaGroup
+  int64 replicaID = 1;
+  int64 collectionID = 2;
+  repeated int64 partition_ids = 3;    // empty indicates to load collection
+  repeated ShardReplica shard_replicas = 4;
+  repeated int64 node_ids = 5; // include leaders
+}
+
+message ShardReplica {
+    int64 leaderID = 1;
+    string leader_addr = 2; // IP:port
+    string dm_channel_name = 3;
+    // optional, DO NOT save it in meta, set it only for GetReplicas()
+    // if with_shard_nodes is true
+    repeated int64 node_ids = 4; 
+}
+
+
+
 service ProxyService {
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
 }
+

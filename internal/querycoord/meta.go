@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util"
@@ -92,12 +93,12 @@ type Meta interface {
 
 	getWatchedChannelsByNodeID(nodeID int64) *querypb.UnsubscribeChannelInfo
 
-	generateReplica(collectionID int64, partitionIds []int64) (*querypb.ReplicaInfo, error)
-	addReplica(replica *querypb.ReplicaInfo) error
-	setReplicaInfo(info *querypb.ReplicaInfo) error
-	getReplicaByID(replicaID int64) (*querypb.ReplicaInfo, error)
-	getReplicasByCollectionID(collectionID int64) ([]*querypb.ReplicaInfo, error)
-	getReplicasByNodeID(nodeID int64) ([]*querypb.ReplicaInfo, error)
+	generateReplica(collectionID int64, partitionIds []int64) (*milvuspb.ReplicaInfo, error)
+	addReplica(replica *milvuspb.ReplicaInfo) error
+	setReplicaInfo(info *milvuspb.ReplicaInfo) error
+	getReplicaByID(replicaID int64) (*milvuspb.ReplicaInfo, error)
+	getReplicasByCollectionID(collectionID int64) ([]*milvuspb.ReplicaInfo, error)
+	getReplicasByNodeID(nodeID int64) ([]*milvuspb.ReplicaInfo, error)
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -1025,22 +1026,22 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 	return unsubscribeChannelInfo
 }
 
-func (m *MetaReplica) generateReplica(collectionID int64, partitionIds []int64) (*querypb.ReplicaInfo, error) {
+func (m *MetaReplica) generateReplica(collectionID int64, partitionIds []int64) (*milvuspb.ReplicaInfo, error) {
 	id, err := m.idAllocator()
 	if err != nil {
 		return nil, err
 	}
 
-	return &querypb.ReplicaInfo{
+	return &milvuspb.ReplicaInfo{
 		ReplicaID:     id,
 		CollectionID:  collectionID,
 		PartitionIds:  partitionIds,
-		ShardReplicas: make([]*querypb.ShardReplica, 0),
+		ShardReplicas: make([]*milvuspb.ShardReplica, 0),
 		NodeIds:       make([]int64, 0),
 	}, nil
 }
 
-func (m *MetaReplica) addReplica(replica *querypb.ReplicaInfo) error {
+func (m *MetaReplica) addReplica(replica *milvuspb.ReplicaInfo) error {
 	err := saveReplicaInfo(replica, m.client)
 	if err != nil {
 		return err
@@ -1050,7 +1051,7 @@ func (m *MetaReplica) addReplica(replica *querypb.ReplicaInfo) error {
 	return nil
 }
 
-func (m *MetaReplica) setReplicaInfo(info *querypb.ReplicaInfo) error {
+func (m *MetaReplica) setReplicaInfo(info *milvuspb.ReplicaInfo) error {
 	err := saveReplicaInfo(info, m.client)
 	if err != nil {
 		return err
@@ -1060,7 +1061,7 @@ func (m *MetaReplica) setReplicaInfo(info *querypb.ReplicaInfo) error {
 	return nil
 }
 
-func (m *MetaReplica) getReplicaByID(replicaID int64) (*querypb.ReplicaInfo, error) {
+func (m *MetaReplica) getReplicaByID(replicaID int64) (*milvuspb.ReplicaInfo, error) {
 	replica, ok := m.replicas.Get(replicaID)
 	if !ok {
 		return nil, errors.New("replica not found")
@@ -1069,18 +1070,18 @@ func (m *MetaReplica) getReplicaByID(replicaID int64) (*querypb.ReplicaInfo, err
 	return replica, nil
 }
 
-func (m *MetaReplica) getReplicasByNodeID(nodeID int64) ([]*querypb.ReplicaInfo, error) {
+func (m *MetaReplica) getReplicasByNodeID(nodeID int64) ([]*milvuspb.ReplicaInfo, error) {
 	replicas := m.replicas.GetReplicasByNodeID(nodeID)
 	return replicas, nil
 }
 
-func (m *MetaReplica) getReplicasByCollectionID(collectionID int64) ([]*querypb.ReplicaInfo, error) {
+func (m *MetaReplica) getReplicasByCollectionID(collectionID int64) ([]*milvuspb.ReplicaInfo, error) {
 	collection, err := m.getCollectionInfoByID(collectionID)
 	if err != nil {
 		return nil, err
 	}
 
-	replicas := make([]*querypb.ReplicaInfo, 0, len(collection.ReplicaIds))
+	replicas := make([]*milvuspb.ReplicaInfo, 0, len(collection.ReplicaIds))
 	for _, replicaID := range collection.ReplicaIds {
 		replica, err := m.getReplicaByID(replicaID)
 		if err != nil {
@@ -1147,7 +1148,7 @@ func saveDmChannelWatchInfos(infos []*querypb.DmChannelWatchInfo, kv kv.MetaKv) 
 	return kv.MultiSave(kvs)
 }
 
-func saveReplicaInfo(info *querypb.ReplicaInfo, kv kv.MetaKv) error {
+func saveReplicaInfo(info *milvuspb.ReplicaInfo, kv kv.MetaKv) error {
 	infoBytes, err := proto.Marshal(info)
 	if err != nil {
 		return err

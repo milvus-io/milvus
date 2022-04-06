@@ -48,7 +48,7 @@ type MockQueryCoord struct {
 	channelResp      *querypb.CreateQueryChannelResponse
 	infoResp         *querypb.GetSegmentInfoResponse
 	metricResp       *milvuspb.GetMetricsResponse
-	replicasResp     *querypb.GetReplicasResponse
+	replicasResp     *milvuspb.GetReplicasResponse
 	shardLeadersResp *querypb.GetShardLeadersResponse
 }
 
@@ -144,7 +144,7 @@ func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return m.metricResp, m.err
 }
 
-func (m *MockQueryCoord) GetReplicas(ctx context.Context, req *querypb.GetReplicasRequest) (*querypb.GetReplicasResponse, error) {
+func (m *MockQueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	return m.replicasResp, m.err
 }
 

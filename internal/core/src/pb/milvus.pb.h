@@ -53,7 +53,7 @@ struct TableStruct_milvus_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[81]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[85]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -204,6 +204,12 @@ extern GetQuerySegmentInfoRequestDefaultTypeInternal _GetQuerySegmentInfoRequest
 class GetQuerySegmentInfoResponse;
 class GetQuerySegmentInfoResponseDefaultTypeInternal;
 extern GetQuerySegmentInfoResponseDefaultTypeInternal _GetQuerySegmentInfoResponse_default_instance_;
+class GetReplicasRequest;
+class GetReplicasRequestDefaultTypeInternal;
+extern GetReplicasRequestDefaultTypeInternal _GetReplicasRequest_default_instance_;
+class GetReplicasResponse;
+class GetReplicasResponseDefaultTypeInternal;
+extern GetReplicasResponseDefaultTypeInternal _GetReplicasResponse_default_instance_;
 class HasCollectionRequest;
 class HasCollectionRequestDefaultTypeInternal;
 extern HasCollectionRequestDefaultTypeInternal _HasCollectionRequest_default_instance_;
@@ -273,12 +279,18 @@ extern ReleaseCollectionRequestDefaultTypeInternal _ReleaseCollectionRequest_def
 class ReleasePartitionsRequest;
 class ReleasePartitionsRequestDefaultTypeInternal;
 extern ReleasePartitionsRequestDefaultTypeInternal _ReleasePartitionsRequest_default_instance_;
+class ReplicaInfo;
+class ReplicaInfoDefaultTypeInternal;
+extern ReplicaInfoDefaultTypeInternal _ReplicaInfo_default_instance_;
 class SearchRequest;
 class SearchRequestDefaultTypeInternal;
 extern SearchRequestDefaultTypeInternal _SearchRequest_default_instance_;
 class SearchResults;
 class SearchResultsDefaultTypeInternal;
 extern SearchResultsDefaultTypeInternal _SearchResults_default_instance_;
+class ShardReplica;
+class ShardReplicaDefaultTypeInternal;
+extern ShardReplicaDefaultTypeInternal _ShardReplica_default_instance_;
 class ShowCollectionsRequest;
 class ShowCollectionsRequestDefaultTypeInternal;
 extern ShowCollectionsRequestDefaultTypeInternal _ShowCollectionsRequest_default_instance_;
@@ -357,6 +369,8 @@ template<> ::milvus::proto::milvus::GetPersistentSegmentInfoRequest* Arena::Crea
 template<> ::milvus::proto::milvus::GetPersistentSegmentInfoResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetPersistentSegmentInfoResponse>(Arena*);
 template<> ::milvus::proto::milvus::GetQuerySegmentInfoRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetQuerySegmentInfoRequest>(Arena*);
 template<> ::milvus::proto::milvus::GetQuerySegmentInfoResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetQuerySegmentInfoResponse>(Arena*);
+template<> ::milvus::proto::milvus::GetReplicasRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetReplicasRequest>(Arena*);
+template<> ::milvus::proto::milvus::GetReplicasResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::GetReplicasResponse>(Arena*);
 template<> ::milvus::proto::milvus::HasCollectionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::HasCollectionRequest>(Arena*);
 template<> ::milvus::proto::milvus::HasPartitionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::HasPartitionRequest>(Arena*);
 template<> ::milvus::proto::milvus::Hits* Arena::CreateMaybeMessage<::milvus::proto::milvus::Hits>(Arena*);
@@ -380,8 +394,10 @@ template<> ::milvus::proto::milvus::RegisterLinkRequest* Arena::CreateMaybeMessa
 template<> ::milvus::proto::milvus::RegisterLinkResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::RegisterLinkResponse>(Arena*);
 template<> ::milvus::proto::milvus::ReleaseCollectionRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ReleaseCollectionRequest>(Arena*);
 template<> ::milvus::proto::milvus::ReleasePartitionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ReleasePartitionsRequest>(Arena*);
+template<> ::milvus::proto::milvus::ReplicaInfo* Arena::CreateMaybeMessage<::milvus::proto::milvus::ReplicaInfo>(Arena*);
 template<> ::milvus::proto::milvus::SearchRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::SearchRequest>(Arena*);
 template<> ::milvus::proto::milvus::SearchResults* Arena::CreateMaybeMessage<::milvus::proto::milvus::SearchResults>(Arena*);
+template<> ::milvus::proto::milvus::ShardReplica* Arena::CreateMaybeMessage<::milvus::proto::milvus::ShardReplica>(Arena*);
 template<> ::milvus::proto::milvus::ShowCollectionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ShowCollectionsRequest>(Arena*);
 template<> ::milvus::proto::milvus::ShowCollectionsResponse* Arena::CreateMaybeMessage<::milvus::proto::milvus::ShowCollectionsResponse>(Arena*);
 template<> ::milvus::proto::milvus::ShowPartitionsRequest* Arena::CreateMaybeMessage<::milvus::proto::milvus::ShowPartitionsRequest>(Arena*);
@@ -13813,6 +13829,651 @@ class GetImportStateResponse :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
+// -------------------------------------------------------------------
+
+class GetReplicasRequest :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.GetReplicasRequest) */ {
+ public:
+  GetReplicasRequest();
+  virtual ~GetReplicasRequest();
+
+  GetReplicasRequest(const GetReplicasRequest& from);
+  GetReplicasRequest(GetReplicasRequest&& from) noexcept
+    : GetReplicasRequest() {
+    *this = ::std::move(from);
+  }
+
+  inline GetReplicasRequest& operator=(const GetReplicasRequest& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GetReplicasRequest& operator=(GetReplicasRequest&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const GetReplicasRequest& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const GetReplicasRequest* internal_default_instance() {
+    return reinterpret_cast<const GetReplicasRequest*>(
+               &_GetReplicasRequest_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    81;
+
+  friend void swap(GetReplicasRequest& a, GetReplicasRequest& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GetReplicasRequest* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline GetReplicasRequest* New() const final {
+    return CreateMaybeMessage<GetReplicasRequest>(nullptr);
+  }
+
+  GetReplicasRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<GetReplicasRequest>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const GetReplicasRequest& from);
+  void MergeFrom(const GetReplicasRequest& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(GetReplicasRequest* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.GetReplicasRequest";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kBaseFieldNumber = 1,
+    kCollectionIDFieldNumber = 2,
+    kWithShardNodesFieldNumber = 3,
+  };
+  // .milvus.proto.common.MsgBase base = 1;
+  bool has_base() const;
+  void clear_base();
+  const ::milvus::proto::common::MsgBase& base() const;
+  ::milvus::proto::common::MsgBase* release_base();
+  ::milvus::proto::common::MsgBase* mutable_base();
+  void set_allocated_base(::milvus::proto::common::MsgBase* base);
+
+  // int64 collectionID = 2;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // bool with_shard_nodes = 3;
+  void clear_with_shard_nodes();
+  bool with_shard_nodes() const;
+  void set_with_shard_nodes(bool value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetReplicasRequest)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::milvus::proto::common::MsgBase* base_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
+  bool with_shard_nodes_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GetReplicasResponse :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.GetReplicasResponse) */ {
+ public:
+  GetReplicasResponse();
+  virtual ~GetReplicasResponse();
+
+  GetReplicasResponse(const GetReplicasResponse& from);
+  GetReplicasResponse(GetReplicasResponse&& from) noexcept
+    : GetReplicasResponse() {
+    *this = ::std::move(from);
+  }
+
+  inline GetReplicasResponse& operator=(const GetReplicasResponse& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GetReplicasResponse& operator=(GetReplicasResponse&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const GetReplicasResponse& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const GetReplicasResponse* internal_default_instance() {
+    return reinterpret_cast<const GetReplicasResponse*>(
+               &_GetReplicasResponse_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    82;
+
+  friend void swap(GetReplicasResponse& a, GetReplicasResponse& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GetReplicasResponse* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline GetReplicasResponse* New() const final {
+    return CreateMaybeMessage<GetReplicasResponse>(nullptr);
+  }
+
+  GetReplicasResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<GetReplicasResponse>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const GetReplicasResponse& from);
+  void MergeFrom(const GetReplicasResponse& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(GetReplicasResponse* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.GetReplicasResponse";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kReplicasFieldNumber = 2,
+    kStatusFieldNumber = 1,
+  };
+  // repeated .milvus.proto.milvus.ReplicaInfo replicas = 2;
+  int replicas_size() const;
+  void clear_replicas();
+  ::milvus::proto::milvus::ReplicaInfo* mutable_replicas(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ReplicaInfo >*
+      mutable_replicas();
+  const ::milvus::proto::milvus::ReplicaInfo& replicas(int index) const;
+  ::milvus::proto::milvus::ReplicaInfo* add_replicas();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ReplicaInfo >&
+      replicas() const;
+
+  // .milvus.proto.common.Status status = 1;
+  bool has_status() const;
+  void clear_status();
+  const ::milvus::proto::common::Status& status() const;
+  ::milvus::proto::common::Status* release_status();
+  ::milvus::proto::common::Status* mutable_status();
+  void set_allocated_status(::milvus::proto::common::Status* status);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.GetReplicasResponse)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ReplicaInfo > replicas_;
+  ::milvus::proto::common::Status* status_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ReplicaInfo :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.ReplicaInfo) */ {
+ public:
+  ReplicaInfo();
+  virtual ~ReplicaInfo();
+
+  ReplicaInfo(const ReplicaInfo& from);
+  ReplicaInfo(ReplicaInfo&& from) noexcept
+    : ReplicaInfo() {
+    *this = ::std::move(from);
+  }
+
+  inline ReplicaInfo& operator=(const ReplicaInfo& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ReplicaInfo& operator=(ReplicaInfo&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ReplicaInfo& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ReplicaInfo* internal_default_instance() {
+    return reinterpret_cast<const ReplicaInfo*>(
+               &_ReplicaInfo_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    83;
+
+  friend void swap(ReplicaInfo& a, ReplicaInfo& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ReplicaInfo* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ReplicaInfo* New() const final {
+    return CreateMaybeMessage<ReplicaInfo>(nullptr);
+  }
+
+  ReplicaInfo* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ReplicaInfo>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ReplicaInfo& from);
+  void MergeFrom(const ReplicaInfo& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ReplicaInfo* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.ReplicaInfo";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPartitionIdsFieldNumber = 3,
+    kShardReplicasFieldNumber = 4,
+    kNodeIdsFieldNumber = 5,
+    kReplicaIDFieldNumber = 1,
+    kCollectionIDFieldNumber = 2,
+  };
+  // repeated int64 partition_ids = 3;
+  int partition_ids_size() const;
+  void clear_partition_ids();
+  ::PROTOBUF_NAMESPACE_ID::int64 partition_ids(int index) const;
+  void set_partition_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_partition_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      partition_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_partition_ids();
+
+  // repeated .milvus.proto.milvus.ShardReplica shard_replicas = 4;
+  int shard_replicas_size() const;
+  void clear_shard_replicas();
+  ::milvus::proto::milvus::ShardReplica* mutable_shard_replicas(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ShardReplica >*
+      mutable_shard_replicas();
+  const ::milvus::proto::milvus::ShardReplica& shard_replicas(int index) const;
+  ::milvus::proto::milvus::ShardReplica* add_shard_replicas();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ShardReplica >&
+      shard_replicas() const;
+
+  // repeated int64 node_ids = 5;
+  int node_ids_size() const;
+  void clear_node_ids();
+  ::PROTOBUF_NAMESPACE_ID::int64 node_ids(int index) const;
+  void set_node_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_node_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      node_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_node_ids();
+
+  // int64 replicaID = 1;
+  void clear_replicaid();
+  ::PROTOBUF_NAMESPACE_ID::int64 replicaid() const;
+  void set_replicaid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // int64 collectionID = 2;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ReplicaInfo)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > partition_ids_;
+  mutable std::atomic<int> _partition_ids_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ShardReplica > shard_replicas_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > node_ids_;
+  mutable std::atomic<int> _node_ids_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::int64 replicaid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ShardReplica :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.milvus.ShardReplica) */ {
+ public:
+  ShardReplica();
+  virtual ~ShardReplica();
+
+  ShardReplica(const ShardReplica& from);
+  ShardReplica(ShardReplica&& from) noexcept
+    : ShardReplica() {
+    *this = ::std::move(from);
+  }
+
+  inline ShardReplica& operator=(const ShardReplica& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ShardReplica& operator=(ShardReplica&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ShardReplica& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ShardReplica* internal_default_instance() {
+    return reinterpret_cast<const ShardReplica*>(
+               &_ShardReplica_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    84;
+
+  friend void swap(ShardReplica& a, ShardReplica& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ShardReplica* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ShardReplica* New() const final {
+    return CreateMaybeMessage<ShardReplica>(nullptr);
+  }
+
+  ShardReplica* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ShardReplica>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ShardReplica& from);
+  void MergeFrom(const ShardReplica& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ShardReplica* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.milvus.ShardReplica";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_milvus_2eproto);
+    return ::descriptor_table_milvus_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kNodeIdsFieldNumber = 4,
+    kLeaderAddrFieldNumber = 2,
+    kDmChannelNameFieldNumber = 3,
+    kLeaderIDFieldNumber = 1,
+  };
+  // repeated int64 node_ids = 4;
+  int node_ids_size() const;
+  void clear_node_ids();
+  ::PROTOBUF_NAMESPACE_ID::int64 node_ids(int index) const;
+  void set_node_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_node_ids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      node_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_node_ids();
+
+  // string leader_addr = 2;
+  void clear_leader_addr();
+  const std::string& leader_addr() const;
+  void set_leader_addr(const std::string& value);
+  void set_leader_addr(std::string&& value);
+  void set_leader_addr(const char* value);
+  void set_leader_addr(const char* value, size_t size);
+  std::string* mutable_leader_addr();
+  std::string* release_leader_addr();
+  void set_allocated_leader_addr(std::string* leader_addr);
+
+  // string dm_channel_name = 3;
+  void clear_dm_channel_name();
+  const std::string& dm_channel_name() const;
+  void set_dm_channel_name(const std::string& value);
+  void set_dm_channel_name(std::string&& value);
+  void set_dm_channel_name(const char* value);
+  void set_dm_channel_name(const char* value, size_t size);
+  std::string* mutable_dm_channel_name();
+  std::string* release_dm_channel_name();
+  void set_allocated_dm_channel_name(std::string* dm_channel_name);
+
+  // int64 leaderID = 1;
+  void clear_leaderid();
+  ::PROTOBUF_NAMESPACE_ID::int64 leaderid() const;
+  void set_leaderid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.milvus.ShardReplica)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > node_ids_;
+  mutable std::atomic<int> _node_ids_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr leader_addr_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr dm_channel_name_;
+  ::PROTOBUF_NAMESPACE_ID::int64 leaderid_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_milvus_2eproto;
+};
 // ===================================================================
 
 
@@ -25765,9 +26426,445 @@ GetImportStateResponse::infos() const {
   return infos_;
 }
 
+// -------------------------------------------------------------------
+
+// GetReplicasRequest
+
+// .milvus.proto.common.MsgBase base = 1;
+inline bool GetReplicasRequest::has_base() const {
+  return this != internal_default_instance() && base_ != nullptr;
+}
+inline const ::milvus::proto::common::MsgBase& GetReplicasRequest::base() const {
+  const ::milvus::proto::common::MsgBase* p = base_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetReplicasRequest.base)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::MsgBase*>(
+      &::milvus::proto::common::_MsgBase_default_instance_);
+}
+inline ::milvus::proto::common::MsgBase* GetReplicasRequest::release_base() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.GetReplicasRequest.base)
+  
+  ::milvus::proto::common::MsgBase* temp = base_;
+  base_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::MsgBase* GetReplicasRequest::mutable_base() {
+  
+  if (base_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::MsgBase>(GetArenaNoVirtual());
+    base_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetReplicasRequest.base)
+  return base_;
+}
+inline void GetReplicasRequest::set_allocated_base(::milvus::proto::common::MsgBase* base) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(base_);
+  }
+  if (base) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      base = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, base, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  base_ = base;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetReplicasRequest.base)
+}
+
+// int64 collectionID = 2;
+inline void GetReplicasRequest::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetReplicasRequest::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetReplicasRequest.collectionID)
+  return collectionid_;
+}
+inline void GetReplicasRequest::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetReplicasRequest.collectionID)
+}
+
+// bool with_shard_nodes = 3;
+inline void GetReplicasRequest::clear_with_shard_nodes() {
+  with_shard_nodes_ = false;
+}
+inline bool GetReplicasRequest::with_shard_nodes() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetReplicasRequest.with_shard_nodes)
+  return with_shard_nodes_;
+}
+inline void GetReplicasRequest::set_with_shard_nodes(bool value) {
+  
+  with_shard_nodes_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetReplicasRequest.with_shard_nodes)
+}
+
+// -------------------------------------------------------------------
+
+// GetReplicasResponse
+
+// .milvus.proto.common.Status status = 1;
+inline bool GetReplicasResponse::has_status() const {
+  return this != internal_default_instance() && status_ != nullptr;
+}
+inline const ::milvus::proto::common::Status& GetReplicasResponse::status() const {
+  const ::milvus::proto::common::Status* p = status_;
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetReplicasResponse.status)
+  return p != nullptr ? *p : *reinterpret_cast<const ::milvus::proto::common::Status*>(
+      &::milvus::proto::common::_Status_default_instance_);
+}
+inline ::milvus::proto::common::Status* GetReplicasResponse::release_status() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.GetReplicasResponse.status)
+  
+  ::milvus::proto::common::Status* temp = status_;
+  status_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::common::Status* GetReplicasResponse::mutable_status() {
+  
+  if (status_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::common::Status>(GetArenaNoVirtual());
+    status_ = p;
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetReplicasResponse.status)
+  return status_;
+}
+inline void GetReplicasResponse::set_allocated_status(::milvus::proto::common::Status* status) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaNoVirtual();
+  if (message_arena == nullptr) {
+    delete reinterpret_cast< ::PROTOBUF_NAMESPACE_ID::MessageLite*>(status_);
+  }
+  if (status) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena = nullptr;
+    if (message_arena != submessage_arena) {
+      status = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, status, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  status_ = status;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.GetReplicasResponse.status)
+}
+
+// repeated .milvus.proto.milvus.ReplicaInfo replicas = 2;
+inline int GetReplicasResponse::replicas_size() const {
+  return replicas_.size();
+}
+inline void GetReplicasResponse::clear_replicas() {
+  replicas_.Clear();
+}
+inline ::milvus::proto::milvus::ReplicaInfo* GetReplicasResponse::mutable_replicas(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetReplicasResponse.replicas)
+  return replicas_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ReplicaInfo >*
+GetReplicasResponse::mutable_replicas() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.GetReplicasResponse.replicas)
+  return &replicas_;
+}
+inline const ::milvus::proto::milvus::ReplicaInfo& GetReplicasResponse::replicas(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetReplicasResponse.replicas)
+  return replicas_.Get(index);
+}
+inline ::milvus::proto::milvus::ReplicaInfo* GetReplicasResponse::add_replicas() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.GetReplicasResponse.replicas)
+  return replicas_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ReplicaInfo >&
+GetReplicasResponse::replicas() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.GetReplicasResponse.replicas)
+  return replicas_;
+}
+
+// -------------------------------------------------------------------
+
+// ReplicaInfo
+
+// int64 replicaID = 1;
+inline void ReplicaInfo::clear_replicaid() {
+  replicaid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ReplicaInfo::replicaid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ReplicaInfo.replicaID)
+  return replicaid_;
+}
+inline void ReplicaInfo::set_replicaid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  replicaid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ReplicaInfo.replicaID)
+}
+
+// int64 collectionID = 2;
+inline void ReplicaInfo::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ReplicaInfo::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ReplicaInfo.collectionID)
+  return collectionid_;
+}
+inline void ReplicaInfo::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ReplicaInfo.collectionID)
+}
+
+// repeated int64 partition_ids = 3;
+inline int ReplicaInfo::partition_ids_size() const {
+  return partition_ids_.size();
+}
+inline void ReplicaInfo::clear_partition_ids() {
+  partition_ids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ReplicaInfo::partition_ids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ReplicaInfo.partition_ids)
+  return partition_ids_.Get(index);
+}
+inline void ReplicaInfo::set_partition_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  partition_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ReplicaInfo.partition_ids)
+}
+inline void ReplicaInfo::add_partition_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  partition_ids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ReplicaInfo.partition_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+ReplicaInfo::partition_ids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ReplicaInfo.partition_ids)
+  return partition_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+ReplicaInfo::mutable_partition_ids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ReplicaInfo.partition_ids)
+  return &partition_ids_;
+}
+
+// repeated .milvus.proto.milvus.ShardReplica shard_replicas = 4;
+inline int ReplicaInfo::shard_replicas_size() const {
+  return shard_replicas_.size();
+}
+inline void ReplicaInfo::clear_shard_replicas() {
+  shard_replicas_.Clear();
+}
+inline ::milvus::proto::milvus::ShardReplica* ReplicaInfo::mutable_shard_replicas(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ReplicaInfo.shard_replicas)
+  return shard_replicas_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ShardReplica >*
+ReplicaInfo::mutable_shard_replicas() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ReplicaInfo.shard_replicas)
+  return &shard_replicas_;
+}
+inline const ::milvus::proto::milvus::ShardReplica& ReplicaInfo::shard_replicas(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ReplicaInfo.shard_replicas)
+  return shard_replicas_.Get(index);
+}
+inline ::milvus::proto::milvus::ShardReplica* ReplicaInfo::add_shard_replicas() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ReplicaInfo.shard_replicas)
+  return shard_replicas_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::ShardReplica >&
+ReplicaInfo::shard_replicas() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ReplicaInfo.shard_replicas)
+  return shard_replicas_;
+}
+
+// repeated int64 node_ids = 5;
+inline int ReplicaInfo::node_ids_size() const {
+  return node_ids_.size();
+}
+inline void ReplicaInfo::clear_node_ids() {
+  node_ids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ReplicaInfo::node_ids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ReplicaInfo.node_ids)
+  return node_ids_.Get(index);
+}
+inline void ReplicaInfo::set_node_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  node_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ReplicaInfo.node_ids)
+}
+inline void ReplicaInfo::add_node_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  node_ids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ReplicaInfo.node_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+ReplicaInfo::node_ids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ReplicaInfo.node_ids)
+  return node_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+ReplicaInfo::mutable_node_ids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ReplicaInfo.node_ids)
+  return &node_ids_;
+}
+
+// -------------------------------------------------------------------
+
+// ShardReplica
+
+// int64 leaderID = 1;
+inline void ShardReplica::clear_leaderid() {
+  leaderid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ShardReplica::leaderid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShardReplica.leaderID)
+  return leaderid_;
+}
+inline void ShardReplica::set_leaderid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  leaderid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShardReplica.leaderID)
+}
+
+// string leader_addr = 2;
+inline void ShardReplica::clear_leader_addr() {
+  leader_addr_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ShardReplica::leader_addr() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShardReplica.leader_addr)
+  return leader_addr_.GetNoArena();
+}
+inline void ShardReplica::set_leader_addr(const std::string& value) {
+  
+  leader_addr_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShardReplica.leader_addr)
+}
+inline void ShardReplica::set_leader_addr(std::string&& value) {
+  
+  leader_addr_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.ShardReplica.leader_addr)
+}
+inline void ShardReplica::set_leader_addr(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  leader_addr_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.ShardReplica.leader_addr)
+}
+inline void ShardReplica::set_leader_addr(const char* value, size_t size) {
+  
+  leader_addr_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.ShardReplica.leader_addr)
+}
+inline std::string* ShardReplica::mutable_leader_addr() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ShardReplica.leader_addr)
+  return leader_addr_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ShardReplica::release_leader_addr() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.ShardReplica.leader_addr)
+  
+  return leader_addr_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ShardReplica::set_allocated_leader_addr(std::string* leader_addr) {
+  if (leader_addr != nullptr) {
+    
+  } else {
+    
+  }
+  leader_addr_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), leader_addr);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.ShardReplica.leader_addr)
+}
+
+// string dm_channel_name = 3;
+inline void ShardReplica::clear_dm_channel_name() {
+  dm_channel_name_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& ShardReplica::dm_channel_name() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShardReplica.dm_channel_name)
+  return dm_channel_name_.GetNoArena();
+}
+inline void ShardReplica::set_dm_channel_name(const std::string& value) {
+  
+  dm_channel_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShardReplica.dm_channel_name)
+}
+inline void ShardReplica::set_dm_channel_name(std::string&& value) {
+  
+  dm_channel_name_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.milvus.ShardReplica.dm_channel_name)
+}
+inline void ShardReplica::set_dm_channel_name(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  dm_channel_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.ShardReplica.dm_channel_name)
+}
+inline void ShardReplica::set_dm_channel_name(const char* value, size_t size) {
+  
+  dm_channel_name_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.ShardReplica.dm_channel_name)
+}
+inline std::string* ShardReplica::mutable_dm_channel_name() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ShardReplica.dm_channel_name)
+  return dm_channel_name_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* ShardReplica::release_dm_channel_name() {
+  // @@protoc_insertion_point(field_release:milvus.proto.milvus.ShardReplica.dm_channel_name)
+  
+  return dm_channel_name_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void ShardReplica::set_allocated_dm_channel_name(std::string* dm_channel_name) {
+  if (dm_channel_name != nullptr) {
+    
+  } else {
+    
+  }
+  dm_channel_name_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), dm_channel_name);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.ShardReplica.dm_channel_name)
+}
+
+// repeated int64 node_ids = 4;
+inline int ShardReplica::node_ids_size() const {
+  return node_ids_.size();
+}
+inline void ShardReplica::clear_node_ids() {
+  node_ids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 ShardReplica::node_ids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ShardReplica.node_ids)
+  return node_ids_.Get(index);
+}
+inline void ShardReplica::set_node_ids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  node_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ShardReplica.node_ids)
+}
+inline void ShardReplica::add_node_ids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  node_ids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ShardReplica.node_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+ShardReplica::node_ids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ShardReplica.node_ids)
+  return node_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+ShardReplica::mutable_node_ids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ShardReplica.node_ids)
+  return &node_ids_;
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

@@ -302,7 +302,7 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 }
 
 // GetReplicas gets the replicas of a certain collection.
-func (c *Client) GetReplicas(ctx context.Context, req *querypb.GetReplicasRequest) (*querypb.GetReplicasResponse, error) {
+func (c *Client) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -312,7 +312,7 @@ func (c *Client) GetReplicas(ctx context.Context, req *querypb.GetReplicasReques
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*querypb.GetReplicasResponse), err
+	return ret.(*milvuspb.GetReplicasResponse), err
 }
 
 // GetShardLeaders gets the shard leaders of a certain collection.
