@@ -12,16 +12,23 @@
 package storage
 
 import (
+	"io"
+
 	"golang.org/x/exp/mmap"
 )
+
+type FileReader interface {
+	io.Reader
+	io.Closer
+}
 
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
-	// GetPath returns path of @filePath.
-	GetPath(filePath string) (string, error)
-	// GetSize returns path of @filePath.
-	GetSize(filePath string) (int64, error)
+	// Path returns path of @filePath.
+	Path(filePath string) (string, error)
+	// Size returns path of @filePath.
+	Size(filePath string) (int64, error)
 	// Write writes @content to @filePath.
 	Write(filePath string, content []byte) error
 	// MultiWrite writes multi @content to @filePath.
@@ -30,6 +37,8 @@ type ChunkManager interface {
 	Exist(filePath string) bool
 	// Read reads @filePath and returns content.
 	Read(filePath string) ([]byte, error)
+	// Reader return a reader for @filePath
+	Reader(filePath string) (FileReader, error)
 	// MultiRead reads @filePath and returns content.
 	MultiRead(filePaths []string) ([][]byte, error)
 	ListWithPrefix(prefix string) ([]string, error)

@@ -21,12 +21,13 @@ import (
 	"io"
 	"sync"
 
+	"go.uber.org/zap"
+	"golang.org/x/exp/mmap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/cache"
-	"go.uber.org/zap"
-	"golang.org/x/exp/mmap"
 )
 
 var (
@@ -116,12 +117,12 @@ func (vcm *VectorChunkManager) deserializeVectorFile(filePath string, content []
 
 // GetPath returns the path of vector data. If cached, return local path.
 // If not cached return remote path.
-func (vcm *VectorChunkManager) GetPath(filePath string) (string, error) {
-	return vcm.vectorStorage.GetPath(filePath)
+func (vcm *VectorChunkManager) Path(filePath string) (string, error) {
+	return vcm.vectorStorage.Path(filePath)
 }
 
-func (vcm *VectorChunkManager) GetSize(filePath string) (int64, error) {
-	return vcm.vectorStorage.GetSize(filePath)
+func (vcm *VectorChunkManager) Size(filePath string) (int64, error) {
+	return vcm.vectorStorage.Size(filePath)
 }
 
 // Write writes the vector data to local cache if cache enabled.
@@ -156,7 +157,7 @@ func (vcm *VectorChunkManager) readWithCache(filePath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	size, err := vcm.cacheStorage.GetSize(filePath)
+	size, err := vcm.cacheStorage.Size(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +238,10 @@ func (vcm *VectorChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
 		}
 	}
 	return nil, errors.New("the file mmap has not been cached")
+}
+
+func (vcm *VectorChunkManager) Reader(filePath string) (FileReader, error) {
+	return nil, errors.New("this method has not been implemented")
 }
 
 // ReadAt reads specific position data of vector. If cached, it reads from local.

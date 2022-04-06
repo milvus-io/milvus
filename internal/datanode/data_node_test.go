@@ -32,6 +32,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 
@@ -79,6 +80,9 @@ func TestDataNode(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
+
+	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
+	Params.DataNodeCfg.NodeID = 1
 
 	t.Run("Test WatchDmChannels ", func(t *testing.T) {
 		emptyNode := &DataNode{}
@@ -316,6 +320,34 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test Import", func(t *testing.T) {
+		content := []byte(`{
+		"rows":[
+			{"bool_field": true, "int8_field": 10, "int16_field": 101, "int32_field": 1001, "int64_field": 10001, "float32_field": 3.14, "float64_field": 1.56, "varChar_field": "hello world", "binary_vector_field": [254, 0, 254, 0], "float_vector_field": [1.1, 1.2]},
+			{"bool_field": false, "int8_field": 11, "int16_field": 102, "int32_field": 1002, "int64_field": 10002, "float32_field": 3.15, "float64_field": 2.56, "varChar_field": "hello world", "binary_vector_field": [253, 0, 253, 0], "float_vector_field": [2.1, 2.2]},
+			{"bool_field": true, "int8_field": 12, "int16_field": 103, "int32_field": 1003, "int64_field": 10003, "float32_field": 3.16, "float64_field": 3.56, "varChar_field": "hello world", "binary_vector_field": [252, 0, 252, 0], "float_vector_field": [3.1, 3.2]},
+			{"bool_field": false, "int8_field": 13, "int16_field": 104, "int32_field": 1004, "int64_field": 10004, "float32_field": 3.17, "float64_field": 4.56, "varChar_field": "hello world", "binary_vector_field": [251, 0, 251, 0], "float_vector_field": [4.1, 4.2]},
+			{"bool_field": true, "int8_field": 14, "int16_field": 105, "int32_field": 1005, "int64_field": 10005, "float32_field": 3.18, "float64_field": 5.56, "varChar_field": "hello world", "binary_vector_field": [250, 0, 250, 0], "float_vector_field": [5.1, 5.2]}
+		]
+		}`)
+
+		filePath := "import/rows_1.json"
+		err = node.chunkManager.Write(filePath, content)
+		assert.NoError(t, err)
+		req := &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				PartitionId:  100,
+				Files:        []string{filePath},
+				RowBased:     true,
+			},
+		}
+		stat, err := node.Import(node.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, stat.ErrorCode)
+	})
+
+	t.Run("Test Import error", func(t *testing.T) {
+		node.rootCoord = &RootCoordFactory{collectionID: -1}
 		req := &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{
 				CollectionId: 100,
@@ -324,7 +356,7 @@ func TestDataNode(t *testing.T) {
 		}
 		stat, err := node.Import(node.ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, stat.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.ErrorCode)
 	})
 
 	t.Run("Test BackGroundGC", func(t *testing.T) {
@@ -585,7 +617,6 @@ func TestWatchChannel(t *testing.T) {
 		exist := node.flowgraphManager.exist("test3")
 		assert.False(t, exist)
 	})
-
 }
 
 func TestDataNode_GetComponentStates(t *testing.T) {

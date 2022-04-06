@@ -1,18 +1,23 @@
 package importutil
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -20,8 +25,11 @@ const (
 )
 
 func Test_NewImportWrapper(t *testing.T) {
+	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	wrapper := NewImportWrapper(ctx, nil, 2, 1, nil, nil)
+	cm, err := f.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	wrapper := NewImportWrapper(ctx, nil, 2, 1, nil, cm, nil)
 	assert.Nil(t, wrapper)
 
 	schema := &schemapb.CollectionSchema{
@@ -39,28 +47,18 @@ func Test_NewImportWrapper(t *testing.T) {
 		Description:  "int64",
 		DataType:     schemapb.DataType_Int64,
 	})
-	wrapper = NewImportWrapper(ctx, schema, 2, 1, nil, nil)
+	wrapper = NewImportWrapper(ctx, schema, 2, 1, nil, cm, nil)
 	assert.NotNil(t, wrapper)
 
-	err := wrapper.Cancel()
+	err = wrapper.Cancel()
 	assert.Nil(t, err)
-}
-
-func saveFile(t *testing.T, filePath string, content []byte) *os.File {
-	fp, err := os.Create(filePath)
-	assert.Nil(t, err)
-
-	_, err = fp.Write(content)
-	assert.Nil(t, err)
-
-	return fp
 }
 
 func Test_ImportRowBased(t *testing.T) {
+	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
-	defer os.RemoveAll(TempFilesPath)
+	cm, err := f.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -75,11 +73,12 @@ func Test_ImportRowBased(t *testing.T) {
 	}`)
 
 	filePath := TempFilesPath + "rows_1.json"
-	fp1 := saveFile(t, filePath, content)
-	defer fp1.Close()
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
+	defer cm.RemoveWithPrefix("")
 
 	rowCount := 0
-	flushFunc := func(fields map[string]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -94,7 +93,7 @@ func Test_ImportRowBased(t *testing.T) {
 	}
 
 	// success case
-	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, true, false)
@@ -109,10 +108,10 @@ func Test_ImportRowBased(t *testing.T) {
 	}`)
 
 	filePath = TempFilesPath + "rows_2.json"
-	fp2 := saveFile(t, filePath, content)
-	defer fp2.Close()
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
 
-	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, true, false)
@@ -127,10 +126,11 @@ func Test_ImportRowBased(t *testing.T) {
 }
 
 func Test_ImportColumnBased_json(t *testing.T) {
+	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
-	defer os.RemoveAll(TempFilesPath)
+	cm, err := f.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	defer cm.RemoveWithPrefix("")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -160,11 +160,11 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	}`)
 
 	filePath := TempFilesPath + "columns_1.json"
-	fp1 := saveFile(t, filePath, content)
-	defer fp1.Close()
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
 
 	rowCount := 0
-	flushFunc := func(fields map[string]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -179,7 +179,7 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	}
 
 	// success case
-	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, false, false)
@@ -192,10 +192,10 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	}`)
 
 	filePath = TempFilesPath + "rows_2.json"
-	fp2 := saveFile(t, filePath, content)
-	defer fp2.Close()
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
 
-	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, false, false)
@@ -209,10 +209,11 @@ func Test_ImportColumnBased_json(t *testing.T) {
 }
 
 func Test_ImportColumnBased_numpy(t *testing.T) {
+	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
-	defer os.RemoveAll(TempFilesPath)
+	cm, err := f.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	defer cm.RemoveWithPrefix("")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -230,24 +231,30 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	files := make([]string, 0)
 
 	filePath := TempFilesPath + "scalar_fields.json"
-	fp1 := saveFile(t, filePath, content)
-	fp1.Close()
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = TempFilesPath + "field_binary_vector.npy"
 	bin := [][2]uint8{{1, 2}, {3, 4}, {5, 6}, {7, 8}, {9, 10}}
-	err = CreateNumpyFile(filePath, bin)
+	content, err = CreateNumpyData(bin)
 	assert.Nil(t, err)
+	log.Debug("content", zap.Any("c", content))
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	filePath = TempFilesPath + "field_float_vector.npy"
 	flo := [][4]float32{{1, 2, 3, 4}, {3, 4, 5, 6}, {5, 6, 7, 8}, {7, 8, 9, 10}, {9, 10, 11, 12}}
-	err = CreateNumpyFile(filePath, flo)
+	content, err = CreateNumpyData(flo)
 	assert.Nil(t, err)
+	log.Debug("content", zap.Any("c", content))
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
 	files = append(files, filePath)
 
 	rowCount := 0
-	flushFunc := func(fields map[string]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -262,7 +269,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	}
 
 	// success case
-	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
 
 	err = wrapper.Import(files, false, false)
 	assert.Nil(t, err)
@@ -274,10 +281,10 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	}`)
 
 	filePath = TempFilesPath + "rows_2.json"
-	fp2 := saveFile(t, filePath, content)
-	defer fp2.Close()
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
 
-	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, flushFunc)
+	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, false, false)
@@ -321,10 +328,11 @@ func perfSchema(dim int) *schemapb.CollectionSchema {
 }
 
 func Test_ImportRowBased_perf(t *testing.T) {
+	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
-	defer os.RemoveAll(TempFilesPath)
+	cm, err := f.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	defer cm.RemoveWithPrefix("")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -365,19 +373,22 @@ func Test_ImportRowBased_perf(t *testing.T) {
 	// generate a json file
 	filePath := TempFilesPath + "row_perf.json"
 	func() {
-		fp, err := os.Create(filePath)
-		assert.Nil(t, err)
-		defer fp.Close()
+		var b bytes.Buffer
+		bw := bufio.NewWriter(&b)
 
-		encoder := json.NewEncoder(fp)
+		encoder := json.NewEncoder(bw)
 		err = encoder.Encode(entities)
 		assert.Nil(t, err)
+		err = bw.Flush()
+		assert.NoError(t, err)
+		err = cm.Write(filePath, b.Bytes())
+		assert.NoError(t, err)
 	}()
 	tr.Record("generate large json file " + filePath)
 
 	// parse the json file
 	parseCount := 0
-	flushFunc := func(fields map[string]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -393,7 +404,7 @@ func Test_ImportRowBased_perf(t *testing.T) {
 
 	schema := perfSchema(dim)
 
-	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int32(segmentSize), idAllocator, flushFunc)
+	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, flushFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, true, false)
@@ -404,10 +415,11 @@ func Test_ImportRowBased_perf(t *testing.T) {
 }
 
 func Test_ImportColumnBased_perf(t *testing.T) {
+	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
-	defer os.RemoveAll(TempFilesPath)
+	cm, err := f.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	defer cm.RemoveWithPrefix("")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -449,15 +461,17 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 
 	// generate json files
 	saveFileFunc := func(filePath string, data interface{}) error {
-		fp, err := os.Create(filePath)
-		if err != nil {
-			return err
-		}
-		defer fp.Close()
+		var b bytes.Buffer
+		bw := bufio.NewWriter(&b)
 
-		encoder := json.NewEncoder(fp)
+		encoder := json.NewEncoder(bw)
 		err = encoder.Encode(data)
-		return err
+		assert.Nil(t, err)
+		err = bw.Flush()
+		assert.NoError(t, err)
+		err = cm.Write(filePath, b.Bytes())
+		assert.NoError(t, err)
+		return nil
 	}
 
 	filePath1 := TempFilesPath + "ids.json"
@@ -472,7 +486,7 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 
 	// parse the json file
 	parseCount := 0
-	flushFunc := func(fields map[string]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -488,7 +502,7 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 
 	schema := perfSchema(dim)
 
-	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int32(segmentSize), idAllocator, flushFunc)
+	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, flushFunc)
 	files := make([]string, 0)
 	files = append(files, filePath1)
 	files = append(files, filePath2)

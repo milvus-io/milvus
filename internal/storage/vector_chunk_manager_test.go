@@ -22,11 +22,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func initMeta() *etcdpb.CollectionMeta {
@@ -179,13 +180,13 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 		key := "1"
 		err = vcm.Write(key, []byte{1})
 		assert.Nil(t, err)
-		pathGet, err := vcm.GetPath(key)
+		pathGet, err := vcm.Path(key)
 		assert.Nil(t, err)
 		assert.Equal(t, pathGet, key)
 
 		err = vcm.cacheStorage.Write(key, []byte{1})
 		assert.Nil(t, err)
-		pathGet, err = vcm.GetPath(key)
+		pathGet, err = vcm.Path(key)
 		assert.Nil(t, err)
 		assert.Equal(t, pathGet, key)
 
@@ -206,13 +207,13 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 		key := "1"
 		err = vcm.Write(key, []byte{1})
 		assert.Nil(t, err)
-		sizeGet, err := vcm.GetSize(key)
+		sizeGet, err := vcm.Size(key)
 		assert.Nil(t, err)
 		assert.EqualValues(t, sizeGet, 1)
 
 		err = vcm.cacheStorage.Write(key, []byte{1})
 		assert.Nil(t, err)
-		sizeGet, err = vcm.GetSize(key)
+		sizeGet, err = vcm.Size(key)
 		assert.Nil(t, err)
 		assert.EqualValues(t, sizeGet, 1)
 

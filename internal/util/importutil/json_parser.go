@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 const (
@@ -19,23 +20,27 @@ const (
 )
 
 type JSONParser struct {
-	ctx     context.Context  // for canceling parse process
-	bufSize int64            // max rows in a buffer
-	fields  map[string]int64 // fields need to be parsed
+	ctx          context.Context  // for canceling parse process
+	bufSize      int64            // max rows in a buffer
+	fields       map[string]int64 // fields need to be parsed
+	name2FieldID map[string]storage.FieldID
 }
 
 // NewJSONParser helper function to create a JSONParser
 func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSchema) *JSONParser {
 	fields := make(map[string]int64)
+	name2FieldID := make(map[string]storage.FieldID)
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
 		fields[schema.GetName()] = 0
+		name2FieldID[schema.GetName()] = schema.GetFieldID()
 	}
 
 	parser := &JSONParser{
-		ctx:     ctx,
-		bufSize: 4096,
-		fields:  fields,
+		ctx:          ctx,
+		bufSize:      4096,
+		fields:       fields,
+		name2FieldID: name2FieldID,
 	}
 
 	return parser
@@ -87,7 +92,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		}
 
 		// read buffer
-		buf := make([]map[string]interface{}, 0, BufferSize)
+		buf := make([]map[storage.FieldID]interface{}, 0, BufferSize)
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
@@ -101,7 +106,11 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 				return p.logError("JSON parse: invalid JSON format, each row should be a key-value map")
 			}
 
-			row := value.(map[string]interface{})
+			row := make(map[storage.FieldID]interface{})
+			stringMap := value.(map[string]interface{})
+			for k, v := range stringMap {
+				row[p.name2FieldID[k]] = v
+			}
 
 			buf = append(buf, row)
 			if len(buf) >= int(p.bufSize) {
@@ -110,7 +119,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 				}
 
 				// clear the buffer
-				buf = make([]map[string]interface{}, 0, BufferSize)
+				buf = make([]map[storage.FieldID]interface{}, 0, BufferSize)
 			}
 		}
 
@@ -185,9 +194,10 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 			return p.logError("JSON parse: invalid column-based JSON format, each field should begin with '['")
 		}
 
+		id := p.name2FieldID[key]
 		// read buffer
-		buf := make(map[string][]interface{})
-		buf[key] = make([]interface{}, 0, BufferSize)
+		buf := make(map[storage.FieldID][]interface{})
+		buf[id] = make([]interface{}, 0, BufferSize)
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
@@ -198,19 +208,19 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 				continue
 			}
 
-			buf[key] = append(buf[key], value)
-			if len(buf[key]) >= int(p.bufSize) {
+			buf[id] = append(buf[id], value)
+			if len(buf[id]) >= int(p.bufSize) {
 				if err = handler.Handle(buf); err != nil {
 					return p.logError(err.Error())
 				}
 
 				// clear the buffer
-				buf[key] = make([]interface{}, 0, BufferSize)
+				buf[id] = make([]interface{}, 0, BufferSize)
 			}
 		}
 
 		// some values in buffer not parsed, parse them
-		if len(buf[key]) > 0 {
+		if len(buf[id]) > 0 {
 			if err = handler.Handle(buf); err != nil {
 				return p.logError(err.Error())
 			}
