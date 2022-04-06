@@ -647,6 +647,10 @@ func (s *Server) GetImportState(ctx context.Context, req *milvuspb.GetImportStat
 	return s.proxy.GetImportState(ctx, req)
 }
 
+func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+	return s.proxy.GetReplicas(ctx, req)
+}
+
 // Check is required by gRPC healthy checking
 func (s *Server) Check(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
 	ret := &grpc_health_v1.HealthCheckResponse{

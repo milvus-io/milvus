@@ -90,8 +90,8 @@ func (m *QueryCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetri
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }
 
-func (m *QueryCoordClient) GetReplicas(ctx context.Context, in *querypb.GetReplicasRequest, opts ...grpc.CallOption) (*querypb.GetReplicasResponse, error) {
-	return &querypb.GetReplicasResponse{}, m.Err
+func (m *QueryCoordClient) GetReplicas(ctx context.Context, in *milvuspb.GetReplicasRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicasResponse, error) {
+	return &milvuspb.GetReplicasResponse{}, m.Err
 }
 
 func (m *QueryCoordClient) GetShardLeaders(ctx context.Context, in *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {

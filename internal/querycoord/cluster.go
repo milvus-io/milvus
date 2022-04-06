@@ -76,7 +76,7 @@ type Cluster interface {
 	allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
 	allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64) error
 
-	assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo) error
+	assignNodesToReplicas(ctx context.Context, replicas []*milvuspb.ReplicaInfo) error
 
 	getSessionVersion() int64
 
@@ -704,7 +704,7 @@ func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs
 	return c.channelAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs)
 }
 
-func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas []*querypb.ReplicaInfo) error {
+func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas []*milvuspb.ReplicaInfo) error {
 	nodes := c.onlineNodeIDs()
 	if len(nodes) < len(replicas) {
 		return errors.New("no enough nodes to create replicas")

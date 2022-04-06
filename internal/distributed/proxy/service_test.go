@@ -360,7 +360,7 @@ func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return nil, nil
 }
 
-func (m *MockQueryCoord) GetReplicas(ctx context.Context, req *querypb.GetReplicasRequest) (*querypb.GetReplicasResponse, error) {
+func (m *MockQueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	return nil, nil
 }
 
@@ -705,6 +705,10 @@ func (m *MockProxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*m
 }
 
 func (m *MockProxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	return nil, nil
 }
 

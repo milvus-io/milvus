@@ -332,9 +332,9 @@ func (coord *QueryCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
-func (coord *QueryCoordMock) GetReplicas(ctx context.Context, req *querypb.GetReplicasRequest) (*querypb.GetReplicasResponse, error) {
+func (coord *QueryCoordMock) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	if !coord.healthy() {
-		return &querypb.GetReplicasResponse{
+		return &milvuspb.GetReplicasResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "unhealthy",
@@ -342,7 +342,7 @@ func (coord *QueryCoordMock) GetReplicas(ctx context.Context, req *querypb.GetRe
 		}, nil
 	}
 
-	return &querypb.GetReplicasResponse{
+	return &milvuspb.GetReplicasResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "not implemented",

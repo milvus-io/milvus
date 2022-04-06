@@ -3932,6 +3932,20 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	return resp, err
 }
 
+// GetReplicas gets replica info
+func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+	log.Info("received get replicas request")
+	resp := &milvuspb.GetReplicasResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	resp, err := node.queryCoord.GetReplicas(ctx, req)
+	log.Info("received get replicas response", zap.Any("resp", resp), zap.Error(err))
+	return resp, err
+}
+
 // Check import task state from datanode
 func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	log.Info("received get import state request", zap.Int64("taskID", req.GetTask()))

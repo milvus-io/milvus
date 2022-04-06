@@ -391,7 +391,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 }
 
 // GetReplicas returns the shard leaders of a certain collection.
-func (s *Server) GetReplicas(ctx context.Context, req *querypb.GetReplicasRequest) (*querypb.GetReplicasResponse, error) {
+func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	return s.queryCoord.GetReplicas(ctx, req)
 }
 
