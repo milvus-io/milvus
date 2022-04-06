@@ -164,14 +164,18 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
-	segs := []typeutil.UniqueID{}
+	var segs []typeutil.UniqueID
 	segLock := sync.Mutex{}
 	core.CallGetFlushedSegmentsService = func(ctx context.Context, collID, partID typeutil.UniqueID) ([]typeutil.UniqueID, error) {
 		segLock.Lock()
 		defer segLock.Unlock()
-		ret := []typeutil.UniqueID{}
+		var ret []typeutil.UniqueID
 		ret = append(ret, segs...)
 		return ret, nil
+	}
+
+	core.CallUpdateSegmentStateService = func(ctx context.Context, segID typeutil.UniqueID, ss commonpb.SegmentState) error {
+		return nil
 	}
 
 	var binlogLock sync.Mutex

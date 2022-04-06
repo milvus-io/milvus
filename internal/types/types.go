@@ -255,6 +255,8 @@ type DataCoord interface {
 	WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
 	// GetFlushState gets the flush state of multiple segments
 	GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error)
+	// SetSegmentState updates a segment's state explicitly.
+	SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error)
 
 	// DropVirtualChannel notifies DataCoord a virtual channel is dropped and
 	// updates related segments binlogs(including insert binlogs, stats logs and delta logs)

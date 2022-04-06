@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -2261,6 +2262,116 @@ func TestGetFlushState(t *testing.T) {
 	})
 }
 
+type mockTxnKVext struct {
+	kv.MockTxnKV
+}
+
+func (m *mockTxnKVext) LoadWithPrefix(prefix string) ([]string, []string, error) {
+	return []string{}, []string{}, nil
+}
+
+func (m *mockTxnKVext) MultiSave(kvs map[string]string) error {
+	return errors.New("(testing only) injected error")
+}
+
+func TestDataCoordServer_SetSegmentState(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		segment := &datapb.SegmentInfo{
+			ID:            1000,
+			CollectionID:  100,
+			PartitionID:   0,
+			InsertChannel: "c1",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Growing,
+			StartPosition: &internalpb.MsgPosition{
+				ChannelName: "c1",
+				MsgID:       []byte{},
+				MsgGroup:    "",
+				Timestamp:   0,
+			},
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(segment))
+		assert.Nil(t, err)
+		// Set segment state.
+		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
+			SegmentId: 1000,
+			NewState:  commonpb.SegmentState_Flushed,
+		})
+		// Verify that the state has been updated.
+		resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			SegmentIDs: []int64{1000},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.States))
+		assert.EqualValues(t, commonpb.SegmentState_Flushed, resp.States[0].State)
+	})
+
+	t.Run("dataCoord meta set state error", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		svr.meta.Lock()
+		func() {
+			defer svr.meta.Unlock()
+			svr.meta, _ = newMeta(&mockTxnKVext{})
+		}()
+		defer closeTestServer(t, svr)
+		segment := &datapb.SegmentInfo{
+			ID:            1000,
+			CollectionID:  100,
+			PartitionID:   0,
+			InsertChannel: "c1",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Growing,
+			StartPosition: &internalpb.MsgPosition{
+				ChannelName: "c1",
+				MsgID:       []byte{},
+				MsgGroup:    "",
+				Timestamp:   0,
+			},
+		}
+		svr.meta.AddSegment(NewSegmentInfo(segment))
+		// Set segment state.
+		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
+			SegmentId: 1000,
+			NewState:  commonpb.SegmentState_Flushed,
+		})
+		// Verify that the state has been updated.
+		resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			SegmentIDs: []int64{1000},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.States))
+		assert.EqualValues(t, commonpb.SegmentState_Flushed, resp.States[0].State)
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
+			SegmentId: 1000,
+			NewState:  commonpb.SegmentState_Flushed,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+	})
+}
+
 func TestImport(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -2279,9 +2390,7 @@ func TestImport(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
-
 		etcd.StopEtcdServer()
-
 	})
 
 	t.Run("no free node", func(t *testing.T) {
@@ -2302,9 +2411,7 @@ func TestImport(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
-
 		etcd.StopEtcdServer()
-
 	})
 
 	t.Run("no datanode available", func(t *testing.T) {
@@ -2319,9 +2426,7 @@ func TestImport(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-
 		etcd.StopEtcdServer()
-
 	})
 
 	t.Run("with closed server", func(t *testing.T) {

@@ -470,6 +470,10 @@ func (m *MockDataCoord) DropVirtualChannel(ctx context.Context, req *datapb.Drop
 	return &datapb.DropVirtualChannelResponse{}, nil
 }
 
+func (m *MockDataCoord) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
+	return &datapb.SetSegmentStateResponse{}, nil
+}
+
 func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	return nil, nil
 }

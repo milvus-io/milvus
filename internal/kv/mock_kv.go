@@ -24,67 +24,67 @@ import (
 	"go.uber.org/zap"
 )
 
-type mockBaseKV struct {
+type MockBaseKV struct {
 	InMemKv map[string]string
 }
 
-func (m *mockBaseKV) Load(key string) (string, error) {
+func (m *MockBaseKV) Load(key string) (string, error) {
 	if val, ok := m.InMemKv[key]; ok {
 		return val, nil
 	}
 	return "", nil
 }
 
-func (m *mockBaseKV) MultiLoad(keys []string) ([]string, error) {
+func (m *MockBaseKV) MultiLoad(keys []string) ([]string, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockBaseKV) LoadWithPrefix(key string) ([]string, []string, error) {
+func (m *MockBaseKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockBaseKV) Save(key string, value string) error {
+func (m *MockBaseKV) Save(key string, value string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockBaseKV) MultiSave(kvs map[string]string) error {
+func (m *MockBaseKV) MultiSave(kvs map[string]string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockBaseKV) Remove(key string) error {
+func (m *MockBaseKV) Remove(key string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockBaseKV) MultiRemove(keys []string) error {
+func (m *MockBaseKV) MultiRemove(keys []string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockBaseKV) RemoveWithPrefix(key string) error {
+func (m *MockBaseKV) RemoveWithPrefix(key string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockBaseKV) Close() {
+func (m *MockBaseKV) Close() {
 	panic("not implemented") // TODO: Implement
 }
 
-type mockTxnKV struct {
-	mockBaseKV
+type MockTxnKV struct {
+	MockBaseKV
 }
 
-func (m *mockTxnKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
+func (m *MockTxnKV) MultiSaveAndRemove(saves map[string]string, removals []string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockTxnKV) MultiRemoveWithPrefix(keys []string) error {
+func (m *MockTxnKV) MultiRemoveWithPrefix(keys []string) error {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockTxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
+func (m *MockTxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	panic("not implemented") // TODO: Implement
 }
 
 type MockMetaKV struct {
-	mockTxnKV
+	MockTxnKV
 }
 
 func (m *MockMetaKV) GetPath(key string) string {

@@ -487,6 +487,20 @@ func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	return ret.(*datapb.DropVirtualChannelResponse), err
 }
 
+// SetSegmentState sets the state of a given segment.
+func (c *Client) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataCoordClient).SetSegmentState(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.SetSegmentStateResponse), err
+}
+
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

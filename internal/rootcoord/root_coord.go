@@ -147,6 +147,9 @@ type Core struct {
 
 	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
+	// Update segment state.
+	CallUpdateSegmentStateService func(ctx context.Context, segID typeutil.UniqueID, ss commonpb.SegmentState) error
+
 	//assign import task to data service
 	CallImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
 
@@ -273,6 +276,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallGetFlushedSegmentsService == nil {
 		return fmt.Errorf("callGetFlushedSegmentsService is nil")
+	}
+	if c.CallUpdateSegmentStateService == nil {
+		return fmt.Errorf("CallUpdateSegmentStateService is nil")
 	}
 	if c.CallWatchChannels == nil {
 		return fmt.Errorf("callWatchChannels is nil")
@@ -597,7 +603,7 @@ func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.Proxy,
 	}
 }
 
-// SetDataCoord set datacoord
+// SetDataCoord set dataCoord.
 func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -712,6 +718,29 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 			return nil, fmt.Errorf("get flushed segments from data coord failed, reason = %s", rsp.Status.Reason)
 		}
 		return rsp.Segments, nil
+	}
+
+	c.CallUpdateSegmentStateService = func(ctx context.Context, segID typeutil.UniqueID, ss commonpb.SegmentState) (retErr error) {
+		defer func() {
+			if err := recover(); err != nil {
+				retErr = fmt.Errorf("update segment state from data coord panic, msg = %v", err)
+			}
+		}()
+		<-initCh
+		req := &datapb.SetSegmentStateRequest{
+			SegmentId: segID,
+			NewState:  ss,
+		}
+		resp, err := s.SetSegmentState(ctx, req)
+		if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Error("failed to update segment state",
+				zap.Any("request", req), zap.Any("response", resp), zap.Error(err))
+			return err
+		}
+		log.Info("successfully set segment state",
+			zap.Int64("segment ID", req.GetSegmentId()),
+			zap.String("new segment state", req.GetNewState().String()))
+		return nil
 	}
 
 	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) (retErr error) {
@@ -2263,13 +2292,14 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-
-	return c.importManager.getTaskState(req.Task), nil
+	return c.importManager.getTaskState(req.GetTask()), nil
 }
 
 // ReportImport reports import task state to RootCoord.
 func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	log.Info("receive import state report", zap.Any("import result", ir))
+	log.Info("receive import state report",
+		zap.Int64("task ID", ir.GetTaskId()),
+		zap.Any("import state", ir.GetState()))
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
@@ -2428,30 +2458,41 @@ func (c *Core) checkCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTask
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("(in loop)context done, exiting checkCompleteIndexLoop",
+			log.Info("(in check complete index loop) context done, exiting checkCompleteIndexLoop",
 				zap.Int64("task ID", ti.GetId()))
 			return
 		case <-ticker.C:
-			log.Info("(in loop)check segments' index states", zap.Int64("task ID", ti.GetId()))
+			log.Info("(in check complete index loop) check segments' index states", zap.Int64("task ID", ti.GetId()))
 			if ct, err := c.CountCompleteIndex(ctx, colName, ti.GetCollectionId(), segIDs); err == nil &&
 				segmentsOnlineReady(ct, len(segIDs)) {
-				log.Info("(in loop)segment indices are ready",
+				log.Info("segment indices are ready",
 					zap.Int64("task ID", ti.GetId()),
 					zap.Int("total # of segments", len(segIDs)),
 					zap.Int("# of segments with index ready", ct))
-				c.importManager.bringSegmentsOnline(ti)
+				c.bringSegmentsOnline(ctx, segIDs)
 				return
 			}
 		case <-expireTicker.C:
-			log.Info("(in loop)waited for sufficiently long time, bring segments online",
+			log.Info("(in check complete index loop) waited for sufficiently long time, bring segments online",
 				zap.Int64("task ID", ti.GetId()))
-			c.importManager.bringSegmentsOnline(ti)
+			c.bringSegmentsOnline(ctx, segIDs)
 			return
 		}
 	}
 }
 
-// segmentsOnlineReady returns true if segments are ready to go up online (a.k.a. searchable).
+// bringSegmentsOnline brings the segments online so that data in these segments become searchable
+// it is done by changing segments' states from `importing` to `flushed`.
+func (c *Core) bringSegmentsOnline(ctx context.Context, segIDs []UniqueID) {
+	log.Info("bringing import task's segments online!", zap.Any("segment IDs", segIDs))
+	// TODO: Make update on segment states atomic.
+	for _, id := range segIDs {
+		// Explicitly mark segment states `flushed`.
+		c.CallUpdateSegmentStateService(ctx, id, commonpb.SegmentState_Flushed)
+	}
+}
+
+// segmentsOnlineReady returns true if segments are ready to go up online (a.k.a. become searchable).
 func segmentsOnlineReady(idxBuilt, segCount int) bool {
 	// Consider segments are ready when:
 	// (1) all but up to 2 segments have indices ready, or

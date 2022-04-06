@@ -446,6 +446,35 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	return resp, nil
 }
 
+// SetSegmentState reset the state of the given segment.
+func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
+	if s.isClosed() {
+		return &datapb.SetSegmentStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    serverNotServingErrMsg,
+			},
+		}, nil
+	}
+	err := s.meta.SetState(req.GetSegmentId(), req.GetNewState())
+	if err != nil {
+		log.Error("failed to updated segment state in dataCoord meta",
+			zap.Int64("segment ID", req.SegmentId),
+			zap.String("to state", req.GetNewState().String()))
+		return &datapb.SetSegmentStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+	return &datapb.SetSegmentStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
+}
+
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
