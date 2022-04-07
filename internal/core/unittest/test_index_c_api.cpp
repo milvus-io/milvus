@@ -236,6 +236,8 @@ TEST(CInt64IndexTest, All) {
     }
 }
 
+// disable this case since marisa not supported in mac
+#ifdef __linux__
 TEST(CStringIndexTest, All) {
     auto strs = GenStrArr(NB);
     schemapb::StringArray str_arr;
@@ -288,3 +290,4 @@ TEST(CStringIndexTest, All) {
 
     delete[](char*) str_ds->Get<const void*>(knowhere::meta::TENSOR);
 }
+#endif

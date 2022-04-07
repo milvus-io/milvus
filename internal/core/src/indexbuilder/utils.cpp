@@ -25,7 +25,9 @@ std::vector<std::string>
 NM_List() {
     static std::vector<std::string> ret{
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+#ifdef MILVUS_SUPPORT_NSG
         knowhere::IndexEnum::INDEX_NSG,
+#endif
         knowhere::IndexEnum::INDEX_RHNSWFlat,
     };
     return ret;
@@ -53,7 +55,9 @@ Need_ID_List() {
 std::vector<std::string>
 Need_BuildAll_list() {
     static std::vector<std::string> ret{
+#ifdef MILVUS_SUPPORT_NSG
         knowhere::IndexEnum::INDEX_NSG,
+#endif
     };
     return ret;
 }
