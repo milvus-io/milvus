@@ -18,6 +18,8 @@
 #include "query/ExprImpl.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "query/Utils.h"
+#include "query/Relational.h"
 
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
@@ -215,6 +217,17 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
             auto elem_func = [val](T x) { return (x < val); };
             return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
         }
+        case OpType::PrefixMatch: {
+            auto index_func = [val](Index* index) {
+                auto dataset = std::make_unique<knowhere::Dataset>();
+                dataset->Set(scalar::OPERATOR_TYPE, Operator::PrefixMatchOp);
+                dataset->Set(scalar::PREFIX_VALUE, val);
+                return index->Query(std::move(dataset));
+            };
+            auto elem_func = [val, op](T x) { return Match(x, val, op); };
+            return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+        }
+        // TODO: PostfixMatch
         default: {
             PanicInfo("unsupported range node");
         }
@@ -290,6 +303,11 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
             res = ExecUnaryRangeVisitorDispatcher<double>(expr);
             break;
         }
+        case DataType::STRING: {
+            // TODO: VARCHAR.
+            res = ExecUnaryRangeVisitorDispatcher<std::string>(expr);
+            break;
+        }
         default:
             PanicInfo("unsupported");
     }
@@ -332,6 +350,11 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
             res = ExecBinaryRangeVisitorDispatcher<double>(expr);
             break;
         }
+        case DataType::STRING: {
+            // TODO: VARCHAR
+            res = ExecBinaryRangeVisitorDispatcher<std::string>(expr);
+            break;
+        }
         default:
             PanicInfo("unsupported");
     }
@@ -356,7 +379,7 @@ struct relational {
 template <typename Op>
 auto
 ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetType {
-    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double>;
+    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> bitsets;
@@ -392,6 +415,11 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
                     auto chunk_data = segment_.chunk_data<double>(offset, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
+                case DataType::STRING: {
+                    // TODO: VARCHAR
+                    auto chunk_data = segment_.chunk_data<std::string>(offset, chunk_id).data();
+                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                }
                 default:
                     PanicInfo("unsupported datatype");
             }
@@ -401,7 +429,7 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
 
         BitsetType bitset(size);
         for (int i = 0; i < size; ++i) {
-            bool is_in = boost::apply_visitor(relational<decltype(op)>{}, left(i), right(i));
+            bool is_in = boost::apply_visitor(Relational<decltype(op)>{}, left(i), right(i));
             bitset[i] = is_in;
         }
         bitsets.emplace_back(std::move(bitset));
@@ -447,6 +475,12 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             res = ExecCompareExprDispatcher(expr, std::less<>{});
             break;
         }
+        case OpType::PrefixMatch: {
+            res = ExecCompareExprDispatcher(expr, MatchOp<OpType::PrefixMatch>{});
+            break;
+        }
+            // case OpType::PostfixMatch: {
+            // }
         default: {
             PanicInfo("unsupported optype");
         }
@@ -473,6 +507,9 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
         auto id_array = std::make_unique<IdArray>();
         auto dst_ids = id_array->mutable_int_id();
         for (const auto& id : expr.terms_) {
+            // Implicitly convert other types to integer.
+            // In fact, we break the template-match rule here.
+            // For example, if T = std::string then T cannot be converted to integer.
             dst_ids->add_data(id);
         }
         auto [uids, seg_offsets] = segment_.search_ids(*id_array, timestamp_);
@@ -503,6 +540,31 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
     auto final_result = Assemble(bitsets);
     AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
     return final_result;
+}
+
+// TODO: refactor this to use `scalar::ScalarIndex::In`.
+//      made a test to compare the performance.
+//      vector<bool> don't match the template.
+//      boost::container::vector<bool> match.
+template <>
+auto
+ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetType {
+    using T = std::string;
+    auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
+    using Index = scalar::ScalarIndex<T>;
+    using Operator = scalar::OperatorType;
+    const auto& terms = expr.terms_;
+    auto n = terms.size();
+    std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
+
+    auto index_func = [&terms, n](Index* index) { return index->In(n, terms.data()); };
+    auto elem_func = [&terms, &term_set](T x) {
+        //// terms has already been sorted.
+        // return std::binary_search(terms.begin(), terms.end(), x);
+        return term_set.find(x) != term_set.end();
+    };
+
+    return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
 }
 
 void
@@ -538,6 +600,11 @@ ExecExprVisitor::visit(TermExpr& expr) {
         }
         case DataType::DOUBLE: {
             res = ExecTermVisitorImpl<double>(expr);
+            break;
+        }
+        case DataType::STRING: {
+            // TODO: VARCHAR
+            res = ExecTermVisitorImpl<std::string>(expr);
             break;
         }
         default:

@@ -452,11 +452,12 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "ode\0224\n\013vector_anns\030\001 \001(\0132\035.milvus.proto."
   "plan.VectorANNSH\000\022-\n\npredicates\030\002 \001(\0132\027."
   "milvus.proto.plan.ExprH\000\022\030\n\020output_field"
-  "_ids\030\003 \003(\003B\006\n\004node*n\n\006OpType\022\013\n\007Invalid\020"
-  "\000\022\017\n\013GreaterThan\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010"
-  "LessThan\020\003\022\r\n\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010"
-  "NotEqual\020\006B3Z1github.com/milvus-io/milvu"
-  "s/internal/proto/planpbb\006proto3"
+  "_ids\030\003 \003(\003B\006\n\004node*\221\001\n\006OpType\022\013\n\007Invalid"
+  "\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014GreaterEqual\020\002\022\014\n"
+  "\010LessThan\020\003\022\r\n\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n"
+  "\010NotEqual\020\006\022\017\n\013PrefixMatch\020\007\022\020\n\014PostfixM"
+  "atch\020\010B3Z1github.com/milvus-io/milvus/in"
+  "ternal/proto/planpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
@@ -476,7 +477,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_pla
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_plan_2eproto_once;
 static bool descriptor_table_plan_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_plan_2eproto = {
-  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 2231,
+  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 2267,
   &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_sccs, descriptor_table_plan_2eproto_deps, 10, 1,
   schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
   file_level_metadata_plan_2eproto, 12, file_level_enum_descriptors_plan_2eproto, file_level_service_descriptors_plan_2eproto,
@@ -544,6 +545,8 @@ bool OpType_IsValid(int value) {
     case 4:
     case 5:
     case 6:
+    case 7:
+    case 8:
       return true;
     default:
       return false;

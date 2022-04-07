@@ -38,7 +38,7 @@ func newTestSchema() *schemapb.CollectionSchema {
 
 	for name, value := range schemapb.DataType_value {
 		dataType := schemapb.DataType(value)
-		if !typeutil.IsIntegerType(dataType) && !typeutil.IsFloatingType(dataType) && !typeutil.IsVectorType(dataType) {
+		if !typeutil.IsIntegerType(dataType) && !typeutil.IsFloatingType(dataType) && !typeutil.IsVectorType(dataType) && !typeutil.IsStringType(dataType) {
 			continue
 		}
 		newField := &schemapb.FieldSchema{
@@ -66,6 +66,9 @@ func TestParseExpr_Naive(t *testing.T) {
 			"Int64Field > -1",
 			"FloatField > +1.0",
 			"FloatField > -1.0",
+			`VarCharField > "str"`,
+			`VarCharField startsWith "str"`,
+			`VarCharField endsWith "str"`,
 		}
 		for _, exprStr := range exprStrs {
 			exprProto, err := parseExpr(schema, exprStr)
@@ -79,6 +82,7 @@ func TestParseExpr_Naive(t *testing.T) {
 		exprStrs := []string{
 			"Int64Field > +aa",
 			"FloatField > -aa",
+			`VarCharField > -aa`,
 		}
 		for _, exprStr := range exprStrs {
 			exprProto, err := parseExpr(schema, exprStr)
@@ -167,6 +171,14 @@ func TestParsePlanNode_Naive(t *testing.T) {
 		"Int64Field < 3 and (Int64Field > 2 || Int64Field == 1)",
 		"DoubleField in [1.0, 2, 3]",
 		"DoubleField in [1.0, 2, 3] && Int64Field < 3 or Int64Field > 2",
+		`not (VarCharField > "str")`,
+		`not ("str" > VarCharField)`,
+		`not (VarCharField startsWith "str")`,
+		`not (VarCharField endsWith "str")`,
+		`VarCharField in ["term0", "term1", "term2"]`,
+		`VarCharField < "str3" and (VarCharField > "str2" || VarCharField == "str1")`,
+		`VarCharField < "str3" and (VarCharField startsWith "str2" || VarCharField endsWith "str1")`,
+		`DoubleField in [1.0, 2, 3] && VarCharField < "str3" or Int64Field > 2`,
 	}
 
 	schema := newTestSchema()
@@ -189,7 +201,7 @@ func TestParsePlanNode_Naive(t *testing.T) {
 }
 
 func TestExternalParser(t *testing.T) {
-	ast, err := ant_parser.Parse("!(1 < a < 2 or b in [1, 2, 3]) or (c < 3 and b > 5)")
+	ast, err := ant_parser.Parse(`!(1 < a < 2 or b in [1, 2, 3]) or (c < 3 and b > 5) and (d > "str1" or d < "str2")`)
 	// NOTE: probe ast here via IDE
 	assert.Nil(t, err)
 
@@ -350,6 +362,10 @@ func TestPlanParseAPIs(t *testing.T) {
 		assert.Equal(t, planpb.OpType_NotEqual, op)
 		op = getCompareOpType("*", reverse)
 		assert.Equal(t, planpb.OpType_Invalid, op)
+		op = getCompareOpType("startsWith", reverse)
+		assert.Equal(t, planpb.OpType_PrefixMatch, op)
+		op = getCompareOpType("endsWith", reverse)
+		assert.Equal(t, planpb.OpType_PostfixMatch, op)
 
 		reverse = true
 		op = getCompareOpType(">", reverse)
@@ -366,6 +382,10 @@ func TestPlanParseAPIs(t *testing.T) {
 		assert.Equal(t, planpb.OpType_NotEqual, op)
 		op = getCompareOpType("*", reverse)
 		assert.Equal(t, planpb.OpType_Invalid, op)
+		op = getCompareOpType("startsWith", reverse)
+		assert.Equal(t, planpb.OpType_PrefixMatch, op)
+		op = getCompareOpType("endsWith", reverse)
+		assert.Equal(t, planpb.OpType_PostfixMatch, op)
 	})
 
 	t.Run("parse bool node", func(t *testing.T) {

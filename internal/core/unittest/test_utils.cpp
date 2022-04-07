@@ -13,6 +13,7 @@
 #include <string.h>
 #include <knowhere/common/MetricType.h>
 
+#include "query/Utils.h"
 #include "segcore/Utils.h"
 
 TEST(Util, FaissMetricTypeToString) {
@@ -32,4 +33,22 @@ TEST(Util, FaissMetricTypeToString) {
     ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Canberra), "METRIC_Canberra");
     ASSERT_EQ(MetricTypeToString(MetricType::METRIC_BrayCurtis), "METRIC_BrayCurtis");
     ASSERT_EQ(MetricTypeToString(MetricType::METRIC_JensenShannon), "METRIC_JensenShannon");
+}
+
+TEST(Util, StringMatch) {
+    using namespace milvus::query;
+
+    ASSERT_ANY_THROW(Match(1, 2, OpType::PrefixMatch));
+    ASSERT_ANY_THROW(Match(std::string("not_match_operation"), std::string("not_match"), OpType::LessEqual));
+
+    ASSERT_TRUE(PrefixMatch("prefix1", "prefix"));
+    ASSERT_TRUE(PostfixMatch("1postfix", "postfix"));
+    ASSERT_TRUE(Match(std::string("prefix1"), std::string("prefix"), OpType::PrefixMatch));
+    ASSERT_TRUE(Match(std::string("1postfix"), std::string("postfix"), OpType::PostfixMatch));
+
+    ASSERT_FALSE(PrefixMatch("", "longer"));
+    ASSERT_FALSE(PostfixMatch("", "longer"));
+
+    ASSERT_FALSE(PrefixMatch("dontmatch", "prefix"));
+    ASSERT_FALSE(PostfixMatch("dontmatch", "postfix"));
 }

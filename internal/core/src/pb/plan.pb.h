@@ -175,12 +175,14 @@ enum OpType : int {
   LessEqual = 4,
   Equal = 5,
   NotEqual = 6,
+  PrefixMatch = 7,
+  PostfixMatch = 8,
   OpType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   OpType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool OpType_IsValid(int value);
 constexpr OpType OpType_MIN = Invalid;
-constexpr OpType OpType_MAX = NotEqual;
+constexpr OpType OpType_MAX = PostfixMatch;
 constexpr int OpType_ARRAYSIZE = OpType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* OpType_descriptor();

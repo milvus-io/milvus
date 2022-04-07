@@ -12,6 +12,8 @@ enum OpType {
   LessEqual = 4;
   Equal = 5;
   NotEqual = 6;
+  PrefixMatch = 7;  // startsWith
+  PostfixMatch = 8; // endsWith
 };
 
 message GenericValue {
@@ -37,12 +39,16 @@ message ColumnInfo {
   bool is_autoID = 4;
 }
 
+// For example: a startsWith "prefix", a >= "str", b < 2 and etc,
+// where both a and b are field in schema.
 message UnaryRangeExpr {
   ColumnInfo column_info = 1;
   OpType op = 2;
   GenericValue value = 3;
 }
 
+// For example: "str1" < a <= "str9", 1 <= b < 9 and etc,
+// where both a and b are field in schema.
 message BinaryRangeExpr {
   ColumnInfo column_info = 1;
   bool lower_inclusive = 2;
@@ -51,17 +57,22 @@ message BinaryRangeExpr {
   GenericValue upper_value = 5;
 }
 
+// For example: a startsWith b, a >= b, a < b, a == b and etc,
+// where both a and b are field in schema.
 message CompareExpr {
   ColumnInfo left_column_info = 1;
   ColumnInfo right_column_info = 2;
   OpType op = 3;
 }
 
+// For example: a in ["term0", "term1"], b in [1, 2, 3, 4] and etc,
+// where both a and b are field in schema.
 message TermExpr {
   ColumnInfo column_info = 1;
   repeated GenericValue values = 2;
 }
 
+// !(expr).
 message UnaryExpr {
   enum UnaryOp {
     Invalid = 0;
@@ -71,6 +82,7 @@ message UnaryExpr {
   Expr child = 2;
 }
 
+// (expr) op (expr), where op is of (LogicalAnd, LogicalOr).
 message BinaryExpr {
   enum BinaryOp {
     Invalid = 0;

@@ -315,8 +315,8 @@ TEST(Indexing, BinaryBruteForce) {
   ]
 ]
 )");
-#else // for mac
-auto ref = json::parse(R"(
+#else  // for mac
+    auto ref = json::parse(R"(
 [
   [
     [ "1024->0.000000", "59169->0.645000", "98548->0.646000", "3356->0.646000", "90373->0.647000" ],

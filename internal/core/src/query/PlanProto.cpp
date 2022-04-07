@@ -11,6 +11,8 @@
 
 #include <google/protobuf/text_format.h>
 
+#include <string>
+
 #include "ExprImpl.h"
 #include "PlanProto.h"
 #include "generated/ExtractInfoExprVisitor.h"
@@ -22,7 +24,7 @@ namespace planpb = milvus::proto::plan;
 template <typename T>
 std::unique_ptr<TermExprImpl<T>>
 ExtractTermExprImpl(FieldOffset field_offset, DataType data_type, const planpb::TermExpr& expr_proto) {
-    static_assert(std::is_fundamental_v<T>);
+    static_assert(std::is_fundamental_v<T> | std::is_same_v<T, std::string>);
     auto size = expr_proto.values_size();
     std::vector<T> terms(size);
     for (int i = 0; i < size; ++i) {
@@ -36,6 +38,9 @@ ExtractTermExprImpl(FieldOffset field_offset, DataType data_type, const planpb::
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
             terms[i] = static_cast<T>(value_proto.float_val());
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
+            terms[i] = static_cast<T>(value_proto.string_val());
         } else {
             static_assert(always_false<T>);
         }
@@ -47,7 +52,7 @@ ExtractTermExprImpl(FieldOffset field_offset, DataType data_type, const planpb::
 template <typename T>
 std::unique_ptr<UnaryRangeExprImpl<T>>
 ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::UnaryRangeExpr& expr_proto) {
-    static_assert(std::is_fundamental_v<T>);
+    static_assert(std::is_fundamental_v<T> | std::is_same_v<T, std::string>);
     auto getValue = [&](const auto& value_proto) -> T {
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
@@ -58,6 +63,9 @@ ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const pl
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
             return static_cast<T>(value_proto.float_val());
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
+            return static_cast<T>(value_proto.string_val());
         } else {
             static_assert(always_false<T>);
         }
@@ -69,7 +77,7 @@ ExtractUnaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const pl
 template <typename T>
 std::unique_ptr<BinaryRangeExprImpl<T>>
 ExtractBinaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const planpb::BinaryRangeExpr& expr_proto) {
-    static_assert(std::is_fundamental_v<T>);
+    static_assert(std::is_fundamental_v<T> | std::is_same_v<T, std::string>);
     auto getValue = [&](const auto& value_proto) -> T {
         if constexpr (std::is_same_v<T, bool>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kBoolVal);
@@ -80,6 +88,9 @@ ExtractBinaryRangeExprImpl(FieldOffset field_offset, DataType data_type, const p
         } else if constexpr (std::is_floating_point_v<T>) {
             Assert(value_proto.val_case() == planpb::GenericValue::kFloatVal);
             return static_cast<T>(value_proto.float_val());
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            Assert(value_proto.val_case() == planpb::GenericValue::kStringVal);
+            return static_cast<T>(value_proto.string_val());
         } else {
             static_assert(always_false<T>);
         }
@@ -209,6 +220,10 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
             case DataType::DOUBLE: {
                 return ExtractUnaryRangeExprImpl<double>(field_offset, data_type, expr_pb);
             }
+            case DataType::STRING: {
+                // TODO: VARCHAR
+                return ExtractUnaryRangeExprImpl<std::string>(field_offset, data_type, expr_pb);
+            }
             default: {
                 PanicInfo("unsupported data type");
             }
@@ -247,6 +262,9 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
             }
             case DataType::DOUBLE: {
                 return ExtractBinaryRangeExprImpl<double>(field_offset, data_type, expr_pb);
+            }
+            case DataType::STRING: {
+                return ExtractBinaryRangeExprImpl<std::string>(field_offset, data_type, expr_pb);
             }
             default: {
                 PanicInfo("unsupported data type");
@@ -312,6 +330,10 @@ ProtoParser::ParseTermExpr(const proto::plan::TermExpr& expr_pb) {
             }
             case DataType::DOUBLE: {
                 return ExtractTermExprImpl<double>(field_offset, data_type, expr_pb);
+            }
+            case DataType::STRING: {
+                // TODO: VARCHAR
+                return ExtractTermExprImpl<std::string>(field_offset, data_type, expr_pb);
             }
             default: {
                 PanicInfo("unsupported data type");

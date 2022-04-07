@@ -110,6 +110,8 @@ enum class OpType {
     LessEqual = 4,
     Equal = 5,
     NotEqual = 6,
+    PrefixMatch = 7,
+    PostfixMatch = 8,
 };
 
 static const std::map<std::string, OpType> mapping_ = {
