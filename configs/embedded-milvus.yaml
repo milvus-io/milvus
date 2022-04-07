@@ -94,8 +94,8 @@ proxy:
   maxDimension: 32768 # Maximum dimension of a vector
   maxShardNum: 256 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue
-  bufFlagExpireTime: 3600 # second, the time to expire bufFlag from cache in collectResultLoop
-  bufFlagCleanupInterval: 600 # second, the interval to clean bufFlag cache in collectResultLoop
+  bufFlagExpireTime: 300 # second, the time to expire bufFlag from cache in collectResultLoop. Default 300.
+  bufFlagCleanupInterval: 600 # second, the interval to clean bufFlag cache in collectResultLoop. Default 600.
   ginLogging: false # Whether to produce gin logs.
 
 
