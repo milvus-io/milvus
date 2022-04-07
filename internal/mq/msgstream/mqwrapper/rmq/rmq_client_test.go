@@ -26,6 +26,7 @@ import (
 	rocksmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 
 	"github.com/apache/pulsar-client-go/pulsar"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	pulsarwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -36,11 +37,9 @@ import (
 var Params paramtable.BaseTable
 
 func TestMain(m *testing.M) {
-	Params.Init()
 	path := "/tmp/milvus/rdb_data"
-	os.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
-	_ = rocksmqimplserver.InitRocksMQ()
+	_ = rocksmqimplserver.InitRocksMQ(path)
 	exitCode := m.Run()
 	defer rocksmqimplserver.CloseRocksMQ()
 	os.Exit(exitCode)

@@ -44,6 +44,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -58,8 +62,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // UniqueID is an alias of int64, is used as a unique identifier for the request.
@@ -85,6 +87,7 @@ type IndexNode struct {
 
 	once sync.Once
 
+	factory      dependency.Factory
 	chunkManager storage.ChunkManager
 	session      *sessionutil.Session
 
@@ -102,13 +105,14 @@ type IndexNode struct {
 }
 
 // NewIndexNode creates a new IndexNode component.
-func NewIndexNode(ctx context.Context) (*IndexNode, error) {
+func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, error) {
 	log.Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{
 		loopCtx:    ctx1,
 		loopCancel: cancel,
+		factory:    factory,
 	}
 	b.UpdateStateCode(internalpb.StateCode_Abnormal)
 	sc, err := NewTaskScheduler(b.loopCtx, b.chunkManager)
@@ -168,6 +172,8 @@ func (i *IndexNode) Init() error {
 	i.initOnce.Do(func() {
 		Params.Init()
 
+		i.factory.Init(&Params)
+
 		i.UpdateStateCode(internalpb.StateCode_Initializing)
 		log.Debug("IndexNode init", zap.Any("State", i.stateCode.Load().(internalpb.StateCode)))
 		err := i.initSession()
@@ -181,13 +187,7 @@ func (i *IndexNode) Init() error {
 		etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
 		i.etcdKV = etcdKV
 
-		chunkManager, err := storage.NewMinioChunkManager(i.loopCtx,
-			storage.Address(Params.MinioCfg.Address),
-			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-			storage.UseSSL(Params.MinioCfg.UseSSL),
-			storage.BucketName(Params.MinioCfg.BucketName),
-			storage.CreateBucket(true))
+		chunkManager, err := i.factory.NewVectorStorageChunkManager(i.loopCtx)
 
 		if err != nil {
 			log.Error("IndexNode NewMinIOKV failed", zap.Error(err))

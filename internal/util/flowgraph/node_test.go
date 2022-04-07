@@ -24,12 +24,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 func generateMsgPack() msgstream.MsgPack {
@@ -58,16 +58,13 @@ func generateMsgPack() msgstream.MsgPack {
 
 func TestNodeCtx_Start(t *testing.T) {
 	os.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestNodeStart")
-	msFactory := msgstream.NewRmsFactory()
-	var Params paramtable.ComponentParam
-	err := msFactory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
-	msgStream, _ := msFactory.NewMsgStream(context.TODO())
+	msgStream, _ := factory.NewMsgStream(context.TODO())
 	channels := []string{"cc"}
 	msgStream.AsConsumer(channels, "sub")
 
-	produceStream, _ := msFactory.NewMsgStream(context.TODO())
+	produceStream, _ := factory.NewMsgStream(context.TODO())
 	produceStream.AsProducer(channels)
 
 	msgPack := generateMsgPack()

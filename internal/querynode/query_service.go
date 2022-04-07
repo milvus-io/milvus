@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
@@ -45,9 +44,8 @@ type queryService struct {
 
 	sessionManager *SessionManager
 
-	localChunkManager  storage.ChunkManager
-	remoteChunkManager storage.ChunkManager
-	localCacheEnabled  bool
+	cacheStorage  storage.ChunkManager
+	vectorStorage storage.ChunkManager
 }
 
 type qsOpt func(*queryService)
@@ -61,30 +59,13 @@ func qsOptWithSessionManager(s *SessionManager) qsOpt {
 func newQueryService(ctx context.Context,
 	historical *historical,
 	streaming *streaming,
+	vectorStorage storage.ChunkManager,
+	cacheStorage storage.ChunkManager,
 	factory msgstream.Factory,
 	opts ...qsOpt,
 ) *queryService {
 
 	queryServiceCtx, queryServiceCancel := context.WithCancel(ctx)
-
-	//TODO godchen: change this to configuration
-	path, err := Params.Load("localStorage.Path")
-	if err != nil {
-		path = "/tmp/milvus/data"
-	}
-	enabled, _ := Params.Load("localStorage.enabled")
-	localCacheEnabled, _ := strconv.ParseBool(enabled)
-
-	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(path))
-
-	remoteChunkManager, err := storage.NewMinioChunkManager(
-		ctx,
-		storage.Address(Params.MinioCfg.Address),
-		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-		storage.UseSSL(Params.MinioCfg.UseSSL),
-		storage.BucketName(Params.MinioCfg.BucketName),
-		storage.CreateBucket(true))
 
 	qs := &queryService{
 		ctx:    queryServiceCtx,
@@ -95,11 +76,9 @@ func newQueryService(ctx context.Context,
 
 		queryCollections: make(map[UniqueID]*queryCollection),
 
-		factory: factory,
-
-		localChunkManager:  localChunkManager,
-		remoteChunkManager: remoteChunkManager,
-		localCacheEnabled:  localCacheEnabled,
+		vectorStorage: vectorStorage,
+		cacheStorage:  cacheStorage,
+		factory:       factory,
 	}
 
 	for _, opt := range opts {
@@ -137,9 +116,8 @@ func (q *queryService) addQueryCollection(collectionID UniqueID) error {
 		q.historical,
 		q.streaming,
 		q.factory,
-		q.localChunkManager,
-		q.remoteChunkManager,
-		q.localCacheEnabled,
+		q.cacheStorage,
+		q.vectorStorage,
 		qcOptWithSessionManager(q.sessionManager),
 	)
 	if err != nil {

@@ -176,7 +176,7 @@ func TestTask_AddQueryChannel(t *testing.T) {
 
 		position := &internalpb.MsgPosition{
 			ChannelName: genQueryChannel(),
-			MsgID:       []byte{1, 2, 3},
+			MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
 			MsgGroup:    defaultSubName,
 			Timestamp:   0,
 		}
@@ -336,7 +336,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				SeekPosition: &msgstream.MsgPosition{
 					ChannelName: tmpChannel,
 					Timestamp:   0,
-					MsgID:       []byte{1, 2, 3},
+					MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
 				},
 				FlushedSegments: []*datapb.SegmentInfo{
 					{
@@ -368,7 +368,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				SeekPosition: &msgstream.MsgPosition{
 					ChannelName: tmpChannel,
 					Timestamp:   0,
-					MsgID:       []byte{1, 2, 3},
+					MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
 				},
 				DroppedSegments: []*datapb.SegmentInfo{
 					{
@@ -494,7 +494,7 @@ func TestTask_watchDeltaChannelsTask(t *testing.T) {
 				ChannelName:  defaultDeltaChannel,
 				SeekPosition: &internalpb.MsgPosition{
 					ChannelName: defaultDeltaChannel,
-					MsgID:       []byte{1, 2, 3},
+					MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
 					MsgGroup:    defaultSubName,
 					Timestamp:   0,
 				},

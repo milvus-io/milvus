@@ -31,12 +31,15 @@ import (
 	"time"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/trace"
+
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -92,10 +95,9 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/querynode"
 
-	"github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/querycoord"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -116,13 +118,6 @@ func init() {
 	Registry.MustRegister(prometheus.NewGoCollector())
 }
 
-func newMsgFactory(localMsg bool) msgstream.Factory {
-	if localMsg {
-		return msgstream.NewRmsFactory()
-	}
-	return msgstream.NewPmsFactory()
-}
-
 func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	var rc *grpcrootcoord.Server
 	var wg sync.WaitGroup
@@ -135,7 +130,7 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		rc, err = grpcrootcoord.NewServer(ctx, factory)
 		if err != nil {
@@ -166,7 +161,7 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		qs, err = grpcquerycoord.NewServer(ctx, factory)
 		if err != nil {
@@ -198,7 +193,7 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		qn, err = grpcquerynode.NewServer(ctx, factory)
 		if err != nil {
@@ -229,7 +224,7 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		ds = grpcdatacoordclient.NewServer(ctx, factory)
 		wg.Done()
 		err := ds.Run()
@@ -257,7 +252,7 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 			defer log.Sync()
 		}
 
-		factory := newMsgFactory(localMsg)
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		dn, err = grpcdatanode.NewServer(ctx, factory)
 		if err != nil {
@@ -288,8 +283,9 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 			defer log.Sync()
 		}
 
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
-		is, err = grpcindexcoord.NewServer(ctx)
+		is, err = grpcindexcoord.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -319,8 +315,9 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			defer log.Sync()
 		}
 
+		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
-		in, err = grpcindexnode.NewServer(ctx)
+		in, err = grpcindexnode.NewServer(ctx, factory)
 		if err != nil {
 			panic(err)
 		}
@@ -439,7 +436,7 @@ func TestProxy(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	localMsg := true
-	factory := newMsgFactory(localMsg)
+	factory := dependency.NewDefaultFactory(localMsg)
 	alias := "TestProxy"
 
 	rc := runRootCoord(ctx, localMsg)

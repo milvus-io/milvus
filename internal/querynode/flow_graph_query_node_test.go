@@ -34,8 +34,7 @@ func TestQueryNodeFlowGraph_consumerFlowGraph(t *testing.T) {
 	streamingReplica, err := genSimpleReplica()
 	assert.NoError(t, err)
 
-	fac, err := genFactory()
-	assert.NoError(t, err)
+	fac := genFactory()
 
 	fg, err := newQueryNodeFlowGraph(ctx,
 		defaultCollectionID,
@@ -58,8 +57,7 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 	streamingReplica, err := genSimpleReplica()
 	assert.NoError(t, err)
 
-	fac, err := genFactory()
-	assert.NoError(t, err)
+	fac := genFactory()
 
 	tSafe := newTSafeReplica()
 

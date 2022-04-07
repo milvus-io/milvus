@@ -23,9 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
@@ -79,9 +81,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
 
-	msFactory := msgstream.NewPmsFactory()
-	err = msFactory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
 	fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
@@ -89,7 +89,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 
 	c := &nodeConfig{
 		replica:      replica,
-		msFactory:    msFactory,
+		msFactory:    factory,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: "string",
 	}
@@ -104,7 +104,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	assert.Error(t, err)*/
 
 	c.msFactory = &CDFMsFactory{
-		Factory: msFactory,
+		Factory: factory,
 		cd:      0,
 	}
 
@@ -167,16 +167,14 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 	require.NoError(t, err)
 
-	msFactory := msgstream.NewPmsFactory()
-	err = msFactory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
 		replica:      replica,
-		msFactory:    msFactory,
+		msFactory:    factory,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: "string",
 	}
@@ -247,12 +245,12 @@ func TestFlushSegment(t *testing.T) {
 	}
 	flushMap.Store(segmentID, insertData)
 
-	msFactory := msgstream.NewPmsFactory()
+	factory := msgstream.NewPmsFactory()
 	m := map[string]interface{}{
 		"receiveBufSize": 1024,
 		"pulsarAddress":  Params.PulsarAddress,
 		"pulsarBufSize":  1024}
-	err = msFactory.SetParams(m)
+	err = factory.SetParams(m)
 	assert.Nil(t, err)
 	flushChan := make(chan flushMsg, 100)
 
@@ -264,7 +262,7 @@ func TestFlushSegment(t *testing.T) {
 
 	c := &nodeConfig{
 		replica:      replica,
-		msFactory:    msFactory,
+		factory:    factory,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: "string",
 	}
@@ -369,9 +367,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	colRep.metaService = newMetaService(mockRootCoord, collMeta.ID)
 
-	msFactory := msgstream.NewPmsFactory()
-	err = msFactory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
 	flushPacks := []*segmentFlushPack{}
 	fpMut := sync.Mutex{}
@@ -394,7 +390,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	flushChan := make(chan flushMsg, 100)
 	c := &nodeConfig{
 		replica:      colRep,
-		msFactory:    msFactory,
+		msFactory:    factory,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: "string",
 	}
@@ -653,17 +649,14 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{Timestamp: 101})
 		require.NoError(t, err)
 
-		msFactory := msgstream.NewPmsFactory()
-
-		err = msFactory.Init(&Params)
-		assert.Nil(t, err)
+		factory := dependency.NewDefaultFactory(true)
 
 		fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 		flushChan := make(chan flushMsg, 100)
 		c := &nodeConfig{
 			replica:      replica,
-			msFactory:    msFactory,
+			msFactory:    factory,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: "string",
 		}

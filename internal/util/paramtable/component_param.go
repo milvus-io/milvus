@@ -20,8 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 const (
@@ -607,7 +608,8 @@ type queryNodeConfig struct {
 	OverloadedMemoryThresholdPercentage float64
 
 	// cache limit
-	LocalFileCacheLimit int64
+	CacheEnabled     bool
+	CacheMemoryLimit int64
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -629,7 +631,8 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.initOverloadedMemoryThresholdPercentage()
 
-	p.initLocalFileCacheLimit()
+	p.initCacheMemoryLimit()
+	p.initCacheEnabled()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -704,13 +707,21 @@ func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {
 	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
 }
 
-func (p *queryNodeConfig) initLocalFileCacheLimit() {
-	overloadedMemoryThresholdPercentage := p.Base.LoadWithDefault("querynoe.chunkManager.localFileCacheLimit", "90")
-	localFileCacheLimit, err := strconv.ParseInt(overloadedMemoryThresholdPercentage, 10, 64)
+func (p *queryNodeConfig) initCacheMemoryLimit() {
+	overloadedMemoryThresholdPercentage := p.Base.LoadWithDefault("queryNode.cache.memoryLimit", "2147483648")
+	cacheMemoryLimit, err := strconv.ParseInt(overloadedMemoryThresholdPercentage, 10, 64)
 	if err != nil {
 		panic(err)
 	}
-	p.LocalFileCacheLimit = localFileCacheLimit
+	p.CacheMemoryLimit = cacheMemoryLimit
+}
+func (p *queryNodeConfig) initCacheEnabled() {
+	var err error
+	cacheEnabled := p.Base.LoadWithDefault("queryNode.cache.enabled", "true")
+	p.CacheEnabled, err = strconv.ParseBool(cacheEnabled)
+	if err != nil {
+		panic(err)
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -17,8 +17,8 @@
 package storage
 
 import (
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
 // DataSorter sorts insert data
@@ -29,7 +29,7 @@ type DataSorter struct {
 
 // getRowIDFieldData returns auto generated row id Field
 func (ds *DataSorter) getRowIDFieldData() FieldData {
-	if data, ok := ds.InsertData.Data[rootcoord.RowIDField]; ok {
+	if data, ok := ds.InsertData.Data[common.RowIDField]; ok {
 		return data
 	}
 	return nil

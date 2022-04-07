@@ -20,8 +20,8 @@ import (
 	"errors"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
 var (
@@ -98,8 +98,8 @@ func (itr *InsertBinlogIterator) Next() (interface{}, error) {
 	}
 
 	v := &Value{
-		ID:        itr.data.Data[rootcoord.RowIDField].GetRow(itr.pos).(int64),
-		Timestamp: itr.data.Data[rootcoord.TimeStampField].GetRow(itr.pos).(int64),
+		ID:        itr.data.Data[common.RowIDField].GetRow(itr.pos).(int64),
+		Timestamp: itr.data.Data[common.TimeStampField].GetRow(itr.pos).(int64),
 		PK:        pk,
 		IsDeleted: false,
 		Value:     m,
@@ -114,11 +114,11 @@ func (itr *InsertBinlogIterator) Dispose() {
 }
 
 func (itr *InsertBinlogIterator) hasNext() bool {
-	_, ok := itr.data.Data[rootcoord.RowIDField]
+	_, ok := itr.data.Data[common.RowIDField]
 	if !ok {
 		return false
 	}
-	return itr.pos < itr.data.Data[rootcoord.RowIDField].RowNum()
+	return itr.pos < itr.data.Data[common.RowIDField].RowNum()
 }
 
 func (itr *InsertBinlogIterator) isDisposed() bool {

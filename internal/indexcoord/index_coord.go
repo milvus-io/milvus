@@ -30,11 +30,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -52,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // make sure IndexCoord implements types.IndexCoord
@@ -82,6 +84,7 @@ type IndexCoord struct {
 
 	idAllocator *allocator.GlobalIDAllocator
 
+	factory      dependency.Factory
 	etcdCli      *clientv3.Client
 	chunkManager storage.ChunkManager
 
@@ -109,7 +112,7 @@ type IndexCoord struct {
 type UniqueID = typeutil.UniqueID
 
 // NewIndexCoord creates a new IndexCoord component.
-func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
+func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	i := &IndexCoord{
@@ -119,6 +122,7 @@ func NewIndexCoord(ctx context.Context) (*IndexCoord, error) {
 		durationInterval:   time.Second * 10,
 		assignTaskInterval: time.Second * 3,
 		taskLimit:          20,
+		factory:            factory,
 	}
 	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return i, nil
@@ -159,6 +163,8 @@ func (i *IndexCoord) Init() error {
 	i.initOnce.Do(func() {
 		i.UpdateStateCode(internalpb.StateCode_Initializing)
 		log.Debug("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(internalpb.StateCode)))
+
+		i.factory.Init(&Params)
 
 		err := i.initSession()
 		if err != nil {
@@ -221,13 +227,7 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 
-		chunkManager, err := storage.NewMinioChunkManager(i.loopCtx,
-			storage.Address(Params.MinioCfg.Address),
-			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-			storage.UseSSL(Params.MinioCfg.UseSSL),
-			storage.BucketName(Params.MinioCfg.BucketName),
-			storage.CreateBucket(true))
+		chunkManager, err := i.factory.NewVectorStorageChunkManager(i.loopCtx)
 
 		if err != nil {
 			log.Error("IndexCoord new minio chunkManager failed", zap.Error(err))

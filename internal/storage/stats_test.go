@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 )
 
 func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
@@ -58,7 +57,7 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 	msgs := &Int64FieldData{
 		Data: []int64{},
 	}
-	err = sw.generatePrimaryKeyStats(rootcoord.RowIDField, schemapb.DataType_Int64, msgs)
+	err = sw.generatePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
 	assert.Nil(t, err)
 }
 
@@ -86,7 +85,7 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 	msgs := &Int64FieldData{
 		Data: []int64{},
 	}
-	err = sw.generatePrimaryKeyStats(rootcoord.RowIDField, schemapb.DataType_Int64, msgs)
+	err = sw.generatePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
 	assert.Nil(t, err)
 }
 

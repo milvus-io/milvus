@@ -21,9 +21,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )
 
 // QueryCoord implements QueryCoord grpc server
@@ -33,7 +33,7 @@ type QueryCoord struct {
 }
 
 // NewQueryCoord creates a new QueryCoord
-func NewQueryCoord(ctx context.Context, factory msgstream.Factory) (*QueryCoord, error) {
+func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord, error) {
 	svr, err := grpcquerycoord.NewServer(ctx, factory)
 	if err != nil {
 		panic(err)

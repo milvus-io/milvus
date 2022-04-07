@@ -23,18 +23,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 func TestTimetickSync(t *testing.T) {
 	ctx := context.Background()
 	sourceID := int64(100)
 
-	factory := msgstream.NewPmsFactory()
-	err := factory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
 	//chanMap := map[typeutil.UniqueID][]string{
 	//	int64(1): {"rootcoord-dml_0"},

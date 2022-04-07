@@ -27,12 +27,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -274,7 +274,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	blobs := make([]*Blob, 0)
 	statsBlobs := make([]*Blob, 0)
 	var writer *InsertBinlogWriter
-	timeFieldData, ok := data.Data[rootcoord.TimeStampField]
+	timeFieldData, ok := data.Data[common.TimeStampField]
 	if !ok {
 		return nil, nil, fmt.Errorf("data doesn't contains timestamp field")
 	}
@@ -646,7 +646,7 @@ func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
 			}
 			eventReader.Close()
 		}
-		if fieldID == rootcoord.TimeStampField {
+		if fieldID == common.TimeStampField {
 			blobInfo := BlobInfo{
 				Length: totalLength,
 			}

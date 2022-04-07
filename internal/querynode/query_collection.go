@@ -90,8 +90,6 @@ type queryCollection struct {
 	localChunkManager  storage.ChunkManager
 	remoteChunkManager storage.ChunkManager
 	vectorChunkManager *storage.VectorChunkManager
-	localCacheEnabled  bool
-	localCacheSize     int64
 
 	globalSegmentManager *globalSealedSegmentManager
 }
@@ -112,7 +110,6 @@ func newQueryCollection(releaseCtx context.Context,
 	factory msgstream.Factory,
 	localChunkManager storage.ChunkManager,
 	remoteChunkManager storage.ChunkManager,
-	localCacheEnabled bool,
 	opts ...qcOpt,
 ) (*queryCollection, error) {
 
@@ -142,8 +139,6 @@ func newQueryCollection(releaseCtx context.Context,
 
 		localChunkManager:    localChunkManager,
 		remoteChunkManager:   remoteChunkManager,
-		localCacheEnabled:    localCacheEnabled,
-		localCacheSize:       Params.QueryNodeCfg.LocalFileCacheLimit,
 		globalSegmentManager: newGlobalSealedSegmentManager(collectionID),
 	}
 
@@ -1303,7 +1298,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			&etcdpb.CollectionMeta{
 				ID:     collection.id,
 				Schema: collection.schema,
-			}, q.localCacheSize, q.localCacheEnabled)
+			}, Params.QueryNodeCfg.CacheMemoryLimit, Params.QueryNodeCfg.CacheEnabled)
 		if err != nil {
 			return err
 		}

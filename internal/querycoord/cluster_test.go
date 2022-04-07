@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 
 	"github.com/stretchr/testify/assert"
@@ -33,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -409,7 +409,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 		clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
-		factory := msgstream.NewPmsFactory()
+		factory := dependency.NewDefaultFactory(true)
 		handler, err := newChannelUnsubscribeHandler(ctx, kv, factory)
 		assert.Nil(t, err)
 		meta, err := newMeta(ctx, kv, factory, nil)
@@ -456,8 +456,7 @@ func TestGrpcRequest(t *testing.T) {
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 	clusterSession.Register()
-	factory := msgstream.NewPmsFactory()
-	err = factory.Init(&Params)
+	factory := dependency.NewDefaultFactory(true)
 	assert.Nil(t, err)
 	idAllocator := func() (UniqueID, error) {
 		return 0, nil
@@ -647,9 +646,7 @@ func TestSetNodeState(t *testing.T) {
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 	clusterSession.Register()
-	factory := msgstream.NewPmsFactory()
-	err = factory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 	idAllocator := func() (UniqueID, error) {
 		return 0, nil
 	}

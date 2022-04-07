@@ -28,11 +28,11 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -197,39 +197,31 @@ func newQueryNodeMock() *QueryNode {
 	}
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
-	msFactory, err := newMessageStreamFactory()
-	if err != nil {
-		panic(err)
-	}
-	svr := NewQueryNode(ctx, msFactory)
+	factory := newMessageStreamFactory()
+	svr := NewQueryNode(ctx, factory)
 	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
 	historicalReplica := newCollectionReplica(etcdKV)
 	svr.historical = newHistorical(svr.queryNodeLoopCtx, historicalReplica, tsReplica)
-	svr.streaming = newStreaming(ctx, streamingReplica, msFactory, etcdKV, tsReplica)
-	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, msFactory)
-	svr.statsService = newStatsService(ctx, svr.historical.replica, msFactory)
-	svr.chunkManager = storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
-	svr.loader = newSegmentLoader(svr.historical.replica, svr.streaming.replica, etcdKV, svr.chunkManager, msgstream.NewPmsFactory())
+	svr.streaming = newStreaming(ctx, streamingReplica, factory, etcdKV, tsReplica)
+	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, factory)
+	svr.statsService = newStatsService(ctx, svr.historical.replica, factory)
+	svr.vectorStorage, err = factory.NewVectorStorageChunkManager(ctx)
+	if err != nil {
+		panic(err)
+	}
+	svr.cacheStorage, err = factory.NewCacheStorageChunkManager(ctx)
+	if err != nil {
+		panic(err)
+	}
+	svr.loader = newSegmentLoader(svr.historical.replica, svr.streaming.replica, etcdKV, svr.vectorStorage, factory)
 	svr.etcdKV = etcdKV
 
 	return svr
 }
 
-func makeNewChannelNames(names []string, suffix string) []string {
-	var ret []string
-	for _, name := range names {
-		ret = append(ret, name+suffix)
-	}
-	return ret
-}
-
-func newMessageStreamFactory() (msgstream.Factory, error) {
-	const receiveBufSize = 1024
-
-	msFactory := msgstream.NewPmsFactory()
-	err := msFactory.Init(&Params)
-	return msFactory, err
+func newMessageStreamFactory() dependency.Factory {
+	return dependency.NewDefaultFactory(true)
 }
 
 func TestMain(m *testing.M) {

@@ -19,8 +19,6 @@ package msgstream
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -75,9 +73,7 @@ type MsgStream interface {
 	GetLatestMsgID(channel string) (MessageID, error)
 }
 
-// Factory is an interface that can be used to generate a new msgstream object
 type Factory interface {
-	Init(params *paramtable.ComponentParam) error
 	NewMsgStream(ctx context.Context) (MsgStream, error)
 	NewTtMsgStream(ctx context.Context) (MsgStream, error)
 	NewQueryMsgStream(ctx context.Context) (MsgStream, error)

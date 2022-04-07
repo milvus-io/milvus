@@ -24,8 +24,7 @@ import (
 	"math/rand"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 
 	"github.com/golang/protobuf/proto"
@@ -627,33 +626,13 @@ func genEtcdKV() (*etcdkv.EtcdKV, error) {
 	return etcdKV, nil
 }
 
-func genFactory() (msgstream.Factory, error) {
-	const receiveBufSize = 1024
-
-	msFactory := msgstream.NewPmsFactory()
-	err := msFactory.Init(&Params)
-	if err != nil {
-		return nil, err
-	}
-	return msFactory, nil
-}
-
-func genInvalidFactory() (msgstream.Factory, error) {
-	const receiveBufSize = 1024
-
-	msFactory := msgstream.NewPmsFactory()
-	err := msFactory.Init(&Params)
-	if err != nil {
-		return nil, err
-	}
-	return msFactory, nil
+func genFactory() dependency.Factory {
+	factory := dependency.NewDefaultFactory(true)
+	return factory
 }
 
 func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	fac, err := genFactory()
-	if err != nil {
-		return nil, err
-	}
+	fac := genFactory()
 	stream, err := fac.NewQueryMsgStream(ctx)
 	if err != nil {
 		return nil, err
@@ -699,7 +678,7 @@ func genVectorChunkManager(ctx context.Context) (*storage.VectorChunkManager, er
 	vcm, err := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
 		ID:     defaultCollectionID,
 		Schema: schema,
-	}, Params.QueryNodeCfg.LocalFileCacheLimit, false)
+	}, Params.QueryNodeCfg.CacheMemoryLimit, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1201,17 +1180,13 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	return r, err
 }
 
-func genSimpleSegmentLoaderWithMqFactory(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
+func genSimpleSegmentLoaderWithMqFactory(historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
 	return newSegmentLoader(historicalReplica, streamingReplica, kv, cm, factory), nil
-}
-
-func genSimpleSegmentLoader(ctx context.Context, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface) (*segmentLoader, error) {
-	return genSimpleSegmentLoaderWithMqFactory(ctx, historicalReplica, streamingReplica, msgstream.NewPmsFactory())
 }
 
 func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
@@ -1249,10 +1224,7 @@ func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface)
 	if err != nil {
 		return nil, err
 	}
-	fac, err := genFactory()
-	if err != nil {
-		return nil, err
-	}
+	fac := genFactory()
 	replica, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1684,7 +1656,7 @@ func saveChangeInfo(key string, value string) error {
 	return kv.Save(key, value)
 }
 
-func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac msgstream.Factory) (*QueryNode, error) {
+func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory) (*QueryNode, error) {
 	node := NewQueryNode(ctx, fac)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
@@ -1707,12 +1679,12 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac msgstream.Factory)
 	if err != nil {
 		return nil, err
 	}
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streaming.replica, historical.replica, node.tSafeReplica, node.msFactory)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streaming.replica, historical.replica, node.tSafeReplica, node.factory)
 
 	node.streaming = streaming
 	node.historical = historical
 
-	loader, err := genSimpleSegmentLoaderWithMqFactory(node.queryNodeLoopCtx, historical.replica, streaming.replica, fac)
+	loader, err := genSimpleSegmentLoaderWithMqFactory(historical.replica, streaming.replica, fac)
 	if err != nil {
 		return nil, err
 	}
@@ -1721,7 +1693,15 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac msgstream.Factory)
 	// start task scheduler
 	go node.scheduler.Start()
 
-	qs := newQueryService(ctx, node.historical, node.streaming, node.msFactory)
+	vectorStorage, err := node.factory.NewVectorStorageChunkManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cacheStorage, err := node.factory.NewCacheStorageChunkManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+	qs := newQueryService(ctx, node.historical, node.streaming, vectorStorage, cacheStorage, fac)
 	defer qs.close()
 	node.queryService = qs
 
@@ -1732,10 +1712,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac msgstream.Factory)
 
 // node
 func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
-	fac, err := genFactory()
-	if err != nil {
-		return nil, err
-	}
+	fac := genFactory()
 	return genSimpleQueryNodeWithMQFactory(ctx, fac)
 }
 
@@ -1855,14 +1832,11 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 }
 
 type mockMsgStreamFactory struct {
+	dependency.Factory
 	mockMqStream msgstream.MsgStream
 }
 
-var _ msgstream.Factory = &mockMsgStreamFactory{}
-
-func (mm *mockMsgStreamFactory) Init(params *paramtable.ComponentParam) error {
-	return nil
-}
+var _ dependency.Factory = &mockMsgStreamFactory{}
 
 func (mm *mockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return mm.mockMqStream, nil
@@ -1873,6 +1847,12 @@ func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.M
 }
 
 func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
+	return nil, nil
+}
+func (mm *mockMsgStreamFactory) NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
+	return nil, nil
+}
+func (mm *mockMsgStreamFactory) NewVectorStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return nil, nil
 }
 

@@ -30,6 +30,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -39,10 +41,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestIndexNode(t *testing.T) {
@@ -63,7 +65,8 @@ func TestIndexNode(t *testing.T) {
 	floatVectorBinlogPath := "float_vector_binlog"
 	binaryVectorBinlogPath := "binary_vector_binlog"
 
-	in, err := NewIndexNode(ctx)
+	factory := dependency.NewDefaultFactory(true)
+	in, err := NewIndexNode(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()
 
@@ -81,6 +84,7 @@ func TestIndexNode(t *testing.T) {
 	err = in.Register()
 	assert.Nil(t, err)
 
+	in.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
 	t.Run("CreateIndex FloatVector", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
 
@@ -476,7 +480,8 @@ func TestCreateIndexFailed(t *testing.T) {
 	metaPath2 := "FloatVector2"
 	floatVectorBinlogPath := "float_vector_binlog"
 
-	in, err := NewIndexNode(ctx)
+	factory := dependency.NewDefaultFactory(true)
+	in, err := NewIndexNode(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()
 
@@ -494,6 +499,7 @@ func TestCreateIndexFailed(t *testing.T) {
 	err = in.Register()
 	assert.Nil(t, err)
 
+	in.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
 	t.Run("CreateIndex error", func(t *testing.T) {
 		var insertCodec storage.InsertCodec
 
@@ -748,7 +754,8 @@ func TestCreateIndexFailed(t *testing.T) {
 func TestIndexNode_Error(t *testing.T) {
 	ctx := context.Background()
 
-	in, err := NewIndexNode(ctx)
+	factory := dependency.NewDefaultFactory(true)
+	in, err := NewIndexNode(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()
 
@@ -768,6 +775,7 @@ func TestIndexNode_Error(t *testing.T) {
 
 	in.UpdateStateCode(internalpb.StateCode_Initializing)
 
+	in.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
 	t.Run("CreateIndex", func(t *testing.T) {
 		status, err := in.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
 		assert.Nil(t, err)

@@ -23,8 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -39,7 +39,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-	factory := msgstream.NewPmsFactory()
+	factory := dependency.NewDefaultFactory(true)
 	meta, err := newMeta(baseCtx, kv, factory, nil)
 	assert.Nil(t, err)
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)

@@ -27,21 +27,22 @@ import (
 	"syscall"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // UniqueID is alias of typeutil.UniqueID
@@ -90,7 +91,7 @@ type Proxy struct {
 
 	session *sessionutil.Session
 
-	msFactory msgstream.Factory
+	factory dependency.Factory
 
 	searchResultCh   chan *internalpb.SearchResults
 	retrieveResultCh chan *internalpb.RetrieveResults
@@ -101,14 +102,14 @@ type Proxy struct {
 }
 
 // NewProxy returns a Proxy struct.
-func NewProxy(ctx context.Context, factory msgstream.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable
 	node := &Proxy{
 		ctx:              ctx1,
 		cancel:           cancel,
-		msFactory:        factory,
+		factory:          factory,
 		searchResultCh:   make(chan *internalpb.SearchResults, n),
 		retrieveResultCh: make(chan *internalpb.RetrieveResults, n),
 	}
@@ -182,15 +183,8 @@ func (node *Proxy) Init() error {
 		log.Debug("create query channel for Proxy done", zap.String("QueryResultChannel", resp.QueryResultChannel))
 	}
 
-	log.Debug("set parameters for ms factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
-	if err := node.msFactory.Init(&Params); err != nil {
-		log.Warn("failed to set parameters for ms factory",
-			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole),
-			zap.Any("parameters", Params.ServiceParam))
-		return err
-	}
-	log.Debug("set parameters for ms factory done", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
+	node.factory.Init(&Params)
+	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
 
 	log.Debug("create id allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
 	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.ProxyID)
@@ -229,12 +223,12 @@ func (node *Proxy) Init() error {
 	log.Debug("create channels manager", zap.String("role", typeutil.ProxyRole))
 	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
 	dqlChannelsFunc := getDqlChannelsFunc(node.ctx, node.session.ServerID, node.queryCoord)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, dqlChannelsFunc, nil, node.msFactory)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, dqlChannelsFunc, nil, node.factory)
 	node.chMgr = chMgr
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("create task scheduler", zap.String("role", typeutil.ProxyRole))
-	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.msFactory,
+	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.factory,
 		schedOptWithSearchResultCh(node.searchResultCh),
 		schedOptWithRetrieveResultCh(node.retrieveResultCh))
 	if err != nil {

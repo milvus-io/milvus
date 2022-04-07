@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -209,10 +210,8 @@ func TestDataNode(t *testing.T) {
 			timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
 
 			// pulsar produce
-			msFactory := msgstream.NewPmsFactory()
-			err = msFactory.Init(&Params)
-			assert.NoError(t, err)
-			insertStream, err := msFactory.NewMsgStream(node1.ctx)
+			factory := dependency.NewDefaultFactory(true)
+			insertStream, err := factory.NewMsgStream(node1.ctx)
 			assert.NoError(t, err)
 			insertStream.AsProducer([]string{dmChannelName})
 			insertStream.Start()
@@ -540,12 +539,10 @@ func TestWatchChannel(t *testing.T) {
 		bs, err = proto.Marshal(&info)
 		assert.NoError(t, err)
 
-		msFactory := node.msFactory
-		defer func() { node.msFactory = msFactory }()
+		msFactory := node.factory
+		defer func() { node.factory = msFactory }()
 
-		node.msFactory = &FailMessageStreamFactory{
-			node.msFactory,
-		}
+		node.factory = &FailMessageStreamFactory{}
 		node.handleWatchInfo(e, ch, bs)
 		<-chPut
 		exist = node.flowgraphManager.exist(ch)

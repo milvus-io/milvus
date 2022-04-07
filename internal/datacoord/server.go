@@ -27,6 +27,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -38,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -46,10 +52,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -122,8 +124,8 @@ type Server struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
-	flushCh   chan UniqueID
-	msFactory msgstream.Factory
+	flushCh chan UniqueID
+	factory dependency.Factory
 
 	session *sessionutil.Session
 	eventCh <-chan *sessionutil.SessionEvent
@@ -182,12 +184,12 @@ func SetSegmentManager(manager Manager) Option {
 }
 
 // CreateServer creates a `Server` instance
-func CreateServer(ctx context.Context, factory msgstream.Factory, opts ...Option) *Server {
+func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:                    ctx,
 		quitCh:                 make(chan struct{}),
-		msFactory:              factory,
+		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
@@ -259,10 +261,7 @@ func (s *Server) Init() error {
 // 4. set server state to Healthy
 func (s *Server) Start() error {
 	var err error
-	err = s.msFactory.Init(&Params)
-	if err != nil {
-		return err
-	}
+	s.factory.Init(&Params)
 	if err = s.initRootCoordClient(); err != nil {
 		return err
 	}
@@ -307,7 +306,7 @@ func (s *Server) initCluster() error {
 	}
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.msFactory), withStateChecker())
+	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.factory), withStateChecker())
 	if err != nil {
 		return err
 	}
@@ -443,7 +442,7 @@ func (s *Server) startServerLoop() {
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
 // tt msg stands for the currently consumed timestamp for each channel
 func (s *Server) startDataNodeTtLoop(ctx context.Context) {
-	ttMsgStream, err := s.msFactory.NewMsgStream(ctx)
+	ttMsgStream, err := s.factory.NewMsgStream(ctx)
 	if err != nil {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		return

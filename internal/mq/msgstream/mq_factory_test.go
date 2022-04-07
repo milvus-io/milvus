@@ -25,9 +25,7 @@ import (
 )
 
 func TestPmsFactory(t *testing.T) {
-	pmsFactory := NewPmsFactory()
-
-	pmsFactory.Init(&Params)
+	pmsFactory := NewPmsFactory(&Params.PulsarCfg)
 
 	ctx := context.Background()
 	_, err := pmsFactory.NewMsgStream(ctx)
@@ -40,19 +38,10 @@ func TestPmsFactory(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestPmsFactory_Init(t *testing.T) {
-	rmsFactory := NewRmsFactory()
-	err := rmsFactory.Init(&Params)
-	assert.Nil(t, err)
-}
-
 func TestRmsFactory(t *testing.T) {
-	os.Setenv("ROCKSMQ_PATH", "/tmp/milvus")
 	defer os.Unsetenv("ROCKSMQ_PATH")
 
-	rmsFactory := NewRmsFactory()
-
-	rmsFactory.Init(&Params)
+	rmsFactory := NewRmsFactory("tmp/milvus")
 
 	ctx := context.Background()
 	_, err := rmsFactory.NewMsgStream(ctx)
@@ -62,11 +51,5 @@ func TestRmsFactory(t *testing.T) {
 	assert.Nil(t, err)
 
 	_, err = rmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
-}
-
-func TestRmsFactory_Init(t *testing.T) {
-	rmsFactory := NewRmsFactory()
-	err := rmsFactory.Init(&Params)
 	assert.Nil(t, err)
 }

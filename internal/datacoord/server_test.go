@@ -30,6 +30,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
@@ -39,14 +45,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 func TestMain(m *testing.M) {
@@ -617,7 +619,7 @@ func TestService_WatchServices(t *testing.T) {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT)
 	defer signal.Reset(syscall.SIGINT)
-	factory := msgstream.NewPmsFactory()
+	factory := dependency.NewDefaultFactory(true)
 	svr := CreateServer(context.TODO(), factory)
 	svr.session = &sessionutil.Session{
 		TriggerKill: true,
@@ -1078,7 +1080,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Partitions: []int64{0},
 		})
 
-		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
 		ttMsgStream.Start()
@@ -1146,7 +1148,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Schema:     newTestSchema(),
 			Partitions: []int64{0},
 		})
-		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
 		ttMsgStream.Start()
@@ -1228,7 +1230,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			Partitions: []int64{0},
 		})
 
-		ttMsgStream, err := svr.msFactory.NewMsgStream(context.TODO())
+		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
 		ttMsgStream.Start()
@@ -2013,7 +2015,7 @@ func TestOptions(t *testing.T) {
 		})
 		assert.NotNil(t, opt)
 
-		factory := msgstream.NewPmsFactory()
+		factory := dependency.NewDefaultFactory(true)
 
 		svr := CreateServer(context.TODO(), factory, opt)
 		dn, err := svr.dataNodeCreator(context.Background(), "")
@@ -2491,9 +2493,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	var err error
 	Params.Init()
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
-	factory := msgstream.NewPmsFactory()
-	err = factory.Init(&Params)
-	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)

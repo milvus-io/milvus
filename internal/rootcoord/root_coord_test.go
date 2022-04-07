@@ -28,6 +28,10 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -45,15 +49,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -504,7 +506,7 @@ func TestRootCoordInit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	coreFactory := msgstream.NewPmsFactory()
+	coreFactory := dependency.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
@@ -637,7 +639,7 @@ func TestRootCoord_Base(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	coreFactory := msgstream.NewPmsFactory()
+	coreFactory := dependency.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	Params.RootCoordCfg.ImportIndexCheckInterval = 0.1
@@ -702,10 +704,7 @@ func TestRootCoord_Base(t *testing.T) {
 	err = core.SetQueryCoord(qm)
 	assert.NoError(t, err)
 
-	tmpFactory := msgstream.NewPmsFactory()
-
-	err = tmpFactory.Init(&Params)
-	assert.NoError(t, err)
+	tmpFactory := dependency.NewDefaultFactory(true)
 
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
@@ -2611,7 +2610,8 @@ func TestRootCoord2(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	msFactory := dependency.NewDefaultFactory(true)
+
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
@@ -2663,9 +2663,6 @@ func TestRootCoord2(t *testing.T) {
 
 	core.session.TriggerKill = false
 	err = core.Register()
-	assert.NoError(t, err)
-
-	err = msFactory.Init(&Params)
 	assert.NoError(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
@@ -2910,7 +2907,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	msFactory := dependency.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
@@ -2960,9 +2957,6 @@ func TestCheckFlushedSegments(t *testing.T) {
 
 	core.session.TriggerKill = false
 	err = core.Register()
-	assert.NoError(t, err)
-
-	err = msFactory.Init(&Params)
 	assert.NoError(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)
@@ -3072,7 +3066,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	msFactory := dependency.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
@@ -3123,9 +3117,6 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 
 	core.session.TriggerKill = false
 	err = core.Register()
-	assert.NoError(t, err)
-
-	err = msFactory.Init(&Params)
 	assert.NoError(t, err)
 
 	timeTickStream, _ := msFactory.NewMsgStream(ctx)

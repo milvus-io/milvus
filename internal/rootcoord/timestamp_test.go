@@ -23,7 +23,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -31,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
 )
 
 type tbd struct {
@@ -80,9 +81,9 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := msgstream.NewPmsFactory()
+	factory := dependency.NewDefaultFactory(true)
 	Params.Init()
-	core, err := NewCore(ctx, msFactory)
+	core, err := NewCore(ctx, factory)
 
 	assert.Nil(b, err)
 
@@ -118,9 +119,6 @@ func BenchmarkAllocTimestamp(b *testing.B) {
 	assert.Nil(b, err)
 
 	err = core.Start()
-	assert.Nil(b, err)
-
-	err = msFactory.Init(&Params)
 	assert.Nil(b, err)
 
 	b.ResetTimer()

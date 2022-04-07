@@ -45,21 +45,22 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -108,25 +109,26 @@ type QueryNode struct {
 	// etcd client
 	etcdCli *clientv3.Client
 
-	msFactory msgstream.Factory
+	factory   dependency.Factory
 	scheduler *taskScheduler
 
 	session        *sessionutil.Session
 	eventCh        <-chan *sessionutil.SessionEvent
 	sessionManager *SessionManager
 
-	chunkManager storage.ChunkManager
-	etcdKV       *etcdkv.EtcdKV
+	vectorStorage storage.ChunkManager
+	cacheStorage  storage.ChunkManager
+	etcdKV        *etcdkv.EtcdKV
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
-func NewQueryNode(ctx context.Context, factory msgstream.Factory) *QueryNode {
+func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		queryService:        nil,
-		msFactory:           factory,
+		factory:             factory,
 	}
 
 	node.scheduler = newTaskScheduler(ctx1)
@@ -272,16 +274,18 @@ func (node *QueryNode) Init() error {
 			return
 		}
 
-		node.chunkManager, err = storage.NewMinioChunkManager(node.queryNodeLoopCtx,
-			storage.Address(Params.MinioCfg.Address),
-			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-			storage.UseSSL(Params.MinioCfg.UseSSL),
-			storage.BucketName(Params.MinioCfg.BucketName),
-			storage.CreateBucket(true))
+		node.factory.Init(&Params)
 
+		node.vectorStorage, err = node.factory.NewVectorStorageChunkManager(node.queryNodeLoopCtx)
 		if err != nil {
-			log.Error("QueryNode init session failed", zap.Error(err))
+			log.Error("QueryNode init vector storage failed", zap.Error(err))
+			initError = err
+			return
+		}
+
+		node.cacheStorage, err = node.factory.NewCacheStorageChunkManager(node.queryNodeLoopCtx)
+		if err != nil {
+			log.Error("QueryNode init cache storage failed", zap.Error(err))
 			initError = err
 			return
 		}
@@ -299,7 +303,7 @@ func (node *QueryNode) Init() error {
 		)
 		node.streaming = newStreaming(node.queryNodeLoopCtx,
 			streamingReplica,
-			node.msFactory,
+			node.factory,
 			node.etcdKV,
 			node.tSafeReplica,
 		)
@@ -308,16 +312,26 @@ func (node *QueryNode) Init() error {
 			node.historical.replica,
 			node.streaming.replica,
 			node.etcdKV,
-			node.chunkManager,
-			node.msFactory)
+			node.vectorStorage,
+			node.factory)
 
-		//node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.msFactory)
-		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.msFactory)
+		//node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.factory)
+		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.factory)
 
 		node.InitSegcore()
 
 		// TODO: add session creator to node
 		node.sessionManager = NewSessionManager(withSessionCreator(defaultSessionCreator()))
+
+		// init services and manager
+		// TODO: pass node.streaming.replica to search service
+		node.queryService = newQueryService(node.queryNodeLoopCtx,
+			node.historical,
+			node.streaming,
+			node.vectorStorage,
+			node.cacheStorage,
+			node.factory,
+			qsOptWithSessionManager(node.sessionManager))
 
 		log.Debug("query node init successfully",
 			zap.Any("queryNodeID", Params.QueryNodeCfg.QueryNodeID),
@@ -331,19 +345,6 @@ func (node *QueryNode) Init() error {
 
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
-	err := node.msFactory.Init(&Params)
-	if err != nil {
-		return err
-	}
-
-	// init services and manager
-	// TODO: pass node.streaming.replica to search service
-	node.queryService = newQueryService(node.queryNodeLoopCtx,
-		node.historical,
-		node.streaming,
-		node.msFactory,
-		qsOptWithSessionManager(node.sessionManager))
-
 	// start task scheduler
 	go node.scheduler.Start()
 

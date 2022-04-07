@@ -21,18 +21,20 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
+
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc"
 )
 
 var ParamsGlobal paramtable.ComponentParam
@@ -122,7 +124,8 @@ func Test_NewClient(t *testing.T) {
 func TestIndexNodeClient(t *testing.T) {
 	ctx := context.Background()
 
-	ins, err := grpcindexnode.NewServer(ctx)
+	factory := dependency.NewDefaultFactory(true)
+	ins, err := grpcindexnode.NewServer(ctx, factory)
 	assert.Nil(t, err)
 	assert.NotNil(t, ins)
 

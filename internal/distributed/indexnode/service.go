@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -241,9 +243,9 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 }
 
 // NewServer create a new IndexNode grpc server.
-func NewServer(ctx context.Context) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	node, err := indexnode.NewIndexNode(ctx1)
+	node, err := indexnode.NewIndexNode(ctx1, factory)
 	if err != nil {
 		defer cancel()
 		return nil, err
