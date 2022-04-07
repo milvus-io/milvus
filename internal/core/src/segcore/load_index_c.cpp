@@ -87,7 +87,9 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
         AssertInfo(find_index_type == true, "Can't find index type in index_params");
         knowhere::IndexMode mode;
         if (find_index_mode) {
-            mode = index_params["index_mode"] == "CPU" ? knowhere::IndexMode::MODE_CPU : knowhere::IndexMode::MODE_GPU;
+            std::string index_mode = index_params["index_mode"];
+            mode = (index_mode == "CPU" || index_mode == "cpu") ? knowhere::IndexMode::MODE_CPU
+                                                                : knowhere::IndexMode::MODE_GPU;
         } else {
             mode = knowhere::IndexMode::MODE_CPU;
         }
