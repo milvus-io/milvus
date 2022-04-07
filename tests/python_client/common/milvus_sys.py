@@ -11,18 +11,17 @@ sys_logs_req = ujson.dumps({"metric_type": "system_logs"})
 class MilvusSys:
     def __init__(self, alias='default'):
         self.alias = alias
-        self.client = connections.get_connection(alias=self.alias)
-        if self.client is None:
+        self.handler = connections._fetch_handler(alias=self.alias)
+        if self.handler is None:
             raise Exception(f"Connection {alias} is disconnected or nonexistent")
 
         # TODO: for now it only supports non_orm style API for getMetricsRequest
-        with self.client._connection() as handler:
-            req = milvus_types.GetMetricsRequest(request=sys_info_req)
-            self.sys_info = handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
-            req = milvus_types.GetMetricsRequest(request=sys_statistics_req)
-            self.sys_statistics = handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
-            req = milvus_types.GetMetricsRequest(request=sys_logs_req)
-            self.sys_logs = handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        req = milvus_types.GetMetricsRequest(request=sys_info_req)
+        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        req = milvus_types.GetMetricsRequest(request=sys_statistics_req)
+        self.sys_statistics = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        req = milvus_types.GetMetricsRequest(request=sys_logs_req)
+        self.sys_logs = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
 
     @property
     def build_version(self):
@@ -50,7 +49,7 @@ class MilvusSys:
         """get all query nodes in Milvus deployment"""
         query_nodes = []
         for node in self.nodes:
-            if 'QueryNode' == node.get('infos').get('type'):
+            if 'querynode' == node.get('infos').get('type'):
                 query_nodes.append(node)
         return query_nodes
 
@@ -59,7 +58,7 @@ class MilvusSys:
         """get all data nodes in Milvus deployment"""
         data_nodes = []
         for node in self.nodes:
-            if 'DataNode' == node.get('infos').get('type'):
+            if 'datanode' == node.get('infos').get('type'):
                 data_nodes.append(node)
         return data_nodes
 
@@ -68,7 +67,7 @@ class MilvusSys:
         """get all index nodes in Milvus deployment"""
         index_nodes = []
         for node in self.nodes:
-            if 'IndexNode' == node.get('infos').get('type'):
+            if 'indexnode' == node.get('infos').get('type'):
                 index_nodes.append(node)
         return index_nodes
 
@@ -77,7 +76,7 @@ class MilvusSys:
         """get all proxy nodes in Milvus deployment"""
         proxy_nodes = []
         for node in self.nodes:
-            if 'Proxy' == node.get('infos').get('type'):
+            if 'proxy' == node.get('infos').get('type'):
                 proxy_nodes.append(node)
         return proxy_nodes
 
