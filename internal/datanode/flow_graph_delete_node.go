@@ -170,23 +170,23 @@ func (dn *deleteNode) showDelBuf() {
 		if v, ok := dn.delBuf.Load(segID); ok {
 			delDataBuf, _ := v.(*DelDataBuf)
 			log.Debug("delta buffer status",
-				zap.Int64("segID", segID),
+				zap.Int64("segment ID", segID),
 				zap.Int64("size", delDataBuf.GetEntriesNum()),
-				zap.String("vchannel", dn.channelName))
+				zap.String("vChannel", dn.channelName))
 			// TODO control the printed length
 			length := len(delDataBuf.delData.Pks)
 			for i := 0; i < length; i++ {
 				log.Debug("del data",
 					zap.Any("pk", delDataBuf.delData.Pks[i]),
 					zap.Uint64("ts", delDataBuf.delData.Tss[i]),
-					zap.Int64("segmentID", segID),
-					zap.String("vchannel", dn.channelName),
+					zap.Int64("segment ID", segID),
+					zap.String("vChannel", dn.channelName),
 				)
 			}
 		} else {
-			log.Error("segment not exist",
-				zap.Int64("segID", segID),
-				zap.String("vchannel", dn.channelName))
+			log.Debug("segment not exist",
+				zap.Int64("segment ID", segID),
+				zap.String("vChannel", dn.channelName))
 		}
 	}
 }
