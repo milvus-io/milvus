@@ -259,8 +259,8 @@ TEST(CApiTest, DeleteTest) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, Growing, -1);
 
-    long delete_row_ids[] = {100000, 100001, 100002};
-    unsigned long delete_timestamps[] = {0, 0, 0};
+    int64_t delete_row_ids[] = {100000, 100001, 100002};
+    uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
@@ -635,8 +635,8 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, Growing, -1);
 
-    long delete_row_ids[] = {100000, 100001, 100002};
-    unsigned long delete_timestamps[] = {0, 0, 0};
+    int64_t delete_row_ids[] = {100000, 100001, 100002};
+    uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
