@@ -33,7 +33,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"strconv"
 	"sync"
 	"unsafe"
 
@@ -165,7 +164,7 @@ func (s *Segment) getIndexedFieldInfo(fieldID UniqueID) (*IndexedFieldInfo, erro
 			indexInfo:   info.indexInfo,
 		}, nil
 	}
-	return nil, errors.New("Invalid fieldID " + strconv.Itoa(int(fieldID)))
+	return nil, fmt.Errorf("Invalid fieldID %d", fieldID)
 }
 
 func (s *Segment) hasLoadIndexForIndexedField(fieldID int64) bool {
