@@ -465,7 +465,7 @@ func (p *proxyConfig) initMaxTaskNum() {
 }
 
 func (p *proxyConfig) initBufFlagExpireTime() {
-	expireTime := p.Base.ParseInt64WithDefault("proxy.bufFlagExpireTime", 3600)
+	expireTime := p.Base.ParseInt64WithDefault("proxy.bufFlagExpireTime", 300)
 	p.BufFlagExpireTime = time.Duration(expireTime) * time.Second
 }
 
