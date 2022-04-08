@@ -34,8 +34,9 @@ inline ScalarIndexPtr<std::string>
 IndexFactory::CreateIndex(const std::string& index_type) {
 #ifdef __linux__
     return CreateStringIndexMarisa();
-#endif
+#else
     throw std::runtime_error("unsupported platform");
+#endif
 }
 
 }  // namespace milvus::scalar

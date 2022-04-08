@@ -14,9 +14,7 @@
 #include <index/ScalarIndexSort.h>
 
 #include "common/SystemProperty.h"
-#if defined(__linux__) || defined(__MINGW64__)
 #include "knowhere/index/vector_index/IndexIVF.h"
-#endif
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "segcore/FieldIndexing.h"
 
@@ -24,7 +22,6 @@ namespace milvus::segcore {
 
 void
 VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
-#if defined(__linux__) || defined(__MINGW64__)
     AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT, "Data type of vector field is not VECTOR_FLOAT");
     auto dim = field_meta_.get_dim();
 
@@ -43,9 +40,6 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
         indexing->AddWithoutIds(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }
-#else
-    throw std::runtime_error("Unsupported BuildIndexRange on current platform!");
-#endif
 }
 
 knowhere::Config

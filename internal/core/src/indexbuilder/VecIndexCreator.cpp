@@ -238,10 +238,9 @@ VecIndexCreator::Serialize() {
         std::shared_ptr<uint8_t[]> raw_data(new uint8_t[raw_data_.size()], std::default_delete<uint8_t[]>());
         memcpy(raw_data.get(), raw_data_.data(), raw_data_.size());
         ret.Append(RAW_DATA, raw_data, raw_data_.size());
-        auto slice_size = get_index_file_slice_size();
         // https://github.com/milvus-io/milvus/issues/6421
         // Disassemble will only divide the raw vectors, other keys were already divided
-        knowhere::Disassemble(slice_size * 1024 * 1024, ret);
+        knowhere::Disassemble(ret, config_);
     }
     return ret;
 }
@@ -300,7 +299,7 @@ VecIndexCreator::get_index_file_slice_size() {
     if (config_.contains(knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
         return config_[knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>();
     }
-    return 4;  // by default
+    return knowhere::index_file_slice_size;  // by default
 }
 
 std::unique_ptr<VecIndexCreator::QueryResult>

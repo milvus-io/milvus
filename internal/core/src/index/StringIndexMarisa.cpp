@@ -80,7 +80,7 @@ StringIndexMarisa::Serialize(const Config& config) {
     res_set.Append(MARISA_TRIE_INDEX, index_data, size);
     res_set.Append(MARISA_STR_IDS, str_ids, str_ids_len);
 
-    knowhere::Disassemble(4 * 1024 * 1024, res_set);
+    knowhere::Disassemble(res_set, config);
 
     return res_set;
 }
