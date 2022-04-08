@@ -214,6 +214,36 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	QueryNodeSearchNQ = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "nq_for_merged_req",
+			Help:      "Number of NQ after merging reqs",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeWaitForExecuteReqs = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "reqs_wait_for_execute",
+			Help:      "the number of requests waiting for execute",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeWaitForMergeReqs = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "reqs_wait_for_merge",
+			Help:      "the number of requests waiting for merge",
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 //RegisterQueryNode registers QueryNode metrics
@@ -235,4 +265,8 @@ func RegisterQueryNode() {
 	prometheus.MustRegister(QueryNodeLoadSegmentLatency)
 	prometheus.MustRegister(QueryNodeServiceTime)
 	prometheus.MustRegister(QueryNodeNumFlowGraphs)
+
+	prometheus.MustRegister(QueryNodeSearchNQ)
+	prometheus.MustRegister(QueryNodeWaitForExecuteReqs)
+	prometheus.MustRegister(QueryNodeWaitForMergeReqs)
 }

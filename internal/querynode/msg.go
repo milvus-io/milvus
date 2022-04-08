@@ -22,9 +22,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
@@ -141,9 +143,19 @@ func (st *searchMsg) RecordSpan() time.Duration {
 
 // CombinePlaceHolderGroups combine all the placeholder groups.
 func (st *searchMsg) CombinePlaceHolderGroups() {
-	st.PlaceholderGroup = []byte{}
-	for _, grp := range st.OrigPlaceHolderGroups {
-		st.PlaceholderGroup = append(st.PlaceholderGroup, grp...)
+	if len(st.OrigPlaceHolderGroups) > 1 {
+		ret := &milvuspb.PlaceholderGroup{}
+		//retValues := ret.Placeholders[0].GetValues()
+		_ = proto.Unmarshal(st.PlaceholderGroup, ret)
+		for i, grp := range st.OrigPlaceHolderGroups {
+			if i == 0 {
+				continue
+			}
+			x := &milvuspb.PlaceholderGroup{}
+			_ = proto.Unmarshal(grp, x)
+			ret.Placeholders[0].Values = append(ret.Placeholders[0].Values, x.Placeholders[0].Values...)
+		}
+		st.PlaceholderGroup, _ = proto.Marshal(ret)
 	}
 }
 
@@ -316,25 +328,26 @@ func mergeSearchMsg(t queryMsg, s queryMsg) queryMsg {
 
 func convertSearchMsg(src *msgstream.SearchMsg) queryMsg {
 	target := &searchMsg{
-		BaseMsg:            src.BaseMsg,
-		Base:               src.Base,
-		ReqIDs:             []UniqueID{src.ReqID},
-		DbID:               src.DbID,
-		CollectionID:       src.GetCollectionID(),
-		PartitionIDs:       src.GetPartitionIDs(),
-		Dsl:                src.GetDsl(),
-		DslType:            src.GetDslType(),
-		PlaceholderGroup:   src.GetPlaceholderGroup(),
-		SerializedExprPlan: src.GetSerializedExprPlan(),
-		TravelTimestamp:    src.GetTravelTimestamp(),
-		GuaranteeTimestamp: src.GetGuaranteeTimestamp(),
-		TimeoutTimestamp:   src.GetTimeoutTimestamp(),
-		NQ:                 src.GetNq(),
-		OrigNQs:            []int64{src.GetNq()},
-		OrigTopKs:          []int64{src.GetTopk()},
-		SourceIDs:          []UniqueID{src.SourceID()},
-		TopK:               src.GetTopk(),
-		MetricType:         src.GetMetricType(),
+		BaseMsg:               src.BaseMsg,
+		Base:                  src.Base,
+		ReqIDs:                []UniqueID{src.ReqID},
+		DbID:                  src.DbID,
+		CollectionID:          src.GetCollectionID(),
+		PartitionIDs:          src.GetPartitionIDs(),
+		Dsl:                   src.GetDsl(),
+		DslType:               src.GetDslType(),
+		PlaceholderGroup:      src.GetPlaceholderGroup(),
+		OrigPlaceHolderGroups: [][]byte{src.GetPlaceholderGroup()},
+		SerializedExprPlan:    src.GetSerializedExprPlan(),
+		TravelTimestamp:       src.GetTravelTimestamp(),
+		GuaranteeTimestamp:    src.GetGuaranteeTimestamp(),
+		TimeoutTimestamp:      src.GetTimeoutTimestamp(),
+		NQ:                    src.GetNq(),
+		OrigNQs:               []int64{src.GetNq()},
+		OrigTopKs:             []int64{src.GetTopk()},
+		SourceIDs:             []UniqueID{src.SourceID()},
+		TopK:                  src.GetTopk(),
+		MetricType:            src.GetMetricType(),
 	}
 	return target
 }
