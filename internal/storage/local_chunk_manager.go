@@ -18,6 +18,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
@@ -51,7 +52,7 @@ func NewLocalChunkManager(opts ...Option) *LocalChunkManager {
 // GetPath returns the path of local data if exists.
 func (lcm *LocalChunkManager) GetPath(filePath string) (string, error) {
 	if !lcm.Exist(filePath) {
-		return "", errors.New("local file cannot be found with filePath:" + filePath)
+		return "", fmt.Errorf("local file cannot be found with filePath: %s", filePath)
 	}
 	absPath := path.Join(lcm.localPath, filePath)
 	return absPath, nil
@@ -101,7 +102,7 @@ func (lcm *LocalChunkManager) Exist(filePath string) bool {
 // Read reads the local storage data if exists.
 func (lcm *LocalChunkManager) Read(filePath string) ([]byte, error) {
 	if !lcm.Exist(filePath) {
-		return nil, errors.New("file not exist" + filePath)
+		return nil, fmt.Errorf("file not exist: %s", filePath)
 	}
 	absPath := path.Join(lcm.localPath, filePath)
 	file, err := os.Open(path.Clean(absPath))
