@@ -28,6 +28,9 @@ import (
 const (
 	// DefaultRetentionDuration defines the default duration for retention which is 5 days in seconds.
 	DefaultRetentionDuration = 3600 * 24 * 5
+
+	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
+	DefaultIndexSliceSize = 4
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -115,7 +118,8 @@ type commonConfig struct {
 	DefaultIndexName     string
 	RetentionDuration    int64
 
-	SimdType string
+	SimdType       string
+	IndexSliceSize int64
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -149,6 +153,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initRetentionDuration()
 
 	p.initSimdType()
+	p.initIndexSliceSize()
 }
 
 func (p *commonConfig) initClusterPrefix() {
@@ -323,6 +328,10 @@ func (p *commonConfig) initSimdType() {
 		"knowhere.simdType",
 	}
 	p.SimdType = p.Base.LoadWithDefault2(keys, "auto")
+}
+
+func (p *commonConfig) initIndexSliceSize() {
+	p.IndexSliceSize = p.Base.ParseInt64WithDefault("common.indexSliceSize", DefaultIndexSliceSize)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

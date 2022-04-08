@@ -50,4 +50,10 @@ SegcoreSetSimdType(const char* value) {
     return ret;
 }
 
+extern "C" void
+SegcoreSetIndexSliceSize(const int64_t value) {
+    milvus::config::KnowhereSetIndexSliceSize(value);
+    LOG_SEGCORE_DEBUG_ << "set config index slice size: " << value;
+}
+
 }  // namespace milvus::segcore

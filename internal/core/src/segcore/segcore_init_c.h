@@ -25,6 +25,9 @@ SegcoreSetChunkRows(const int64_t);
 char*
 SegcoreSetSimdType(const char*);
 
+void
+SegcoreSetIndexSliceSize(const int64_t);
+
 #ifdef __cplusplus
 }
 #endif

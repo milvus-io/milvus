@@ -22,6 +22,9 @@ IndexBuilderInit();
 char*
 IndexBuilderSetSimdType(const char*);
 
+void
+IndexBuilderSetIndexSliceSize(const int64_t);
+
 #ifdef __cplusplus
 };
 #endif
