@@ -28,7 +28,11 @@ package querynode
 import "C"
 import (
 	"errors"
-	"unsafe"
+	"fmt"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 // SearchResult contains a pointer to the search result in C++ memory
@@ -36,10 +40,8 @@ type SearchResult struct {
 	cSearchResult C.CSearchResult
 }
 
-// MarshaledHits contains a pointer to the marshaled hits in C++ memory
-type MarshaledHits struct {
-	cMarshaledHits C.CMarshaledHits
-}
+// searchResultDataBlobs is the CSearchResultsDataBlobs in C++
+type searchResultDataBlobs = C.CSearchResultDataBlobs
 
 // RetrieveResult contains a pointer to the retrieve result in C++ memory
 type RetrieveResult struct {
@@ -65,47 +67,59 @@ func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 	return nil
 }
 
-func reorganizeSearchResults(searchResults []*SearchResult, numSegments int64) (*MarshaledHits, error) {
+func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResult, numSegments int, reqSlices []int32) (searchResultDataBlobs, error) {
+	log.Debug("start marshal...",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("msgID", msgID),
+		zap.Int32s("reqSlices", reqSlices))
+
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 
-	var cNumSegments = C.int64_t(numSegments)
-	var cMarshaledHits C.CMarshaledHits
+	var cNumSegments = C.int32_t(numSegments)
+	var cSlicesPtr = (*C.int32_t)(&reqSlices[0])
+	var cNumSlices = C.int32_t(len(reqSlices))
 
-	status := C.ReorganizeSearchResults(&cMarshaledHits, cSearchResultPtr, cNumSegments)
+	var cSearchResultDataBlobs searchResultDataBlobs
+
+	status := C.Marshal(&cSearchResultDataBlobs, cSearchResultPtr, cNumSegments, cSlicesPtr, cNumSlices)
 	if err := HandleCStatus(&status, "ReorganizeSearchResults failed"); err != nil {
 		return nil, err
 	}
-	return &MarshaledHits{cMarshaledHits: cMarshaledHits}, nil
+	return cSearchResultDataBlobs, nil
 }
 
-func (mh *MarshaledHits) getHitsBlobSize() int64 {
-	res := C.GetHitsBlobSize(mh.cMarshaledHits)
-	return int64(res)
+func getReqSlices(nqOfReqs []int64, nqPerSlice int64) ([]int32, error) {
+	if nqPerSlice == 0 {
+		return nil, fmt.Errorf("zero nqPerSlice is not allowed")
+	}
+
+	slices := make([]int32, 0)
+	for i := 0; i < len(nqOfReqs); i++ {
+		for j := 0; j < int(nqOfReqs[i]/nqPerSlice); j++ {
+			slices = append(slices, int32(nqPerSlice))
+		}
+		if tailSliceSize := nqOfReqs[i] % nqPerSlice; tailSliceSize > 0 {
+			slices = append(slices, int32(tailSliceSize))
+		}
+	}
+	return slices, nil
 }
 
-func (mh *MarshaledHits) getHitsBlob() ([]byte, error) {
-	byteSize := mh.getHitsBlobSize()
-	result := make([]byte, byteSize)
-	cResultPtr := unsafe.Pointer(&result[0])
-	C.GetHitsBlob(mh.cMarshaledHits, cResultPtr)
-	return result, nil
+func getSearchResultDataBlob(cSearchResultDataBlobs searchResultDataBlobs, blobIndex int) ([]byte, error) {
+	var blob C.CProto
+	status := C.GetSearchResultDataBlob(&blob, cSearchResultDataBlobs, C.int32_t(blobIndex))
+	if err := HandleCStatus(&status, "marshal failed"); err != nil {
+		return nil, err
+	}
+	return GetCProtoBlob(&blob), nil
 }
 
-func (mh *MarshaledHits) hitBlobSizeInGroup(groupOffset int64) ([]int64, error) {
-	cGroupOffset := (C.int64_t)(groupOffset)
-	numQueries := C.GetNumQueriesPerGroup(mh.cMarshaledHits, cGroupOffset)
-	result := make([]int64, int64(numQueries))
-	cResult := (*C.int64_t)(&result[0])
-	C.GetHitSizePerQueries(mh.cMarshaledHits, cGroupOffset, cResult)
-	return result, nil
-}
-
-func deleteMarshaledHits(hits *MarshaledHits) {
-	C.DeleteMarshaledHits(hits.cMarshaledHits)
+func deleteSearchResultDataBlobs(cSearchResultDataBlobs searchResultDataBlobs) {
+	C.DeleteSearchResultDataBlobs(cSearchResultDataBlobs)
 }
 
 func deleteSearchResults(results []*SearchResult) {

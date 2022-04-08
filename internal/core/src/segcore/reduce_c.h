@@ -13,38 +13,29 @@
 extern "C" {
 #endif
 
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "common/type_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 
-typedef void* CMarshaledHits;
-
-void
-DeleteMarshaledHits(CMarshaledHits c_marshaled_hits);
-
-int
-MergeInto(int64_t num_queries, int64_t topk, float* distances, int64_t* uids, float* new_distances, int64_t* new_uids);
+typedef void* CSearchResultDataBlobs;
 
 CStatus
 ReduceSearchResultsAndFillData(CSearchPlan c_plan, CSearchResult* search_results, int64_t num_segments);
 
 CStatus
-ReorganizeSearchResults(CMarshaledHits* c_marshaled_hits, CSearchResult* c_search_results, int64_t num_segments);
+Marshal(CSearchResultDataBlobs* cSearchResultDataBlobs,
+        CSearchResult* c_search_results,
+        int32_t num_segments,
+        int32_t* nq_slice_sizes,
+        int32_t num_slices);
 
-int64_t
-GetHitsBlobSize(CMarshaledHits c_marshaled_hits);
+CStatus
+GetSearchResultDataBlob(CProto* searchResultDataBlob,
+                        CSearchResultDataBlobs cSearchResultDataBlobs,
+                        int32_t blob_index);
 
 void
-GetHitsBlob(CMarshaledHits c_marshaled_hits, const void* hits);
-
-int64_t
-GetNumQueriesPerGroup(CMarshaledHits c_marshaled_hits, int64_t group_index);
-
-void
-GetHitSizePerQueries(CMarshaledHits c_marshaled_hits, int64_t group_index, int64_t* hit_size_peer_query);
+DeleteSearchResultDataBlobs(CSearchResultDataBlobs cSearchResultDataBlobs);
 
 #ifdef __cplusplus
 }
