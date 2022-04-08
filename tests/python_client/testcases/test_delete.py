@@ -737,14 +737,19 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.load()
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16417")
     @pytest.mark.tags(CaseLabel.L2)
-    def test_delete_insert_same_entity(self):
+    @pytest.mark.parametrize("to_query", [True, False])
+    @pytest.mark.parametrize("to_flush", [True, False])
+    def test_delete_insert_same_id_growing(self, to_query, to_flush):
         """
-        target: test delete and insert same entity
-        method: 1.delete entity one
-                2.insert entity one
-                3.query  entity one
-        expected: verify query result
+        target: test insert same id entity after delete from growing data
+        method: 1.create and load
+                2.insert entities and no flush
+                3.delete id 0 entity
+                4.insert new entity with same id
+                5.query with the id
+        expected: Verify that the query gets the newly inserted entity
         """
         # init collection and insert data without flush
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
@@ -754,16 +759,67 @@ class TestDeleteOperation(TestcaseBase):
 
         # delete
         del_res, _ = collection_w.delete(tmp_expr)
-        assert del_res.delete_count == 1
-        # assert collection_w.num_entities == tmp_nb
-        collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+        log.debug(f'to_query:{to_query}')
+        if to_query:
+            collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
         # insert entity with primary key 0
-        collection_w.insert(df[:1])
+        df_new = cf.gen_default_dataframe_data(1)
+        collection_w.insert(df_new)
+        log.debug(f'to_flush:{to_flush}')
+        if to_flush:
+            log.debug(collection_w.num_entities)
 
         # query entity one
-        res = df.iloc[0:1, :1].to_dict('records')
+        res = df_new.iloc[[0], [0, 2]].to_dict('records')
+        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
+
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/15744")
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("to_query", [True, False])
+    def test_delete_insert_same_id_sealed(self, to_query):
+        """
+        target: test insert same id entity after delete from sealed data
+        method: 1.create and insert with flush
+                2.load and query with the id
+                3.delte the id entity
+                4.insert new entity with the same id and flush
+                5.query the id
+        expected: Verify that the query gets the newly inserted entity
+        """
+        # init collection and insert data without flush
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+
+        # insert
+        df = cf.gen_default_dataframe_data(1000)
+        collection_w.insert(df)
+        log.debug(collection_w.num_entities)
+
+        # load and query
+        collection_w.load()
+        res = df.iloc[:1, :1].to_dict('records')
+        default_search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+        collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
+                            param=default_search_params, limit=1)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
+
+        # delete
+        collection_w.delete(tmp_expr)
+        if to_query:
+            collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+
+        # re-insert
+        df_new = cf.gen_default_dataframe_data(nb=1)
+        collection_w.insert(df_new)
+        log.debug(collection_w.num_entities)
+
+        # re-query
+        res = df_new.iloc[[0], [0, 2]].to_dict('records')
+        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
+        collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
+                            param=default_search_params, limit=1)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_entity_loop(self):
@@ -806,7 +862,9 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_delete_merge_same_id_channel_and_sealed(self):
+    @pytest.mark.parametrize("to_flush_data", [True, False])
+    @pytest.mark.parametrize("to_flush_delete", [True, False])
+    def test_delete_merge_same_id_channel_and_sealed(self, to_flush_data, to_flush_delete):
         """
         target: test merge same delete ids from channel and sealed
         method: 1.create, insert
@@ -831,9 +889,18 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.load()
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
-        # re-insert id 0 and re-delete id 0
-        collection_w.insert(df[:1])
+        # insert new entity with same id 0 and query
+        df_new = cf.gen_default_dataframe_data(1)
+        collection_w.insert(df_new)
+        if to_flush_data:
+            log.debug(collection_w.num_entities)
+        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': df_new.iloc[[0], [0, 2]].to_dict('records'), 'with_vec': True})
+
         collection_w.delete(tmp_expr)
+        if to_flush_delete:
+            log.debug(collection_w.num_entities)
         collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -957,7 +1024,7 @@ class TestDeleteOperation(TestcaseBase):
             collection_w.insert(df)
 
         # delete even numbers
-        ids = [i for i in range(0, tmp_nb*multi, 2)]
+        ids = [i for i in range(0, tmp_nb * multi, 2)]
         expr = f'{ct.default_int64_field_name} in {ids}'
         collection_w.delete(expr)
 
@@ -989,7 +1056,7 @@ class TestDeleteOperation(TestcaseBase):
         for i in range(segment_num):
             df = cf.gen_default_dataframe_data(nb=segment_per_count, start=(i * segment_per_count))
             res, _ = collection_w.insert(df)
-            assert collection_w.num_entities == (i+1) * segment_per_count
+            assert collection_w.num_entities == (i + 1) * segment_per_count
             ids.extend(res.primary_keys)
 
         collection_w.load()
