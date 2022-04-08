@@ -97,6 +97,17 @@ func (kv *MemoryKV) LoadBytes(key string) ([]byte, error) {
 	return item.(memoryKVItem).value.ByteSlice(), nil
 }
 
+// Get return value if key exists, or return empty string
+func (kv *MemoryKV) Get(key string) string {
+	kv.RLock()
+	defer kv.RUnlock()
+	item := kv.tree.Get(memoryKVItem{key: key})
+	if item == nil {
+		return ""
+	}
+	return item.(memoryKVItem).value.String()
+}
+
 // LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
 func (kv *MemoryKV) LoadWithDefault(key, defaultValue string) string {
 	kv.RLock()

@@ -57,6 +57,7 @@ type mqMsgStream struct {
 	consumerLock *sync.Mutex
 	readerLock   *sync.Mutex
 	closed       int32
+	onceChan     sync.Once
 }
 
 // NewMqMsgStream is used to generate a new mqMsgStream object
@@ -179,15 +180,14 @@ func (ms *mqMsgStream) SetRepackFunc(repackFunc RepackFunc) {
 }
 
 func (ms *mqMsgStream) Start() {
-	for _, c := range ms.consumers {
-		ms.wait.Add(1)
-		go ms.receiveMsg(c)
-	}
 }
 
 func (ms *mqMsgStream) Close() {
+
 	ms.streamCancel()
+	ms.readerLock.Lock()
 	ms.wait.Wait()
+	ms.readerLock.Unlock()
 
 	for _, producer := range ms.producers {
 		if producer != nil {
@@ -521,6 +521,15 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 }
 
 func (ms *mqMsgStream) Chan() <-chan *MsgPack {
+	ms.onceChan.Do(func() {
+		for _, c := range ms.consumers {
+			ms.readerLock.Lock()
+			ms.wait.Add(1)
+			ms.readerLock.Unlock()
+			go ms.receiveMsg(c)
+		}
+	})
+
 	return ms.receiveBuf
 }
 
@@ -648,12 +657,7 @@ func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName strin
 }
 
 // Start will start a goroutine which keep carrying msg from pulsar/rocksmq to golang chan
-func (ms *MqTtMsgStream) Start() {
-	if ms.consumers != nil {
-		ms.wait.Add(1)
-		go ms.bufMsgPackToChannel()
-	}
-}
+func (ms *MqTtMsgStream) Start() {}
 
 // Close will stop goroutine and free internal producers and consumers
 func (ms *MqTtMsgStream) Close() {
@@ -910,4 +914,17 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		}
 	}
 	return nil
+}
+
+func (ms *MqTtMsgStream) Chan() <-chan *MsgPack {
+	ms.onceChan.Do(func() {
+		if ms.consumers != nil {
+			ms.readerLock.Lock()
+			ms.wait.Add(1)
+			ms.readerLock.Unlock()
+			go ms.bufMsgPackToChannel()
+		}
+	})
+
+	return ms.receiveBuf
 }

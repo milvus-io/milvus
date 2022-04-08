@@ -45,11 +45,20 @@ minio:
   bucketName: "a-bucket" # Bucket name in MinIO/S3
   rootPath: files # The root path where the message is stored in MinIO/S3
 
+# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
+# There is a note about enabling priority if we config multiple mq in this file
+# 1. standalone(local) mode: rockskmq(default) > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
+
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
   address: localhost # Address of pulsar
   port: 6650 # Port of pulsar
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
+
+# If you want to enable kafka, needs to comment the pulsar configs
+#kafka:
+#  brokerList: localhost1:9092,localhost2:9092,localhost3:9092
 
 rocksmq:
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
@@ -276,5 +285,5 @@ common:
   simdType: auto
   indexSliceSize: 4 # MB
 
-  storage:
-    vector: minio
+  storageType: minio
+
