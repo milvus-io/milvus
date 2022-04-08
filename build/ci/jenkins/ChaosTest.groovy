@@ -34,7 +34,7 @@ pipeline {
         string(
             description: 'Image Repository',
             name: 'image_repository',
-            defaultValue: 'harbor.zilliz.cc/milvus/milvus'
+            defaultValue: 'registry.milvus.io/milvus/milvus'
         )
         string(
             description: 'Image Tag',
