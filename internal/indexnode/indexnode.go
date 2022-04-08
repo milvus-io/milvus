@@ -153,6 +153,10 @@ func (i *IndexNode) initKnowhere() {
 	Params.CommonCfg.SimdType = C.GoString(cRealSimdType)
 	C.free(unsafe.Pointer(cRealSimdType))
 	C.free(unsafe.Pointer(cSimdType))
+
+	// override segcore index slice size
+	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
+	C.IndexBuilderSetIndexSliceSize(cIndexSliceSize)
 }
 
 func (i *IndexNode) initSession() error {

@@ -25,4 +25,7 @@ KnowhereInitImpl();
 std::string
 KnowhereSetSimdType(const char*);
 
+void
+KnowhereSetIndexSliceSize(const int64_t size);
+
 }  // namespace milvus::config

@@ -27,3 +27,8 @@ IndexBuilderSetSimdType(const char* value) {
     ret[real_type.length()] = 0;
     return ret;
 }
+
+void
+IndexBuilderSetIndexSliceSize(const int64_t value) {
+    milvus::config::KnowhereSetIndexSliceSize(value);
+}

@@ -40,9 +40,13 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("default index name = %s", Params.DefaultIndexName)
 
 		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
+		t.Logf("default retention duration = %d", Params.RetentionDuration)
 
 		assert.NotEqual(t, Params.SimdType, "")
 		t.Logf("knowhere simd type = %s", Params.SimdType)
+
+		assert.Equal(t, Params.IndexSliceSize, int64(DefaultIndexSliceSize))
+		t.Logf("knowhere index slice size = %d", Params.IndexSliceSize)
 
 		// -- proxy --
 		assert.Equal(t, Params.ProxySubName, "by-dev-proxy")

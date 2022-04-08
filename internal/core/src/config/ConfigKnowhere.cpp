@@ -62,4 +62,9 @@ KnowhereSetSimdType(const char* value) {
     }
 }
 
+void
+KnowhereSetIndexSliceSize(const int64_t size) {
+    knowhere::KnowhereConfig::SetIndexFileSliceSize(size);
+}
+
 }  // namespace milvus::config
