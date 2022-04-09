@@ -29,7 +29,6 @@
 #include "segcore/reduce_c.h"
 #include "segcore/Reduce.h"
 #include "test_utils/DataGen.h"
-#include "utils/Types.h"
 
 namespace chrono = std::chrono;
 
@@ -2226,7 +2225,7 @@ TEST(CApiTest, SealedSegmentTest) {
         age = e() % 2000;
     }
     auto blob = (void*)(&ages[0]);
-    FieldMeta field_meta(FieldName("age"), FieldId(101), engine::DataType::INT64);
+    FieldMeta field_meta(FieldName("age"), FieldId(101), DataType::INT64);
     auto array = CreateScalarDataArrayFrom(ages.data(), N, field_meta);
     std::string age_data;
     auto marshal = google::protobuf::TextFormat::PrintToString(*array.get(), &age_data);
@@ -2257,19 +2256,19 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), engine::DataType::INT64);
+    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
     auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
     std::string counter_data;
     auto marshal = google::protobuf::TextFormat::PrintToString(*count_array.get(), &counter_data);
     assert(marshal == true);
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, engine::DataType::INT64);
+    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
     auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
     std::string row_ids_data;
     marshal = google::protobuf::TextFormat::PrintToString(*row_ids_array.get(), &row_ids_data);
     assert(marshal == true);
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, engine::DataType::INT64);
+    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
     auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
     std::string timestamps_data;
     marshal = google::protobuf::TextFormat::PrintToString(*timestamps_array.get(), &timestamps_data);
@@ -2431,19 +2430,19 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     assert(marshal == true);
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), engine::DataType::INT64);
+    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
     auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
     std::string counter_data;
     marshal = google::protobuf::TextFormat::PrintToString(*count_array.get(), &counter_data);
     assert(marshal == true);
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, engine::DataType::INT64);
+    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
     auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
     std::string row_ids_data;
     marshal = google::protobuf::TextFormat::PrintToString(*row_ids_array.get(), &row_ids_data);
     assert(marshal == true);
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, engine::DataType::INT64);
+    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
     auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
     std::string timestamps_data;
     marshal = google::protobuf::TextFormat::PrintToString(*timestamps_array.get(), &timestamps_data);
@@ -2542,19 +2541,19 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), engine::DataType::INT64);
+    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
     auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
     std::string counter_data;
     auto marshal = google::protobuf::TextFormat::PrintToString(*count_array.get(), &counter_data);
     assert(marshal == true);
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, engine::DataType::INT64);
+    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
     auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
     std::string row_ids_data;
     marshal = google::protobuf::TextFormat::PrintToString(*row_ids_array.get(), &row_ids_data);
     assert(marshal == true);
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, engine::DataType::INT64);
+    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
     auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
     std::string timestamps_data;
     marshal = google::protobuf::TextFormat::PrintToString(*timestamps_array.get(), &timestamps_data);

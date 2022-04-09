@@ -46,7 +46,6 @@ generate_data(int N) {
 
 TEST(SegmentCoreTest, NormalDistributionTest) {
     using namespace milvus::segcore;
-    using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);
@@ -60,7 +59,6 @@ TEST(SegmentCoreTest, NormalDistributionTest) {
 // Test insert column-based data
 TEST(SegmentCoreTest, MockTest2) {
     using namespace milvus::segcore;
-    using namespace milvus::engine;
 
     // schema
     auto schema = std::make_shared<Schema>();
@@ -77,7 +75,6 @@ TEST(SegmentCoreTest, MockTest2) {
 
 TEST(SegmentCoreTest, SmallIndex) {
     using namespace milvus::segcore;
-    using namespace milvus::engine;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::INT32);

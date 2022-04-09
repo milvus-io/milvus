@@ -30,16 +30,35 @@
 #include "knowhere/common/MetricType.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
-#include "utils/Types.h"
 
 namespace milvus {
 
+using idx_t = int64_t;
+using offset_t = int32_t;
+using date_t = int32_t;
+using distance_t = float;
+
+enum class DataType {
+    NONE = 0,
+    BOOL = 1,
+    INT8 = 2,
+    INT16 = 3,
+    INT32 = 4,
+    INT64 = 5,
+
+    FLOAT = 10,
+    DOUBLE = 11,
+
+    STRING = 20,
+    VARCHAR = 21,
+
+    VECTOR_BINARY = 100,
+    VECTOR_FLOAT = 101,
+};
+
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
-
-using engine::DataType;
-using engine::idx_t;
-constexpr auto MAX_ROW_COUNT = std::numeric_limits<engine::idx_t>::max();
+constexpr auto MAX_ROW_COUNT = std::numeric_limits<idx_t>::max();
 
 using ScalarArray = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;

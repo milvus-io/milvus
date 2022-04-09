@@ -19,7 +19,6 @@
 #include "segcore/SegmentGrowing.h"
 #include "segcore/AckResponder.h"
 
-using namespace milvus::engine;
 using namespace milvus::segcore;
 using std::vector;
 

@@ -165,7 +165,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         // prepare data
         auto& field_meta = schema_->operator[](field_id);
         auto data_type = field_meta.get_data_type();
-        AssertInfo(data_type == engine::DataType(info.field_data->type()),
+        AssertInfo(data_type == DataType(info.field_data->type()),
                    "field type of load data is inconsistent with the schema");
         auto field_data = insert_record_.get_field_data_base(field_id);
         AssertInfo(field_data->empty(), "already exists");

@@ -11,12 +11,12 @@
 
 #pragma once
 
-#include <utils/Types.h>
-#include "index/Index.h"
+#include <string>
+
 #include "common/type_c.h"
+#include "index/Index.h"
 #include "index/ScalarIndex.h"
 #include "index/StringIndex.h"
-#include <string>
 
 namespace milvus::scalar {
 

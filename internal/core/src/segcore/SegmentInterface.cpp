@@ -30,7 +30,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult&
     AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
     auto field_data = bulk_subscript(pk_field_id, results.seg_offsets_.data(), size);
-    results.pk_type_ = engine::DataType(field_data->type());
+    results.pk_type_ = DataType(field_data->type());
 
     std::vector<PkType> pks(size);
     ParsePksFromFieldData(pks, *field_data.get());

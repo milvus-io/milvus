@@ -142,7 +142,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
     for (auto field_id : schema->get_field_ids()) {
         auto field_meta = schema->operator[](field_id);
         switch (field_meta.get_data_type()) {
-            case engine::DataType::VECTOR_FLOAT: {
+            case DataType::VECTOR_FLOAT: {
                 auto dim = field_meta.get_dim();
                 vector<float> final(dim * N);
                 bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
@@ -169,7 +169,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(final, N, field_meta);
                 break;
             }
-            case engine::DataType::VECTOR_BINARY: {
+            case DataType::VECTOR_BINARY: {
                 auto dim = field_meta.get_dim();
                 Assert(dim % 8 == 0);
                 vector<uint8_t> data(dim / 8 * N);
@@ -179,7 +179,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data, N, field_meta);
                 break;
             }
-            case engine::DataType::INT64: {
+            case DataType::INT64: {
                 vector<int64_t> data(N);
                 // begin with counter
                 if (starts_with(field_meta.get_name().get(), "counter")) {
@@ -198,7 +198,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data, N, field_meta);
                 break;
             }
-            case engine::DataType::INT32: {
+            case DataType::INT32: {
                 vector<int> data(N);
                 for (auto& x : data) {
                     x = er() % (2 * N);
@@ -206,7 +206,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data, N, field_meta);
                 break;
             }
-            case engine::DataType::INT16: {
+            case DataType::INT16: {
                 vector<int16_t> data(N);
                 for (auto& x : data) {
                     x = er() % (2 * N);
@@ -214,7 +214,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data, N, field_meta);
                 break;
             }
-            case engine::DataType::INT8: {
+            case DataType::INT8: {
                 vector<int8_t> data(N);
                 for (auto& x : data) {
                     x = er() % (2 * N);
@@ -222,7 +222,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data, N, field_meta);
                 break;
             }
-            case engine::DataType::FLOAT: {
+            case DataType::FLOAT: {
                 vector<float> data(N);
                 for (auto& x : data) {
                     x = distr(er);
@@ -230,7 +230,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data, N, field_meta);
                 break;
             }
-            case engine::DataType::DOUBLE: {
+            case DataType::DOUBLE: {
                 vector<double> data(N);
                 for (auto& x : data) {
                     x = distr(er);
@@ -238,7 +238,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data, N, field_meta);
                 break;
             }
-            case engine::DataType::VARCHAR: {
+            case DataType::VARCHAR: {
                 vector<std::string> data(N);
                 for (auto& x : data) {
                     x = std::to_string(er());
@@ -367,7 +367,7 @@ SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
     auto row_count = dataset.row_ids_.size();
     {
         LoadFieldDataInfo info;
-        FieldMeta field_meta(FieldName("RowID"), RowFieldID, engine::DataType::INT64);
+        FieldMeta field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
         auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), row_count, field_meta);
         info.field_data = array.release();
         info.row_count = dataset.row_ids_.size();
@@ -376,7 +376,7 @@ SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
     }
     {
         LoadFieldDataInfo info;
-        FieldMeta field_meta(FieldName("Timestamp"), TimestampFieldID, engine::DataType::INT64);
+        FieldMeta field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
         auto array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), row_count, field_meta);
         info.field_data = array.release();
         info.row_count = dataset.timestamps_.size();
