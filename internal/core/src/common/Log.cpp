@@ -14,9 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "log/Log.h"
-INITIALIZE_EASYLOGGINGPP
-
 #ifdef WIN32
 #include <Windows.h>
 #endif
@@ -26,6 +23,10 @@ INITIALIZE_EASYLOGGINGPP
 #include <memory>
 #include <stdexcept>
 #include <string>
+
+#include "Log.h"
+
+INITIALIZE_EASYLOGGINGPP
 
 // namespace milvus {
 

@@ -11,9 +11,9 @@
 
 #include "common/CGoHelper.h"
 #include "common/LoadInfo.h"
+#include "common/Log.h"
 #include "common/Types.h"
 #include "common/type_c.h"
-#include "log/Log.h"
 
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"

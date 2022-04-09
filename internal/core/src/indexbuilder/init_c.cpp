@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <string.h>
-#include "config/ConfigKnowhere.h"
+#include "common/ConfigKnowhere.h"
 #include "indexbuilder/init_c.h"
 
 void

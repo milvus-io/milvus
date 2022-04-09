@@ -17,9 +17,8 @@
 #include <mutex>
 
 #include "ConfigKnowhere.h"
+#include "common/Log.h"
 #include "exceptions/EasyAssert.h"
-#include "easyloggingpp/easylogging++.h"
-#include "log/Log.h"
 #include "knowhere/archive/KnowhereConfig.h"
 
 namespace milvus::config {

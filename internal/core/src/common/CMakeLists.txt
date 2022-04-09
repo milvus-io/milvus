@@ -10,9 +10,11 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 set(COMMON_SRC
+        ConfigKnowhere.cpp
+        Log.cpp
         Schema.cpp
-        Types.cpp
         SystemProperty.cpp
+        Types.cpp
         vector_index_c.cpp
         )
 
@@ -20,6 +22,6 @@ add_library(milvus_common SHARED
         ${COMMON_SRC}
         )
 
-target_link_libraries(milvus_common milvus_utils milvus_config milvus_log knowhere milvus_proto yaml-cpp boost_bitset_ext)
+target_link_libraries(milvus_common milvus_utils knowhere milvus_proto yaml-cpp boost_bitset_ext)
 
 install(TARGETS milvus_common DESTINATION lib)
