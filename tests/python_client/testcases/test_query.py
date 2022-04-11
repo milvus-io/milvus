@@ -405,7 +405,7 @@ class TestQueryParams(TestcaseBase):
         res = df.iloc[:pos, :1].to_dict('records')
         self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_random_values(self):
         """
         target: test query with random filter values
@@ -426,7 +426,7 @@ class TestQueryParams(TestcaseBase):
         res = df.iloc[random_values, :1].to_dict('records')
         self.collection_wrap.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_expr_not_in_random(self):
         """
         target: test query with fixed filter values

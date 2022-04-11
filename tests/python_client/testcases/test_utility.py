@@ -225,7 +225,7 @@ class TestUtilityParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "describe collection failed: can't find collection"}
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="pymilvus issue #677")
     def test_loading_progress_invalid_partition_names(self, get_invalid_partition_names):
         """
@@ -240,7 +240,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_names", [[ct.default_tag], [ct.default_partition_name, ct.default_tag]])
     def test_loading_progress_not_existed_partitions(self, partition_names):
         """
@@ -759,7 +759,7 @@ class TestUtilityBase(TestcaseBase):
         res, _ = self.utility_wrap.index_building_progress(c_name)
         assert res["indexed_rows"] == nb
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_without_loading(self):
         """
         target: test loading progress without loading
@@ -770,11 +770,11 @@ class TestUtilityBase(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-        exp_res = {num_loaded_entities: 0, num_total_entities: ct.default_nb}
+        exp_res = {loading_progress: '0%'}
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert res == exp_res
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])
     def test_loading_progress_collection(self, nb):
         """
@@ -785,10 +785,9 @@ class TestUtilityBase(TestcaseBase):
         # create, insert default_nb, flush and load
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=nb)[0]
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res[num_total_entities] == nb
-        assert res[num_loaded_entities] == nb
+        assert res[loading_progress] == '100%'
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_async_load(self):
         """
         target: test loading progress with async collection load
@@ -801,9 +800,13 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         collection_w.load(_async=True)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert (0 <= res[num_loaded_entities] <= ct.default_nb)
+        loading_int = cf.percent_to_int(res[loading_progress])
+        if -1 != loading_int:
+            assert (0 <= loading_int <= 100)
+        else:
+            log.info("The output of loading progress is not a string or a percentage")
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_empty_collection(self):
         """
         target: test loading_progress on an empty collection
@@ -813,10 +816,10 @@ class TestUtilityBase(TestcaseBase):
         collection_w = self.init_collection_wrap()
         collection_w.load()
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        exp_res = {num_loaded_entities: 0, num_total_entities: 0}
+        exp_res = {loading_progress: '100%'}
         assert exp_res == res
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_loading_progress_after_release(self):
         """
         target: test loading progress without loading
@@ -825,16 +828,16 @@ class TestUtilityBase(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         collection_w.release()
-        exp_res = {num_loaded_entities: 0, num_total_entities: ct.default_nb}
+        exp_res = {loading_progress: '0%'}
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert res == exp_res
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_release_partition(self):
         """
         target: test loading progress after release part partitions
         method: 1.insert data into two partitions and flush
-                2.load one partiton and release one partition
+                2.load one partition and release one partition
         expected: loaded one partition entities
         """
         half = ct.default_nb
@@ -842,10 +845,9 @@ class TestUtilityBase(TestcaseBase):
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
         partition_w.release()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        assert res[num_total_entities] == half * 2
-        assert res[num_loaded_entities] == half
+        assert res[loading_progress] == '50%'
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_load_partition(self):
         """
         target: test loading progress after load partition
@@ -858,10 +860,9 @@ class TestUtilityBase(TestcaseBase):
         collection_w.release()
         partition_w.load()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        assert res[num_total_entities] == half * 2
-        assert res[num_loaded_entities] == half
+        assert res[loading_progress] == '50%'
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_loading_progress_with_partition(self):
         """
         target: test loading progress with partition
@@ -872,8 +873,7 @@ class TestUtilityBase(TestcaseBase):
         half = ct.default_nb
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
         res = self.utility_wrap.loading_progress(collection_w.name, partition_names=[partition_w.name])[0]
-        assert res[num_total_entities] == half
-        assert res[num_loaded_entities] == half
+        assert res[loading_progress] == '100%'
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_loading_collection_empty(self):
@@ -890,7 +890,7 @@ class TestUtilityBase(TestcaseBase):
         exp_res = {loading_progress: "100%"}
         assert res == exp_res
 
-    @pytest.mark.tag(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_wait_for_loading_complete(self):
         """
         target: test wait for loading collection
@@ -905,9 +905,9 @@ class TestUtilityBase(TestcaseBase):
         collection_w.load(_async=True)
         self.utility_wrap.wait_for_loading_complete(collection_w.name)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res[num_loaded_entities] == nb
+        assert res[loading_progress] == '100%'
 
-    @pytest.mark.tag(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_collection(self):
         """
         target: test utility drop collection by name
@@ -920,7 +920,7 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.drop_collection(c_name)
         assert not self.utility_wrap.has_collection(c_name)[0]
 
-    @pytest.mark.tag(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_drop_collection_repeatedly(self):
         """
         target: test drop collection repeatedly
@@ -935,7 +935,7 @@ class TestUtilityBase(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: {"describe collection failed: can't find collection:"}}
         self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_create_repeatedly(self):
         """
         target: test repeatedly create and drop same name collection
@@ -1323,7 +1323,7 @@ class TestUtilityAdvanced(TestcaseBase):
         for name in [c_name, c_name_2]:
             assert name in res
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_multi_collection_concurrent(self):
         """
         target: test concurrent drop collection

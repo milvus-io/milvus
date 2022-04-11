@@ -548,3 +548,19 @@ def get_segment_distribution(res):
             segment_distribution[r.nodeID]["growing"].append(r.segmentID)
 
     return segment_distribution
+
+def percent_to_int(string):
+    """
+    transform percent(0%--100%) to int
+    """
+
+    new_int = -1
+    if not isinstance(string, str):
+        log.error("%s is not a string" % string)
+        return new_int
+    if "%" not in string:
+        log.error("%s is not a percent" % string)
+    else:
+        new_int = int(string.strip("%"))
+
+    return new_int
