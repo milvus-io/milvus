@@ -148,9 +148,16 @@ build-cpp-embd: pre-proc
 
 build-cpp-with-unittest: pre-proc
 	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode}  -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+
+build-cpp-with-coverage: pre-proc
+	@echo "Building Milvus cpp library with coverage and unittest ..."
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+
 
 # Run the tests.
 unittest: test-cpp test-go
@@ -192,12 +199,12 @@ test-cpp: build-cpp-with-unittest
 codecov: codecov-go codecov-cpp
 
 # Run codecov-go
-codecov-go: build-cpp-with-unittest
+codecov-go: build-cpp-with-coverage
 	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 
 # Run codecov-cpp
-codecov-cpp: build-cpp-with-unittest
+codecov-cpp: build-cpp-with-coverage
 	@echo "Running cpp coverage..."
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
