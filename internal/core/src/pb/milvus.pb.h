@@ -11871,6 +11871,7 @@ class LoadBalanceRequest :
     kSealedSegmentIDsFieldNumber = 4,
     kBaseFieldNumber = 1,
     kSrcNodeIDFieldNumber = 2,
+    kCollectionIDFieldNumber = 5,
   };
   // repeated int64 dst_nodeIDs = 3;
   int dst_nodeids_size() const;
@@ -11907,6 +11908,11 @@ class LoadBalanceRequest :
   ::PROTOBUF_NAMESPACE_ID::int64 src_nodeid() const;
   void set_src_nodeid(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 collectionID = 5;
+  void clear_collectionid();
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid() const;
+  void set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.LoadBalanceRequest)
  private:
   class _Internal;
@@ -11918,6 +11924,7 @@ class LoadBalanceRequest :
   mutable std::atomic<int> _sealed_segmentids_cached_byte_size_;
   ::milvus::proto::common::MsgBase* base_;
   ::PROTOBUF_NAMESPACE_ID::int64 src_nodeid_;
+  ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -26150,6 +26157,20 @@ inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
 LoadBalanceRequest::mutable_sealed_segmentids() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.LoadBalanceRequest.sealed_segmentIDs)
   return &sealed_segmentids_;
+}
+
+// int64 collectionID = 5;
+inline void LoadBalanceRequest::clear_collectionid() {
+  collectionid_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 LoadBalanceRequest::collectionid() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.LoadBalanceRequest.collectionID)
+  return collectionid_;
+}
+inline void LoadBalanceRequest::set_collectionid(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  collectionid_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.LoadBalanceRequest.collectionID)
 }
 
 // -------------------------------------------------------------------

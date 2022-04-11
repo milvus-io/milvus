@@ -281,6 +281,7 @@ message LoadBalanceRequest {
   TriggerCondition balance_reason = 3;
   repeated int64 dst_nodeIDs = 4;
   repeated int64 sealed_segmentIDs = 5;
+  string collection_name = 6;
 }
 
 //-------------------- internal meta proto------------------

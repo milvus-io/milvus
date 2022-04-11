@@ -755,6 +755,7 @@ message LoadBalanceRequest {
   int64 src_nodeID = 2;
   repeated int64 dst_nodeIDs = 3;
   repeated int64 sealed_segmentIDs = 4;
+  int64 collectionID = 5;
 }
 
 message ManualCompactionRequest {
