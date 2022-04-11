@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 from base.client_base import TestcaseBase
@@ -701,9 +702,14 @@ class TestUtilityBase(TestcaseBase):
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
         cw.create_index(default_field_name, default_index_params)
-        res, _ = self.utility_wrap.index_building_progress(c_name)
-        assert (0 < res['indexed_rows'] <= nb)
-        assert res['total_rows'] == nb
+        start = time.time()
+        while True:
+            time.sleep(1)
+            res, _ = self.utility_wrap.index_building_progress(c_name)
+            if 0 < res['indexed_rows'] <= nb:
+                break
+            if time.time() - start > 5:
+                raise BaseException(1, f"Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_index_collection_not_existed(self):
