@@ -888,7 +888,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: default_binary_schema})
         assert c_name in self.utility_wrap.list_collections()[0]
 
-    @pytest.mark.tag(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_collection_shards_num_with_default_value(self):
         """
         target:test collection with shards_num
@@ -902,7 +902,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_shards_num: default_shards_num})
         assert c_name in self.utility_wrap.list_collections()[0]
 
-    @pytest.mark.tag(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("shards_num", [-256, 0, 10, 256])
     def test_collection_shards_num_with_not_default_value(self, shards_num):
         """
@@ -917,7 +917,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_shards_num: shards_num})
         assert c_name in self.utility_wrap.list_collections()[0]
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_collection_shards_num_with_error_type(self):
         """
         target:test collection with error type shards_num

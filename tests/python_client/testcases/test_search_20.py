@@ -882,7 +882,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit})
 
-    @pytest.mark.tag(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L0)
     def test_search_with_hit_vectors(self, nq, dim, auto_id):
         """
         target: test search with vectors in collections
@@ -1608,7 +1608,7 @@ class TestCollectionSearch(TestcaseBase):
             res = res.result()
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
-    @pytest.mark.tag(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_travel_time_without_expression(self, auto_id):
         """
         target: test search using travel time without expression
