@@ -30,6 +30,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
+	"github.com/milvus-io/milvus/internal/util/crypto"
+
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -1926,6 +1930,111 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, 0, len(resp.CollectionNames))
 	})
 
+	wg.Add(1)
+	t.Run("credential apis", func(t *testing.T) {
+		defer wg.Done()
+
+		// 1. create credential
+		password := "xxx"
+		newPassword := "yyy"
+		constructCreateCredentialRequest := func(rand string) *milvuspb.CreateCredentialRequest {
+			return &milvuspb.CreateCredentialRequest{
+				Base:     nil,
+				Username: "test_username_" + rand,
+				Password: crypto.Base64Encode(password),
+			}
+		}
+		// success
+		createCredentialReq := constructCreateCredentialRequest(funcutil.RandomString(15))
+		resp, err := proxy.CreateCredential(ctx, createCredentialReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// recreate -> fail (user already exists)
+		resp, err = proxy.CreateCredential(ctx, createCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// invalid username
+		reqInvalidField := constructCreateCredentialRequest(funcutil.RandomString(15))
+		reqInvalidField.Username = "11_invalid_username"
+		resp, err = proxy.CreateCredential(ctx, reqInvalidField)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// invalid password (not decode)
+		reqInvalidField = constructCreateCredentialRequest(funcutil.RandomString(15))
+		reqInvalidField.Password = "not_decoded_password"
+		resp, err = proxy.CreateCredential(ctx, reqInvalidField)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// invalid password (length gt 256)
+		reqInvalidField = constructCreateCredentialRequest(funcutil.RandomString(15))
+		reqInvalidField.Password = "aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffgggggggggghhhhhhhhhhiiiiiiiiiijjjjjjjjjjkkkkkkkkkkllllllllllmmmmmmmmmnnnnnnnnnnnooooooooooppppppppppqqqqqqqqqqrrrrrrrrrrsssssssssstttttttttttuuuuuuuuuuuvvvvvvvvvvwwwwwwwwwwwxxxxxxxxxxyyyyyyyyyzzzzzzzzzzz"
+		resp, err = proxy.CreateCredential(ctx, reqInvalidField)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// 2. update credential
+		createCredentialReq.Password = crypto.Base64Encode(newPassword)
+		updateResp, err := proxy.UpdateCredential(ctx, createCredentialReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// invalid password (not decode)
+		createCredentialReq.Password = newPassword
+		updateResp, err = proxy.UpdateCredential(ctx, createCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// invalid password (length gt 256)
+		createCredentialReq.Password = "aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffgggggggggghhhhhhhhhhiiiiiiiiiijjjjjjjjjjkkkkkkkkkkllllllllllmmmmmmmmmnnnnnnnnnnnooooooooooppppppppppqqqqqqqqqqrrrrrrrrrrsssssssssstttttttttttuuuuuuuuuuuvvvvvvvvvvwwwwwwwwwwwxxxxxxxxxxyyyyyyyyyzzzzzzzzzzz"
+		updateResp, err = proxy.UpdateCredential(ctx, createCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// 3. get credential
+		constructGetCredentialRequest := func() *rootcoordpb.GetCredentialRequest {
+			return &rootcoordpb.GetCredentialRequest{
+				Base:     nil,
+				Username: createCredentialReq.Username,
+			}
+		}
+		getCredentialReq := constructGetCredentialRequest()
+		getResp, err := rootCoordClient.GetCredential(ctx, getCredentialReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, getResp.Status.ErrorCode)
+		assert.True(t, crypto.PasswordVerify(newPassword, getResp.Password))
+
+		getCredentialReq.Username = "("
+		getResp, err = rootCoordClient.GetCredential(ctx, getCredentialReq)
+		assert.Error(t, err)
+
+		// 4. list credential usernames
+		constructListCredUsersRequest := func() *milvuspb.ListCredUsersRequest {
+			return &milvuspb.ListCredUsersRequest{
+				Base: nil,
+			}
+		}
+		listCredUsersReq := constructListCredUsersRequest()
+		listUsersResp, err := proxy.ListCredUsers(ctx, listCredUsersReq)
+		assert.NoError(t, err)
+		assert.True(t, len(listUsersResp.Usernames) > 0)
+
+		// 5. delete credential
+		constructDelCredRequest := func() *milvuspb.DeleteCredentialRequest {
+			return &milvuspb.DeleteCredentialRequest{
+				Base:     nil,
+				Username: createCredentialReq.Username,
+			}
+		}
+		delCredReq := constructDelCredRequest()
+		deleteResp, err := proxy.DeleteCredential(ctx, delCredReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, deleteResp.ErrorCode)
+	})
+
 	// proxy unhealthy
 	//
 	//notStateCode := "not state code"
@@ -2683,6 +2792,39 @@ func TestProxy(t *testing.T) {
 		resp, err := proxy.AlterAlias(shortCtx, &milvuspb.AlterAliasRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("CreateCredential fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.CreateCredential(shortCtx, &milvuspb.CreateCredentialRequest{Username: "xxx"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("UpdateCredential fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.UpdateCredential(shortCtx, &milvuspb.CreateCredentialRequest{Username: "xxx"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("DeleteCredential fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.DeleteCredential(shortCtx, &milvuspb.DeleteCredentialRequest{Username: "xxx"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("ListCredUsers fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		globalMetaCache.ClearCredUsers() // precondition
+		resp, err := proxy.ListCredUsers(shortCtx, &milvuspb.ListCredUsersRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	testServer.gracefulStop()

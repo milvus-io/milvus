@@ -43,3 +43,14 @@ func TestAddOne(t *testing.T) {
 	resultb := []byte(output)
 	assert.Equal(t, resultb, []byte{1, 20, 255, 0})
 }
+
+func TestAfter(t *testing.T) {
+	res := After("abc", "x")
+	assert.Equal(t, res, "")
+
+	res = After("abc", "bc")
+	assert.Equal(t, res, "")
+
+	res = After("abc", "ab")
+	assert.Equal(t, res, "c")
+}

@@ -29,7 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -52,6 +54,13 @@ type Cache interface {
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
+
+	// GetCredentialInfo operate credential cache
+	GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
+	RemoveCredential(username string)
+	UpdateCredential(credInfo *internalpb.CredentialInfo)
+	GetCredUsernames(ctx context.Context) ([]string, error)
+	ClearCredUsers()
 }
 
 type collectionInfo struct {
@@ -75,8 +84,11 @@ var _ Cache = (*MetaCache)(nil)
 type MetaCache struct {
 	client types.RootCoord
 
-	collInfo map[string]*collectionInfo
-	mu       sync.RWMutex
+	collInfo         map[string]*collectionInfo
+	credMap          map[string]*internalpb.CredentialInfo // cache for credential, lazy load
+	credUsernameList []string                              // no need initialize when NewMetaCache
+	mu               sync.RWMutex
+	credMut          sync.RWMutex
 }
 
 // globalMetaCache is singleton instance of Cache
@@ -97,6 +109,7 @@ func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
 	return &MetaCache{
 		client:   client,
 		collInfo: map[string]*collectionInfo{},
+		credMap:  map[string]*internalpb.CredentialInfo{},
 	}, nil
 }
 
@@ -416,4 +429,94 @@ func (m *MetaCache) RemovePartition(ctx context.Context, collectionName, partiti
 		return
 	}
 	delete(partInfo, partitionName)
+}
+
+// GetCredentialInfo returns the credential related to provided username
+// If the cache missed, proxy will try to fetch from storage
+func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error) {
+	m.credMut.RLock()
+	var credInfo *internalpb.CredentialInfo
+	credInfo, ok := m.credMap[username]
+	m.credMut.RUnlock()
+
+	if !ok {
+		req := &rootcoordpb.GetCredentialRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_GetCredential,
+			},
+			Username: username,
+		}
+		resp, err := m.client.GetCredential(ctx, req)
+		if err != nil {
+			return &internalpb.CredentialInfo{}, err
+		}
+		credInfo = &internalpb.CredentialInfo{
+			Username:          resp.Username,
+			EncryptedPassword: resp.Password,
+		}
+		m.UpdateCredential(credInfo)
+	}
+
+	return &internalpb.CredentialInfo{
+		Username:          credInfo.Username,
+		EncryptedPassword: credInfo.EncryptedPassword,
+	}, nil
+}
+
+func (m *MetaCache) ClearCredUsers() {
+	m.credMut.Lock()
+	defer m.credMut.Unlock()
+	// clear credUsernameList
+	m.credUsernameList = nil
+}
+
+func (m *MetaCache) RemoveCredential(username string) {
+	m.credMut.Lock()
+	defer m.credMut.Unlock()
+	// delete pair in credMap
+	delete(m.credMap, username)
+	// clear credUsernameList
+	m.credUsernameList = nil
+}
+
+func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
+	m.credMut.Lock()
+	defer m.credMut.Unlock()
+	// update credMap
+	username := credInfo.Username
+	password := credInfo.EncryptedPassword
+	_, ok := m.credMap[username]
+	if !ok {
+		m.credMap[username] = &internalpb.CredentialInfo{}
+	}
+	m.credMap[username].Username = username
+	m.credMap[username].EncryptedPassword = password
+}
+
+func (m *MetaCache) UpdateCredUsersListCache(usernames []string) {
+	m.credMut.Lock()
+	defer m.credMut.Unlock()
+	m.credUsernameList = usernames
+}
+
+func (m *MetaCache) GetCredUsernames(ctx context.Context) ([]string, error) {
+	m.credMut.RLock()
+	usernames := m.credUsernameList
+	m.credMut.RUnlock()
+
+	if usernames == nil {
+		req := &milvuspb.ListCredUsersRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ListCredUsernames,
+			},
+		}
+		resp, err := m.client.ListCredUsers(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		usernames = resp.Usernames
+		m.UpdateCredUsersListCache(usernames)
+	}
+
+	return usernames, nil
 }

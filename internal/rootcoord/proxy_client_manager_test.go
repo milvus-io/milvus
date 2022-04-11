@@ -147,3 +147,34 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 
 	assert.Panics(t, func() { pcm.ReleaseDQLMessageStream(ctx, nil) })
 }
+
+func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
+	Params.Init()
+	ctx := context.Background()
+
+	core, err := NewCore(ctx, nil)
+	assert.Nil(t, err)
+	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer cli.Close()
+	core.etcdCli = cli
+
+	pcm := newProxyClientManager(core)
+
+	pcm.InvalidateCredentialCache(ctx, nil)
+
+	core.SetNewProxyClient(
+		func(se *sessionutil.Session) (types.Proxy, error) {
+			return nil, nil
+		},
+	)
+
+	session := &sessionutil.Session{
+		ServerID: 100,
+		Address:  "localhost",
+	}
+
+	pcm.AddProxyClient(session)
+
+	pcm.InvalidateCredentialCache(ctx, nil)
+}

@@ -2503,3 +2503,187 @@ func segmentsOnlineReady(idxBuilt, segCount int) bool {
 	}
 	return false
 }
+
+// ExpireCredCache will call invalidate credential cache
+func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
+	req := proxypb.InvalidateCredCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  0, //TODO, msg type
+			MsgID:    0, //TODO, msg id
+			SourceID: c.session.ServerID,
+		},
+		Username: username,
+	}
+	return c.proxyClientManager.InvalidateCredentialCache(ctx, &req)
+}
+
+// UpdateCredCache will call update credential cache
+func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
+	req := proxypb.UpdateCredCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  0, //TODO, msg type
+			MsgID:    0, //TODO, msg id
+			SourceID: c.session.ServerID,
+		},
+		Username: credInfo.Username,
+		Password: credInfo.EncryptedPassword,
+	}
+	return c.proxyClientManager.UpdateCredentialCache(ctx, &req)
+}
+
+// ClearCredUsersCache will call clear credential usernames cache
+func (c *Core) ClearCredUsersCache(ctx context.Context) error {
+	req := internalpb.ClearCredUsersCacheRequest{}
+	return c.proxyClientManager.ClearCredUsersCache(ctx, &req)
+}
+
+// CreateCredential create new user and password
+// 	1. decode ciphertext password to raw password
+// 	2. encrypt raw password
+// 	3. save in to etcd
+func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) (*commonpb.Status, error) {
+	metrics.RootCoordCreateCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("CreateCredential")
+	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", credInfo.Username))
+
+	if cred, _ := c.MetaTable.getCredential(credInfo.Username); cred != nil {
+		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "user already exists:"+credInfo.Username), nil
+	}
+	// update proxy's local cache
+	err := c.ClearCredUsersCache(ctx)
+	if err != nil {
+		log.Error("CreateCredential clear credential username list cache failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", credInfo.Username), zap.Error(err))
+		metrics.RootCoordCreateCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "CreateCredential failed: "+err.Error()), nil
+	}
+	// insert to db
+	err = c.MetaTable.AddCredential(credInfo)
+	if err != nil {
+		log.Error("CreateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", credInfo.Username), zap.Error(err))
+		metrics.RootCoordCreateCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "CreateCredential failed: "+err.Error()), nil
+	}
+	log.Debug("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", credInfo.Username))
+
+	metrics.RootCoordCreateCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialWriteTypeLatency.WithLabelValues("CreateCredential").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfCredentials.Inc()
+	return succStatus(), nil
+}
+
+// GetCredential get credential by username
+func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	metrics.RootCoordGetCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("GetCredential")
+	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", in.Username))
+
+	credInfo, err := c.MetaTable.getCredential(in.Username)
+	if err != nil {
+		log.Error("GetCredential query credential failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", in.Username), zap.Error(err))
+		metrics.RootCoordGetCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return &rootcoordpb.GetCredentialResponse{
+			Status: failStatus(commonpb.ErrorCode_GetCredentialFailure, "GetCredential failed: "+err.Error()),
+		}, err
+	}
+	log.Debug("GetCredential success", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", in.Username))
+
+	metrics.RootCoordGetCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialReadTypeLatency.WithLabelValues("GetCredential", in.Username).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &rootcoordpb.GetCredentialResponse{
+		Status:   succStatus(),
+		Username: credInfo.Username,
+		Password: credInfo.EncryptedPassword,
+	}, nil
+}
+
+// UpdateCredential update password for a user
+func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) (*commonpb.Status, error) {
+	metrics.RootCoordUpdateCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("UpdateCredential")
+	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", credInfo.Username))
+	// update proxy's local cache
+	err := c.UpdateCredCache(ctx, credInfo)
+	if err != nil {
+		log.Error("UpdateCredential update credential cache failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", credInfo.Username), zap.Error(err))
+		metrics.RootCoordUpdateCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UpdateCredentialFailure, "UpdateCredential failed: "+err.Error()), nil
+	}
+	// update data on storage
+	err = c.MetaTable.AddCredential(credInfo)
+	if err != nil {
+		log.Error("UpdateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", credInfo.Username), zap.Error(err))
+		metrics.RootCoordUpdateCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UpdateCredentialFailure, "UpdateCredential failed: "+err.Error()), nil
+	}
+	log.Debug("UpdateCredential success", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", credInfo.Username))
+
+	metrics.RootCoordUpdateCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialWriteTypeLatency.WithLabelValues("UpdateCredential").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return succStatus(), nil
+}
+
+// DeleteCredential delete a user
+func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	metrics.RootCoordDeleteCredentialCounter.WithLabelValues(metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("DeleteCredential")
+
+	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", in.Username))
+	// invalidate proxy's local cache
+	err := c.ExpireCredCache(ctx, in.Username)
+	if err != nil {
+		log.Error("DeleteCredential expire credential cache failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", in.Username), zap.Error(err))
+		metrics.RootCoordDeleteCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), nil
+	}
+	// delete data on storage
+	err = c.MetaTable.DeleteCredential(in.Username)
+	if err != nil {
+		log.Error("DeleteCredential remove credential failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", in.Username), zap.Error(err))
+		metrics.RootCoordDeleteCredentialCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), err
+	}
+	log.Debug("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
+		zap.String("username", in.Username))
+
+	metrics.RootCoordDeleteCredentialCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialWriteTypeLatency.WithLabelValues("DeleteCredential").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfCredentials.Dec()
+	return succStatus(), nil
+}
+
+// ListCredUsers list all usernames
+func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	metrics.RootCoordListCredUsersCounter.WithLabelValues(metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("ListCredUsers")
+
+	credInfo, err := c.MetaTable.ListCredentialUsernames()
+	if err != nil {
+		log.Error("ListCredUsers query usernames failed", zap.String("role", typeutil.RootCoordRole),
+			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
+		return &milvuspb.ListCredUsersResponse{
+			Status: failStatus(commonpb.ErrorCode_ListCredUsersFailure, "ListCredUsers failed: "+err.Error()),
+		}, err
+	}
+	log.Debug("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
+
+	metrics.RootCoordListCredUsersCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialReadTypeLatency.WithLabelValues("ListCredUsers", "ALL.API").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.ListCredUsersResponse{
+		Status:    succStatus(),
+		Usernames: credInfo.Usernames,
+	}, nil
+}

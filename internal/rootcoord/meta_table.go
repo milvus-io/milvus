@@ -30,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -76,6 +78,12 @@ const (
 
 	// DropPartitionDDType name of DD type for drop partition
 	DropPartitionDDType = "DropPartition"
+
+	// UserSubPrefix subpath for credential user
+	UserSubPrefix = "/credential/users"
+
+	// CredentialPrefix prefix for credential user
+	CredentialPrefix = ComponentPrefix + UserSubPrefix
 )
 
 // MetaTable store all rootcoord meta info
@@ -94,6 +102,7 @@ type MetaTable struct {
 	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
 	ddLock     sync.RWMutex
+	credLock   sync.RWMutex
 }
 
 // NewMetaTable creates meta table for rootcoord, which stores all in-memory information
@@ -105,6 +114,7 @@ func NewMetaTable(txn kv.TxnKV, snap kv.SnapShotKV) (*MetaTable, error) {
 		tenantLock: sync.RWMutex{},
 		proxyLock:  sync.RWMutex{},
 		ddLock:     sync.RWMutex{},
+		credLock:   sync.RWMutex{},
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -1339,4 +1349,73 @@ func (mt *MetaTable) IsAlias(collectionAlias string) bool {
 	defer mt.ddLock.RUnlock()
 	_, ok := mt.collAlias2ID[collectionAlias]
 	return ok
+}
+
+// AddCredential add credential
+func (mt *MetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
+	mt.credLock.Lock()
+	defer mt.credLock.Unlock()
+
+	if credInfo.Username == "" {
+		return fmt.Errorf("username is empty")
+	}
+	k := fmt.Sprintf("%s/%s", CredentialPrefix, credInfo.Username)
+	err := mt.txn.Save(k, credInfo.EncryptedPassword)
+	if err != nil {
+		log.Error("MetaTable save fail", zap.Error(err))
+		return fmt.Errorf("save credential fail key:%s, err:%w", credInfo.Username, err)
+	}
+	return nil
+}
+
+// GetCredential get credential by username
+func (mt *MetaTable) getCredential(username string) (*internalpb.CredentialInfo, error) {
+	mt.credLock.RLock()
+	defer mt.credLock.RUnlock()
+
+	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+	v, err := mt.txn.Load(k)
+	if err != nil {
+		log.Warn("MetaTable load fail", zap.String("key", k), zap.Error(err))
+		return nil, err
+	}
+	return &internalpb.CredentialInfo{Username: username, EncryptedPassword: v}, nil
+}
+
+// DeleteCredential delete credential
+func (mt *MetaTable) DeleteCredential(username string) error {
+	mt.credLock.Lock()
+	defer mt.credLock.Unlock()
+
+	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
+
+	err := mt.txn.Remove(k)
+	if err != nil {
+		log.Error("MetaTable remove fail", zap.Error(err))
+		return fmt.Errorf("remove credential fail key:%s, err:%w", username, err)
+	}
+	return nil
+}
+
+// ListCredentialUsernames list credential usernames
+func (mt *MetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse, error) {
+	mt.credLock.RLock()
+	defer mt.credLock.RUnlock()
+
+	keys, _, err := mt.txn.LoadWithPrefix(CredentialPrefix)
+	if err != nil {
+		log.Error("MetaTable list all credential usernames fail", zap.Error(err))
+		return &milvuspb.ListCredUsersResponse{}, err
+	}
+
+	var usernames []string
+	for _, path := range keys {
+		username := typeutil.After(path, UserSubPrefix+"/")
+		if len(username) == 0 {
+			log.Warn("no username extract from path:", zap.String("path", path))
+			continue
+		}
+		usernames = append(usernames, username)
+	}
+	return &milvuspb.ListCredUsersResponse{Usernames: usernames}, nil
 }

@@ -22,6 +22,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/crypto"
+
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -131,6 +135,39 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 			Reason:    "describe collection failed: " + err.Error(),
 		},
 		Schema: nil,
+	}, nil
+}
+
+func (m *MockRootCoordClientInterface) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	if m.Error {
+		return nil, errors.New("mocked error")
+	}
+	m.AccessCount++
+	if req.Username == "mockUser" {
+		encryptedPassword, _ := crypto.PasswordEncrypt("mockPass")
+		return &rootcoordpb.GetCredentialResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Username: "mockUser",
+			Password: encryptedPassword,
+		}, nil
+	}
+
+	err := fmt.Errorf("can't find credential: " + req.Username)
+	return nil, err
+}
+
+func (m *MockRootCoordClientInterface) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	if m.Error {
+		return nil, errors.New("mocked error")
+	}
+
+	return &milvuspb.ListCredUsersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Usernames: []string{"mockUser"},
 	}, nil
 }
 

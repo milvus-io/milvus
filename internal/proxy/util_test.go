@@ -527,3 +527,38 @@ func TestFillFieldIDBySchema(t *testing.T) {
 	assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
 	assert.Equal(t, int64(1), columns[0].FieldId)
 }
+
+func TestValidateUsername(t *testing.T) {
+	// only spaces
+	res := ValidateUsername(" ")
+	assert.Error(t, res)
+	// starts with non-alphabet
+	res = ValidateUsername("1abc")
+	assert.Error(t, res)
+	// length gt 32
+	res = ValidateUsername("aaaaaaaaaabbbbbbbbbbccccccccccddddd")
+	assert.Error(t, res)
+	// illegal character which not alphabet, _, or number
+	res = ValidateUsername("a1^7*).,")
+	assert.Error(t, res)
+	// normal username that only contains alphabet, _, and number
+	Params.InitOnce()
+	res = ValidateUsername("a17_good")
+	assert.Nil(t, res)
+}
+
+func TestValidatePassword(t *testing.T) {
+	Params.InitOnce()
+	// only spaces
+	res := ValidatePassword(" ")
+	assert.Nil(t, res)
+	//
+	res = ValidatePassword("1abc")
+	assert.Nil(t, res)
+	//
+	res = ValidatePassword("a1^7*).,")
+	assert.Nil(t, res)
+	//
+	res = ValidatePassword("aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffgggggggggghhhhhhhhhhiiiiiiiiiijjjjjjjjjjkkkkkkkkkkllllllllllmmmmmmmmmnnnnnnnnnnnooooooooooppppppppppqqqqqqqqqqrrrrrrrrrrsssssssssstttttttttttuuuuuuuuuuuvvvvvvvvvvwwwwwwwwwwwxxxxxxxxxxyyyyyyyyyzzzzzzzzzzz")
+	assert.Error(t, res)
+}

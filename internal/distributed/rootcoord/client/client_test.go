@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"google.golang.org/grpc"
@@ -145,6 +146,21 @@ func Test_NewClient(t *testing.T) {
 
 		r29, err := client.ReportImport(ctx, nil)
 		retCheck(retNotNil, r29, err)
+
+		r30, err := client.CreateCredential(ctx, nil)
+		retCheck(retNotNil, r30, err)
+
+		r31, err := client.GetCredential(ctx, nil)
+		retCheck(retNotNil, r31, err)
+
+		r32, err := client.UpdateCredential(ctx, nil)
+		retCheck(retNotNil, r32, err)
+
+		r33, err := client.DeleteCredential(ctx, nil)
+		retCheck(retNotNil, r33, err)
+
+		r34, err := client.ListCredUsers(ctx, nil)
+		retCheck(retNotNil, r34, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{
@@ -181,6 +197,120 @@ func Test_NewClient(t *testing.T) {
 
 	checkFunc(true)
 
+	// timeout
+	timeout := time.Nanosecond
+	shortCtx, shortCancel := context.WithTimeout(ctx, timeout)
+	defer shortCancel()
+	time.Sleep(timeout)
+
+	retCheck := func(ret interface{}, err error) {
+		assert.Nil(t, ret)
+		assert.NotNil(t, err)
+	}
+
+	r1Timeout, err := client.GetComponentStates(shortCtx)
+	retCheck(r1Timeout, err)
+
+	r2Timeout, err := client.GetTimeTickChannel(shortCtx)
+	retCheck(r2Timeout, err)
+
+	r3Timeout, err := client.GetStatisticsChannel(shortCtx)
+	retCheck(r3Timeout, err)
+
+	r4Timeout, err := client.CreateCollection(shortCtx, nil)
+	retCheck(r4Timeout, err)
+
+	r5Timeout, err := client.DropCollection(shortCtx, nil)
+	retCheck(r5Timeout, err)
+
+	r6Timeout, err := client.HasCollection(shortCtx, nil)
+	retCheck(r6Timeout, err)
+
+	r7Timeout, err := client.DescribeCollection(shortCtx, nil)
+	retCheck(r7Timeout, err)
+
+	r8Timeout, err := client.ShowCollections(shortCtx, nil)
+	retCheck(r8Timeout, err)
+
+	r9Timeout, err := client.CreatePartition(shortCtx, nil)
+	retCheck(r9Timeout, err)
+
+	r10Timeout, err := client.DropPartition(shortCtx, nil)
+	retCheck(r10Timeout, err)
+
+	r11Timeout, err := client.HasPartition(shortCtx, nil)
+	retCheck(r11Timeout, err)
+
+	r12Timeout, err := client.ShowPartitions(shortCtx, nil)
+	retCheck(r12Timeout, err)
+
+	r13Timeout, err := client.CreateIndex(shortCtx, nil)
+	retCheck(r13Timeout, err)
+
+	r14Timeout, err := client.DropIndex(shortCtx, nil)
+	retCheck(r14Timeout, err)
+
+	r15Timeout, err := client.DescribeIndex(shortCtx, nil)
+	retCheck(r15Timeout, err)
+
+	r16Timeout, err := client.AllocTimestamp(shortCtx, nil)
+	retCheck(r16Timeout, err)
+
+	r17Timeout, err := client.AllocID(shortCtx, nil)
+	retCheck(r17Timeout, err)
+
+	r18Timeout, err := client.UpdateChannelTimeTick(shortCtx, nil)
+	retCheck(r18Timeout, err)
+
+	r19Timeout, err := client.DescribeSegment(shortCtx, nil)
+	retCheck(r19Timeout, err)
+
+	r20Timeout, err := client.ShowSegments(shortCtx, nil)
+	retCheck(r20Timeout, err)
+
+	r21Timeout, err := client.ReleaseDQLMessageStream(shortCtx, nil)
+	retCheck(r21Timeout, err)
+
+	r22Timeout, err := client.SegmentFlushCompleted(shortCtx, nil)
+	retCheck(r22Timeout, err)
+
+	r23Timeout, err := client.GetMetrics(shortCtx, nil)
+	retCheck(r23Timeout, err)
+
+	r24Timeout, err := client.CreateAlias(shortCtx, nil)
+	retCheck(r24Timeout, err)
+
+	r25Timeout, err := client.DropAlias(shortCtx, nil)
+	retCheck(r25Timeout, err)
+
+	r26Timeout, err := client.AlterAlias(shortCtx, nil)
+	retCheck(r26Timeout, err)
+
+	r27Timeout, err := client.Import(shortCtx, nil)
+	retCheck(r27Timeout, err)
+
+	r28Timeout, err := client.GetImportState(shortCtx, nil)
+	retCheck(r28Timeout, err)
+
+	r29Timeout, err := client.ReportImport(shortCtx, nil)
+	retCheck(r29Timeout, err)
+
+	r30Timeout, err := client.CreateCredential(shortCtx, nil)
+	retCheck(r30Timeout, err)
+
+	r31Timeout, err := client.GetCredential(shortCtx, nil)
+	retCheck(r31Timeout, err)
+
+	r32Timeout, err := client.UpdateCredential(shortCtx, nil)
+	retCheck(r32Timeout, err)
+
+	r33Timeout, err := client.DeleteCredential(shortCtx, nil)
+	retCheck(r33Timeout, err)
+
+	r34Timeout, err := client.ListCredUsers(shortCtx, nil)
+	retCheck(r34Timeout, err)
+
+	// clean up
 	err = client.Stop()
 	assert.Nil(t, err)
 }

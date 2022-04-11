@@ -629,6 +629,17 @@ type RootCoord interface {
 	// response status contains the status/error code and failing reason if any error is returned
 	// error is always nil
 	ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error)
+
+	// CreateCredential create new user and password
+	CreateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error)
+	// UpdateCredential update password for a user
+	UpdateCredential(ctx context.Context, req *internalpb.CredentialInfo) (*commonpb.Status, error)
+	// DeleteCredential delete a user
+	DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error)
+	// ListCredUsers list all usernames
+	ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error)
+	// GetCredential get credential by username
+	GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error)
 }
 
 // RootCoordComponent is used by grpc server of RootCoord
@@ -686,6 +697,21 @@ type Proxy interface {
 	//
 	// error is returned only when some communication issue occurs.
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
+
+	// InvalidateCredentialCache notifies Proxy to clear all the credential cache of specified username.
+	//
+	// InvalidateCredentialCache should be called when there are credential changes for specified username.
+	// Such as `CreateCredential`, `UpdateCredential`, `DeleteCredential`, etc.
+	//
+	// InvalidateCredentialCache should always succeed even though the specified username doesn't exist in Proxy.
+	// So the code of response `Status` should be always `Success`.
+	//
+	// error is returned only when some communication issue occurs.
+	InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error)
+
+	UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error)
+
+	ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error)
 
 	// ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
 	//
@@ -1104,6 +1130,15 @@ type ProxyComponent interface {
 	GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)
 
 	GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error)
+
+	// CreateCredential create new user and password
+	CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error)
+	// UpdateCredential update password for a user
+	UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error)
+	// DeleteCredential delete a user
+	DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error)
+	// ListCredUsers list all usernames
+	ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error)
 }
 
 // QueryNode is the interface `querynode` package implements

@@ -487,3 +487,43 @@ func fillFieldIDBySchema(columns []*schemapb.FieldData, schema *schemapb.Collect
 
 	return nil
 }
+
+func ValidateUsername(username string) error {
+	username = strings.TrimSpace(username)
+
+	if username == "" {
+		return errors.New("username should not be empty")
+	}
+
+	invalidMsg := "Invalid username: " + username + ". "
+	if int64(len(username)) > Params.ProxyCfg.MaxUsernameLength {
+		msg := invalidMsg + "The length of username must be less than " +
+			strconv.FormatInt(Params.ProxyCfg.MaxUsernameLength, 10) + " characters."
+		return errors.New(msg)
+	}
+
+	firstChar := username[0]
+	if !isAlpha(firstChar) {
+		msg := invalidMsg + "The first character of username must be a letter."
+		return errors.New(msg)
+	}
+
+	usernameSize := len(username)
+	for i := 1; i < usernameSize; i++ {
+		c := username[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			msg := invalidMsg + "Username should only contain numbers, letters, and underscores."
+			return errors.New(msg)
+		}
+	}
+	return nil
+}
+
+func ValidatePassword(password string) error {
+	if int64(len(password)) > Params.ProxyCfg.MaxPasswordLength {
+		msg := "The length of password must be less than " +
+			strconv.FormatInt(Params.ProxyCfg.MaxPasswordLength, 10) + " characters."
+		return errors.New(msg)
+	}
+	return nil
+}
