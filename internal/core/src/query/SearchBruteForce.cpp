@@ -73,7 +73,7 @@ BinarySearchBruteForceFast(MetricType metric_type,
                            int64_t num_queries,
                            int64_t round_decimal,
                            const uint8_t* query_data,
-                           const faiss::BitsetView& bitset) {
+                           const BitsetView& bitset) {
     SubSearchResult sub_result(num_queries, topk, metric_type, round_decimal);
     float* result_distances = sub_result.get_distances();
     idx_t* result_ids = sub_result.get_ids();
@@ -91,7 +91,7 @@ SubSearchResult
 FloatSearchBruteForce(const dataset::SearchDataset& dataset,
                       const void* chunk_data_raw,
                       int64_t size_per_chunk,
-                      const faiss::BitsetView& bitset) {
+                      const BitsetView& bitset) {
     auto metric_type = dataset.metric_type;
     auto num_queries = dataset.num_queries;
     auto topk = dataset.topk;
@@ -115,7 +115,7 @@ SubSearchResult
 BinarySearchBruteForce(const dataset::SearchDataset& dataset,
                        const void* chunk_data_raw,
                        int64_t size_per_chunk,
-                       const faiss::BitsetView& bitset) {
+                       const BitsetView& bitset) {
     // TODO: refactor the internal function
     auto query_data = reinterpret_cast<const uint8_t*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const uint8_t*>(chunk_data_raw);

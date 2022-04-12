@@ -17,7 +17,7 @@ SubSearchResult
 SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
-              const faiss::BitsetView& bitset) {
+              const BitsetView& bitset) {
     auto num_queries = search_dataset.num_queries;
     auto topK = search_dataset.topk;
     auto dim = search_dataset.dim;

@@ -12,6 +12,7 @@
 set(COMMON_SRC
         Schema.cpp
         Types.cpp
+	BitsetView.cpp
         SystemProperty.cpp
         vector_index_c.cpp
         )
@@ -20,6 +21,6 @@ add_library(milvus_common SHARED
         ${COMMON_SRC}
         )
 
-target_link_libraries(milvus_common milvus_utils milvus_config milvus_log knowhere milvus_proto yaml-cpp )
+target_link_libraries(milvus_common milvus_utils milvus_config milvus_log knowhere milvus_proto yaml-cpp boost_bitset_ext)
 
 install(TARGETS milvus_common DESTINATION lib)

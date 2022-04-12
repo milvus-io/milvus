@@ -60,12 +60,6 @@ class SegmentSealedImpl : public SegmentSealed {
     const Schema&
     get_schema() const override;
 
-    std::shared_ptr<DeletedRecord::TmpBitmap>
-    get_deleted_bitmap(int64_t del_barrier,
-                       Timestamp query_timestamp,
-                       int64_t insert_barrier,
-                       bool force = false) const;
-
  public:
     int64_t
     num_chunk_index(FieldOffset field_offset) const override;
@@ -110,6 +104,12 @@ class SegmentSealedImpl : public SegmentSealed {
     int64_t
     get_active_count(Timestamp ts) const override;
 
+    std::shared_ptr<DeletedRecord::TmpBitmap>
+    get_deleted_bitmap(int64_t del_barrier,
+                       Timestamp query_timestamp,
+                       int64_t insert_barrier,
+                       bool force = false) const;
+
  private:
     template <typename T>
     static void
@@ -140,8 +140,8 @@ class SegmentSealedImpl : public SegmentSealed {
                   const BitsetView& bitset,
                   SearchResult& output) const override;
 
-    BitsetView
-    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
+    void
+    mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
 
     bool
     is_system_field_ready() const {

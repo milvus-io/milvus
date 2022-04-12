@@ -18,11 +18,13 @@
 #include <vector>
 #include <index/ScalarIndex.h>
 
+#include "DeletedRecord.h"
 #include "FieldIndexing.h"
 #include "common/Schema.h"
 #include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
+#include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "query/Plan.h"
@@ -113,8 +115,8 @@ class SegmentInternalInterface : public SegmentInterface {
                   const BitsetView& bitset,
                   SearchResult& output) const = 0;
 
-    virtual BitsetView
-    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const = 0;
+    virtual void
+    mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const = 0;
 
     // count of chunk that has index available
     virtual int64_t

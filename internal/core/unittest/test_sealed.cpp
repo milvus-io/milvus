@@ -309,8 +309,8 @@ TEST(Sealed, LoadFieldData) {
 		["66353->5.696000", "30664->5.881000", "41087->5.917000", "10393->6.633000", "90215->7.202000"]
 	]
 ])");
-#else // for mac
-auto std_json = Json::parse(R"(
+#else  // for mac
+    auto std_json = Json::parse(R"(
 [
 	[
         ["982->0.000000", "31864->4.270000", "18916->4.651000", "71547->5.125000", "86706->5.991000"],
@@ -386,9 +386,9 @@ TEST(Sealed, Delete) {
     segment->LoadDeletedRecord(info);
 
     std::vector<uint8_t> tmp_block{0, 0};
-    auto view = BitsetView(tmp_block.data(), 10);
-    auto bitset = segment->get_filtered_bitmap(view, 10, 11);
-    ASSERT_EQ(bitset.size(), N);
+    BitsetType bitset(N, false);
+    segment->mask_with_delete(bitset, 10, 11);
+    ASSERT_EQ(bitset.count(), pks.size());
 
     int64_t new_count = 3;
     std::vector<idx_t> new_pks{6, 7, 8};

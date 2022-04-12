@@ -177,14 +177,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   SearchResult& output) const override;
 
  public:
-    std::shared_ptr<DeletedRecord::TmpBitmap>
-    get_deleted_bitmap(int64_t del_barrier,
-                       Timestamp query_timestamp,
-                       int64_t insert_barrier,
-                       bool force = false) const;
-
-    BitsetView
-    get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
+    void
+    mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
@@ -196,6 +190,12 @@ class SegmentGrowingImpl : public SegmentGrowing {
     search_ids(const BitsetView& view, Timestamp timestamp) const override;
 
  protected:
+    std::shared_ptr<DeletedRecord::TmpBitmap>
+    get_deleted_bitmap(int64_t del_barrier,
+                       Timestamp query_timestamp,
+                       int64_t insert_barrier,
+                       bool force = false) const;
+
     int64_t
     num_chunk() const override;
 
