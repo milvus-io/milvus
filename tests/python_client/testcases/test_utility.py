@@ -1458,6 +1458,7 @@ class TestUtilityAdvanced(TestcaseBase):
                 cnt += r.num_rows
         assert cnt == nb
 
+    @pytest.mark.skip(reason="wait for zhuwenxing to update")
     @pytest.mark.tags(CaseLabel.Loadbalance)
     def test_load_balance_normal(self):
         """
@@ -1499,6 +1500,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # assert sealed_segment_ids is subset of des_sealed_segment_ids
         assert set(sealed_segment_ids).issubset(des_sealed_segment_ids)
 
+    @pytest.mark.skip(reason="wait for zhuwenxing to update")
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_src_node_not_exist(self):
         """
@@ -1535,6 +1537,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_task=CheckTasks.err_res,
                                        check_items={ct.err_code: 1, ct.err_msg: "is not exist to balance"})
 
+    @pytest.mark.skip(reason="wait for zhuwenxing to update")
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_all_dst_node_not_exist(self):
         """
@@ -1570,6 +1573,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_task=CheckTasks.err_res,
                                        check_items={ct.err_code: 1, ct.err_msg: "no available queryNode to allocate"})
 
+    @pytest.mark.skip(reason="wait for zhuwenxing to update")
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_one_sealed_segment_id_not_exist(self):
         """
