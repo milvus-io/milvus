@@ -1598,6 +1598,45 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("test import", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.ImportRequest{
+			CollectionName: collectionName,
+			Files:          []string{"f1", "f2", "f3"},
+		}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.Import(context.TODO(), req)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Nil(t, err)
+	})
+
+	wg.Add(1)
+	t.Run("test import collection ID not found", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.ImportRequest{
+			CollectionName: "bad_collection_name",
+			Files:          []string{"f1", "f2", "f3"},
+		}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.Import(context.TODO(), req)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Error(t, err)
+	})
+
+	wg.Add(1)
+	t.Run("test import get vChannel fail", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.ImportRequest{
+			CollectionName: "bad_collection_name",
+			Files:          []string{"f1", "f2", "f3"},
+		}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		resp, err := proxy.Import(context.TODO(), req)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Error(t, err)
+	})
+
+	wg.Add(1)
 	t.Run("release collection", func(t *testing.T) {
 		defer wg.Done()
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
@@ -1610,6 +1649,7 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, "", resp.Reason)
 
 		// release dql message stream
 		resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
@@ -1619,6 +1659,7 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, "", resp.Reason)
 	})
 
 	wg.Add(1)
@@ -1881,6 +1922,7 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, "", resp.Reason)
 
 		// invalidate meta cache
 		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
@@ -2933,38 +2975,66 @@ func TestProxy_GetComponentStates_state_code(t *testing.T) {
 	assert.NotEqual(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 }
 
-func TestProxy__Import(t *testing.T) {
-	req := &milvuspb.ImportRequest{
-		CollectionName: "dummy",
-	}
-	rootCoord := &RootCoordMock{}
-	rootCoord.state.Store(internalpb.StateCode_Healthy)
-	t.Run("test import", func(t *testing.T) {
-
-		proxy := &Proxy{rootCoord: rootCoord}
-		proxy.stateCode.Store(internalpb.StateCode_Healthy)
-
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Nil(t, err)
+func TestProxy_Import(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	err := InitMetaCache(rc)
+	assert.NoError(t, err)
+	rc.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DropCollection,
+			MsgID:     100,
+			Timestamp: 100,
+		},
+		CollectionName: "import_collection",
 	})
+	localMsg := true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	factory := dependency.NewDefaultFactory(localMsg)
+	proxy, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	t.Run("test import get vChannel failed", func(t *testing.T) {
+		defer wg.Done()
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+		proxy.chMgr = newChannelsMgrImpl(nil, nil, nil, nil, nil)
+		resp, err := proxy.Import(context.TODO(),
+			&milvuspb.ImportRequest{
+				CollectionName: "import_collection",
+			})
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Error(t, err)
+	})
+	wg.Add(1)
 	t.Run("test import with unhealthy", func(t *testing.T) {
-		proxy := &Proxy{rootCoord: rootCoord}
+		defer wg.Done()
+		req := &milvuspb.ImportRequest{
+			CollectionName: "dummy",
+		}
 		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.EqualValues(t, unhealthyStatus(), resp.Status)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
+	resp, err := rc.DropCollection(context.TODO(), &milvuspb.DropCollectionRequest{
+		CollectionName: "import_collection",
+	})
+	wg.Wait()
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	rc.Stop()
 }
 
-func TestProxy__GetImportState(t *testing.T) {
+func TestProxy_GetImportState(t *testing.T) {
 	req := &milvuspb.GetImportStateRequest{
 		Task: 1,
 	}
 	rootCoord := &RootCoordMock{}
 	rootCoord.state.Store(internalpb.StateCode_Healthy)
 	t.Run("test get import state", func(t *testing.T) {
-
 		proxy := &Proxy{rootCoord: rootCoord}
 		proxy.stateCode.Store(internalpb.StateCode_Healthy)
 

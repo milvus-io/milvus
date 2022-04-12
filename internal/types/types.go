@@ -611,7 +611,7 @@ type RootCoord interface {
 	// error is always nil
 	Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
 
-	// Check import task state from datanode
+	// GetImportState checks import task state from datanode
 	//
 	// ctx is the context to control request deadline and cancellation
 	// req contains the request params, including a task id
@@ -621,7 +621,7 @@ type RootCoord interface {
 	// error is always nil
 	GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)
 
-	// Report impot task state to rootcoord
+	// ReportImport reports import task state to rootCoord
 	//
 	// ctx is the context to control request deadline and cancellation
 	// req contains the import results, including imported row count and an id list of generated segments

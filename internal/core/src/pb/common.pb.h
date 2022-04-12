@@ -192,12 +192,13 @@ enum SegmentState : int {
   Flushed = 4,
   Flushing = 5,
   Dropped = 6,
+  Importing = 7,
   SegmentState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   SegmentState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool SegmentState_IsValid(int value);
 constexpr SegmentState SegmentState_MIN = SegmentStateNone;
-constexpr SegmentState SegmentState_MAX = Dropped;
+constexpr SegmentState SegmentState_MAX = Importing;
 constexpr int SegmentState_ARRAYSIZE = SegmentState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SegmentState_descriptor();

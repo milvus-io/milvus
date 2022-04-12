@@ -113,9 +113,11 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		if task.GetState().GetStateCode() == commonpb.ImportState_ImportFailed {
 			continue
 		}
+		// TODO: Use ImportTaskInfo directly.
 		it := &datapb.ImportTask{
 			CollectionId: task.GetCollectionId(),
 			PartitionId:  task.GetPartitionId(),
+			ChannelNames: task.GetChannelNames(),
 			RowBased:     task.GetRowBased(),
 			TaskId:       task.GetId(),
 			Files:        task.GetFiles(),
@@ -146,7 +148,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		task.DatanodeId = resp.GetDatanodeId()
 		log.Debug("import task successfully assigned to DataNode",
 			zap.Int64("task ID", it.GetTaskId()),
-			zap.Int64("DataNode ID", task.GetDatanodeId()))
+			zap.Int64("dataNode ID", task.GetDatanodeId()))
 		// Add new working dataNode to busyNodes.
 		m.busyNodes[resp.GetDatanodeId()] = true
 
@@ -252,6 +254,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					Id:           m.nextTaskID,
 					RequestId:    reqID,
 					CollectionId: cID,
+					ChannelNames: req.ChannelNames,
 					Bucket:       bucket,
 					RowBased:     req.GetRowBased(),
 					Files:        []string{req.GetFiles()[i]},
@@ -274,6 +277,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				Id:           m.nextTaskID,
 				RequestId:    reqID,
 				CollectionId: cID,
+				ChannelNames: req.ChannelNames,
 				Bucket:       bucket,
 				RowBased:     req.GetRowBased(),
 				Files:        req.GetFiles(),

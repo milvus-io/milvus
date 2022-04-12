@@ -1017,14 +1017,14 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 		log.Info("picking a free dataNode",
 			zap.Any("all dataNodes", nodes),
 			zap.Int64("picking free dataNode with ID", dnID))
-		s.cluster.Import(ctx, dnID, itr)
+		s.cluster.Import(s.ctx, dnID, itr)
 	} else {
 		// No DataNodes are available, choose a still working DataNode randomly.
 		dnID := nodes[rand.Intn(len(nodes))]
 		log.Info("all dataNodes are busy, picking a random dataNode still",
 			zap.Any("all dataNodes", nodes),
 			zap.Int64("picking dataNode with ID", dnID))
-		s.cluster.Import(ctx, dnID, itr)
+		s.cluster.Import(s.ctx, dnID, itr)
 	}
 
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
