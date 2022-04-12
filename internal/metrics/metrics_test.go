@@ -17,9 +17,11 @@
 package metrics
 
 import (
+	"os"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRegisterMetrics(t *testing.T) {
@@ -33,4 +35,12 @@ func TestRegisterMetrics(t *testing.T) {
 	RegisterProxy(r)
 	RegisterQueryNode(r)
 	RegisterQueryCoord(r)
+	ServeHTTP(r)
+}
+
+func TestGetMetricsAddr(t *testing.T) {
+	assert.Equal(t, getMetricsAddr(), ":"+DefaultListenPort)
+	testPort := "9092"
+	os.Setenv(ListenPortEnvKey, testPort)
+	assert.Equal(t, getMetricsAddr(), ":"+testPort)
 }
