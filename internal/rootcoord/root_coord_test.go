@@ -709,9 +709,10 @@ func TestRootCoord_Base(t *testing.T) {
 	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
 	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
 	timeTickStream.Start()
+	defer timeTickStream.Close()
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
-	clearMsgChan(1500*time.Millisecond, dmlStream.Chan())
+	defer dmlStream.Close()
 
 	core.SetEtcdClient(etcdCli)
 

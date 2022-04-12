@@ -54,6 +54,31 @@ services:
       - "6831:6831/udp"
       - "16686:16686"
 
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: 'bitnami/kafka:3.1.0'
+    ports:
+      - '9092:9092'
+    environment:
+      - KAFKA_BROKER_ID=0
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:9092
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      # set kafka server config
+      - KAFKA_CFG_MAX_PARTITION_FETCH_BYTES=5242880
+      - KAFKA_CFG_MAX_REQUEST_SIZE=5242880
+      - KAFKA_CFG_MESSAGE_MAX_BYTES=5242880
+      - KAFKA_CFG_REPLICA_FETCH_MAX_BYTES=5242880
+      - KAFKA_CFG_FETCH_MESSAGE_MAX_BYTES=5242880
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+    depends_on:
+      - zookeeper
+
 networks:
   default:
     name: milvus_dev

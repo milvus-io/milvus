@@ -27,7 +27,7 @@ import (
 	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-
+	kafkawrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/kafka"
 	puslarmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 )
@@ -114,9 +114,39 @@ func NewRmsFactory(path string) *RmsFactory {
 		ReceiveBufSize:    1024,
 		RmqBufSize:        1024,
 	}
+
 	err := rmqimplserver.InitRocksMQ(path)
 	if err != nil {
 		log.Error("init rmq error", zap.Error(err))
+	}
+	return f
+}
+
+type KmsFactory struct {
+	dispatcherFactory ProtoUDFactory
+	KafkaAddress      string
+	ReceiveBufSize    int64
+}
+
+func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+	kafkaClient := kafkawrapper.NewKafkaClientInstance(f.KafkaAddress)
+	return NewMqMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+}
+
+func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
+	kafkaClient := kafkawrapper.NewKafkaClientInstance(f.KafkaAddress)
+	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+}
+
+func (f *KmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
+	return f.NewMsgStream(ctx)
+}
+
+func NewKmsFactory(config *paramtable.KafkaConfig) Factory {
+	f := &KmsFactory{
+		dispatcherFactory: ProtoUDFactory{},
+		ReceiveBufSize:    1024,
+		KafkaAddress:      config.Address,
 	}
 	return f
 }

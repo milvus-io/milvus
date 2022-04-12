@@ -92,7 +92,8 @@ func (f *fixture) setup() []parameters {
 	rmqClient, _ := rmq.NewClientWithDefaultOptions()
 
 	parameters := []parameters{
-		{pulsarClient}, {rmqClient},
+		{pulsarClient},
+		{rmqClient},
 	}
 	return parameters
 }

@@ -136,6 +136,17 @@ func TestBaseTable_Remove(t *testing.T) {
 	assert.Nil(t, err6)
 }
 
+func TestBaseTable_Get(t *testing.T) {
+	err := baseParams.Save("key", "10")
+	assert.Nil(t, err)
+
+	v := baseParams.Get("key")
+	assert.Equal(t, "10", v)
+
+	v2 := baseParams.Get("none")
+	assert.Equal(t, "", v2)
+}
+
 func TestBaseTable_LoadYaml(t *testing.T) {
 	err := baseParams.LoadYaml("milvus.yaml")
 	assert.Nil(t, err)

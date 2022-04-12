@@ -101,7 +101,7 @@ func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *compone
 		} else {
 			rootcoord.Params.SetLogConfig(typeutil.RootCoordRole)
 		}
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 		var err error
 		rc, err = components.NewRootCoord(ctx, factory)
 		if err != nil {
@@ -133,7 +133,7 @@ func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string
 			proxy.Params.SetLogConfig(typeutil.ProxyRole)
 		}
 
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 		var err error
 		pn, err = components.NewProxy(ctx, factory)
 		if err != nil {
@@ -164,7 +164,7 @@ func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *compon
 			querycoord.Params.SetLogConfig(typeutil.QueryCoordRole)
 		}
 
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 		var err error
 		qs, err = components.NewQueryCoord(ctx, factory)
 		if err != nil {
@@ -196,7 +196,7 @@ func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias st
 			querynode.Params.SetLogConfig(typeutil.QueryNodeRole)
 		}
 
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 		var err error
 		qn, err = components.NewQueryNode(ctx, factory)
 		if err != nil {
@@ -227,7 +227,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 			datacoord.Params.SetLogConfig(typeutil.DataCoordRole)
 		}
 
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 
 		dctx := logutil.WithModule(ctx, "DataCoord")
 		var err error
@@ -261,7 +261,7 @@ func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias str
 			datanode.Params.SetLogConfig(typeutil.DataNodeRole)
 		}
 
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 		var err error
 		dn, err = components.NewDataNode(ctx, factory)
 		if err != nil {
@@ -292,7 +292,7 @@ func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *compon
 			indexcoord.Params.SetLogConfig(typeutil.IndexCoordRole)
 		}
 
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 
 		var err error
 		is, err = components.NewIndexCoord(ctx, factory)
@@ -325,7 +325,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 			indexnode.Params.SetLogConfig(typeutil.IndexNodeRole)
 		}
 
-		factory := dependency.NewDefaultFactory(localMsg)
+		factory := dependency.NewFactory(localMsg)
 
 		var err error
 		in, err = components.NewIndexNode(ctx, factory)
@@ -355,12 +355,14 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 		Params.Init()
 
-		path, _ := Params.Load("_RocksmqPath")
-		err := rocksmqimpl.InitRocksMQ(path)
-		if err != nil {
-			panic(err)
+		if Params.RocksmqEnable() {
+			path, _ := Params.Load("_RocksmqPath")
+			err := rocksmqimpl.InitRocksMQ(path)
+			if err != nil {
+				panic(err)
+			}
+			defer stopRocksmq()
 		}
-		defer stopRocksmq()
 
 		if Params.EtcdCfg.UseEmbedEtcd {
 			// Start etcd server.
