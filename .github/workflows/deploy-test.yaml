@@ -16,7 +16,7 @@ on:
       previous_release_version:
         description: The previous release version to use for the deploy test
         required: true
-        default: 'v2.0.1'
+        default: 'v2.0.2'
 
       new_image_repo:
         description: The image repository name to use for the deploy test
@@ -56,7 +56,7 @@ jobs:
         env:
           DEFAULT_OLD_IMAGE_REPO: "milvusdb/milvus"
           DEFAULT_OLD_IMAGE_TAG: "latest"
-          DEFAULT_PREVIOUS_RELEASE_VERSION: "v2.0.1"
+          DEFAULT_PREVIOUS_RELEASE_VERSION: "v2.0.2"
           DEFAULT_NEW_IMAGE_REPO: "milvusdb/milvus-dev"
           DEFAULT_NEW_IMAGE_TAG: "master-latest"
         run: |
@@ -222,11 +222,11 @@ jobs:
           # if the task is upgrade, install milvus with latest rc image in repo milvusdb/milvus
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "cluster" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20220125-6336e232 -f cluster-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest  -f cluster-values.yaml;
           fi
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "standalone" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.tag=master-20220125-6336e232 -f standalone-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest -f standalone-values.yaml;
           fi
 
           kubectl get pods

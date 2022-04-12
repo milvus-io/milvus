@@ -17,8 +17,8 @@ function check_healthy {
     # if time is greater than 300s, the condition still not satisfied, we regard it as a failure
     if [ $time_cnt -gt 300 ];
     then
-        printf "timeout,there are some issue with deployment!"
-        error_exit
+        printf "timeout,there are some issues with deployment!"
+        exit 1
     fi
     cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
     healthy=$(docker-compose ps | grep "healthy" | wc -l)
