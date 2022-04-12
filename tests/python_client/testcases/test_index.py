@@ -441,9 +441,8 @@ class TestIndexBase:
         expected: error raised
         """
         tmp_field_name = "int64"
-        result = connect.insert(collection, default_entities)
-        with pytest.raises(Exception) as e:
-            connect.create_index(collection, tmp_field_name, get_simple_index)
+        connect.insert(collection, default_entities)
+        connect.create_index(collection, tmp_field_name, get_simple_index)
 
     @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
