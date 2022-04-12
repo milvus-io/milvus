@@ -804,11 +804,12 @@ message GetFlushStateResponse {
 }
 
 message ImportRequest {
-  string collection_name = 1;  // target collection
-  string partition_name = 2;  // target partition
-  bool row_based = 3;  // the file is row-based or column-based
-  repeated string files = 4;  // file paths to be imported
-  repeated common.KeyValuePair options = 5;  // import options, bucket, etc.
+  string collection_name = 1;                // target collection
+  string partition_name = 2;                 // target partition
+  repeated string channel_names = 3;         // channel names for the collection
+  bool row_based = 4;                        // the file is row-based or column-based
+  repeated string files = 5;                 // file paths to be imported
+  repeated common.KeyValuePair options = 6;  // import options, bucket, etc.
 }
  
 message ImportResponse {

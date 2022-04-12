@@ -241,6 +241,7 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2StatslogPaths = 8;
   repeated FieldBinlog deltalogs = 9;
   bool dropped = 10;
+  bool importing = 11;
 }
 
 message CheckPoint {
@@ -433,10 +434,11 @@ message ImportTask {
   common.Status status = 1;
   int64 collection_id = 2;                   // target collection ID
   int64 partition_id = 3;                    // target partition ID
-  bool row_based = 4;                        // the file is row-based or column-based
-  int64 task_id = 5;                         // id of the task
-  repeated string files = 6;                 // file paths to be imported
-  repeated common.KeyValuePair infos = 7;    // more informations about the task, bucket, etc.
+  repeated string channel_names = 4;         // target channel names of the collection.
+  bool row_based = 5;                        // the file is row-based or column-based
+  int64 task_id = 6;                         // id of the task
+  repeated string files = 7;                 // file paths to be imported
+  repeated common.KeyValuePair infos = 8;    // extra information about the task, bucket, etc.
 }
 
 message ImportTaskState {
@@ -448,16 +450,17 @@ message ImportTaskState {
 }
 
 message ImportTaskInfo {
-  int64 id = 1;                  // Task ID.
-  int64 request_id = 2;          // Request ID of the import task.
-  int64 datanode_id = 3;         // ID of DataNode that processes the task.
-  int64 collection_id = 4;       // Collection ID for the import task.
-  int64 partition_id = 5;        // Partition ID for the import task.
-  string bucket = 6;             // Bucket for the import task.
-  bool row_based = 7;            // Boolean indicating whether import files are row-based or column-based.
-  repeated string files = 8;     // A list of files to import.
-  int64 create_ts = 9;           // Timestamp when the import task is created.
-  ImportTaskState state = 10;    // State of the import task.
+  int64 id = 1;                       // Task ID.
+  int64 request_id = 2;               // Request ID of the import task.
+  int64 datanode_id = 3;              // ID of DataNode that processes the task.
+  int64 collection_id = 4;            // Collection ID for the import task.
+  int64 partition_id = 5;             // Partition ID for the import task.
+  repeated string channel_names = 6;  // Names of channels for the collection.
+  string bucket = 7;                  // Bucket for the import task.
+  bool row_based = 8;                 // Boolean indicating whether import files are row-based or column-based.
+  repeated string files = 9;          // A list of files to import.
+  int64 create_ts = 10;               // Timestamp when the import task is created.
+  ImportTaskState state = 11;         // State of the import task.
 }
 
 message ImportTaskResponse {

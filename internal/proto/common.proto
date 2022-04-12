@@ -63,6 +63,7 @@ enum SegmentState {
     Flushed = 4;
     Flushing = 5;
     Dropped = 6;
+    Importing = 7;
 }
 
 message Status {

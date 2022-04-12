@@ -13317,13 +13317,31 @@ class ImportRequest :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kFilesFieldNumber = 4,
-    kOptionsFieldNumber = 5,
+    kChannelNamesFieldNumber = 3,
+    kFilesFieldNumber = 5,
+    kOptionsFieldNumber = 6,
     kCollectionNameFieldNumber = 1,
     kPartitionNameFieldNumber = 2,
-    kRowBasedFieldNumber = 3,
+    kRowBasedFieldNumber = 4,
   };
-  // repeated string files = 4;
+  // repeated string channel_names = 3;
+  int channel_names_size() const;
+  void clear_channel_names();
+  const std::string& channel_names(int index) const;
+  std::string* mutable_channel_names(int index);
+  void set_channel_names(int index, const std::string& value);
+  void set_channel_names(int index, std::string&& value);
+  void set_channel_names(int index, const char* value);
+  void set_channel_names(int index, const char* value, size_t size);
+  std::string* add_channel_names();
+  void add_channel_names(const std::string& value);
+  void add_channel_names(std::string&& value);
+  void add_channel_names(const char* value);
+  void add_channel_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& channel_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_channel_names();
+
+  // repeated string files = 5;
   int files_size() const;
   void clear_files();
   const std::string& files(int index) const;
@@ -13340,7 +13358,7 @@ class ImportRequest :
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& files() const;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_files();
 
-  // repeated .milvus.proto.common.KeyValuePair options = 5;
+  // repeated .milvus.proto.common.KeyValuePair options = 6;
   int options_size() const;
   void clear_options();
   ::milvus::proto::common::KeyValuePair* mutable_options(int index);
@@ -13373,7 +13391,7 @@ class ImportRequest :
   std::string* release_partition_name();
   void set_allocated_partition_name(std::string* partition_name);
 
-  // bool row_based = 3;
+  // bool row_based = 4;
   void clear_row_based();
   bool row_based() const;
   void set_row_based(bool value);
@@ -13383,6 +13401,7 @@ class ImportRequest :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> channel_names_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> files_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > options_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr collection_name_;
@@ -26713,7 +26732,72 @@ inline void ImportRequest::set_allocated_partition_name(std::string* partition_n
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.ImportRequest.partition_name)
 }
 
-// bool row_based = 3;
+// repeated string channel_names = 3;
+inline int ImportRequest::channel_names_size() const {
+  return channel_names_.size();
+}
+inline void ImportRequest::clear_channel_names() {
+  channel_names_.Clear();
+}
+inline const std::string& ImportRequest::channel_names(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ImportRequest.channel_names)
+  return channel_names_.Get(index);
+}
+inline std::string* ImportRequest::mutable_channel_names(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ImportRequest.channel_names)
+  return channel_names_.Mutable(index);
+}
+inline void ImportRequest::set_channel_names(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ImportRequest.channel_names)
+  channel_names_.Mutable(index)->assign(value);
+}
+inline void ImportRequest::set_channel_names(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ImportRequest.channel_names)
+  channel_names_.Mutable(index)->assign(std::move(value));
+}
+inline void ImportRequest::set_channel_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  channel_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.milvus.ImportRequest.channel_names)
+}
+inline void ImportRequest::set_channel_names(int index, const char* value, size_t size) {
+  channel_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.milvus.ImportRequest.channel_names)
+}
+inline std::string* ImportRequest::add_channel_names() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.milvus.ImportRequest.channel_names)
+  return channel_names_.Add();
+}
+inline void ImportRequest::add_channel_names(const std::string& value) {
+  channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ImportRequest.channel_names)
+}
+inline void ImportRequest::add_channel_names(std::string&& value) {
+  channel_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ImportRequest.channel_names)
+}
+inline void ImportRequest::add_channel_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  channel_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.milvus.ImportRequest.channel_names)
+}
+inline void ImportRequest::add_channel_names(const char* value, size_t size) {
+  channel_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.milvus.ImportRequest.channel_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+ImportRequest::channel_names() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ImportRequest.channel_names)
+  return channel_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+ImportRequest::mutable_channel_names() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ImportRequest.channel_names)
+  return &channel_names_;
+}
+
+// bool row_based = 4;
 inline void ImportRequest::clear_row_based() {
   row_based_ = false;
 }
@@ -26727,7 +26811,7 @@ inline void ImportRequest::set_row_based(bool value) {
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.ImportRequest.row_based)
 }
 
-// repeated string files = 4;
+// repeated string files = 5;
 inline int ImportRequest::files_size() const {
   return files_.size();
 }
@@ -26792,7 +26876,7 @@ ImportRequest::mutable_files() {
   return &files_;
 }
 
-// repeated .milvus.proto.common.KeyValuePair options = 5;
+// repeated .milvus.proto.common.KeyValuePair options = 6;
 inline int ImportRequest::options_size() const {
   return options_.size();
 }

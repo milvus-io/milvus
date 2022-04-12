@@ -3921,14 +3921,42 @@ func unhealthyStatus() *commonpb.Status {
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	log.Info("received import request")
-	resp := &milvuspb.ImportResponse{}
+	resp := &milvuspb.ImportResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
 		return resp, nil
 	}
-
-	resp, err := node.rootCoord.Import(ctx, req)
-	log.Info("received import response", zap.String("collectionName", req.GetCollectionName()), zap.Any("resp", resp), zap.Error(err))
+	// Get collection ID and then channel names.
+	collID, err := globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
+	if err != nil {
+		log.Error("collection ID not found",
+			zap.String("collection name", req.GetCollectionName()),
+			zap.Error(err))
+		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		resp.Status.Reason = err.Error()
+		return resp, err
+	}
+	chNames, err := node.chMgr.getVChannels(collID)
+	if err != nil {
+		log.Error("get vChannels failed",
+			zap.Int64("collection ID", collID),
+			zap.Error(err))
+		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		resp.Status.Reason = err.Error()
+		return resp, err
+	}
+	req.ChannelNames = chNames
+	// Call rootCoord to finish import.
+	resp, err = node.rootCoord.Import(ctx, req)
+	log.Info("received import response",
+		zap.String("collection name", req.GetCollectionName()),
+		zap.Any("resp", resp),
+		zap.Error(err))
 	return resp, err
 }
 
