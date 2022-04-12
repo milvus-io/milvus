@@ -229,7 +229,6 @@ auto
 ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<BinaryRangeExprImpl<T>&>(expr_raw);
     using Index = scalar::ScalarIndex<T>;
-    using Operator = knowhere::scalar::OperatorType;
     bool lower_inclusive = expr.lower_inclusive_;
     bool upper_inclusive = expr.upper_inclusive_;
     T val1 = expr.lower_value_;

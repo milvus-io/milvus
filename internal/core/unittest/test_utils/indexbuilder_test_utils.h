@@ -41,7 +41,7 @@ int DEVICEID = 0;
 
 namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
-using knowhere::scalar::OperatorType;
+using milvus::scalar::OperatorType;
 using milvus::indexbuilder::MapParams;
 using milvus::indexbuilder::ScalarIndexCreator;
 using ScalarTestParams = std::pair<MapParams, MapParams>;

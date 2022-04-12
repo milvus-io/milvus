@@ -16,7 +16,6 @@
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
-#include "knowhere/index/structured_index_simple/StructuredIndexSort.h"
 
 namespace milvus::query {
 
