@@ -111,6 +111,12 @@ connections.connect(host=args.host, port="19530")
 print(f"\nList collections...")
 collection_list = list_collections()
 print(collection_list)
+# keep 10 collections with prefix "CreateChecker_", others will be skiped
+cnt = 0
 for collection_name in collection_list:
+    if collection_name.startswith("CreateChecker_"):
+        cnt += 1
+    if collection_name.startswith("CreateChecker_") and cnt > 10:
+        continue
     print(f"check collection {collection_name}")
     hello_milvus(collection_name)
