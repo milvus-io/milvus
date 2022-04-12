@@ -94,15 +94,23 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 	return mcm, nil
 }
 
-// GetPath returns the path of minio data if exists.
-func (mcm *MinioChunkManager) GetPath(filePath string) (string, error) {
+// Path returns the path of minio data if exists.
+func (mcm *MinioChunkManager) Path(filePath string) (string, error) {
 	if !mcm.Exist(filePath) {
 		return "", errors.New("minio file manage cannot be found with filePath:" + filePath)
 	}
 	return filePath, nil
 }
 
-func (mcm *MinioChunkManager) GetSize(filePath string) (int64, error) {
+// Reader returns the path of minio data if exists.
+func (mcm *MinioChunkManager) Reader(filePath string) (FileReader, error) {
+	if !mcm.Exist(filePath) {
+		return nil, errors.New("minio file manage cannot be found with filePath:" + filePath)
+	}
+	return mcm.Client.GetObject(mcm.ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
+}
+
+func (mcm *MinioChunkManager) Size(filePath string) (int64, error) {
 	objectInfo, err := mcm.Client.StatObject(mcm.ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
 	if err != nil {
 		return 0, err

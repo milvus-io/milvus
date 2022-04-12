@@ -173,6 +173,19 @@ type DataCoordFactory struct {
 	DropVirtualChannelNotSuccess bool
 }
 
+func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
+	return &datapb.AssignSegmentIDResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		SegIDAssignments: []*datapb.SegmentIDAssignment{
+			{
+				SegID: 666,
+			},
+		},
+	}, nil
+}
+
 func (ds *DataCoordFactory) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
 	if ds.CompleteCompactionError {
 		return nil, errors.New("Error")
@@ -842,6 +855,12 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}}
+
+	if in.Count == 12 {
+		resp.Status.ErrorCode = commonpb.ErrorCode_Success
+		resp.ID = 1
+		resp.Count = 12
+	}
 
 	if m.ID == 0 {
 		resp.Status.Reason = "Zero ID"

@@ -5,22 +5,23 @@ import (
 	"fmt"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // interface to process rows data
 type JSONRowHandler interface {
-	Handle(rows []map[string]interface{}) error
+	Handle(rows []map[storage.FieldID]interface{}) error
 }
 
 // interface to process column data
 type JSONColumnHandler interface {
-	Handle(columns map[string][]interface{}) error
+	Handle(columns map[storage.FieldID][]interface{}) error
 }
 
 // method to get dimension of vecotor field
@@ -49,7 +50,7 @@ type Validator struct {
 }
 
 // method to construct valiator functions
-func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[string]*Validator) error {
+func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[storage.FieldID]*Validator) error {
 	if collectionSchema == nil {
 		return errors.New("collection schema is nil")
 	}
@@ -70,13 +71,13 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
 
-		validators[schema.GetName()] = &Validator{}
-		validators[schema.GetName()].primaryKey = schema.GetIsPrimaryKey()
-		validators[schema.GetName()].autoID = schema.GetAutoID()
+		validators[schema.GetFieldID()] = &Validator{}
+		validators[schema.GetFieldID()].primaryKey = schema.GetIsPrimaryKey()
+		validators[schema.GetFieldID()].autoID = schema.GetAutoID()
 
 		switch schema.DataType {
 		case schemapb.DataType_Bool:
-			validators[schema.GetName()].validateFunc = func(obj interface{}) error {
+			validators[schema.GetFieldID()].validateFunc = func(obj interface{}) error {
 				switch obj.(type) {
 				case bool:
 					return nil
@@ -87,55 +88,55 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				}
 
 			}
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := obj.(bool)
 				field.(*storage.BoolFieldData).Data = append(field.(*storage.BoolFieldData).Data, value)
 				field.(*storage.BoolFieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Float:
-			validators[schema.GetName()].validateFunc = numericValidator
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := float32(obj.(float64))
 				field.(*storage.FloatFieldData).Data = append(field.(*storage.FloatFieldData).Data, value)
 				field.(*storage.FloatFieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Double:
-			validators[schema.GetName()].validateFunc = numericValidator
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := obj.(float64)
 				field.(*storage.DoubleFieldData).Data = append(field.(*storage.DoubleFieldData).Data, value)
 				field.(*storage.DoubleFieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int8:
-			validators[schema.GetName()].validateFunc = numericValidator
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := int8(obj.(float64))
 				field.(*storage.Int8FieldData).Data = append(field.(*storage.Int8FieldData).Data, value)
 				field.(*storage.Int8FieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int16:
-			validators[schema.GetName()].validateFunc = numericValidator
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := int16(obj.(float64))
 				field.(*storage.Int16FieldData).Data = append(field.(*storage.Int16FieldData).Data, value)
 				field.(*storage.Int16FieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int32:
-			validators[schema.GetName()].validateFunc = numericValidator
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := int32(obj.(float64))
 				field.(*storage.Int32FieldData).Data = append(field.(*storage.Int32FieldData).Data, value)
 				field.(*storage.Int32FieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int64:
-			validators[schema.GetName()].validateFunc = numericValidator
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := int64(obj.(float64))
 				field.(*storage.Int64FieldData).Data = append(field.(*storage.Int64FieldData).Data, value)
 				field.(*storage.Int64FieldData).NumRows[0]++
@@ -146,9 +147,9 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			if err != nil {
 				return err
 			}
-			validators[schema.GetName()].dimension = dim
+			validators[schema.GetFieldID()].dimension = dim
 
-			validators[schema.GetName()].validateFunc = func(obj interface{}) error {
+			validators[schema.GetFieldID()].validateFunc = func(obj interface{}) error {
 				switch vt := obj.(type) {
 				case []interface{}:
 					if len(vt)*8 != dim {
@@ -175,7 +176,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				}
 			}
 
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				arr := obj.([]interface{})
 				for i := 0; i < len(arr); i++ {
 					value := byte(arr[i].(float64))
@@ -190,9 +191,9 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 			if err != nil {
 				return err
 			}
-			validators[schema.GetName()].dimension = dim
+			validators[schema.GetFieldID()].dimension = dim
 
-			validators[schema.GetName()].validateFunc = func(obj interface{}) error {
+			validators[schema.GetFieldID()].validateFunc = func(obj interface{}) error {
 				switch vt := obj.(type) {
 				case []interface{}:
 					if len(vt) != dim {
@@ -213,7 +214,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				}
 			}
 
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				arr := obj.([]interface{})
 				for i := 0; i < len(arr); i++ {
 					value := float32(arr[i].(float64))
@@ -222,8 +223,8 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				field.(*storage.FloatVectorFieldData).NumRows[0]++
 				return nil
 			}
-		case schemapb.DataType_String:
-			validators[schema.GetName()].validateFunc = func(obj interface{}) error {
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
+			validators[schema.GetFieldID()].validateFunc = func(obj interface{}) error {
 				switch obj.(type) {
 				case string:
 					return nil
@@ -234,7 +235,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				}
 			}
 
-			validators[schema.GetName()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				value := obj.(string)
 				field.(*storage.StringFieldData).Data = append(field.(*storage.StringFieldData).Data, value)
 				field.(*storage.StringFieldData).NumRows[0]++
@@ -250,14 +251,14 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 
 // row-based json format validator class
 type JSONRowValidator struct {
-	downstream JSONRowHandler        // downstream processor, typically is a JSONRowComsumer
-	validators map[string]*Validator // validators for each field
-	rowCounter int64                 // how many rows have been validated
+	downstream JSONRowHandler                 // downstream processor, typically is a JSONRowComsumer
+	validators map[storage.FieldID]*Validator // validators for each field
+	rowCounter int64                          // how many rows have been validated
 }
 
 func NewJSONRowValidator(collectionSchema *schemapb.CollectionSchema, downstream JSONRowHandler) *JSONRowValidator {
 	v := &JSONRowValidator{
-		validators: make(map[string]*Validator),
+		validators: make(map[storage.FieldID]*Validator),
 		downstream: downstream,
 		rowCounter: 0,
 	}
@@ -270,7 +271,7 @@ func (v *JSONRowValidator) ValidateCount() int64 {
 	return v.rowCounter
 }
 
-func (v *JSONRowValidator) Handle(rows []map[string]interface{}) error {
+func (v *JSONRowValidator) Handle(rows []map[storage.FieldID]interface{}) error {
 	if v.validators == nil || len(v.validators) == 0 {
 		return errors.New("JSON row validator is not initialized")
 	}
@@ -286,14 +287,14 @@ func (v *JSONRowValidator) Handle(rows []map[string]interface{}) error {
 
 	for i := 0; i < len(rows); i++ {
 		row := rows[i]
-		for name, validator := range v.validators {
+		for id, validator := range v.validators {
 			if validator.primaryKey && validator.autoID {
 				// auto-generated primary key, ignore
 				continue
 			}
-			value, ok := row[name]
+			value, ok := row[id]
 			if !ok {
-				return errors.New("JSON row validator: field " + name + " missed at the row " + strconv.FormatInt(v.rowCounter+int64(i), 10))
+				return errors.New("JSON row validator: fieldID " + strconv.FormatInt(id, 10) + " missed at the row " + strconv.FormatInt(v.rowCounter+int64(i), 10))
 			}
 
 			if err := validator.validateFunc(value); err != nil {
@@ -313,27 +314,27 @@ func (v *JSONRowValidator) Handle(rows []map[string]interface{}) error {
 
 // column-based json format validator class
 type JSONColumnValidator struct {
-	downstream JSONColumnHandler     // downstream processor, typically is a JSONColumnComsumer
-	validators map[string]*Validator // validators for each field
-	rowCounter map[string]int64      // row count of each field
+	downstream JSONColumnHandler              // downstream processor, typically is a JSONColumnComsumer
+	validators map[storage.FieldID]*Validator // validators for each field
+	rowCounter map[storage.FieldID]int64      // row count of each field
 }
 
 func NewJSONColumnValidator(schema *schemapb.CollectionSchema, downstream JSONColumnHandler) *JSONColumnValidator {
 	v := &JSONColumnValidator{
-		validators: make(map[string]*Validator),
+		validators: make(map[storage.FieldID]*Validator),
 		downstream: downstream,
-		rowCounter: make(map[string]int64),
+		rowCounter: make(map[storage.FieldID]int64),
 	}
 	initValidators(schema, v.validators)
 
 	return v
 }
 
-func (v *JSONColumnValidator) ValidateCount() map[string]int64 {
+func (v *JSONColumnValidator) ValidateCount() map[storage.FieldID]int64 {
 	return v.rowCounter
 }
 
-func (v *JSONColumnValidator) Handle(columns map[string][]interface{}) error {
+func (v *JSONColumnValidator) Handle(columns map[storage.FieldID][]interface{}) error {
 	if v.validators == nil || len(v.validators) == 0 {
 		return errors.New("JSON column validator is not initialized")
 	}
@@ -346,7 +347,7 @@ func (v *JSONColumnValidator) Handle(columns map[string][]interface{}) error {
 			if rowCount == -1 {
 				rowCount = counter
 			} else if rowCount != counter {
-				return errors.New("JSON column validator: the field " + k + " row count " + strconv.Itoa(int(counter)) + " is not equal to other fields " + strconv.Itoa(int(rowCount)))
+				return errors.New("JSON column validator: the field " + strconv.FormatInt(k, 10) + " row count " + strconv.Itoa(int(counter)) + " is not equal to other fields " + strconv.Itoa(int(rowCount)))
 			}
 		}
 
@@ -383,74 +384,74 @@ func (v *JSONColumnValidator) Handle(columns map[string][]interface{}) error {
 
 // row-based json format consumer class
 type JSONRowConsumer struct {
-	collectionSchema *schemapb.CollectionSchema     // collection schema
-	rowIDAllocator   *allocator.IDAllocator         // autoid allocator
-	validators       map[string]*Validator          // validators for each field
-	rowCounter       int64                          // how many rows have been consumed
-	shardNum         int32                          // sharding number of the collection
-	segmentsData     []map[string]storage.FieldData // in-memory segments data
-	segmentSize      int32                          // maximum size of a segment in MB
-	primaryKey       string                         // name of primary key
+	collectionSchema *schemapb.CollectionSchema              // collection schema
+	rowIDAllocator   *allocator.IDAllocator                  // autoid allocator
+	validators       map[storage.FieldID]*Validator          // validators for each field
+	rowCounter       int64                                   // how many rows have been consumed
+	shardNum         int32                                   // sharding number of the collection
+	segmentsData     []map[storage.FieldID]storage.FieldData // in-memory segments data
+	segmentSize      int64                                   // maximum size of a segment in MB
+	primaryKey       storage.FieldID                         // name of primary key
 
-	callFlushFunc func(fields map[string]storage.FieldData) error // call back function to flush segment
+	callFlushFunc func(fields map[storage.FieldID]storage.FieldData) error // call back function to flush segment
 }
 
-func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[string]storage.FieldData {
-	segmentData := make(map[string]storage.FieldData)
+func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[storage.FieldID]storage.FieldData {
+	segmentData := make(map[storage.FieldID]storage.FieldData)
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
 		switch schema.DataType {
 		case schemapb.DataType_Bool:
-			segmentData[schema.GetName()] = &storage.BoolFieldData{
+			segmentData[schema.GetFieldID()] = &storage.BoolFieldData{
 				Data:    make([]bool, 0),
 				NumRows: []int64{0},
 			}
 		case schemapb.DataType_Float:
-			segmentData[schema.GetName()] = &storage.FloatFieldData{
+			segmentData[schema.GetFieldID()] = &storage.FloatFieldData{
 				Data:    make([]float32, 0),
 				NumRows: []int64{0},
 			}
 		case schemapb.DataType_Double:
-			segmentData[schema.GetName()] = &storage.DoubleFieldData{
+			segmentData[schema.GetFieldID()] = &storage.DoubleFieldData{
 				Data:    make([]float64, 0),
 				NumRows: []int64{0},
 			}
 		case schemapb.DataType_Int8:
-			segmentData[schema.GetName()] = &storage.Int8FieldData{
+			segmentData[schema.GetFieldID()] = &storage.Int8FieldData{
 				Data:    make([]int8, 0),
 				NumRows: []int64{0},
 			}
 		case schemapb.DataType_Int16:
-			segmentData[schema.GetName()] = &storage.Int16FieldData{
+			segmentData[schema.GetFieldID()] = &storage.Int16FieldData{
 				Data:    make([]int16, 0),
 				NumRows: []int64{0},
 			}
 		case schemapb.DataType_Int32:
-			segmentData[schema.GetName()] = &storage.Int32FieldData{
+			segmentData[schema.GetFieldID()] = &storage.Int32FieldData{
 				Data:    make([]int32, 0),
 				NumRows: []int64{0},
 			}
 		case schemapb.DataType_Int64:
-			segmentData[schema.GetName()] = &storage.Int64FieldData{
+			segmentData[schema.GetFieldID()] = &storage.Int64FieldData{
 				Data:    make([]int64, 0),
 				NumRows: []int64{0},
 			}
 		case schemapb.DataType_BinaryVector:
 			dim, _ := getFieldDimension(schema)
-			segmentData[schema.GetName()] = &storage.BinaryVectorFieldData{
+			segmentData[schema.GetFieldID()] = &storage.BinaryVectorFieldData{
 				Data:    make([]byte, 0),
 				NumRows: []int64{0},
 				Dim:     dim,
 			}
 		case schemapb.DataType_FloatVector:
 			dim, _ := getFieldDimension(schema)
-			segmentData[schema.GetName()] = &storage.FloatVectorFieldData{
+			segmentData[schema.GetFieldID()] = &storage.FloatVectorFieldData{
 				Data:    make([]float32, 0),
 				NumRows: []int64{0},
 				Dim:     dim,
 			}
-		case schemapb.DataType_String:
-			segmentData[schema.GetName()] = &storage.StringFieldData{
+		case schemapb.DataType_String, schemapb.DataType_VarChar:
+			segmentData[schema.GetFieldID()] = &storage.StringFieldData{
 				Data:    make([]string, 0),
 				NumRows: []int64{0},
 			}
@@ -463,8 +464,8 @@ func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[string]sto
 	return segmentData
 }
 
-func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *allocator.IDAllocator, shardNum int32, segmentSize int32,
-	flushFunc func(fields map[string]storage.FieldData) error) *JSONRowConsumer {
+func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *allocator.IDAllocator, shardNum int32, segmentSize int64,
+	flushFunc func(fields map[storage.FieldID]storage.FieldData) error) *JSONRowConsumer {
 	if collectionSchema == nil {
 		log.Error("JSON row consumer: collection schema is nil")
 		return nil
@@ -473,16 +474,17 @@ func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *al
 	v := &JSONRowConsumer{
 		collectionSchema: collectionSchema,
 		rowIDAllocator:   idAlloc,
-		validators:       make(map[string]*Validator),
+		validators:       make(map[storage.FieldID]*Validator),
 		shardNum:         shardNum,
 		segmentSize:      segmentSize,
 		rowCounter:       0,
+		primaryKey:       -1,
 		callFlushFunc:    flushFunc,
 	}
 
 	initValidators(collectionSchema, v.validators)
 
-	v.segmentsData = make([]map[string]storage.FieldData, 0, shardNum)
+	v.segmentsData = make([]map[storage.FieldID]storage.FieldData, 0, shardNum)
 	for i := 0; i < int(shardNum); i++ {
 		segmentData := initSegmentData(collectionSchema)
 		if segmentData == nil {
@@ -494,12 +496,12 @@ func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *al
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
 		if schema.GetIsPrimaryKey() {
-			v.primaryKey = schema.GetName()
+			v.primaryKey = schema.GetFieldID()
 			break
 		}
 	}
 	// primary key not found
-	if v.primaryKey == "" {
+	if v.primaryKey == -1 {
 		log.Error("JSON row consumer: collection schema has no primary key")
 		return nil
 	}
@@ -544,7 +546,7 @@ func (v *JSONRowConsumer) flush(force bool) error {
 	return nil
 }
 
-func (v *JSONRowConsumer) Handle(rows []map[string]interface{}) error {
+func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	if v.validators == nil || len(v.validators) == 0 {
 		return errors.New("JSON row consumer is not initialized")
 	}
@@ -614,23 +616,23 @@ func (v *JSONRowConsumer) Handle(rows []map[string]interface{}) error {
 
 // column-based json format consumer class
 type JSONColumnConsumer struct {
-	collectionSchema *schemapb.CollectionSchema   // collection schema
-	validators       map[string]*Validator        // validators for each field
-	fieldsData       map[string]storage.FieldData // in-memory fields data
-	primaryKey       string                       // name of primary key
+	collectionSchema *schemapb.CollectionSchema            // collection schema
+	validators       map[storage.FieldID]*Validator        // validators for each field
+	fieldsData       map[storage.FieldID]storage.FieldData // in-memory fields data
+	primaryKey       storage.FieldID                       // name of primary key
 
-	callFlushFunc func(fields map[string]storage.FieldData) error // call back function to flush segment
+	callFlushFunc func(fields map[storage.FieldID]storage.FieldData) error // call back function to flush segment
 }
 
 func NewJSONColumnConsumer(collectionSchema *schemapb.CollectionSchema,
-	flushFunc func(fields map[string]storage.FieldData) error) *JSONColumnConsumer {
+	flushFunc func(fields map[storage.FieldID]storage.FieldData) error) *JSONColumnConsumer {
 	if collectionSchema == nil {
 		return nil
 	}
 
 	v := &JSONColumnConsumer{
 		collectionSchema: collectionSchema,
-		validators:       make(map[string]*Validator),
+		validators:       make(map[storage.FieldID]*Validator),
 		callFlushFunc:    flushFunc,
 	}
 	initValidators(collectionSchema, v.validators)
@@ -639,7 +641,7 @@ func NewJSONColumnConsumer(collectionSchema *schemapb.CollectionSchema,
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
 		if schema.GetIsPrimaryKey() {
-			v.primaryKey = schema.GetName()
+			v.primaryKey = schema.GetFieldID()
 			break
 		}
 	}
@@ -650,9 +652,9 @@ func NewJSONColumnConsumer(collectionSchema *schemapb.CollectionSchema,
 func (v *JSONColumnConsumer) flush() error {
 	// check row count, should be equal
 	rowCount := 0
-	for name, field := range v.fieldsData {
+	for id, field := range v.fieldsData {
 		// skip the autoid field
-		if name == v.primaryKey && v.validators[v.primaryKey].autoID {
+		if id == v.primaryKey && v.validators[v.primaryKey].autoID {
 			continue
 		}
 		cnt := field.RowNum()
@@ -665,7 +667,7 @@ func (v *JSONColumnConsumer) flush() error {
 		if rowCount == 0 {
 			rowCount = cnt
 		} else if rowCount != cnt {
-			return errors.New("JSON column consumer: " + name + " row count " + strconv.Itoa(cnt) + " doesn't equal " + strconv.Itoa(rowCount))
+			return errors.New("JSON column consumer: " + strconv.FormatInt(id, 10) + " row count " + strconv.Itoa(cnt) + " doesn't equal " + strconv.Itoa(rowCount))
 		}
 	}
 
@@ -678,7 +680,7 @@ func (v *JSONColumnConsumer) flush() error {
 	return v.callFlushFunc(v.fieldsData)
 }
 
-func (v *JSONColumnConsumer) Handle(columns map[string][]interface{}) error {
+func (v *JSONColumnConsumer) Handle(columns map[storage.FieldID][]interface{}) error {
 	if v.validators == nil || len(v.validators) == 0 {
 		return errors.New("JSON column consumer is not initialized")
 	}
@@ -691,10 +693,10 @@ func (v *JSONColumnConsumer) Handle(columns map[string][]interface{}) error {
 	}
 
 	// consume columns data
-	for name, values := range columns {
-		validator, ok := v.validators[name]
+	for id, values := range columns {
+		validator, ok := v.validators[id]
 		if !ok {
-			// not a valid field name
+			// not a valid field id
 			break
 		}
 
@@ -705,8 +707,8 @@ func (v *JSONColumnConsumer) Handle(columns map[string][]interface{}) error {
 
 		// convert and consume data
 		for i := 0; i < len(values); i++ {
-			if err := validator.convertFunc(values[i], v.fieldsData[name]); err != nil {
-				return errors.New("JSON column consumer: " + err.Error() + " of field " + name)
+			if err := validator.convertFunc(values[i], v.fieldsData[id]); err != nil {
+				return errors.New("JSON column consumer: " + err.Error() + " of field " + strconv.FormatInt(id, 10))
 			}
 		}
 	}

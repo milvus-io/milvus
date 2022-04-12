@@ -1,6 +1,7 @@
 package importutil
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -23,6 +24,16 @@ func CreateNumpyFile(path string, data interface{}) error {
 	}
 
 	return nil
+}
+
+func CreateNumpyData(data interface{}) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	err := npyio.Write(buf, data)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 // a class to expand other numpy lib ability

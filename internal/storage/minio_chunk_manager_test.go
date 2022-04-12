@@ -354,7 +354,7 @@ func TestMinIOCM(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("test GetSize", func(t *testing.T) {
+	t.Run("test Size", func(t *testing.T) {
 		testGetSizeRoot := path.Join(testMinIOKVRoot, "get_size")
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -369,18 +369,18 @@ func TestMinIOCM(t *testing.T) {
 		err = testCM.Write(key, value)
 		assert.NoError(t, err)
 
-		size, err := testCM.GetSize(key)
+		size, err := testCM.Size(key)
 		assert.NoError(t, err)
 		assert.Equal(t, size, int64(len(value)))
 
 		key2 := path.Join(testGetSizeRoot, "TestMemoryKV_GetSize_key2")
 
-		size, err = testCM.GetSize(key2)
+		size, err = testCM.Size(key2)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), size)
 	})
 
-	t.Run("test GetPath", func(t *testing.T) {
+	t.Run("test Path", func(t *testing.T) {
 		testGetPathRoot := path.Join(testMinIOKVRoot, "get_path")
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -395,13 +395,13 @@ func TestMinIOCM(t *testing.T) {
 		err = testCM.Write(key, value)
 		assert.NoError(t, err)
 
-		p, err := testCM.GetPath(key)
+		p, err := testCM.Path(key)
 		assert.NoError(t, err)
 		assert.Equal(t, p, key)
 
 		key2 := path.Join(testGetPathRoot, "TestMemoryKV_GetSize_key2")
 
-		p, err = testCM.GetPath(key2)
+		p, err = testCM.Path(key2)
 		assert.Error(t, err)
 		assert.Equal(t, p, "")
 	})

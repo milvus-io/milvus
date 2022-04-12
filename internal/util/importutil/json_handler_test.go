@@ -5,12 +5,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/stretchr/testify/assert"
 )
 
 type mockIDAllocator struct {
@@ -68,17 +69,23 @@ func Test_GetFieldDimension(t *testing.T) {
 }
 
 func Test_InitValidators(t *testing.T) {
-	validators := make(map[string]*Validator)
+	validators := make(map[storage.FieldID]*Validator)
 	err := initValidators(nil, validators)
 	assert.NotNil(t, err)
 
+	schema := sampleSchema()
 	// success case
-	err = initValidators(sampleSchema(), validators)
+	err = initValidators(schema, validators)
 	assert.Nil(t, err)
-	assert.Equal(t, len(sampleSchema().Fields), len(validators))
+	assert.Equal(t, len(schema.Fields), len(validators))
+	name2ID := make(map[string]storage.FieldID)
+	for _, field := range schema.Fields {
+		name2ID[field.GetName()] = field.GetFieldID()
+	}
 
 	checkFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
-		v, ok := validators[funcName]
+		id := name2ID[funcName]
+		v, ok := validators[id]
 		assert.True(t, ok)
 		err = v.validateFunc(validVal)
 		assert.Nil(t, err)
@@ -127,7 +134,7 @@ func Test_InitValidators(t *testing.T) {
 	checkFunc("field_float_vector", validVal, invalidVal)
 
 	// error cases
-	schema := &schemapb.CollectionSchema{
+	schema = &schemapb.CollectionSchema{
 		Name:        "schema",
 		Description: "schema",
 		AutoID:      true,
@@ -144,7 +151,7 @@ func Test_InitValidators(t *testing.T) {
 		},
 	})
 
-	validators = make(map[string]*Validator)
+	validators = make(map[storage.FieldID]*Validator)
 	err = initValidators(schema, validators)
 	assert.NotNil(t, err)
 
@@ -308,7 +315,7 @@ func Test_JSONRowConsumer(t *testing.T) {
 
 	var callTime int32
 	var totalCount int
-	consumeFunc := func(fields map[string]storage.FieldData) error {
+	consumeFunc := func(fields map[storage.FieldID]storage.FieldData) error {
 		callTime++
 		rowCount := 0
 		for _, data := range fields {
@@ -370,7 +377,7 @@ func Test_JSONColumnConsumer(t *testing.T) {
 
 	callTime := 0
 	rowCount := 0
-	consumeFunc := func(fields map[string]storage.FieldData) error {
+	consumeFunc := func(fields map[storage.FieldID]storage.FieldData) error {
 		callTime++
 		for _, data := range fields {
 			if rowCount == 0 {

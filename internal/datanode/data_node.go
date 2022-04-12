@@ -39,6 +39,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	allocator2 "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -46,12 +47,15 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -787,9 +791,221 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID),
 		}, nil
 	}
+	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_RequestTSO,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  node.NodeID,
+		},
+		Count: 1,
+	})
+	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
+		if err != nil {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "DataNode alloc ts failed",
+			}, nil
+		}
+	}
+
+	ts := rep.GetTimestamp()
+
+	metaService := newMetaService(node.rootCoord, req.GetImportTask().GetCollectionId())
+	schema, err := metaService.getCollectionSchema(ctx, req.GetImportTask().GetCollectionId(), 0)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.NodeID)
+	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize/(1024*1024), idAllocator, node.chunkManager, importFlushReqFunc(node, req, schema, ts))
+	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
 
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 	return resp, nil
+}
+
+type importFlushFunc func(fields map[storage.FieldID]storage.FieldData) error
+
+func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *schemapb.CollectionSchema, ts Timestamp) importFlushFunc {
+	return func(fields map[storage.FieldID]storage.FieldData) error {
+		segReqs := []*datapb.SegmentIDRequest{
+			{
+				ChannelName:  "test-channel",
+				Count:        1,
+				CollectionID: req.GetImportTask().GetCollectionId(),
+				PartitionID:  req.GetImportTask().GetCollectionId(),
+			},
+		}
+		segmentIDReq := &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          typeutil.ProxyRole,
+			SegmentIDRequests: segReqs,
+		}
+
+		resp, err := node.dataCoord.AssignSegmentID(context.Background(), segmentIDReq)
+		if err != nil {
+			return fmt.Errorf("syncSegmentID Failed:%w", err)
+		}
+
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return fmt.Errorf("syncSegmentID Failed:%s", resp.Status.Reason)
+		}
+		segmentID := resp.SegIDAssignments[0].SegID
+
+		var rowNum int
+		for _, field := range fields {
+			rowNum = field.RowNum()
+			break
+		}
+		tsFieldData := make([]int64, rowNum)
+		for i := range tsFieldData {
+			tsFieldData[i] = int64(ts)
+		}
+		fields[common.TimeStampField] = &storage.Int64FieldData{
+			Data:    tsFieldData,
+			NumRows: []int64{int64(rowNum)},
+		}
+		var pkFieldID int64
+		for _, field := range schema.Fields {
+			if field.IsPrimaryKey {
+				pkFieldID = field.GetFieldID()
+				break
+			}
+		}
+		fields[common.RowIDField] = fields[pkFieldID]
+
+		data := BufferData{buffer: &InsertData{
+			Data: fields,
+		}}
+		meta := &etcdpb.CollectionMeta{
+			ID:     req.GetImportTask().GetCollectionId(),
+			Schema: schema,
+		}
+		inCodec := storage.NewInsertCodec(meta)
+
+		binLogs, statsBinlogs, err := inCodec.Serialize(req.GetImportTask().GetPartitionId(), segmentID, data.buffer)
+		if err != nil {
+			return err
+		}
+
+		var alloc allocatorInterface = newAllocator(node.rootCoord)
+		start, _, err := alloc.allocIDBatch(uint32(len(binLogs)))
+		if err != nil {
+			return err
+		}
+
+		field2Insert := make(map[UniqueID]*datapb.Binlog, len(binLogs))
+		kvs := make(map[string][]byte, len(binLogs))
+		field2Logidx := make(map[UniqueID]UniqueID, len(binLogs))
+		for idx, blob := range binLogs {
+			fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
+			if err != nil {
+				log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+				return err
+			}
+
+			logidx := start + int64(idx)
+
+			// no error raise if alloc=false
+			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
+
+			key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
+			kvs[key] = blob.Value[:]
+			field2Insert[fieldID] = &datapb.Binlog{
+				EntriesNum:    data.size,
+				TimestampFrom: 0, //TODO
+				TimestampTo:   0, //TODO,
+				LogPath:       key,
+				LogSize:       int64(len(blob.Value)),
+			}
+			field2Logidx[fieldID] = logidx
+		}
+
+		field2Stats := make(map[UniqueID]*datapb.Binlog)
+		// write stats binlog
+		for _, blob := range statsBinlogs {
+			fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
+			if err != nil {
+				log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+				return err
+			}
+
+			logidx := field2Logidx[fieldID]
+
+			// no error raise if alloc=false
+			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
+
+			key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
+			kvs[key] = blob.Value
+			field2Stats[fieldID] = &datapb.Binlog{
+				EntriesNum:    0,
+				TimestampFrom: 0, //TODO
+				TimestampTo:   0, //TODO,
+				LogPath:       key,
+				LogSize:       int64(len(blob.Value)),
+			}
+		}
+
+		err = node.chunkManager.MultiWrite(kvs)
+		if err != nil {
+			return err
+		}
+		var (
+			fieldInsert []*datapb.FieldBinlog
+			fieldStats  []*datapb.FieldBinlog
+		)
+
+		for k, v := range field2Insert {
+			fieldInsert = append(fieldInsert, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
+		}
+		for k, v := range field2Stats {
+			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
+		}
+
+		req := &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   0, //TODO msg type
+				MsgID:     0, //TODO msg id
+				Timestamp: 0, //TODO time stamp
+				SourceID:  Params.DataNodeCfg.NodeID,
+			},
+			SegmentID:           segmentID,
+			CollectionID:        req.ImportTask.GetCollectionId(),
+			Field2BinlogPaths:   fieldInsert,
+			Field2StatslogPaths: fieldStats,
+			Importing:           true,
+		}
+
+		err = retry.Do(context.Background(), func() error {
+			rsp, err := node.dataCoord.SaveBinlogPaths(context.Background(), req)
+			// should be network issue, return error and retry
+			if err != nil {
+				return fmt.Errorf(err.Error())
+			}
+
+			// TODO should retry only when datacoord status is unhealthy
+			if rsp.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
+			}
+			return nil
+		})
+		if err != nil {
+			log.Warn("failed to SaveBinlogPaths", zap.Error(err))
+			return err
+		}
+
+		return nil
+	}
+
 }

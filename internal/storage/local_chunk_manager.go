@@ -48,13 +48,21 @@ func NewLocalChunkManager(opts ...Option) *LocalChunkManager {
 	}
 }
 
-// GetPath returns the path of local data if exists.
-func (lcm *LocalChunkManager) GetPath(filePath string) (string, error) {
+// Path returns the path of local data if exists.
+func (lcm *LocalChunkManager) Path(filePath string) (string, error) {
 	if !lcm.Exist(filePath) {
 		return "", errors.New("local file cannot be found with filePath:" + filePath)
 	}
 	absPath := path.Join(lcm.localPath, filePath)
 	return absPath, nil
+}
+
+func (lcm *LocalChunkManager) Reader(filePath string) (FileReader, error) {
+	if !lcm.Exist(filePath) {
+		return nil, errors.New("local file cannot be found with filePath:" + filePath)
+	}
+	absPath := path.Join(lcm.localPath, filePath)
+	return os.Open(absPath)
 }
 
 // Write writes the data to local storage.
@@ -181,7 +189,7 @@ func (lcm *LocalChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
 	return mmap.Open(path.Clean(absPath))
 }
 
-func (lcm *LocalChunkManager) GetSize(filePath string) (int64, error) {
+func (lcm *LocalChunkManager) Size(filePath string) (int64, error) {
 	absPath := path.Join(lcm.localPath, filePath)
 	fi, err := os.Stat(absPath)
 	if err != nil {

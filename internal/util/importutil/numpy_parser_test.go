@@ -5,11 +5,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/sbinet/npyio/npy"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/sbinet/npyio/npy"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_NewNumpyParser(t *testing.T) {
