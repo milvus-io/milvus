@@ -152,12 +152,12 @@ func (node *Proxy) initSession() error {
 
 // Init initialize proxy.
 func (node *Proxy) Init() error {
-	log.Debug("init session for Proxy")
+	log.Info("init session for Proxy")
 	if err := node.initSession(); err != nil {
 		log.Warn("failed to init Proxy's session", zap.Error(err))
 		return err
 	}
-	log.Debug("init session for Proxy done")
+	log.Info("init session for Proxy done")
 
 	if node.queryCoord != nil {
 		log.Debug("create query channel for Proxy")

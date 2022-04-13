@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"go.uber.org/zap"
 
 	grpcproxy "github.com/milvus-io/milvus/internal/distributed/proxy"
 )
@@ -47,9 +48,10 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 // Run starts service
 func (n *Proxy) Run() error {
 	if err := n.svr.Run(); err != nil {
+		log.Warn("failed to start Proxy", zap.Error(err))
 		return err
 	}
-	log.Debug("Proxy successfully started")
+	log.Info("Proxy successfully started")
 	return nil
 }
 
