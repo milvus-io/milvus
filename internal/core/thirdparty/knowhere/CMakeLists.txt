@@ -23,9 +23,9 @@ endif ()
 
 if (MSYS)
     # TODO(matrixji) replace with official release after `support windows` merged/tagged
-    # windows adaptation + milvus-io/knowhere@v1.1.1
-    set (KNOWHERE_SOURCE_URL "https://github.com/matrixji/knowhere/archive/refs/tags/v1.1.1-windows-adaptation.tar.gz")
-    set (KNOWHERE_SOURCE_MD5 "c7a483a9edd618e6d5519af5109fcce7")
+    # windows adaptation + milvus-io/knowhere@v1.1.3
+    set (KNOWHERE_SOURCE_URL "https://github.com/matrixji/knowhere/archive/refs/tags/v1.1.3-win.tar.gz")
+    set (KNOWHERE_SOURCE_MD5 "58021c73c4dc9fce40f429c02968bf79")
 endif (MSYS)
 
 macro(build_knowhere)

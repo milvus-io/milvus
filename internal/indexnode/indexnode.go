@@ -25,6 +25,7 @@ package indexnode
 #cgo windows LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
 
 #include <stdlib.h>
+#include <stdint.h>
 #include "indexbuilder/init_c.h"
 
 */
