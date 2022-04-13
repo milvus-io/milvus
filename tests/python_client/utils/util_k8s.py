@@ -82,6 +82,28 @@ def get_pod_list(namespace, label_selector):
         raise Exception(str(e))
 
 
+def get_pod_ip_name_pairs(namespace, label_selector):
+    """
+    get pod ip name pairs with label selector
+
+    :param namespace: the namespace where the release
+    :type namespace: str
+
+    :param label_selector: labels to restrict which pods to list
+    :type label_selector: str
+
+    :example:
+            >>> get_pod_ip_name_pairs("chaos-testing", "app.kubernetes.io/instance=test-proxy-pod-failure, component=querynode")
+    """
+    m = dict()
+    items = get_pod_list(namespace, label_selector)
+    for item in items:
+        ip = item.status.pod_ip
+        name = item.metadata.name
+        m[ip] = name
+    return m
+
+
 def export_pod_logs(namespace, label_selector, release_name=None):
     """
     export pod logs with label selector to '/tmp/milvus'
@@ -144,6 +166,7 @@ def read_pod_log(namespace, label_selector, release_name):
 
 
 if __name__ == '__main__':
-    label = "app.kubernetes.io/instance=test-proxy-pod-failure, component=proxy"
+    label = "app.kubernetes.io/instance=milvus-load-balance, component=querynode"
     res = get_pod_list("chaos-testing", label_selector=label)
+    m = get_pod_ip_name_pairs("chaos-testing", label_selector=label)
     export_pod_logs(namespace='chaos-testing', label_selector=label)
