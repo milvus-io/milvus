@@ -110,9 +110,8 @@ jobs:
           echo "result analysis"
           cat ${{ env.RELEASE }}.log || echo "no log file"
 
-      - name: Milvus E2E Test
-        timeout-minutes: 15
-        if: ${{ always() }}
+      - name: Wait all pods ready
+        timeout-minutes: 5
         shell: bash
         working-directory: tests/python_client
         run: |
@@ -127,8 +126,26 @@ jobs:
           sleep 20s
           nc -vz 127.0.0.1 19530
 
+      - name: Run e2e test after chaos
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client
+        run: |
+
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+
+      - name: Run hello_milvus after chaos
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client
+        run: |
           python chaos/scripts/hello_milvus.py --host 127.0.0.1
+
+      - name: Verify all collections after chaos
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client
+        run: |
           python chaos/scripts/verify_all_collections.py --host 127.0.0.1
 
       - name: Export logs
