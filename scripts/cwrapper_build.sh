@@ -37,8 +37,9 @@ mkdir -p ${OUTPUT_LIB}
 
 BUILD_TYPE="Debug"
 CUSTOM_THIRDPARTY_PATH=""
+EMBEDDED_MILVUS="OFF"
 
-while getopts "a:b:t:h:f:" arg; do
+while getopts "a:g:t:h:f:b" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -49,17 +50,21 @@ while getopts "a:b:t:h:f:" arg; do
   a)
     GIT_ARROW_REPO=$OPTARG
     ;;
-  b)
+  g)
     GIT_ARROW_TAG=$OPTARG
     ;;
   h) # help
     echo "-t: build type(default: Debug)
 -a: arrow repo(default: https://github.com/apache/arrow.git)
--b: arrow tag(default: apache-arrow-2.0.0)
+-g: arrow tag(default: apache-arrow-2.0.0)
 -f: custom thirdparty path(default: "")
 -h: help
+-b: build embedded milvus(default: OFF)
                 "
     exit 0
+    ;;
+  b)
+    EMBEDDED_MILVUS="ON"
     ;;
   ?)
     echo "ERROR! unknown argument"
@@ -82,6 +87,7 @@ CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
 -DCMAKE_INSTALL_PREFIX=${OUTPUT_LIB} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+-DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} ${SRC_DIR}"
 
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"

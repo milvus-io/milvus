@@ -56,11 +56,16 @@ macro( build_rocksdb )
         set ( ROCKSDB_URL_MD5 "67f9e04fda62af551dd039c37b1808ac" )
     endif ()
 
+    if ( EMBEDDED_MILVUS )
+        message ( STATUS "Turning on fPIC while building embedded Milvus" )
+        set( FPIC_ARG "-DCMAKE_POSITION_INDEPENDENT_CODE=ON" )
+    endif()
     set( ROCKSDB_CMAKE_ARGS
          "-DWITH_GFLAGS=OFF"
          "-DROCKSDB_BUILD_SHARED=OFF"
          "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
          "-DFAIL_ON_WARNINGS=OFF"
+         ${FPIC_ARG}
          #This is used to solve 'illegal instruction' problem in some machine
          "-DPORTABLE=ON"
         )
