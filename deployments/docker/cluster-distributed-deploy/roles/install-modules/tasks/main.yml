@@ -1,0 +1,13 @@
+---
+- name: Install Packages #安装下面列表中的软件
+  apt: name={{ item }} state=latest update_cache=yes
+  with_items:
+    - ntp
+    - python3
+    - tcpdump
+    - wget
+    - openssl
+    - curl
+    - python3-pip
+
+

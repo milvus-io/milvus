@@ -1,0 +1,30 @@
+---
+- name: Install Docker Dependencies #以下部分都是安装Docker相关的软件
+  apt: name={{ item }} state=latest update_cache=yes
+  with_items:
+    - apt-transport-https
+    - ca-certificates
+    - software-properties-common 
+  tags: docker
+
+- name: Get Docker key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  tags: docker
+
+- name: Add Docker packages to Repository
+  apt_repository:
+    repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename|lower }} stable
+  tags: docker
+
+- name: Install Docker-CE
+  apt: name="docker-ce" state=latest update_cache=yes
+  tags: docker
+
+- name: Install python3-docker
+  apt: name="python3-docker" state=latest update_cache=yes
+  tags: docker
+
+- name: Install docker-compose python3 library
+  command: "pip3 install docker-compose"

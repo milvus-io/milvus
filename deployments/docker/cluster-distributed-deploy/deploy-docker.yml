@@ -1,0 +1,15 @@
+---
+- name: setup pre-requisites #安装前置条件
+  hosts: all
+  become: yes
+  become_user: root
+  roles:
+    - install-modules #脚本路径roles\install-modules\main.yml
+    - configure-hosts-file #添加Hostname和IP地址到Host文件，脚本路径roles\configure-hosts-file\tasks\main.yml
+
+- name: install docker #安装Docker和设置Ansible python库
+  become: yes
+  become_user: root
+  hosts: dockernodes
+  roles:
+    - docker-installation #脚本路径roles\docker-installation\tasks\main.yml
