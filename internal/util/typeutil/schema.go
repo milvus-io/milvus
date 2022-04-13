@@ -468,3 +468,51 @@ func IsPrimaryFieldType(dataType schemapb.DataType) bool {
 
 	return false
 }
+
+func GetPK(data *schemapb.IDs, idx int64) interface{} {
+	if int64(GetSizeOfIDs(data)) <= idx {
+		return nil
+	}
+	switch data.GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		return data.GetIntId().GetData()[idx]
+	case *schemapb.IDs_StrId:
+		return data.GetStrId().GetData()[idx]
+	}
+	return nil
+}
+
+func IsPKInvalid(pk interface{}) bool {
+	switch realPK := pk.(type) {
+	case int64:
+		return realPK == InvalidIntPK
+	case string:
+		return realPK == InvalidStrPK
+	}
+	return true
+}
+
+func AppendPKs(pks *schemapb.IDs, pk interface{}) {
+	switch realPK := pk.(type) {
+	case int64:
+		if pks.GetIntId() == nil {
+			pks.IdField = &schemapb.IDs_IntId{
+				IntId: &schemapb.LongArray{
+					Data: make([]int64, 0),
+				},
+			}
+		}
+		pks.GetIntId().Data = append(pks.GetIntId().GetData(), realPK)
+	case string:
+		if pks.GetStrId() == nil {
+			pks.IdField = &schemapb.IDs_StrId{
+				StrId: &schemapb.StringArray{
+					Data: make([]string, 0),
+				},
+			}
+		}
+		pks.GetStrId().Data = append(pks.GetStrId().GetData(), realPK)
+	default:
+		log.Warn("got unexpected data type of pk when append pks", zap.Any("pk", pk))
+	}
+}

@@ -457,9 +457,12 @@ func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64
 	if data.TopK != topk {
 		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
-	if len(data.Ids.GetIntId().Data) != (int)(nq*topk) {
-		return fmt.Errorf("search result's id length %d invalid", len(data.Ids.GetIntId().Data))
+
+	pkHitNum := typeutil.GetSizeOfIDs(data.GetIds())
+	if int64(pkHitNum) != nq*topk {
+		return fmt.Errorf("search result's id length %d invalid, nq: %d, topk: %d", pkHitNum, nq, topk)
 	}
+
 	if len(data.Scores) != (int)(nq*topk) {
 		return fmt.Errorf("search result's score length %d invalid", len(data.Scores))
 	}
@@ -474,8 +477,8 @@ func selectSearchResultData(dataArray []*schemapb.SearchResultData, offsets []in
 			continue
 		}
 		idx := qi*topk + offset
-		id := dataArray[i].Ids.GetIntId().Data[idx]
-		if id != -1 {
+		id := typeutil.GetPK(dataArray[i].GetIds(), idx)
+		if !typeutil.IsPKInvalid(id) {
 			distance := dataArray[i].Scores[idx]
 			if distance > maxDistance {
 				sel = i
@@ -505,14 +508,8 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 			TopK:       topk,
 			FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
 			Scores:     make([]float32, 0),
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: make([]int64, 0),
-					},
-				},
-			},
-			Topks: make([]int64, 0),
+			Ids:        &schemapb.IDs{},
+			Topks:      make([]int64, 0),
 		},
 	}
 
@@ -533,7 +530,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, len(searchResultData))
 
-		var idSet = make(map[int64]struct{})
+		var idSet = make(map[interface{}]struct{})
 		var j int64
 		for j = 0; j < topk; {
 			sel := selectSearchResultData(searchResultData, offsets, topk, i)
@@ -542,17 +539,17 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 			}
 			idx := i*topk + offsets[sel]
 
-			id := searchResultData[sel].Ids.GetIntId().Data[idx]
-			score := searchResultData[sel].Scores[idx]
+			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			// ignore invalid search result
-			if id == -1 {
+			if typeutil.IsPKInvalid(id) {
 				continue
 			}
+			score := searchResultData[sel].Scores[idx]
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
 				typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
-				ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
+				typeutil.AppendPKs(ret.Results.Ids, id)
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				idSet[id] = struct{}{}
 				j++

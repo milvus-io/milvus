@@ -1427,3 +1427,292 @@ func TestSearchTask_7803_reduce(t *testing.T) {
 	cancel()
 	wg.Wait()
 }
+
+func Test_checkSearchResultData(t *testing.T) {
+	type args struct {
+		data *schemapb.SearchResultData
+		nq   int64
+		topk int64
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			args: args{
+				data: &schemapb.SearchResultData{NumQueries: 100},
+				nq:   10,
+			},
+			wantErr: true,
+		},
+		{
+			args: args{
+				data: &schemapb.SearchResultData{NumQueries: 1, TopK: 1},
+				nq:   1,
+				topk: 10,
+			},
+			wantErr: true,
+		},
+		{
+			args: args{
+				data: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1, 2}, // != nq * topk
+							},
+						},
+					},
+				},
+				nq:   1,
+				topk: 1,
+			},
+			wantErr: true,
+		},
+		{
+			args: args{
+				data: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_StrId{
+							StrId: &schemapb.StringArray{
+								Data: []string{"1", "2"}, // != nq * topk
+							},
+						},
+					},
+				},
+				nq:   1,
+				topk: 1,
+			},
+			wantErr: true,
+		},
+		{
+			args: args{
+				data: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1},
+							},
+						},
+					},
+					Scores: []float32{0.99, 0.98}, // != nq * topk
+				},
+				nq:   1,
+				topk: 1,
+			},
+			wantErr: true,
+		},
+		{
+			args: args{
+				data: &schemapb.SearchResultData{
+					NumQueries: 1,
+					TopK:       1,
+					Ids: &schemapb.IDs{
+						IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{
+								Data: []int64{1},
+							},
+						},
+					},
+					Scores: []float32{0.99},
+				},
+				nq:   1,
+				topk: 1,
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := checkSearchResultData(tt.args.data, tt.args.nq, tt.args.topk); (err != nil) != tt.wantErr {
+				t.Errorf("checkSearchResultData(%v, %v, %v) error = %v, wantErr %v",
+					tt.args.data, tt.args.nq, tt.args.topk, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func Test_selectSearchResultData_int(t *testing.T) {
+	type args struct {
+		dataArray []*schemapb.SearchResultData
+		offsets   []int64
+		topk      int64
+		qi        int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			args: args{
+				dataArray: []*schemapb.SearchResultData{
+					{
+						Ids: &schemapb.IDs{
+							IdField: &schemapb.IDs_IntId{
+								IntId: &schemapb.LongArray{
+									Data: []int64{11, 9, 7, 5, 3, 1},
+								},
+							},
+						},
+						Scores: []float32{1.1, 0.9, 0.7, 0.5, 0.3, 0.1},
+					},
+					{
+						Ids: &schemapb.IDs{
+							IdField: &schemapb.IDs_IntId{
+								IntId: &schemapb.LongArray{
+									Data: []int64{12, 10, 8, 6, 4, 2},
+								},
+							},
+						},
+						Scores: []float32{1.2, 1.0, 0.8, 0.6, 0.4, 0.2},
+					},
+				},
+				offsets: []int64{0, 1},
+				topk:    2,
+				qi:      0,
+			},
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectSearchResultData(tt.args.dataArray, tt.args.offsets, tt.args.topk, tt.args.qi); got != tt.want {
+				t.Errorf("selectSearchResultData() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_selectSearchResultData_str(t *testing.T) {
+	type args struct {
+		dataArray []*schemapb.SearchResultData
+		offsets   []int64
+		topk      int64
+		qi        int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			args: args{
+				dataArray: []*schemapb.SearchResultData{
+					{
+						Ids: &schemapb.IDs{
+							IdField: &schemapb.IDs_StrId{
+								StrId: &schemapb.StringArray{
+									Data: []string{"11", "9", "7", "5", "3", "1"},
+								},
+							},
+						},
+						Scores: []float32{1.1, 0.9, 0.7, 0.5, 0.3, 0.1},
+					},
+					{
+						Ids: &schemapb.IDs{
+							IdField: &schemapb.IDs_StrId{
+								StrId: &schemapb.StringArray{
+									Data: []string{"12", "10", "8", "6", "4", "2"},
+								},
+							},
+						},
+						Scores: []float32{1.2, 1.0, 0.8, 0.6, 0.4, 0.2},
+					},
+				},
+				offsets: []int64{0, 1},
+				topk:    2,
+				qi:      1,
+			},
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := selectSearchResultData(tt.args.dataArray, tt.args.offsets, tt.args.topk, tt.args.qi); got != tt.want {
+				t.Errorf("selectSearchResultData() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_reduceSearchResultData_int(t *testing.T) {
+	topk := 2
+	nq := 3
+	results := []*schemapb.SearchResultData{
+		{
+			NumQueries: int64(nq),
+			TopK:       int64(topk),
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{11, 9, 7, 5, 3, 1},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.7, 0.5, 0.3, 0.1},
+		},
+		{
+			NumQueries: int64(nq),
+			TopK:       int64(topk),
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{12, 10, 8, 6, 4, 2},
+					},
+				},
+			},
+			Scores: []float32{1.2, 1.0, 0.8, 0.6, 0.4, 0.2},
+		},
+	}
+
+	reduced, err := reduceSearchResultData(results, int64(nq), int64(topk), distance.L2)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []int64{3, 4, 7, 8, 11, 12}, reduced.GetResults().GetIds().GetIntId().GetData())
+	// hard to compare floating point value.
+	// TODO: compare scores.
+}
+
+func Test_reduceSearchResultData_str(t *testing.T) {
+	topk := 2
+	nq := 3
+	results := []*schemapb.SearchResultData{
+		{
+			NumQueries: int64(nq),
+			TopK:       int64(topk),
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"11", "9", "7", "5", "3", "1"},
+					},
+				},
+			},
+			Scores: []float32{1.1, 0.9, 0.7, 0.5, 0.3, 0.1},
+		},
+		{
+			NumQueries: int64(nq),
+			TopK:       int64(topk),
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_StrId{
+					StrId: &schemapb.StringArray{
+						Data: []string{"12", "10", "8", "6", "4", "2"},
+					},
+				},
+			},
+			Scores: []float32{1.2, 1.0, 0.8, 0.6, 0.4, 0.2},
+		},
+	}
+
+	reduced, err := reduceSearchResultData(results, int64(nq), int64(topk), distance.L2)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, []string{"3", "4", "7", "8", "11", "12"}, reduced.GetResults().GetIds().GetStrId().GetData())
+	// hard to compare floating point value.
+	// TODO: compare scores.
+}

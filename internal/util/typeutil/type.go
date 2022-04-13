@@ -49,3 +49,5 @@ const (
 )
 
 const InvalidUniqueID = UniqueID(-1)
+const InvalidIntPK = int64(-1)
+const InvalidStrPK = ""
