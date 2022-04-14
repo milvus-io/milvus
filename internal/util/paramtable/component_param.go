@@ -193,6 +193,7 @@ func (p *commonConfig) initProxySubName() {
 }
 
 // --- rootcoord ---
+// Deprecate
 func (p *commonConfig) initRootCoordTimeTick() {
 	keys := []string{
 		"common.chanNamePrefix.rootCoordTimeTick",
@@ -242,6 +243,7 @@ func (p *commonConfig) initQueryCoordSearch() {
 	p.QueryCoordSearch = p.initChanNamePrefix(keys)
 }
 
+// Deprecated, search result use grpc instead of a result channel
 func (p *commonConfig) initQueryCoordSearchResult() {
 	keys := []string{
 		"common.chanNamePrefix.searchResult",
@@ -250,6 +252,7 @@ func (p *commonConfig) initQueryCoordSearchResult() {
 	p.QueryCoordSearchResult = p.initChanNamePrefix(keys)
 }
 
+// Deprecate
 func (p *commonConfig) initQueryCoordTimeTick() {
 	keys := []string{
 		"common.chanNamePrefix.queryTimeTick",
@@ -284,6 +287,7 @@ func (p *commonConfig) initDataCoordStatistic() {
 	p.DataCoordStatistic = p.initChanNamePrefix(keys)
 }
 
+// Deprecate
 func (p *commonConfig) initDataCoordTimeTick() {
 	keys := []string{
 		"common.chanNamePrefix.dataCoordTimeTick",

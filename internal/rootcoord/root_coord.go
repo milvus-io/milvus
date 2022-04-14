@@ -471,39 +471,7 @@ func (c *Core) setMsgStreams() error {
 		return fmt.Errorf("RootCoordSubName is empty")
 	}
 
-	// rootcoord time tick channel
-	if Params.CommonCfg.RootCoordTimeTick == "" {
-		return fmt.Errorf("timeTickChannel is empty")
-	}
-	timeTickStream, _ := c.factory.NewMsgStream(c.ctx)
-	metrics.RootCoordNumOfMsgStream.Inc()
-	timeTickStream.AsProducer([]string{Params.CommonCfg.RootCoordTimeTick})
-	log.Debug("RootCoord register timetick producer success", zap.String("channel name", Params.CommonCfg.RootCoordTimeTick))
-
 	c.SendTimeTick = func(t typeutil.Timestamp, reason string) error {
-		msgPack := ms.MsgPack{}
-		baseMsg := ms.BaseMsg{
-			BeginTimestamp: t,
-			EndTimestamp:   t,
-			HashValues:     []uint32{0},
-		}
-		timeTickResult := internalpb.TimeTickMsg{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_TimeTick,
-				MsgID:     0,
-				Timestamp: t,
-				SourceID:  c.session.ServerID,
-			},
-		}
-		timeTickMsg := &ms.TimeTickMsg{
-			BaseMsg:     baseMsg,
-			TimeTickMsg: timeTickResult,
-		}
-		msgPack.Msgs = append(msgPack.Msgs, timeTickMsg)
-		if err := timeTickStream.Broadcast(&msgPack); err != nil {
-			return err
-		}
-
 		pc := c.chanTimeTick.listDmlChannels()
 		pt := make([]uint64, len(pc))
 		for i := 0; i < len(pt); i++ {
@@ -520,10 +488,6 @@ func (c *Core) setMsgStreams() error {
 			Timestamps:       pt,
 			DefaultTimestamp: t,
 		}
-		//log.Debug("update timetick",
-		//	zap.Any("DefaultTs", t),
-		//	zap.Any("sourceID", c.session.ServerID),
-		//	zap.Any("reason", reason))
 		return c.chanTimeTick.updateTimeTick(&ttMsg, reason)
 	}
 
@@ -1291,7 +1255,6 @@ func (c *Core) Start() error {
 	}
 
 	log.Debug(typeutil.RootCoordRole, zap.Int64("node id", c.session.ServerID))
-	log.Debug(typeutil.RootCoordRole, zap.String("time tick channel name", Params.CommonCfg.RootCoordTimeTick))
 
 	c.startOnce.Do(func() {
 		if err := c.proxyManager.WatchProxy(); err != nil {
