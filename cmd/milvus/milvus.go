@@ -189,20 +189,26 @@ func printUsage(w io.Writer, f *flag.Flag) {
 }
 
 // create runtime folder
-func createRuntimeDir() string {
+func createRuntimeDir(sType string) string {
+	var writer io.Writer
+	if sType == typeutil.EmbeddedRole {
+		writer = io.Discard
+	} else {
+		writer = os.Stderr
+	}
 	runtimeDir := "/run/milvus"
 	if runtime.GOOS == "windows" {
 		runtimeDir = "run"
 		if err := makeRuntimeDir(runtimeDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
+			fmt.Fprintf(writer, "Create runtime directory at %s failed\n", runtimeDir)
 			os.Exit(-1)
 		}
 	} else {
 		if err := makeRuntimeDir(runtimeDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
+			fmt.Fprintf(writer, "Set runtime dir at %s failed, set it to /tmp/milvus directory\n", runtimeDir)
 			runtimeDir = "/tmp/milvus"
 			if err = makeRuntimeDir(runtimeDir); err != nil {
-				fmt.Fprintf(os.Stderr, "Create runtime directory at %s failed\n", runtimeDir)
+				fmt.Fprintf(writer, "Create runtime directory at %s failed\n", runtimeDir)
 				os.Exit(-1)
 			}
 		}
@@ -311,7 +317,7 @@ func RunMilvus(args []string) {
 		params.SetLogger(0)
 	}
 
-	runtimeDir := createRuntimeDir()
+	runtimeDir := createRuntimeDir(serverType)
 	filename := getPidFileName(serverType, svrAlias)
 	switch command {
 	case "run":

@@ -63,7 +63,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 		return nil, ErrMissingMetadata()
 	}
 	if globalMetaCache == nil {
-		return nil, ErrGlobalMetaCacheUninitialized()
+		return nil, ErrProxyNotReady()
 	}
 	// check:
 	//	1. if rpc call from a member (like index/query/data component)

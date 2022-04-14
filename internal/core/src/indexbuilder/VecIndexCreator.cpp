@@ -165,7 +165,8 @@ VecIndexCreator::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
         }
     }
     auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-    std::cout << "Konwhere BuildWithoutIds config_ is " << config_ << std::endl;
+    // TODO: Use easylogging instead, if you really need to keep this log.
+    // std::cout << "Konwhere BuildWithoutIds config_ is " << config_ << std::endl;
     AssertInfo(conf_adapter->CheckTrain(config_, index_mode), "something wrong in index parameters!");
 
     if (is_in_need_id_list(index_type)) {

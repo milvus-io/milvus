@@ -80,6 +80,6 @@ func ErrUnauthenticated() error {
 	return fmt.Errorf("unauthenticated: invalid credential")
 }
 
-func ErrGlobalMetaCacheUninitialized() error {
-	return fmt.Errorf("internal: globalMetaCache not initialized")
+func ErrProxyNotReady() error {
+	return fmt.Errorf("internal: Milvus Proxy is not ready yet. please wait")
 }

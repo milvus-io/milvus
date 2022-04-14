@@ -45,6 +45,7 @@ func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
 			cfg.LogLevel = etcdCfg.EtcdLogLevel
 			e, err := embed.StartEtcd(cfg)
 			if err != nil {
+				log.Error("failed to init embedded Etcd server", zap.Error(err))
 				initError = err
 			}
 			etcdServer = e
