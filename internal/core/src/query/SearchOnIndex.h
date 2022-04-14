@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "common/BitsetView.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
@@ -21,6 +22,6 @@ SubSearchResult
 SearchOnIndex(const dataset::SearchDataset& search_dataset,
               const knowhere::VecIndex& indexing,
               const knowhere::Config& search_conf,
-              const faiss::BitsetView& bitset);
+              const BitsetView& bitset);
 
 }  // namespace milvus::query

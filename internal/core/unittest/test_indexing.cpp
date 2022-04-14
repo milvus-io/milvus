@@ -56,12 +56,6 @@ TEST(Indexing, SmartBruteForce) {
     constexpr int DIM = 16;
     constexpr int TOPK = 10;
 
-    auto bitmap = std::make_shared<faiss::ConcurrentBitset>(N);
-    // exclude the first
-    for (int i = 0; i < N / 2; ++i) {
-        bitmap->set(i);
-    }
-
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
     auto total_count = DIM * TOPK;
     auto raw = (const float*)raw_data.data();
@@ -157,16 +151,16 @@ TEST(Indexing, Naive) {
         index->AddWithoutIds(ds, conf);
     }
 
-    auto bitmap = std::make_shared<faiss::ConcurrentBitset>(N);
+    auto bitmap = BitsetType(N, false);
     // exclude the first
     for (int i = 0; i < N / 2; ++i) {
-        bitmap->set(i);
+        bitmap.set(i);
     }
 
     //    index->SetBlacklist(bitmap);
+    BitsetView view = bitmap;
     auto query_ds = knowhere::GenDataset(1, DIM, raw_data.data());
-
-    auto final = index->Query(query_ds, conf, bitmap);
+    auto final = index->Query(query_ds, conf, view);
     auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
     auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
     for (int i = 0; i < TOPK; ++i) {
@@ -315,8 +309,8 @@ TEST(Indexing, BinaryBruteForce) {
   ]
 ]
 )");
-#else // for mac
-auto ref = json::parse(R"(
+#else  // for mac
+    auto ref = json::parse(R"(
 [
   [
     [ "1024->0.000000", "59169->0.645000", "98548->0.646000", "3356->0.646000", "90373->0.647000" ],

@@ -11,19 +11,12 @@
 
 #pragma once
 
-#include <deque>
-#include <boost/dynamic_bitset.hpp>
-
+#include "common/BitsetView.h"
 #include "query/PlanNode.h"
 #include "query/SearchOnGrowing.h"
 #include "segcore/SealedIndexingRecord.h"
 
 namespace milvus::query {
-
-using BitsetSimple = std::deque<BitsetType>;
-
-aligned_vector<uint8_t>
-AssembleNegBitset(const BitsetSimple& bitmap_simple);
 
 void
 SearchOnSealed(const Schema& schema,
@@ -31,7 +24,7 @@ SearchOnSealed(const Schema& schema,
                const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,
-               const faiss::BitsetView& view,
+               const BitsetView& view,
                SearchResult& result,
                int64_t segment_id);
 

@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "common/BitsetView.h"
 #include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {
@@ -21,7 +22,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const query::SearchInfo& info,
                 const void* query_data,
                 int64_t num_queries,
-                const faiss::BitsetView& bitset,
+                const BitsetView& bitset,
                 SearchResult& results);
 
 }  // namespace milvus::query

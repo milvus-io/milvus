@@ -272,7 +272,7 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
         int64_t the_offset = seg_offsets[del_index].get();
         AssertInfo(the_offset >= 0, "Seg offset is invalid");
         if (deleted_record_.timestamps_[del_index] >= query_timestamp) {
-            bitmap->clear(the_offset);
+            bitmap->reset(the_offset);
         } else {
             bitmap->set(the_offset);
         }
@@ -281,27 +281,19 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
     return current;
 }
 
-BitsetView
-SegmentSealedImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const {
+void
+SegmentSealedImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
     if (del_barrier == 0) {
-        return bitset;
+        return;
     }
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    if (bitmap_holder == nullptr) {
-        return bitset;
+    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
+        return;
     }
-    AssertInfo(bitmap_holder, "bitmap_holder is null");
-    auto deleted_bitmap = bitmap_holder->bitmap_ptr;
-    if (bitset.size() == 0) {
-        return BitsetView(deleted_bitmap);
-    }
-    AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
-
-    auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
-    auto final_bitmap = (*deleted_bitmap.get()) | (*filtered_bitmap.get());
-    auto res = BitsetView(final_bitmap);
-    return res;
+    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
+    AssertInfo(delete_bitset.size() == bitset.size(), "Deleted bitmap size not equal to filtered bitmap size");
+    bitset |= delete_bitset;
 }
 
 void

@@ -44,7 +44,7 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
                                        int64_t insert_barrier,
                                        bool force) const {
     auto old = deleted_record_.get_lru_entry();
-    if (old->bitmap_ptr->count() == insert_barrier) {
+    if (old->bitmap_ptr->size() == insert_barrier) {
         if (old->del_barrier == del_barrier) {
             return old;
         }
@@ -80,7 +80,7 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
                 continue;
             }
             if (record_.timestamps_[the_offset] >= query_timestamp) {
-                bitmap->clear(the_offset);
+                bitmap->reset(the_offset);
             } else {
                 bitmap->set(the_offset);
             }
@@ -90,27 +90,19 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
     return current;
 }
 
-BitsetView
-SegmentGrowingImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_barrier, Timestamp timestamp) const {
+void
+SegmentGrowingImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
     if (del_barrier == 0) {
-        return bitset;
+        return;
     }
     auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
-    if (bitmap_holder == nullptr) {
-        return bitset;
+    if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
+        return;
     }
-    AssertInfo(bitmap_holder, "bitmap_holder is null");
-    auto deleted_bitmap = bitmap_holder->bitmap_ptr;
-    if (bitset.size() == 0) {
-        return BitsetView(deleted_bitmap);
-    }
-    AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
-
-    auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
-    auto final_bitmap = (*deleted_bitmap.get()) | (*filtered_bitmap.get());
-    BitsetView res = BitsetView(final_bitmap);
-    return res;
+    auto& delete_bitset = *bitmap_holder->bitmap_ptr;
+    AssertInfo(delete_bitset.size() == bitset.size(), "Deleted bitmap size not equal to filtered bitmap size");
+    bitset |= delete_bitset;
 }
 
 Status

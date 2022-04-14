@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "common/BitsetView.h"
 #include "SearchOnGrowing.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
@@ -58,7 +59,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             auto size_per_chunk = field_indexing.get_size_per_chunk();
             auto indexing = field_indexing.get_chunk_indexing(chunk_id);
 
-            auto sub_view = BitsetSubView(bitset, chunk_id * size_per_chunk, size_per_chunk);
+            auto sub_view = bitset.subview(chunk_id * size_per_chunk, size_per_chunk);
             auto sub_qr = SearchOnIndex(search_dataset, *indexing, search_conf, sub_view);
 
             // convert chunk uid to segment uid
@@ -84,7 +85,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_size_per_chunk);
         auto size_per_chunk = element_end - element_begin;
 
-        auto sub_view = BitsetSubView(bitset, element_begin, size_per_chunk);
+        auto sub_view = bitset.subview(element_begin, size_per_chunk);
         auto sub_qr = FloatSearchBruteForce(search_dataset, chunk.data(), size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid
@@ -110,7 +111,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
              const uint8_t* query_data,
              int64_t num_queries,
              int64_t ins_barrier,
-             const faiss::BitsetView& bitset,
+             const BitsetView& bitset,
              SearchResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
@@ -146,7 +147,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
         auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_size_per_chunk);
         auto nsize = element_end - element_begin;
 
-        auto sub_view = BitsetSubView(bitset, element_begin, nsize);
+        auto sub_view = bitset.subview(element_begin, nsize);
         auto sub_result = BinarySearchBruteForce(search_dataset, chunk.data(), nsize, sub_view);
 
         // convert chunk uid to segment uid
@@ -174,7 +175,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const query::SearchInfo& info,
                 const void* query_data,
                 int64_t num_queries,
-                const faiss::BitsetView& bitset,
+                const BitsetView& bitset,
                 SearchResult& results) {
     // TODO: add data_type to info
     auto data_type = segment.get_schema()[info.field_offset_].get_data_type();
