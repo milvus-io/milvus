@@ -80,6 +80,7 @@ func TestDataNode(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
+	defer node.Stop()
 
 	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
 	Params.DataNodeCfg.NodeID = 1
@@ -399,6 +400,7 @@ func TestWatchChannel(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
+	defer node.Stop()
 	err = node.Register()
 	assert.Nil(t, err)
 
