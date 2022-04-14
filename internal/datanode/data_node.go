@@ -820,8 +820,27 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		}, nil
 	}
 	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.NodeID)
-	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize/(1024*1024), idAllocator, node.chunkManager, importFlushReqFunc(node, req, schema, ts))
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     req.GetImportTask().TaskId,
+		DatanodeId: node.NodeID,
+		State:      commonpb.ImportState_ImportPersisted,
+		Segments:   make([]int64, 0),
+	}
+	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize, idAllocator, node.chunkManager,
+		importFlushReqFunc(node, req, importResult, schema, ts))
 	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	// report root coord that the import task has been finished
+	_, err = node.rootCoord.ReportImport(ctx, importResult)
 	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -835,13 +854,16 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	return resp, nil
 }
 
-type importFlushFunc func(fields map[storage.FieldID]storage.FieldData) error
-
-func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *schemapb.CollectionSchema, ts Timestamp) importFlushFunc {
-	return func(fields map[storage.FieldID]storage.FieldData) error {
+func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoordpb.ImportResult, schema *schemapb.CollectionSchema, ts Timestamp) importutil.ImportFlushFunc {
+	return func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
+		if shardNum >= len(req.ImportTask.ChannelNames) {
+			log.Error("import task returns invalid shard number", zap.Int("shardNum", shardNum))
+			return fmt.Errorf("syncSegmentID Failed: invalid shard number %d", shardNum)
+		}
+		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardNum", shardNum))
 		segReqs := []*datapb.SegmentIDRequest{
 			{
-				ChannelName:  "test-channel",
+				ChannelName:  req.ImportTask.ChannelNames[shardNum],
 				Count:        1,
 				CollectionID: req.GetImportTask().GetCollectionId(),
 				PartitionID:  req.GetImportTask().GetCollectionId(),
@@ -1005,6 +1027,8 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *s
 			return err
 		}
 
+		log.Info("segment imported and persisted", zap.Int64("segmentID", segmentID))
+		res.Segments = append(res.Segments, segmentID)
 		return nil
 	}
 

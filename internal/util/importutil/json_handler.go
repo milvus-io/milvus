@@ -278,7 +278,7 @@ func (v *JSONRowValidator) Handle(rows []map[storage.FieldID]interface{}) error 
 
 	// parse completed
 	if rows == nil {
-		log.Debug("JSON row validation finished")
+		log.Info("JSON row validation finished")
 		if v.downstream != nil {
 			return v.downstream.Handle(rows)
 		}
@@ -287,6 +287,7 @@ func (v *JSONRowValidator) Handle(rows []map[storage.FieldID]interface{}) error 
 
 	for i := 0; i < len(rows); i++ {
 		row := rows[i]
+
 		for id, validator := range v.validators {
 			if validator.primaryKey && validator.autoID {
 				// auto-generated primary key, ignore
@@ -352,7 +353,7 @@ func (v *JSONColumnValidator) Handle(columns map[storage.FieldID][]interface{}) 
 		}
 
 		// let the downstream know parse is completed
-		log.Debug("JSON column validation finished")
+		log.Info("JSON column validation finished")
 		if v.downstream != nil {
 			return v.downstream.Handle(nil)
 		}
@@ -382,6 +383,8 @@ func (v *JSONColumnValidator) Handle(columns map[storage.FieldID][]interface{}) 
 	return nil
 }
 
+type ImportFlushFunc func(fields map[storage.FieldID]storage.FieldData, shardNum int) error
+
 // row-based json format consumer class
 type JSONRowConsumer struct {
 	collectionSchema *schemapb.CollectionSchema              // collection schema
@@ -390,10 +393,10 @@ type JSONRowConsumer struct {
 	rowCounter       int64                                   // how many rows have been consumed
 	shardNum         int32                                   // sharding number of the collection
 	segmentsData     []map[storage.FieldID]storage.FieldData // in-memory segments data
-	segmentSize      int64                                   // maximum size of a segment in MB
+	segmentSize      int64                                   // maximum size of a segment(unit:byte)
 	primaryKey       storage.FieldID                         // name of primary key
 
-	callFlushFunc func(fields map[storage.FieldID]storage.FieldData) error // call back function to flush segment
+	callFlushFunc ImportFlushFunc // call back function to flush segment
 }
 
 func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[storage.FieldID]storage.FieldData {
@@ -465,7 +468,7 @@ func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[storage.Fi
 }
 
 func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *allocator.IDAllocator, shardNum int32, segmentSize int64,
-	flushFunc func(fields map[storage.FieldID]storage.FieldData) error) *JSONRowConsumer {
+	flushFunc ImportFlushFunc) *JSONRowConsumer {
 	if collectionSchema == nil {
 		log.Error("JSON row consumer: collection schema is nil")
 		return nil
@@ -521,8 +524,8 @@ func (v *JSONRowConsumer) flush(force bool) error {
 			segmentData := v.segmentsData[i]
 			rowNum := segmentData[v.primaryKey].RowNum()
 			if rowNum > 0 {
-				log.Debug("JSON row consumer: force flush segment", zap.Int("rows", rowNum))
-				v.callFlushFunc(segmentData)
+				log.Info("JSON row consumer: force flush segment", zap.Int("rows", rowNum))
+				v.callFlushFunc(segmentData, i)
 			}
 		}
 
@@ -532,13 +535,14 @@ func (v *JSONRowConsumer) flush(force bool) error {
 	// segment size can be flushed
 	for i := 0; i < len(v.segmentsData); i++ {
 		segmentData := v.segmentsData[i]
+		rowNum := segmentData[v.primaryKey].RowNum()
 		memSize := 0
 		for _, field := range segmentData {
 			memSize += field.GetMemorySize()
 		}
-		if memSize >= int(v.segmentSize)*1024*1024 {
-			log.Debug("JSON row consumer: flush fulled segment", zap.Int("bytes", memSize))
-			v.callFlushFunc(segmentData)
+		if memSize >= int(v.segmentSize) && rowNum > 0 {
+			log.Info("JSON row consumer: flush fulled segment", zap.Int("bytes", memSize), zap.Int("rowNum", rowNum))
+			v.callFlushFunc(segmentData, i)
 			v.segmentsData[i] = initSegmentData(v.collectionSchema)
 		}
 	}
@@ -554,7 +558,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	// flush in necessery
 	if rows == nil {
 		err := v.flush(true)
-		log.Debug("JSON row consumer finished")
+		log.Info("JSON row consumer finished")
 		return err
 	}
 
@@ -596,6 +600,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 		shard := hash % uint32(v.shardNum)
 		pkArray := v.segmentsData[shard][v.primaryKey].(*storage.Int64FieldData)
 		pkArray.Data = append(pkArray.Data, id)
+		pkArray.NumRows[0]++
 
 		// convert value and consume
 		for name, validator := range v.validators {
@@ -614,6 +619,8 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	return nil
 }
 
+type ColumnFlushFunc func(fields map[storage.FieldID]storage.FieldData) error
+
 // column-based json format consumer class
 type JSONColumnConsumer struct {
 	collectionSchema *schemapb.CollectionSchema            // collection schema
@@ -621,11 +628,10 @@ type JSONColumnConsumer struct {
 	fieldsData       map[storage.FieldID]storage.FieldData // in-memory fields data
 	primaryKey       storage.FieldID                       // name of primary key
 
-	callFlushFunc func(fields map[storage.FieldID]storage.FieldData) error // call back function to flush segment
+	callFlushFunc ColumnFlushFunc // call back function to flush segment
 }
 
-func NewJSONColumnConsumer(collectionSchema *schemapb.CollectionSchema,
-	flushFunc func(fields map[storage.FieldID]storage.FieldData) error) *JSONColumnConsumer {
+func NewJSONColumnConsumer(collectionSchema *schemapb.CollectionSchema, flushFunc ColumnFlushFunc) *JSONColumnConsumer {
 	if collectionSchema == nil {
 		return nil
 	}
@@ -674,7 +680,7 @@ func (v *JSONColumnConsumer) flush() error {
 	if rowCount == 0 {
 		return errors.New("JSON column consumer: row count is 0")
 	}
-	log.Debug("JSON column consumer: rows parsed", zap.Int("rowCount", rowCount))
+	log.Info("JSON column consumer: rows parsed", zap.Int("rowCount", rowCount))
 
 	// output the fileds data, let outside split them into segments
 	return v.callFlushFunc(v.fieldsData)
@@ -688,7 +694,7 @@ func (v *JSONColumnConsumer) Handle(columns map[storage.FieldID][]interface{}) e
 	// flush at the end
 	if columns == nil {
 		err := v.flush()
-		log.Debug("JSON column consumer finished")
+		log.Info("JSON column consumer finished")
 		return err
 	}
 

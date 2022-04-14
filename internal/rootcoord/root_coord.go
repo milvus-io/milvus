@@ -2278,6 +2278,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		zap.Int64("collection ID", cID),
 		zap.String("partition name", req.GetPartitionName()),
 		zap.Int("# of files = ", len(req.GetFiles())),
+		zap.Bool("row-based", req.GetRowBased()),
 	)
 	resp := c.importManager.importJob(ctx, req, cID)
 	return resp, nil
@@ -2345,8 +2346,9 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 	}()
 
 	// Start a loop to check segments' index states periodically.
-	c.wg.Add(1)
-	go c.checkCompleteIndexLoop(ctx, ti, colName, ir.Segments)
+	// c.wg.Add(1)
+	// go c.checkCompleteIndexLoop(ctx, ti, colName, ir.Segments)
+	c.bringSegmentsOnline(ctx, ir.Segments)
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

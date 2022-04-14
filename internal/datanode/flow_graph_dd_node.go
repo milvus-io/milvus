@@ -283,6 +283,10 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		return nil
 	}
 	pChannelName := funcutil.ToPhysicalChannel(vchanInfo.ChannelName)
+	log.Info("ddNode add flushed segment",
+		zap.String("channelName", vchanInfo.ChannelName),
+		zap.String("pChannelName", pChannelName),
+	)
 	deltaChannelName, err := funcutil.ConvertChannelName(pChannelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
 	if err != nil {
 		log.Error(err.Error())
