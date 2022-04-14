@@ -62,6 +62,9 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	if !ok {
 		return nil, ErrMissingMetadata()
 	}
+	if globalMetaCache == nil {
+		return nil, ErrGlobalMetaCacheUninitialized()
+	}
 	// check:
 	//	1. if rpc call from a member (like index/query/data component)
 	// 	2. if rpc call from sdk

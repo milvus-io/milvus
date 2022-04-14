@@ -79,3 +79,7 @@ func ErrMissingMetadata() error {
 func ErrUnauthenticated() error {
 	return fmt.Errorf("unauthenticated: invalid credential")
 }
+
+func ErrGlobalMetaCacheUninitialized() error {
+	return fmt.Errorf("internal: globalMetaCache not initialized")
+}

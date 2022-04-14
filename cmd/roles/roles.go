@@ -346,6 +346,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 
 // Run Milvus components.
 func (mr *MilvusRoles) Run(local bool, alias string) {
+	log.Info("starting running Milvus components")
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// only standalone enable localMsg
