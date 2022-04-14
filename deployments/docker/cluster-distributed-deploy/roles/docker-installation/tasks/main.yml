@@ -1,5 +1,5 @@
 ---
-- name: Install Docker Dependencies #以下部分都是安装Docker相关的软件
+- name: Install Docker Dependencies 
   apt: name={{ item }} state=latest update_cache=yes
   with_items:
     - apt-transport-https

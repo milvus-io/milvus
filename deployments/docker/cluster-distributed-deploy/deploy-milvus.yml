@@ -1,5 +1,5 @@
 ---
-- name: Create milvus-etcd, minio, pulsar #Milvus基本的依赖组件，部署在同一台Host上便于控制IP地址
+- name: Create milvus-etcd, minio, pulsar #Milvus dependent
   hosts: dependencies
   become: yes
   become_user: root
@@ -9,7 +9,7 @@
     - deploy-minio
     - deploy-pulsar
 
-- name: Create milvus nodes #将Milvus的3个node角色部署到同一个Host，可以搭配读写优化的磁盘
+- name: Create milvus nodes #Deploy all 3 nodes on the same host can be benefitial from I/O optimized disk, and it's easier to have additional host running a set of milvus nodes.
   hosts: nodes
   become: yes
   become_user: root
@@ -19,7 +19,7 @@
     - deploy-indexnode
     - deploy-querynode
 
-- name: Create milvus coords #将4个Milvus的Coordinator，和一个Proxy部署在同一个Host，可以做相应的优化配置，如果有其它方面的考虑，可以将Proxy分离出来
+- name: Create milvus coords #Deploy all Coordinators and Proxy on the same host will reduce time to traffic on network.
   hosts: coords
   become: yes
   become_user: root

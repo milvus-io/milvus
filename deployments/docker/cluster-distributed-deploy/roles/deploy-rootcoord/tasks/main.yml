@@ -9,4 +9,4 @@
       PULSAR_ADDRESS: "{{PULSAR_ADDRESS}}"
       QUERY_COORD_ADDRESS: "{{QUERY_COORD_ADDRESS}}"
       METRICS_PORT: "9094"
-    network_mode: "{{nodes_network}}" #使用Host网络，Host定义在Inventory的变量中。如果使用Bridge网络则需要Publish相关的端口
+    network_mode: "{{nodes_network}}" #Use the network which defined as variable in Inventory.

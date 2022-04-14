@@ -1,5 +1,5 @@
 ---
-- name: Install Packages #安装下面列表中的软件
+- name: Install Packages 
   apt: name={{ item }} state=latest update_cache=yes
   with_items:
     - ntp

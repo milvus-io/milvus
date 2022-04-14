@@ -13,4 +13,4 @@
       interval: 30s
       timeout: 20s
       retries: 3
-    network_mode: "{{dependencies_network}}" #使用Host网络，Host定义在Inventory的变量中。如果使用Bridge网络则需要Publish相关的端口
+    network_mode: "{{dependencies_network}}" #Use the network which defined as variable in Inventory.
