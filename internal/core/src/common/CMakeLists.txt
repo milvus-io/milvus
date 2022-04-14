@@ -12,7 +12,6 @@
 set(COMMON_SRC
         Schema.cpp
         Types.cpp
-	BitsetView.cpp
         SystemProperty.cpp
         vector_index_c.cpp
         )
