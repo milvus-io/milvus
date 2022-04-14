@@ -39,8 +39,9 @@ fi
 
 BUILD_TYPE="Debug"
 CUSTOM_THIRDPARTY_PATH=""
+EMBEDDED_MILVUS="OFF"
 
-while getopts "t:h:f:" arg; do
+while getopts "t:h:f:b" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -52,8 +53,12 @@ while getopts "t:h:f:" arg; do
     echo "-t: build type(default: Debug)
 -f: custom thirdparty path(default: "")
 -h: help
+-b: build embedded milvus(default: OFF)
                 "
     exit 0
+    ;;
+  b)
+    EMBEDDED_MILVUS="ON"
     ;;
   ?)
     echo "ERROR! unknown argument"
@@ -68,6 +73,7 @@ pushd ${CMAKE_BUILD}
 CMAKE_CMD="cmake \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DCMAKE_INSTALL_PREFIX=${OUTPUT_LIB} \
+-DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} ${SRC_DIR}"
 
 unameOut="$(uname -s)"

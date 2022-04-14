@@ -126,7 +126,14 @@ endif (MSYS)
 
 add_library(wrapper STATIC)
 target_sources(wrapper PUBLIC ParquetWrapper.cpp PayloadStream.cpp)
-set_target_properties( wrapper PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR} )
+
+if ( EMBEDDED_MILVUS )
+    message ( STATUS "Turning on fPIC while building embedded Milvus" )
+    set_target_properties( wrapper PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR} POSITION_INDEPENDENT_CODE ON )
+else()
+    set_target_properties( wrapper PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR} )
+endif()
+
 target_link_libraries( wrapper PUBLIC parquet pthread)
 
 if(NOT CMAKE_INSTALL_PREFIX)
