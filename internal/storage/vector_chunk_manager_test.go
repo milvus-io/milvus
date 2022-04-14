@@ -130,7 +130,7 @@ func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorCh
 	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	meta := initMeta()
-	vcm, err := NewVectorChunkManager(lcm, rcm, meta, 16, localCacheEnable)
+	vcm, err := NewVectorChunkManager(lcm, rcm, meta, 1024*1024, 1024*1024, localCacheEnable)
 	if err != nil {
 		return nil, cancel, err
 	}
@@ -139,12 +139,12 @@ func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorCh
 }
 
 var Params paramtable.BaseTable
-var localPath = "/tmp/milvus/test_data/"
+var defaultLocalTestPath = "/tmp/milvus/test_data/"
 
 func TestMain(m *testing.M) {
 	Params.Init()
 	exitCode := m.Run()
-	err := os.RemoveAll(localPath)
+	err := os.RemoveAll(defaultLocalTestPath)
 	if err != nil {
 		return
 	}
@@ -158,14 +158,15 @@ func TestNewVectorChunkManager(t *testing.T) {
 	rcm, err := newMinIOChunkManager(ctx, bucketName)
 	assert.Nil(t, err)
 	assert.NotNil(t, rcm)
-	lcm := NewLocalChunkManager(RootPath(localPath))
+
+	lcm := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 
 	meta := initMeta()
-	vcm, err := NewVectorChunkManager(lcm, rcm, meta, 16, true)
+	vcm, err := NewVectorChunkManager(lcm, rcm, meta, 16, 16, true)
 	assert.Nil(t, err)
 	assert.NotNil(t, vcm)
 
-	vcm, err = NewVectorChunkManager(lcm, rcm, meta, -1, true)
+	vcm, err = NewVectorChunkManager(lcm, rcm, meta, 0, 0, true)
 	assert.NotNil(t, err)
 	assert.Nil(t, vcm)
 }
@@ -173,7 +174,7 @@ func TestNewVectorChunkManager(t *testing.T) {
 func TestVectorChunkManager_GetPath(t *testing.T) {
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, cancel, err := buildVectorChunkManager(defaultLocalTestPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
@@ -184,13 +185,12 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, pathGet, key)
 
-		err = vcm.cacheStorage.Write(key, []byte{1})
-		assert.Nil(t, err)
+		vcm.cache.Add(key, []byte{1})
 		pathGet, err = vcm.Path(key)
 		assert.Nil(t, err)
 		assert.Equal(t, pathGet, key)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(defaultLocalTestPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -200,7 +200,7 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 func TestVectorChunkManager_GetSize(t *testing.T) {
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, cancel, err := buildVectorChunkManager(defaultLocalTestPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
@@ -211,13 +211,12 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, sizeGet, 1)
 
-		err = vcm.cacheStorage.Write(key, []byte{1})
-		assert.Nil(t, err)
+		vcm.cache.Add(key, []byte{1})
 		sizeGet, err = vcm.Size(key)
 		assert.Nil(t, err)
 		assert.EqualValues(t, sizeGet, 1)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(defaultLocalTestPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -227,7 +226,7 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 func TestVectorChunkManager_Write(t *testing.T) {
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, cancel, err := buildVectorChunkManager(defaultLocalTestPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
@@ -250,7 +249,7 @@ func TestVectorChunkManager_Write(t *testing.T) {
 		exist = vcm.Exist("key_2")
 		assert.True(t, exist)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(defaultLocalTestPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -260,13 +259,12 @@ func TestVectorChunkManager_Write(t *testing.T) {
 func TestVectorChunkManager_Remove(t *testing.T) {
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, cancel, err := buildVectorChunkManager(defaultLocalTestPath, localCache)
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
 		key := "1"
-		err = vcm.cacheStorage.Write(key, []byte{1})
-		assert.Nil(t, err)
+		vcm.cache.Add(key, []byte{1})
 
 		err = vcm.Remove(key)
 		assert.Nil(t, err)
@@ -274,12 +272,8 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 		exist := vcm.Exist(key)
 		assert.False(t, exist)
 
-		contents := map[string][]byte{
-			"key_1": {111},
-			"key_2": {222},
-		}
-		err = vcm.cacheStorage.MultiWrite(contents)
-		assert.NoError(t, err)
+		vcm.cache.Add("key_1", []byte{111})
+		vcm.cache.Add("key_2", []byte{222})
 
 		err = vcm.MultiRemove([]string{"key_1", "key_2"})
 		assert.NoError(t, err)
@@ -289,7 +283,7 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 		exist = vcm.Exist("key_2")
 		assert.False(t, exist)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(defaultLocalTestPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -324,7 +318,6 @@ func (m *mockFailedChunkManager) MultiRemove(key []string) error {
 func TestVectorChunkManager_Remove_Fail(t *testing.T) {
 	vcm := &VectorChunkManager{
 		vectorStorage: &mockFailedChunkManager{fail: true},
-		cacheStorage:  &mockFailedChunkManager{fail: true},
 	}
 	assert.Error(t, vcm.Remove("test"))
 	assert.Error(t, vcm.MultiRemove([]string{"test"}))
@@ -334,7 +327,7 @@ func TestVectorChunkManager_Remove_Fail(t *testing.T) {
 func TestVectorChunkManager_Read(t *testing.T) {
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
-		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
+		vcm, cancel, err := buildVectorChunkManager(defaultLocalTestPath, localCache)
 		assert.NotNil(t, vcm)
 		assert.NoError(t, err)
 
@@ -430,7 +423,7 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, content)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(defaultLocalTestPath)
 		assert.NoError(t, err)
 
 		cancel()

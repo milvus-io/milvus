@@ -25,15 +25,16 @@ import (
 )
 
 type LRU struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	evictList *list.List
-	items     map[interface{}]*list.Element
-	capacity  int
-	onEvicted func(k Key, v Value)
-	m         sync.RWMutex
-	evictedCh chan *entry
-	stats     *Stats
+	ctx         context.Context
+	cancel      context.CancelFunc
+	evictList   *list.List
+	items       map[interface{}]*list.Element
+	size        uint64
+	capacity    uint64
+	storeHelper *StoreHelper
+	m           sync.RWMutex
+	evictedCh   chan *Entry
+	stats       *Stats
 }
 
 type Stats struct {
@@ -41,6 +42,7 @@ type Stats struct {
 	evictedCount float32
 	readCount    float32
 	writeCount   float32
+	memoryUsage  uint64
 }
 
 func (s *Stats) String() string {
@@ -51,33 +53,55 @@ func (s *Stats) String() string {
 		evictedRatio = s.evictedCount / s.writeCount
 	}
 
-	return fmt.Sprintf("lru cache hit ratio = %f, evictedRatio = %f", hitRatio, evictedRatio)
+	return fmt.Sprintf("lru cache hit ratio = %f, evictedRatio = %f. memoryUsage = %d", hitRatio, evictedRatio, s.memoryUsage)
 }
 
-type Key interface {
-}
-type Value interface {
-}
-
-type entry struct {
-	key   Key
-	value Value
+type StoreHelper struct {
+	Store       func(Key, Value) *Entry
+	Load        func(entry *Entry) (Value, bool)
+	MeasureSize func(Value) int
+	OnEvicted   func(k Key, v Value)
 }
 
-func NewLRU(capacity int, onEvicted func(k Key, v Value)) (*LRU, error) {
-	if capacity <= 0 {
-		return nil, errors.New("cache size must be positive")
+func defaultStoreHelper() *StoreHelper {
+	return &StoreHelper{
+		Store: func(key Key, value Value) *Entry {
+			return &Entry{Key: key, Value: value}
+		},
+		Load: func(entry *Entry) (Value, bool) {
+			return entry.Value, true
+		},
+		MeasureSize: func(value Value) int {
+			return len(value.([]byte))
+		},
+	}
+}
+
+type Option func(lru *LRU)
+
+func SetStoreHelper(helper *StoreHelper) Option {
+	return func(lru *LRU) {
+		lru.storeHelper = helper
+	}
+}
+
+func NewLRU(capacity uint64, opts ...Option) (*LRU, error) {
+	if capacity == 0 {
+		return nil, errors.New("cache Size must be positive")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &LRU{
-		ctx:       ctx,
-		cancel:    cancel,
-		capacity:  capacity,
-		evictList: list.New(),
-		items:     make(map[interface{}]*list.Element),
-		onEvicted: onEvicted,
-		evictedCh: make(chan *entry, 16),
-		stats:     &Stats{},
+		ctx:         ctx,
+		cancel:      cancel,
+		capacity:    capacity,
+		evictList:   list.New(),
+		items:       make(map[interface{}]*list.Element),
+		evictedCh:   make(chan *Entry, 16),
+		stats:       &Stats{},
+		storeHelper: defaultStoreHelper(),
+	}
+	for _, opt := range opts {
+		opt(c)
 	}
 	go c.evictedWorker()
 	return c, nil
@@ -90,35 +114,38 @@ func (c *LRU) evictedWorker() {
 			return
 		case e, ok := <-c.evictedCh:
 			if ok {
-				if c.onEvicted != nil {
-					c.onEvicted(e.key, e.value)
+				if c.storeHelper.OnEvicted != nil {
+					c.storeHelper.OnEvicted(e.Key, e.Value)
 				}
 			}
 		}
 	}
 }
 
-func (c *LRU) Add(key, value Value) {
+func (c *LRU) Add(key Key, value Value) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.stats.writeCount++
 	if e, ok := c.items[key]; ok {
 		c.evictList.MoveToFront(e)
-		e.Value.(*entry).value = value
+		e.Value.(*Entry).Value = value
 		return
 	}
-	e := &entry{key: key, value: value}
+	e := c.storeHelper.Store(key, value)
+	e.Size = c.storeHelper.MeasureSize(value)
 	listE := c.evictList.PushFront(e)
 	c.items[key] = listE
+	c.size += uint64(e.Size)
 
-	if c.evictList.Len() > c.capacity {
+	for c.size > c.capacity {
 		c.stats.evictedCount++
 		oldestE := c.evictList.Back()
 		if oldestE != nil {
 			c.evictList.Remove(oldestE)
-			kv := oldestE.Value.(*entry)
-			delete(c.items, kv.key)
-			if c.onEvicted != nil {
+			kv := oldestE.Value.(*Entry)
+			c.size -= uint64(kv.Size)
+			delete(c.items, kv.Key)
+			if c.storeHelper.OnEvicted != nil {
 				c.evictedCh <- kv
 			}
 		}
@@ -132,8 +159,8 @@ func (c *LRU) Get(key Key) (value Value, ok bool) {
 	if e, ok := c.items[key]; ok {
 		c.stats.hitCount++
 		c.evictList.MoveToFront(e)
-		kv := e.Value.(*entry)
-		return kv.value, true
+		kv := e.Value.(*Entry)
+		return c.storeHelper.Load(kv)
 	}
 	return nil, false
 }
@@ -143,9 +170,10 @@ func (c *LRU) Remove(key Key) {
 	defer c.m.Unlock()
 	if e, ok := c.items[key]; ok {
 		c.evictList.Remove(e)
-		kv := e.Value.(*entry)
-		delete(c.items, kv.key)
-		if c.onEvicted != nil {
+		kv := e.Value.(*Entry)
+		delete(c.items, kv.Key)
+		c.size -= uint64(kv.Size)
+		if c.storeHelper.OnEvicted != nil {
 			c.evictedCh <- kv
 		}
 	}
@@ -164,19 +192,19 @@ func (c *LRU) Keys() []Key {
 	keys := make([]Key, len(c.items))
 	i := 0
 	for ent := c.evictList.Back(); ent != nil; ent = ent.Prev() {
-		keys[i] = ent.Value.(*entry).key
+		keys[i] = ent.Value.(*Entry).Key
 		i++
 	}
 	return keys
 }
 
-func (c *LRU) Len() int {
+func (c *LRU) Size() uint64 {
 	c.m.RLock()
 	defer c.m.RUnlock()
-	return c.evictList.Len()
+	return c.size
 }
 
-func (c *LRU) Capacity() int {
+func (c *LRU) Capacity() uint64 {
 	return c.capacity
 }
 
@@ -184,29 +212,31 @@ func (c *LRU) Purge() {
 	c.m.Lock()
 	defer c.m.Unlock()
 	for k, v := range c.items {
-		if c.onEvicted != nil {
-			c.evictedCh <- v.Value.(*entry)
+		if c.storeHelper.OnEvicted != nil {
+			c.storeHelper.OnEvicted(v.Value.(*Entry).Key, v.Value.(*Entry).Value)
 		}
 		delete(c.items, k)
 	}
 	c.evictList.Init()
+	c.size = 0
 }
 
-func (c *LRU) Resize(capacity int) int {
+func (c *LRU) Resize(capacity uint64) uint64 {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.capacity = capacity
-	if capacity >= c.evictList.Len() {
+	if capacity >= c.size {
 		return 0
 	}
-	diff := c.evictList.Len() - c.capacity
-	for i := 0; i < diff; i++ {
+	diff := c.size - capacity
+	for c.size > capacity {
 		oldestE := c.evictList.Back()
 		if oldestE != nil {
 			c.evictList.Remove(oldestE)
-			kv := oldestE.Value.(*entry)
-			delete(c.items, kv.key)
-			if c.onEvicted != nil {
+			kv := oldestE.Value.(*Entry)
+			delete(c.items, kv.Key)
+			c.size -= uint64(kv.Size)
+			if c.storeHelper.OnEvicted != nil {
 				c.evictedCh <- kv
 			}
 		}
@@ -219,8 +249,8 @@ func (c *LRU) GetOldest() (Key, Value, bool) {
 	defer c.m.RUnlock()
 	ent := c.evictList.Back()
 	if ent != nil {
-		kv := ent.Value.(*entry)
-		return kv.key, kv.value, true
+		kv := ent.Value.(*Entry)
+		return kv.Key, kv.Value, true
 	}
 	return nil, nil, false
 }
@@ -232,12 +262,13 @@ func (c *LRU) Close() {
 	for i := 0; i < remain; i++ {
 		e, ok := <-c.evictedCh
 		if ok {
-			c.onEvicted(e.key, e.value)
+			c.storeHelper.OnEvicted(e.Key, e.Value)
 		}
 	}
 	close(c.evictedCh)
 }
 
 func (c *LRU) Stats() *Stats {
+	c.stats.memoryUsage = c.size
 	return c.stats
 }

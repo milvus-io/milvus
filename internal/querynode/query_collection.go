@@ -1266,7 +1266,10 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 			&etcdpb.CollectionMeta{
 				ID:     collection.id,
 				Schema: collection.schema,
-			}, Params.QueryNodeCfg.CacheMemoryLimit, Params.QueryNodeCfg.CacheEnabled)
+			}, Params.QueryNodeCfg.CacheMemoryLimit,
+			Params.QueryNodeCfg.LocalFileCacheLimit,
+			Params.QueryNodeCfg.LocalFileCacheEnabled,
+		)
 		if err != nil {
 			return err
 		}

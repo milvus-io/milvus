@@ -678,7 +678,7 @@ func genVectorChunkManager(ctx context.Context) (*storage.VectorChunkManager, er
 	vcm, err := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
 		ID:     defaultCollectionID,
 		Schema: schema,
-	}, Params.QueryNodeCfg.CacheMemoryLimit, false)
+	}, Params.QueryNodeCfg.CacheMemoryLimit, Params.QueryNodeCfg.LocalFileCacheLimit, false)
 	if err != nil {
 		return nil, err
 	}

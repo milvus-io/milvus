@@ -28,7 +28,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test load", func(t *testing.T) {
 		testLoadRoot := "test_load"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 		defer testCM.RemoveWithPrefix(testLoadRoot)
 
 		prepareTests := []struct {
@@ -137,7 +137,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test write", func(t *testing.T) {
 		testMultiSaveRoot := "test_write"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 		//defer testCM.RemoveWithPrefix(testMultiSaveRoot)
 
 		err := testCM.Write(path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
@@ -161,7 +161,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test MultiSave", func(t *testing.T) {
 		testMultiSaveRoot := "test_multisave"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 		defer testCM.RemoveWithPrefix(testMultiSaveRoot)
 
 		err := testCM.Write(path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
@@ -191,7 +191,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test Remove", func(t *testing.T) {
 		testRemoveRoot := "test_remove"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 		defer testCM.RemoveWithPrefix(testRemoveRoot)
 
 		prepareTests := []struct {
@@ -283,7 +283,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test ReadAt", func(t *testing.T) {
 		testLoadPartialRoot := "read_at"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 		defer testCM.RemoveWithPrefix(testLoadPartialRoot)
 
 		key := path.Join(testLoadPartialRoot, "TestMinIOKV_LoadPartial_key")
@@ -328,7 +328,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test Size", func(t *testing.T) {
 		testGetSizeRoot := "get_size"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 		defer testCM.RemoveWithPrefix(testGetSizeRoot)
 
 		key := path.Join(testGetSizeRoot, "TestMinIOKV_GetSize_key")
@@ -351,7 +351,7 @@ func TestLocalCM(t *testing.T) {
 	t.Run("test Path", func(t *testing.T) {
 		testGetSizeRoot := "get_path"
 
-		testCM := NewLocalChunkManager(RootPath(localPath))
+		testCM := NewLocalChunkManager(RootPath(defaultLocalTestPath))
 		defer testCM.RemoveWithPrefix(testGetSizeRoot)
 
 		key := path.Join(testGetSizeRoot, "TestMinIOKV_GetPath_key")
@@ -362,7 +362,7 @@ func TestLocalCM(t *testing.T) {
 
 		p, err := testCM.Path(key)
 		assert.NoError(t, err)
-		assert.Equal(t, p, path.Join(localPath, key))
+		assert.Equal(t, p, path.Join(defaultLocalTestPath, key))
 
 		key2 := path.Join(testGetSizeRoot, "TestMemoryKV_GetSize_key2")
 

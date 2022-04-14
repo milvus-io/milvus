@@ -172,8 +172,9 @@ queryNode:
     chunkRows: 32768 # The number of vectors in a chunk.
 
   cache:
-    enabled: true
-    memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
+    memoryLimit: 268435456 # 256 MB, 256 * 1024 *1024
+    localFileCacheLimit: 17179869184 # 16GB, 16 * 1024 * 1024 * 1024
+    localFileCacheEnabled: true
 
 
 indexCoord:

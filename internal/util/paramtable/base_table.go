@@ -278,10 +278,30 @@ func (gp *BaseTable) ParseInt64(key string) int64 {
 	}
 	return value
 }
+func (gp *BaseTable) ParseUint64(key string) uint64 {
+	valueStr, err := gp.Load(key)
+	if err != nil {
+		panic(err)
+	}
+	value, err := strconv.ParseUint(valueStr, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
 
 func (gp *BaseTable) ParseInt64WithDefault(key string, defaultValue int64) int64 {
 	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(defaultValue, 10))
 	value, err := strconv.ParseInt(valueStr, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
+func (gp *BaseTable) ParseUint64WithDefault(key string, defaultValue uint64) uint64 {
+	valueStr := gp.LoadWithDefault(key, strconv.FormatUint(defaultValue, 10))
+	value, err := strconv.ParseUint(valueStr, 10, 64)
 	if err != nil {
 		panic(err)
 	}

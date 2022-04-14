@@ -649,8 +649,9 @@ type queryNodeConfig struct {
 	OverloadedMemoryThresholdPercentage float64
 
 	// cache limit
-	CacheEnabled     bool
-	CacheMemoryLimit int64
+	LocalFileCacheEnabled bool
+	LocalFileCacheLimit   uint64
+	CacheMemoryLimit      uint64
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -673,7 +674,8 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initOverloadedMemoryThresholdPercentage()
 
 	p.initCacheMemoryLimit()
-	p.initCacheEnabled()
+	p.initLocalFileCacheEnabled()
+	p.initLocalFileCacheLimit()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -748,21 +750,14 @@ func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {
 	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
 }
 
-func (p *queryNodeConfig) initCacheMemoryLimit() {
-	overloadedMemoryThresholdPercentage := p.Base.LoadWithDefault("queryNode.cache.memoryLimit", "2147483648")
-	cacheMemoryLimit, err := strconv.ParseInt(overloadedMemoryThresholdPercentage, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.CacheMemoryLimit = cacheMemoryLimit
+func (p *queryNodeConfig) initLocalFileCacheLimit() {
+	p.LocalFileCacheLimit = p.Base.ParseUint64WithDefault("queryNode.cache.localFileCacheLimit", 17179869184)
 }
-func (p *queryNodeConfig) initCacheEnabled() {
-	var err error
-	cacheEnabled := p.Base.LoadWithDefault("queryNode.cache.enabled", "true")
-	p.CacheEnabled, err = strconv.ParseBool(cacheEnabled)
-	if err != nil {
-		panic(err)
-	}
+func (p *queryNodeConfig) initCacheMemoryLimit() {
+	p.CacheMemoryLimit = p.Base.ParseUint64WithDefault("queryNode.cache.memoryLimit", 268435456)
+}
+func (p *queryNodeConfig) initLocalFileCacheEnabled() {
+	p.LocalFileCacheEnabled = p.Base.ParseBool("queryNode.cache.localFileCacheEnabled", true)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
