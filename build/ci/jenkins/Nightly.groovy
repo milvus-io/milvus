@@ -8,7 +8,7 @@ String cron_string = BRANCH_NAME == "master" ? "50 22,2 * * * " : ""
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 4 * 60
 def imageTag=''
-def chart_version='3.0.19'
+def chart_version='3.0.20'
 pipeline {
     triggers {
         cron """${cron_timezone}
@@ -86,7 +86,7 @@ pipeline {
                     axes {
                         axis {
                             name 'MILVUS_SERVER_TYPE'
-                            values 'standalone', 'distributed'
+                            values 'standalone', 'distributed-pulsar', 'distributed-kafka'
                         }
                         axis {
                             name 'MILVUS_CLIENT'
@@ -103,9 +103,12 @@ pipeline {
                                             sh 'printenv'
                                             def clusterEnabled = "false"
                                             // def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
-                                            if ("${MILVUS_SERVER_TYPE}" == "distributed") {
+                                            def mqMode='pulsar' // default using is pulsar
+                                            if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                 clusterEnabled = "true"
-                                                // setMemoryResourceLimitArgs="--set queryNode.resources.limits.memory=4Gi"
+                                            } else if ("${MILVUS_SERVER_TYPE}" == "distributed-kafka") {
+                                                clusterEnabled = "true"
+                                                mqMode='kafka'
                                             }
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                 if ("${imageTag}"==''){
@@ -140,6 +143,7 @@ pipeline {
                                                     --set indexNode.replicas=2 \
                                                     --set dataNode.replicas=2 \
                                                     --version ${chart_version} \
+                                                    -f values/${mqMode}.yaml \
                                                     -f values/nightly.yaml "
                                                     """
                                                 }
@@ -167,9 +171,14 @@ pipeline {
                                     script {
                                                 def release_name=sh(returnStdout: true, script: './get_release_name.sh')
                                                 def clusterEnabled = "false"
+                                                def mqMode='pulsar'
                                                 int e2e_timeout_seconds = 6 * 60 * 60
-                                                if ("${MILVUS_SERVER_TYPE}" == "distributed") {
+                                                if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                     clusterEnabled = "true"
+                                                    e2e_timeout_seconds = 10 * 60 * 60
+                                                } else if("${MILVUS_SERVER_TYPE}" == "distributed-kafka" ) {
+                                                    clusterEnabled = "true"
+                                                    mqMode='kafka'
                                                     e2e_timeout_seconds = 10 * 60 * 60
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {
@@ -178,7 +187,8 @@ pipeline {
                                                     MILVUS_HELM_NAMESPACE="milvus-ci" \
                                                     MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                                     TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                                    ./ci_e2e.sh  "-n 6 --tags L0 L1 L2 "
+                                                    MQ_MODE="${mqMode}" \
+                                                    ./ci_e2e.sh  "-n 6 --tags L0 L1 L2"
                                                     """
                                                 } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
