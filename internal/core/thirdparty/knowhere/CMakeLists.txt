@@ -11,8 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION v1.1.4 )
-set( KNOWHERE_SOURCE_MD5 "605a11509d54e4af1f6c4f23de8beaa9" )
+set( KNOWHERE_VERSION v1.1.5 )
+set( KNOWHERE_SOURCE_MD5 "5baa7ecaea0e9e5c9f3f440cf8757d3c")
 
 if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
     set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
@@ -20,13 +20,6 @@ else ()
     set( KNOWHERE_SOURCE_URL
         "https://github.com/milvus-io/knowhere/archive/refs/tags/${KNOWHERE_VERSION}.tar.gz" )
 endif ()
-
-if (MSYS)
-    # TODO(matrixji) replace with official release after `support windows` merged/tagged
-    # windows adaptation + milvus-io/knowhere@v1.1.3
-    set (KNOWHERE_SOURCE_URL "https://github.com/matrixji/knowhere/archive/refs/tags/v1.1.3-win.tar.gz")
-    set (KNOWHERE_SOURCE_MD5 "58021c73c4dc9fce40f429c02968bf79")
-endif (MSYS)
 
 macro(build_knowhere)
     message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
@@ -40,7 +33,7 @@ macro(build_knowhere)
 
     externalproject_add(knowhere_ep
             #GIT_REPOSITORY  "https://github.com/milvus-io/knowhere.git"
-            #GIT_TAG         v1.0.1
+            #GIT_TAG         main
             URL             ${KNOWHERE_SOURCE_URL}
             URL_MD5         ${KNOWHERE_SOURCE_MD5}
             CMAKE_ARGS      ${KNOWHERE_CMAKE_ARGS}

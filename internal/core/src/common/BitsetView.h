@@ -18,22 +18,21 @@
 
 #include <deque>
 #include <boost_ext/dynamic_bitset_ext.hpp>
+
 #include "common/Types.h"
 #include "knowhere/utils/BitsetView.h"
 
 namespace milvus {
 
 class BitsetView : public faiss::BitsetView {
-    using BaseBitsetView = faiss::BitsetView;
-
  public:
     BitsetView() = default;
     ~BitsetView() = default;
 
-    BitsetView(const std::nullptr_t value) : BaseBitsetView(value) {  // NOLINT
+    BitsetView(const std::nullptr_t value) : faiss::BitsetView(value) {  // NOLINT
     }
 
-    BitsetView(const uint8_t* data, size_t num_bits) : BaseBitsetView(data, num_bits) {  // NOLINT
+    BitsetView(const uint8_t* data, size_t num_bits) : faiss::BitsetView(data, num_bits) {  // NOLINT
     }
 
     BitsetView(const BitsetType& bitset)  // NOLINT
@@ -47,7 +46,14 @@ class BitsetView : public faiss::BitsetView {
     }
 
     BitsetView
-    subview(size_t pos, size_t count) const;
+    subview(size_t offset, size_t size) const {
+        if (empty()) {
+            return BitsetView();
+        }
+        assert((offset & 0x7) == 0);
+        assert((offset + size) <= this->size());
+        return BitsetView(data() + (offset >> 3), size);
+    }
 };
 
 }  // namespace milvus
