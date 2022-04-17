@@ -706,11 +706,6 @@ func TestRootCoord_Base(t *testing.T) {
 
 	tmpFactory := dependency.NewDefaultFactory(true)
 
-	timeTickStream, _ := tmpFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
-	timeTickStream.Start()
-	defer timeTickStream.Close()
-
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
 	defer dmlStream.Close()
 
@@ -738,27 +733,7 @@ func TestRootCoord_Base(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	shardsNum := int32(8)
 
-	fmt.Printf("hello world2")
 	var wg sync.WaitGroup
-	wg.Add(1)
-	t.Run("time tick", func(t *testing.T) {
-		defer wg.Done()
-		ttmsg, ok := <-timeTickStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(ttmsg.Msgs))
-		ttm, ok := (ttmsg.Msgs[0]).(*msgstream.TimeTickMsg)
-		assert.True(t, ok)
-		assert.Greater(t, ttm.Base.Timestamp, uint64(0))
-		t.Log(ttm.Base.Timestamp)
-
-		ttmsg2, ok := <-timeTickStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(ttmsg2.Msgs))
-		ttm2, ok := (ttmsg2.Msgs[0]).(*msgstream.TimeTickMsg)
-		assert.True(t, ok)
-		assert.Greater(t, ttm2.Base.Timestamp, uint64(0))
-		assert.Equal(t, ttm2.Base.Timestamp, ttm.Base.Timestamp+1)
-	})
 
 	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
@@ -2077,14 +2052,9 @@ func TestRootCoord_Base(t *testing.T) {
 		defer wg.Done()
 		const (
 			proxyIDInvalid = 102
-			proxyName0     = "proxy_0"
-			proxyName1     = "proxy_1"
-			chanName0      = "c0"
-			chanName1      = "c1"
-			chanName2      = "c2"
-			ts0            = uint64(100)
-			ts1            = uint64(120)
-			ts2            = uint64(150)
+			ts0            = uint64(20)
+			ts1            = uint64(40)
+			ts2            = uint64(60)
 		)
 		numChan := core.chanTimeTick.getDmlChannelNum()
 		p1 := sessionutil.Session{
@@ -2118,12 +2088,41 @@ func TestRootCoord_Base(t *testing.T) {
 		dn2 := core.chanTimeTick.getDeltaChannelName()
 		core.chanTimeTick.addDeltaChannels(dn0, dn1, dn2)
 
+		// wait for local channel reported
+		for {
+			core.chanTimeTick.lock.Lock()
+			_, ok := core.chanTimeTick.sess2ChanTsMap[core.session.ServerID].chanTsMap[cn0]
+
+			if !ok {
+				core.chanTimeTick.lock.Unlock()
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			_, ok = core.chanTimeTick.sess2ChanTsMap[core.session.ServerID].chanTsMap[cn1]
+
+			if !ok {
+				core.chanTimeTick.lock.Unlock()
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			_, ok = core.chanTimeTick.sess2ChanTsMap[core.session.ServerID].chanTsMap[cn2]
+
+			if !ok {
+				core.chanTimeTick.lock.Unlock()
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			core.chanTimeTick.lock.Unlock()
+			break
+		}
 		msg0 := &internalpb.ChannelTimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_TimeTick,
 				SourceID: 100,
 			},
-			ChannelNames: []string{chanName0, chanName1},
+			ChannelNames: []string{cn0, cn1},
 			Timestamps:   []uint64{ts0, ts2},
 		}
 		s, _ := core.UpdateChannelTimeTick(ctx, msg0)
@@ -2136,7 +2135,7 @@ func TestRootCoord_Base(t *testing.T) {
 				MsgType:  commonpb.MsgType_TimeTick,
 				SourceID: 101,
 			},
-			ChannelNames: []string{chanName1, chanName2},
+			ChannelNames: []string{cn1, cn2},
 			Timestamps:   []uint64{ts1, ts2},
 		}
 		s, _ = core.UpdateChannelTimeTick(ctx, msg1)
@@ -2666,24 +2665,9 @@ func TestRootCoord2(t *testing.T) {
 	err = core.Register()
 	assert.NoError(t, err)
 
-	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
-	timeTickStream.Start()
-
 	time.Sleep(100 * time.Millisecond)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	t.Run("time tick", func(t *testing.T) {
-		defer wg.Done()
-		ttmsg, ok := <-timeTickStream.Chan()
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(ttmsg.Msgs))
-		ttm, ok := (ttmsg.Msgs[0]).(*msgstream.TimeTickMsg)
-		assert.True(t, ok)
-		assert.Greater(t, ttm.Base.Timestamp, typeutil.Timestamp(0))
-	})
-
 	wg.Add(1)
 	t.Run("create collection", func(t *testing.T) {
 		defer wg.Done()
@@ -2960,10 +2944,6 @@ func TestCheckFlushedSegments(t *testing.T) {
 	err = core.Register()
 	assert.NoError(t, err)
 
-	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
-	timeTickStream.Start()
-
 	time.Sleep(100 * time.Millisecond)
 
 	var wg sync.WaitGroup
@@ -3119,10 +3099,6 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
-
-	timeTickStream, _ := msFactory.NewMsgStream(ctx)
-	timeTickStream.AsConsumer([]string{Params.CommonCfg.RootCoordTimeTick}, Params.CommonCfg.RootCoordSubName)
-	timeTickStream.Start()
 
 	time.Sleep(100 * time.Millisecond)
 
