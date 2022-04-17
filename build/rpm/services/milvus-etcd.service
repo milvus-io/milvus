@@ -27,4 +27,4 @@ StandardError=inherit
 Restart=always
 
 # Start main service
-ExecStart=/usr/bin/milvus-etcd --data-dir /var/lib/milvus/etcd-data
+ExecStart=/usr/bin/milvus-etcd --data-dir /var/lib/milvus/etcd-data --auto-compaction-retention '1000' --auto-compaction-mode 'revision'
