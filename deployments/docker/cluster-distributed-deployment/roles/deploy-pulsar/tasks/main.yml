@@ -1,0 +1,15 @@
+- name: "pulsar"
+  docker_container:
+    name: pulsar
+    image: apachepulsar/pulsar:2.8.2
+    env:
+      # bin/apply-config-from-env.py script will modify the configuration file based on the environment variables
+      # nettyMaxFrameSizeBytes must be calculated from maxMessageSize + 10240 (padding)
+      nettyMaxFrameSizeBytes: "104867840" # this is 104857600 + 10240 (padding)
+      defaultRetentionTimeInMinutes: "10080"
+      defaultRetentionSizeInMB: "8192"
+      # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
+      PULSAR_PREFIX_maxMessageSize: "104857600"
+      PULSAR_GC: -XX:+UseG1GC
+    command: "bin/pulsar standalone --no-functions-worker --no-stream-storage" #/bin/bash -c bin/apply-config-from-env.py conf/standalone.conf &&
+    network_mode: "{{dependencies_network}}" #Use the network which defined as variable in Inventory.

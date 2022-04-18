@@ -1,0 +1,12 @@
+- name: datacoord
+  docker_container: 
+    name: datacoord
+    image: "{{image}}"
+    command: ["milvus", "run", "datacoord"]
+    env:
+      ETCD_ENDPOINTS: "{{ETCD_ENDPOINTS}}"
+      MINIO_ADDRESS: "{{MINIO_ADDRESS}}"
+      PULSAR_ADDRESS: "{{PULSAR_ADDRESS}}"
+      DATA_COORD_ADDRESS: "{{DATA_COORD_ADDRESS}}"
+      METRICS_PORT: "9095"
+    network_mode: "{{nodes_network}}" #Use the network which defined as variable in Inventory.
