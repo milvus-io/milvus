@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -1133,6 +1135,14 @@ func TestMetaTable(t *testing.T) {
 		_, err = mt.GetIndexByID(idxInfo[0].IndexID)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("cannot find index, id = %d", idxInfo[0].IndexID))
+	})
+
+	wg.Add(1)
+	t.Run("add credential failed", func(t *testing.T) {
+		defer wg.Done()
+
+		err = mt.AddCredential(&internalpb.CredentialInfo{Username: "x", EncryptedPassword: "a\xc5z"})
+		assert.NotNil(t, err)
 	})
 
 	wg.Add(1)

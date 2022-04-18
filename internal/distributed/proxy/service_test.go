@@ -752,7 +752,7 @@ func (m *MockProxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCr
 	return nil, nil
 }
 
-func (m *MockProxy) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+func (m *MockProxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

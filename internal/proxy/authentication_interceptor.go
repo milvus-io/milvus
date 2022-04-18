@@ -68,8 +68,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	// check:
 	//	1. if rpc call from a member (like index/query/data component)
 	// 	2. if rpc call from sdk
-	usernames, _ := globalMetaCache.GetCredUsernames(ctx)
-	if len(usernames) > 0 {
+	if Params.CommonCfg.AuthorizationEnabled {
 		if !validSourceID(ctx, md[strings.ToLower(util.HeaderSourceID)]) &&
 			!validAuth(ctx, md[strings.ToLower(util.HeaderAuthorize)]) {
 			return nil, ErrUnauthenticated()

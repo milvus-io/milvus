@@ -287,3 +287,5 @@ common:
 
   storageType: minio
 
+  security:
+    authorizationEnabled: false

@@ -30,14 +30,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
-	"github.com/milvus-io/milvus/internal/util/crypto"
-
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/trace"
 
@@ -58,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/distance"
 
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 
 	"github.com/golang/protobuf/proto"
 
@@ -1972,22 +1970,23 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, 0, len(resp.CollectionNames))
 	})
 
+	username := "test_username_" + funcutil.RandomString(15)
+	password := "xxx"
+
 	wg.Add(1)
-	t.Run("credential apis", func(t *testing.T) {
+	t.Run("credential CREATE api", func(t *testing.T) {
 		defer wg.Done()
 
 		// 1. create credential
-		password := "xxx"
-		newPassword := "yyy"
-		constructCreateCredentialRequest := func(rand string) *milvuspb.CreateCredentialRequest {
+		constructCreateCredentialRequest := func() *milvuspb.CreateCredentialRequest {
 			return &milvuspb.CreateCredentialRequest{
 				Base:     nil,
-				Username: "test_username_" + rand,
+				Username: username,
 				Password: crypto.Base64Encode(password),
 			}
 		}
 		// success
-		createCredentialReq := constructCreateCredentialRequest(funcutil.RandomString(15))
+		createCredentialReq := constructCreateCredentialRequest()
 		resp, err := proxy.CreateCredential(ctx, createCredentialReq)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -1998,49 +1997,90 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		// invalid username
-		reqInvalidField := constructCreateCredentialRequest(funcutil.RandomString(15))
-		reqInvalidField.Username = "11_invalid_username"
-		resp, err = proxy.CreateCredential(ctx, reqInvalidField)
+		createCredentialReq.Username = "11_invalid_username"
+		resp, err = proxy.CreateCredential(ctx, createCredentialReq)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		// invalid password (not decode)
-		reqInvalidField = constructCreateCredentialRequest(funcutil.RandomString(15))
-		reqInvalidField.Password = "not_decoded_password"
-		resp, err = proxy.CreateCredential(ctx, reqInvalidField)
+		createCredentialReq.Password = "not_decoded_password"
+		resp, err = proxy.CreateCredential(ctx, createCredentialReq)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		// invalid password (length gt 256)
-		reqInvalidField = constructCreateCredentialRequest(funcutil.RandomString(15))
-		reqInvalidField.Password = "aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffgggggggggghhhhhhhhhhiiiiiiiiiijjjjjjjjjjkkkkkkkkkkllllllllllmmmmmmmmmnnnnnnnnnnnooooooooooppppppppppqqqqqqqqqqrrrrrrrrrrsssssssssstttttttttttuuuuuuuuuuuvvvvvvvvvvwwwwwwwwwwwxxxxxxxxxxyyyyyyyyyzzzzzzzzzzz"
-		resp, err = proxy.CreateCredential(ctx, reqInvalidField)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		// 2. update credential
-		createCredentialReq.Password = crypto.Base64Encode(newPassword)
-		updateResp, err := proxy.UpdateCredential(ctx, createCredentialReq)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
-
-		// invalid password (not decode)
-		createCredentialReq.Password = newPassword
-		updateResp, err = proxy.UpdateCredential(ctx, createCredentialReq)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
 
 		// invalid password (length gt 256)
 		createCredentialReq.Password = "aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffgggggggggghhhhhhhhhhiiiiiiiiiijjjjjjjjjjkkkkkkkkkkllllllllllmmmmmmmmmnnnnnnnnnnnooooooooooppppppppppqqqqqqqqqqrrrrrrrrrrsssssssssstttttttttttuuuuuuuuuuuvvvvvvvvvvwwwwwwwwwwwxxxxxxxxxxyyyyyyyyyzzzzzzzzzzz"
-		updateResp, err = proxy.UpdateCredential(ctx, createCredentialReq)
+		resp, err = proxy.CreateCredential(ctx, createCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("credential UPDATE api", func(t *testing.T) {
+		defer wg.Done()
+
+		// 2. update credential
+		newPassword := "yyy"
+		constructUpdateCredentialRequest := func() *milvuspb.UpdateCredentialRequest {
+			return &milvuspb.UpdateCredentialRequest{
+				Base:        nil,
+				Username:    username,
+				OldPassword: crypto.Base64Encode(password),
+				NewPassword: crypto.Base64Encode(newPassword),
+			}
+		}
+		// cannot update non-existing user's password
+		updateCredentialReq := constructUpdateCredentialRequest()
+		updateCredentialReq.Username = "test_username_" + funcutil.RandomString(15)
+		updateResp, err := proxy.UpdateCredential(ctx, updateCredentialReq)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
 
+		// success
+		updateCredentialReq.Username = username
+		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
+		updateResp, err = proxy.UpdateCredential(ctx, updateCredentialReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// invalid old password (not decode)
+		updateCredentialReq.OldPassword = password
+		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
+		updateResp, err = proxy.UpdateCredential(ctx, updateCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// invalid new password (not decode)
+		updateCredentialReq.OldPassword = crypto.Base64Encode(password)
+		updateCredentialReq.NewPassword = newPassword
+		updateResp, err = proxy.UpdateCredential(ctx, updateCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// invalid password (length gt 256)
+		updateCredentialReq.NewPassword = "aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffgggggggggghhhhhhhhhhiiiiiiiiiijjjjjjjjjjkkkkkkkkkkllllllllllmmmmmmmmmnnnnnnnnnnnooooooooooppppppppppqqqqqqqqqqrrrrrrrrrrsssssssssstttttttttttuuuuuuuuuuuvvvvvvvvvvwwwwwwwwwwwxxxxxxxxxxyyyyyyyyyzzzzzzzzzzz"
+		updateResp, err = proxy.UpdateCredential(ctx, updateCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// wrong password
+		updateCredentialReq.OldPassword = crypto.Base64Encode("wrong_password")
+		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
+		updateResp, err = proxy.UpdateCredential(ctx, updateCredentialReq)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("credential GET api", func(t *testing.T) {
+		defer wg.Done()
+
 		// 3. get credential
+		newPassword := "yyy"
 		constructGetCredentialRequest := func() *rootcoordpb.GetCredentialRequest {
 			return &rootcoordpb.GetCredentialRequest{
 				Base:     nil,
-				Username: createCredentialReq.Username,
+				Username: username,
 			}
 		}
 		getCredentialReq := constructGetCredentialRequest()
@@ -2052,6 +2092,11 @@ func TestProxy(t *testing.T) {
 		getCredentialReq.Username = "("
 		getResp, err = rootCoordClient.GetCredential(ctx, getCredentialReq)
 		assert.Error(t, err)
+	})
+
+	wg.Add(1)
+	t.Run("credential LIST api", func(t *testing.T) {
+		defer wg.Done()
 
 		// 4. list credential usernames
 		constructListCredUsersRequest := func() *milvuspb.ListCredUsersRequest {
@@ -2063,12 +2108,17 @@ func TestProxy(t *testing.T) {
 		listUsersResp, err := proxy.ListCredUsers(ctx, listCredUsersReq)
 		assert.NoError(t, err)
 		assert.True(t, len(listUsersResp.Usernames) > 0)
+	})
+
+	wg.Add(1)
+	t.Run("credential DELETE api", func(t *testing.T) {
+		defer wg.Done()
 
 		// 5. delete credential
 		constructDelCredRequest := func() *milvuspb.DeleteCredentialRequest {
 			return &milvuspb.DeleteCredentialRequest{
 				Base:     nil,
-				Username: createCredentialReq.Username,
+				Username: username,
 			}
 		}
 		delCredReq := constructDelCredRequest()
@@ -2847,7 +2897,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("UpdateCredential fail, timeout", func(t *testing.T) {
 		defer wg.Done()
-		resp, err := proxy.UpdateCredential(shortCtx, &milvuspb.CreateCredentialRequest{Username: "xxx"})
+		resp, err := proxy.UpdateCredential(shortCtx, &milvuspb.UpdateCredentialRequest{Username: "xxx"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})

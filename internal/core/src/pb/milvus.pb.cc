@@ -389,6 +389,10 @@ class CreateCredentialRequestDefaultTypeInternal {
  public:
   ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<CreateCredentialRequest> _instance;
 } _CreateCredentialRequest_default_instance_;
+class UpdateCredentialRequestDefaultTypeInternal {
+ public:
+  ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<UpdateCredentialRequest> _instance;
+} _UpdateCredentialRequest_default_instance_;
 class DeleteCredentialRequestDefaultTypeInternal {
  public:
   ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<DeleteCredentialRequest> _instance;
@@ -1716,6 +1720,21 @@ static void InitDefaultsscc_info_StringResponse_milvus_2eproto() {
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 1, InitDefaultsscc_info_StringResponse_milvus_2eproto}, {
       &scc_info_Status_common_2eproto.base,}};
 
+static void InitDefaultsscc_info_UpdateCredentialRequest_milvus_2eproto() {
+  GOOGLE_PROTOBUF_VERIFY_VERSION;
+
+  {
+    void* ptr = &::milvus::proto::milvus::_UpdateCredentialRequest_default_instance_;
+    new (ptr) ::milvus::proto::milvus::UpdateCredentialRequest();
+    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
+  }
+  ::milvus::proto::milvus::UpdateCredentialRequest::InitAsDefaultInstance();
+}
+
+::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<1> scc_info_UpdateCredentialRequest_milvus_2eproto =
+    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 1, InitDefaultsscc_info_UpdateCredentialRequest_milvus_2eproto}, {
+      &scc_info_MsgBase_common_2eproto.base,}};
+
 static void InitDefaultsscc_info_VectorIDs_milvus_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
@@ -1747,7 +1766,7 @@ static void InitDefaultsscc_info_VectorsArray_milvus_2eproto() {
       &scc_info_VectorIDs_milvus_2eproto.base,
       &scc_info_VectorField_schema_2eproto.base,}};
 
-static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_milvus_2eproto[89];
+static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_milvus_2eproto[90];
 static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_milvus_2eproto[2];
 static constexpr ::PROTOBUF_NAMESPACE_ID::ServiceDescriptor const** file_level_service_descriptors_milvus_2eproto = nullptr;
 
@@ -2508,6 +2527,17 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_milvus_2eproto::offsets[] PROT
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::CreateCredentialRequest, created_utc_timestamps_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::CreateCredentialRequest, modified_utc_timestamps_),
   ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::UpdateCredentialRequest, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::UpdateCredentialRequest, base_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::UpdateCredentialRequest, username_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::UpdateCredentialRequest, oldpassword_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::UpdateCredentialRequest, newpassword_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::UpdateCredentialRequest, created_utc_timestamps_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::UpdateCredentialRequest, modified_utc_timestamps_),
+  ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::milvus::DeleteCredentialRequest, _internal_metadata_),
   ~0u,  // no _extensions_
   ~0u,  // no _oneof_case_
@@ -2615,9 +2645,10 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 726, -1, sizeof(::milvus::proto::milvus::ReplicaInfo)},
   { 736, -1, sizeof(::milvus::proto::milvus::ShardReplica)},
   { 745, -1, sizeof(::milvus::proto::milvus::CreateCredentialRequest)},
-  { 755, -1, sizeof(::milvus::proto::milvus::DeleteCredentialRequest)},
-  { 762, -1, sizeof(::milvus::proto::milvus::ListCredUsersResponse)},
-  { 769, -1, sizeof(::milvus::proto::milvus::ListCredUsersRequest)},
+  { 755, -1, sizeof(::milvus::proto::milvus::UpdateCredentialRequest)},
+  { 766, -1, sizeof(::milvus::proto::milvus::DeleteCredentialRequest)},
+  { 773, -1, sizeof(::milvus::proto::milvus::ListCredUsersResponse)},
+  { 780, -1, sizeof(::milvus::proto::milvus::ListCredUsersRequest)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -2707,6 +2738,7 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_ReplicaInfo_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_ShardReplica_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_CreateCredentialRequest_default_instance_),
+  reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_UpdateCredentialRequest_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_DeleteCredentialRequest_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_ListCredUsersResponse_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::milvus::_ListCredUsersRequest_default_instance_),
@@ -3009,143 +3041,148 @@ const char descriptor_table_protodef_milvus_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "lvus.proto.common.MsgBase\022\020\n\010username\030\002 "
   "\001(\t\022\020\n\010password\030\003 \001(\t\022\036\n\026created_utc_tim"
   "estamps\030\004 \001(\004\022\037\n\027modified_utc_timestamps"
-  "\030\005 \001(\004\"W\n\027DeleteCredentialRequest\022*\n\004bas"
-  "e\030\001 \001(\0132\034.milvus.proto.common.MsgBase\022\020\n"
-  "\010username\030\002 \001(\t\"W\n\025ListCredUsersResponse"
-  "\022+\n\006status\030\001 \001(\0132\033.milvus.proto.common.S"
-  "tatus\022\021\n\tusernames\030\002 \003(\t\"B\n\024ListCredUser"
-  "sRequest\022*\n\004base\030\001 \001(\0132\034.milvus.proto.co"
-  "mmon.MsgBase*!\n\010ShowType\022\007\n\003All\020\000\022\014\n\010InM"
-  "emory\020\001*>\n\017PlaceholderType\022\010\n\004None\020\000\022\020\n\014"
-  "BinaryVector\020d\022\017\n\013FloatVector\020e2\270$\n\rMilv"
-  "usService\022_\n\020CreateCollection\022,.milvus.p"
-  "roto.milvus.CreateCollectionRequest\032\033.mi"
-  "lvus.proto.common.Status\"\000\022[\n\016DropCollec"
-  "tion\022*.milvus.proto.milvus.DropCollectio"
-  "nRequest\032\033.milvus.proto.common.Status\"\000\022"
-  "_\n\rHasCollection\022).milvus.proto.milvus.H"
-  "asCollectionRequest\032!.milvus.proto.milvu"
-  "s.BoolResponse\"\000\022[\n\016LoadCollection\022*.mil"
-  "vus.proto.milvus.LoadCollectionRequest\032\033"
+  "\030\005 \001(\004\"\302\001\n\027UpdateCredentialRequest\022*\n\004ba"
+  "se\030\001 \001(\0132\034.milvus.proto.common.MsgBase\022\020"
+  "\n\010username\030\002 \001(\t\022\023\n\013oldPassword\030\003 \001(\t\022\023\n"
+  "\013newPassword\030\004 \001(\t\022\036\n\026created_utc_timest"
+  "amps\030\005 \001(\004\022\037\n\027modified_utc_timestamps\030\006 "
+  "\001(\004\"W\n\027DeleteCredentialRequest\022*\n\004base\030\001"
+  " \001(\0132\034.milvus.proto.common.MsgBase\022\020\n\010us"
+  "ername\030\002 \001(\t\"W\n\025ListCredUsersResponse\022+\n"
+  "\006status\030\001 \001(\0132\033.milvus.proto.common.Stat"
+  "us\022\021\n\tusernames\030\002 \003(\t\"B\n\024ListCredUsersRe"
+  "quest\022*\n\004base\030\001 \001(\0132\034.milvus.proto.commo"
+  "n.MsgBase*!\n\010ShowType\022\007\n\003All\020\000\022\014\n\010InMemo"
+  "ry\020\001*>\n\017PlaceholderType\022\010\n\004None\020\000\022\020\n\014Bin"
+  "aryVector\020d\022\017\n\013FloatVector\020e2\270$\n\rMilvusS"
+  "ervice\022_\n\020CreateCollection\022,.milvus.prot"
+  "o.milvus.CreateCollectionRequest\032\033.milvu"
+  "s.proto.common.Status\"\000\022[\n\016DropCollectio"
+  "n\022*.milvus.proto.milvus.DropCollectionRe"
+  "quest\032\033.milvus.proto.common.Status\"\000\022_\n\r"
+  "HasCollection\022).milvus.proto.milvus.HasC"
+  "ollectionRequest\032!.milvus.proto.milvus.B"
+  "oolResponse\"\000\022[\n\016LoadCollection\022*.milvus"
+  ".proto.milvus.LoadCollectionRequest\032\033.mi"
+  "lvus.proto.common.Status\"\000\022a\n\021ReleaseCol"
+  "lection\022-.milvus.proto.milvus.ReleaseCol"
+  "lectionRequest\032\033.milvus.proto.common.Sta"
+  "tus\"\000\022w\n\022DescribeCollection\022..milvus.pro"
+  "to.milvus.DescribeCollectionRequest\032/.mi"
+  "lvus.proto.milvus.DescribeCollectionResp"
+  "onse\"\000\022\206\001\n\027GetCollectionStatistics\0223.mil"
+  "vus.proto.milvus.GetCollectionStatistics"
+  "Request\0324.milvus.proto.milvus.GetCollect"
+  "ionStatisticsResponse\"\000\022n\n\017ShowCollectio"
+  "ns\022+.milvus.proto.milvus.ShowCollections"
+  "Request\032,.milvus.proto.milvus.ShowCollec"
+  "tionsResponse\"\000\022]\n\017CreatePartition\022+.mil"
+  "vus.proto.milvus.CreatePartitionRequest\032"
+  "\033.milvus.proto.common.Status\"\000\022Y\n\rDropPa"
+  "rtition\022).milvus.proto.milvus.DropPartit"
+  "ionRequest\032\033.milvus.proto.common.Status\""
+  "\000\022]\n\014HasPartition\022(.milvus.proto.milvus."
+  "HasPartitionRequest\032!.milvus.proto.milvu"
+  "s.BoolResponse\"\000\022[\n\016LoadPartitions\022*.mil"
+  "vus.proto.milvus.LoadPartitionsRequest\032\033"
   ".milvus.proto.common.Status\"\000\022a\n\021Release"
-  "Collection\022-.milvus.proto.milvus.Release"
-  "CollectionRequest\032\033.milvus.proto.common."
-  "Status\"\000\022w\n\022DescribeCollection\022..milvus."
-  "proto.milvus.DescribeCollectionRequest\032/"
-  ".milvus.proto.milvus.DescribeCollectionR"
-  "esponse\"\000\022\206\001\n\027GetCollectionStatistics\0223."
-  "milvus.proto.milvus.GetCollectionStatist"
-  "icsRequest\0324.milvus.proto.milvus.GetColl"
-  "ectionStatisticsResponse\"\000\022n\n\017ShowCollec"
-  "tions\022+.milvus.proto.milvus.ShowCollecti"
-  "onsRequest\032,.milvus.proto.milvus.ShowCol"
-  "lectionsResponse\"\000\022]\n\017CreatePartition\022+."
-  "milvus.proto.milvus.CreatePartitionReque"
-  "st\032\033.milvus.proto.common.Status\"\000\022Y\n\rDro"
-  "pPartition\022).milvus.proto.milvus.DropPar"
-  "titionRequest\032\033.milvus.proto.common.Stat"
-  "us\"\000\022]\n\014HasPartition\022(.milvus.proto.milv"
-  "us.HasPartitionRequest\032!.milvus.proto.mi"
-  "lvus.BoolResponse\"\000\022[\n\016LoadPartitions\022*."
-  "milvus.proto.milvus.LoadPartitionsReques"
-  "t\032\033.milvus.proto.common.Status\"\000\022a\n\021Rele"
-  "asePartitions\022-.milvus.proto.milvus.Rele"
-  "asePartitionsRequest\032\033.milvus.proto.comm"
-  "on.Status\"\000\022\203\001\n\026GetPartitionStatistics\0222"
-  ".milvus.proto.milvus.GetPartitionStatist"
-  "icsRequest\0323.milvus.proto.milvus.GetPart"
-  "itionStatisticsResponse\"\000\022k\n\016ShowPartiti"
-  "ons\022*.milvus.proto.milvus.ShowPartitions"
-  "Request\032+.milvus.proto.milvus.ShowPartit"
-  "ionsResponse\"\000\022U\n\013CreateAlias\022\'.milvus.p"
-  "roto.milvus.CreateAliasRequest\032\033.milvus."
-  "proto.common.Status\"\000\022Q\n\tDropAlias\022%.mil"
-  "vus.proto.milvus.DropAliasRequest\032\033.milv"
-  "us.proto.common.Status\"\000\022S\n\nAlterAlias\022&"
-  ".milvus.proto.milvus.AlterAliasRequest\032\033"
-  ".milvus.proto.common.Status\"\000\022U\n\013CreateI"
-  "ndex\022\'.milvus.proto.milvus.CreateIndexRe"
-  "quest\032\033.milvus.proto.common.Status\"\000\022h\n\r"
-  "DescribeIndex\022).milvus.proto.milvus.Desc"
-  "ribeIndexRequest\032*.milvus.proto.milvus.D"
-  "escribeIndexResponse\"\000\022h\n\rGetIndexState\022"
-  ").milvus.proto.milvus.GetIndexStateReque"
-  "st\032*.milvus.proto.milvus.GetIndexStateRe"
-  "sponse\"\000\022\200\001\n\025GetIndexBuildProgress\0221.mil"
-  "vus.proto.milvus.GetIndexBuildProgressRe"
-  "quest\0322.milvus.proto.milvus.GetIndexBuil"
-  "dProgressResponse\"\000\022Q\n\tDropIndex\022%.milvu"
-  "s.proto.milvus.DropIndexRequest\032\033.milvus"
-  ".proto.common.Status\"\000\022S\n\006Insert\022\".milvu"
-  "s.proto.milvus.InsertRequest\032#.milvus.pr"
-  "oto.milvus.MutationResult\"\000\022S\n\006Delete\022\"."
-  "milvus.proto.milvus.DeleteRequest\032#.milv"
-  "us.proto.milvus.MutationResult\"\000\022R\n\006Sear"
-  "ch\022\".milvus.proto.milvus.SearchRequest\032\""
-  ".milvus.proto.milvus.SearchResults\"\000\022P\n\005"
-  "Flush\022!.milvus.proto.milvus.FlushRequest"
-  "\032\".milvus.proto.milvus.FlushResponse\"\000\022O"
-  "\n\005Query\022!.milvus.proto.milvus.QueryReque"
-  "st\032!.milvus.proto.milvus.QueryResults\"\000\022"
-  "d\n\014CalcDistance\022(.milvus.proto.milvus.Ca"
-  "lcDistanceRequest\032(.milvus.proto.milvus."
-  "CalcDistanceResults\"\000\022h\n\rGetFlushState\022)"
-  ".milvus.proto.milvus.GetFlushStateReques"
-  "t\032*.milvus.proto.milvus.GetFlushStateRes"
-  "ponse\"\000\022\211\001\n\030GetPersistentSegmentInfo\0224.m"
-  "ilvus.proto.milvus.GetPersistentSegmentI"
-  "nfoRequest\0325.milvus.proto.milvus.GetPers"
-  "istentSegmentInfoResponse\"\000\022z\n\023GetQueryS"
-  "egmentInfo\022/.milvus.proto.milvus.GetQuer"
-  "ySegmentInfoRequest\0320.milvus.proto.milvu"
-  "s.GetQuerySegmentInfoResponse\"\000\022b\n\013GetRe"
-  "plicas\022\'.milvus.proto.milvus.GetReplicas"
-  "Request\032(.milvus.proto.milvus.GetReplica"
-  "sResponse\"\000\022P\n\005Dummy\022!.milvus.proto.milv"
-  "us.DummyRequest\032\".milvus.proto.milvus.Du"
-  "mmyResponse\"\000\022e\n\014RegisterLink\022(.milvus.p"
-  "roto.milvus.RegisterLinkRequest\032).milvus"
-  ".proto.milvus.RegisterLinkResponse\"\000\022_\n\n"
-  "GetMetrics\022&.milvus.proto.milvus.GetMetr"
-  "icsRequest\032\'.milvus.proto.milvus.GetMetr"
-  "icsResponse\"\000\022U\n\013LoadBalance\022\'.milvus.pr"
-  "oto.milvus.LoadBalanceRequest\032\033.milvus.p"
-  "roto.common.Status\"\000\022w\n\022GetCompactionSta"
-  "te\022..milvus.proto.milvus.GetCompactionSt"
-  "ateRequest\032/.milvus.proto.milvus.GetComp"
-  "actionStateResponse\"\000\022q\n\020ManualCompactio"
-  "n\022,.milvus.proto.milvus.ManualCompaction"
-  "Request\032-.milvus.proto.milvus.ManualComp"
-  "actionResponse\"\000\022\200\001\n\033GetCompactionStateW"
-  "ithPlans\022..milvus.proto.milvus.GetCompac"
-  "tionPlansRequest\032/.milvus.proto.milvus.G"
-  "etCompactionPlansResponse\"\000\022S\n\006Import\022\"."
-  "milvus.proto.milvus.ImportRequest\032#.milv"
-  "us.proto.milvus.ImportResponse\"\000\022k\n\016GetI"
-  "mportState\022*.milvus.proto.milvus.GetImpo"
-  "rtStateRequest\032+.milvus.proto.milvus.Get"
-  "ImportStateResponse\"\000\022_\n\020CreateCredentia"
-  "l\022,.milvus.proto.milvus.CreateCredential"
-  "Request\032\033.milvus.proto.common.Status\"\000\022_"
-  "\n\020UpdateCredential\022,.milvus.proto.milvus"
-  ".CreateCredentialRequest\032\033.milvus.proto."
-  "common.Status\"\000\022_\n\020DeleteCredential\022,.mi"
-  "lvus.proto.milvus.DeleteCredentialReques"
-  "t\032\033.milvus.proto.common.Status\"\000\022h\n\rList"
-  "CredUsers\022).milvus.proto.milvus.ListCred"
-  "UsersRequest\032*.milvus.proto.milvus.ListC"
-  "redUsersResponse\"\0002u\n\014ProxyService\022e\n\014Re"
-  "gisterLink\022(.milvus.proto.milvus.Registe"
-  "rLinkRequest\032).milvus.proto.milvus.Regis"
-  "terLinkResponse\"\000BW\n\016io.milvus.grpcB\013Mil"
-  "vusProtoP\001Z3github.com/milvus-io/milvus/"
-  "internal/proto/milvuspb\240\001\001b\006proto3"
+  "Partitions\022-.milvus.proto.milvus.Release"
+  "PartitionsRequest\032\033.milvus.proto.common."
+  "Status\"\000\022\203\001\n\026GetPartitionStatistics\0222.mi"
+  "lvus.proto.milvus.GetPartitionStatistics"
+  "Request\0323.milvus.proto.milvus.GetPartiti"
+  "onStatisticsResponse\"\000\022k\n\016ShowPartitions"
+  "\022*.milvus.proto.milvus.ShowPartitionsReq"
+  "uest\032+.milvus.proto.milvus.ShowPartition"
+  "sResponse\"\000\022U\n\013CreateAlias\022\'.milvus.prot"
+  "o.milvus.CreateAliasRequest\032\033.milvus.pro"
+  "to.common.Status\"\000\022Q\n\tDropAlias\022%.milvus"
+  ".proto.milvus.DropAliasRequest\032\033.milvus."
+  "proto.common.Status\"\000\022S\n\nAlterAlias\022&.mi"
+  "lvus.proto.milvus.AlterAliasRequest\032\033.mi"
+  "lvus.proto.common.Status\"\000\022U\n\013CreateInde"
+  "x\022\'.milvus.proto.milvus.CreateIndexReque"
+  "st\032\033.milvus.proto.common.Status\"\000\022h\n\rDes"
+  "cribeIndex\022).milvus.proto.milvus.Describ"
+  "eIndexRequest\032*.milvus.proto.milvus.Desc"
+  "ribeIndexResponse\"\000\022h\n\rGetIndexState\022).m"
+  "ilvus.proto.milvus.GetIndexStateRequest\032"
+  "*.milvus.proto.milvus.GetIndexStateRespo"
+  "nse\"\000\022\200\001\n\025GetIndexBuildProgress\0221.milvus"
+  ".proto.milvus.GetIndexBuildProgressReque"
+  "st\0322.milvus.proto.milvus.GetIndexBuildPr"
+  "ogressResponse\"\000\022Q\n\tDropIndex\022%.milvus.p"
+  "roto.milvus.DropIndexRequest\032\033.milvus.pr"
+  "oto.common.Status\"\000\022S\n\006Insert\022\".milvus.p"
+  "roto.milvus.InsertRequest\032#.milvus.proto"
+  ".milvus.MutationResult\"\000\022S\n\006Delete\022\".mil"
+  "vus.proto.milvus.DeleteRequest\032#.milvus."
+  "proto.milvus.MutationResult\"\000\022R\n\006Search\022"
+  "\".milvus.proto.milvus.SearchRequest\032\".mi"
+  "lvus.proto.milvus.SearchResults\"\000\022P\n\005Flu"
+  "sh\022!.milvus.proto.milvus.FlushRequest\032\"."
+  "milvus.proto.milvus.FlushResponse\"\000\022O\n\005Q"
+  "uery\022!.milvus.proto.milvus.QueryRequest\032"
+  "!.milvus.proto.milvus.QueryResults\"\000\022d\n\014"
+  "CalcDistance\022(.milvus.proto.milvus.CalcD"
+  "istanceRequest\032(.milvus.proto.milvus.Cal"
+  "cDistanceResults\"\000\022h\n\rGetFlushState\022).mi"
+  "lvus.proto.milvus.GetFlushStateRequest\032*"
+  ".milvus.proto.milvus.GetFlushStateRespon"
+  "se\"\000\022\211\001\n\030GetPersistentSegmentInfo\0224.milv"
+  "us.proto.milvus.GetPersistentSegmentInfo"
+  "Request\0325.milvus.proto.milvus.GetPersist"
+  "entSegmentInfoResponse\"\000\022z\n\023GetQuerySegm"
+  "entInfo\022/.milvus.proto.milvus.GetQuerySe"
+  "gmentInfoRequest\0320.milvus.proto.milvus.G"
+  "etQuerySegmentInfoResponse\"\000\022b\n\013GetRepli"
+  "cas\022\'.milvus.proto.milvus.GetReplicasReq"
+  "uest\032(.milvus.proto.milvus.GetReplicasRe"
+  "sponse\"\000\022P\n\005Dummy\022!.milvus.proto.milvus."
+  "DummyRequest\032\".milvus.proto.milvus.Dummy"
+  "Response\"\000\022e\n\014RegisterLink\022(.milvus.prot"
+  "o.milvus.RegisterLinkRequest\032).milvus.pr"
+  "oto.milvus.RegisterLinkResponse\"\000\022_\n\nGet"
+  "Metrics\022&.milvus.proto.milvus.GetMetrics"
+  "Request\032\'.milvus.proto.milvus.GetMetrics"
+  "Response\"\000\022U\n\013LoadBalance\022\'.milvus.proto"
+  ".milvus.LoadBalanceRequest\032\033.milvus.prot"
+  "o.common.Status\"\000\022w\n\022GetCompactionState\022"
+  "..milvus.proto.milvus.GetCompactionState"
+  "Request\032/.milvus.proto.milvus.GetCompact"
+  "ionStateResponse\"\000\022q\n\020ManualCompaction\022,"
+  ".milvus.proto.milvus.ManualCompactionReq"
+  "uest\032-.milvus.proto.milvus.ManualCompact"
+  "ionResponse\"\000\022\200\001\n\033GetCompactionStateWith"
+  "Plans\022..milvus.proto.milvus.GetCompactio"
+  "nPlansRequest\032/.milvus.proto.milvus.GetC"
+  "ompactionPlansResponse\"\000\022S\n\006Import\022\".mil"
+  "vus.proto.milvus.ImportRequest\032#.milvus."
+  "proto.milvus.ImportResponse\"\000\022k\n\016GetImpo"
+  "rtState\022*.milvus.proto.milvus.GetImportS"
+  "tateRequest\032+.milvus.proto.milvus.GetImp"
+  "ortStateResponse\"\000\022_\n\020CreateCredential\022,"
+  ".milvus.proto.milvus.CreateCredentialReq"
+  "uest\032\033.milvus.proto.common.Status\"\000\022_\n\020U"
+  "pdateCredential\022,.milvus.proto.milvus.Up"
+  "dateCredentialRequest\032\033.milvus.proto.com"
+  "mon.Status\"\000\022_\n\020DeleteCredential\022,.milvu"
+  "s.proto.milvus.DeleteCredentialRequest\032\033"
+  ".milvus.proto.common.Status\"\000\022h\n\rListCre"
+  "dUsers\022).milvus.proto.milvus.ListCredUse"
+  "rsRequest\032*.milvus.proto.milvus.ListCred"
+  "UsersResponse\"\0002u\n\014ProxyService\022e\n\014Regis"
+  "terLink\022(.milvus.proto.milvus.RegisterLi"
+  "nkRequest\032).milvus.proto.milvus.Register"
+  "LinkResponse\"\000BW\n\016io.milvus.grpcB\013Milvus"
+  "ProtoP\001Z3github.com/milvus-io/milvus/int"
+  "ernal/proto/milvuspb\240\001\001b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_milvus_2eproto_deps[2] = {
   &::descriptor_table_common_2eproto,
   &::descriptor_table_schema_2eproto,
 };
-static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_milvus_2eproto_sccs[89] = {
+static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_milvus_2eproto_sccs[90] = {
   &scc_info_AlterAliasRequest_milvus_2eproto.base,
   &scc_info_BoolResponse_milvus_2eproto.base,
   &scc_info_CalcDistanceRequest_milvus_2eproto.base,
@@ -3233,16 +3270,17 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_mil
   &scc_info_ShowSegmentsRequest_milvus_2eproto.base,
   &scc_info_ShowSegmentsResponse_milvus_2eproto.base,
   &scc_info_StringResponse_milvus_2eproto.base,
+  &scc_info_UpdateCredentialRequest_milvus_2eproto.base,
   &scc_info_VectorIDs_milvus_2eproto.base,
   &scc_info_VectorsArray_milvus_2eproto.base,
 };
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_milvus_2eproto_once;
 static bool descriptor_table_milvus_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_milvus_2eproto = {
-  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 17074,
-  &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 89, 2,
+  &descriptor_table_milvus_2eproto_initialized, descriptor_table_protodef_milvus_2eproto, "milvus.proto", 17271,
+  &descriptor_table_milvus_2eproto_once, descriptor_table_milvus_2eproto_sccs, descriptor_table_milvus_2eproto_deps, 90, 2,
   schemas, file_default_instances, TableStruct_milvus_2eproto::offsets,
-  file_level_metadata_milvus_2eproto, 89, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
+  file_level_metadata_milvus_2eproto, 90, file_level_enum_descriptors_milvus_2eproto, file_level_service_descriptors_milvus_2eproto,
 };
 
 // Force running AddDescriptors() at dynamic initialization time.
@@ -39761,6 +39799,557 @@ void CreateCredentialRequest::InternalSwap(CreateCredentialRequest* other) {
 
 // ===================================================================
 
+void UpdateCredentialRequest::InitAsDefaultInstance() {
+  ::milvus::proto::milvus::_UpdateCredentialRequest_default_instance_._instance.get_mutable()->base_ = const_cast< ::milvus::proto::common::MsgBase*>(
+      ::milvus::proto::common::MsgBase::internal_default_instance());
+}
+class UpdateCredentialRequest::_Internal {
+ public:
+  static const ::milvus::proto::common::MsgBase& base(const UpdateCredentialRequest* msg);
+};
+
+const ::milvus::proto::common::MsgBase&
+UpdateCredentialRequest::_Internal::base(const UpdateCredentialRequest* msg) {
+  return *msg->base_;
+}
+void UpdateCredentialRequest::clear_base() {
+  if (GetArenaNoVirtual() == nullptr && base_ != nullptr) {
+    delete base_;
+  }
+  base_ = nullptr;
+}
+UpdateCredentialRequest::UpdateCredentialRequest()
+  : ::PROTOBUF_NAMESPACE_ID::Message(), _internal_metadata_(nullptr) {
+  SharedCtor();
+  // @@protoc_insertion_point(constructor:milvus.proto.milvus.UpdateCredentialRequest)
+}
+UpdateCredentialRequest::UpdateCredentialRequest(const UpdateCredentialRequest& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message(),
+      _internal_metadata_(nullptr) {
+  _internal_metadata_.MergeFrom(from._internal_metadata_);
+  username_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.username().empty()) {
+    username_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.username_);
+  }
+  oldpassword_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.oldpassword().empty()) {
+    oldpassword_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.oldpassword_);
+  }
+  newpassword_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (!from.newpassword().empty()) {
+    newpassword_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.newpassword_);
+  }
+  if (from.has_base()) {
+    base_ = new ::milvus::proto::common::MsgBase(*from.base_);
+  } else {
+    base_ = nullptr;
+  }
+  ::memcpy(&created_utc_timestamps_, &from.created_utc_timestamps_,
+    static_cast<size_t>(reinterpret_cast<char*>(&modified_utc_timestamps_) -
+    reinterpret_cast<char*>(&created_utc_timestamps_)) + sizeof(modified_utc_timestamps_));
+  // @@protoc_insertion_point(copy_constructor:milvus.proto.milvus.UpdateCredentialRequest)
+}
+
+void UpdateCredentialRequest::SharedCtor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&scc_info_UpdateCredentialRequest_milvus_2eproto.base);
+  username_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  oldpassword_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  newpassword_.UnsafeSetDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  ::memset(&base_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&modified_utc_timestamps_) -
+      reinterpret_cast<char*>(&base_)) + sizeof(modified_utc_timestamps_));
+}
+
+UpdateCredentialRequest::~UpdateCredentialRequest() {
+  // @@protoc_insertion_point(destructor:milvus.proto.milvus.UpdateCredentialRequest)
+  SharedDtor();
+}
+
+void UpdateCredentialRequest::SharedDtor() {
+  username_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  oldpassword_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  newpassword_.DestroyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (this != internal_default_instance()) delete base_;
+}
+
+void UpdateCredentialRequest::SetCachedSize(int size) const {
+  _cached_size_.Set(size);
+}
+const UpdateCredentialRequest& UpdateCredentialRequest::default_instance() {
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_UpdateCredentialRequest_milvus_2eproto.base);
+  return *internal_default_instance();
+}
+
+
+void UpdateCredentialRequest::Clear() {
+// @@protoc_insertion_point(message_clear_start:milvus.proto.milvus.UpdateCredentialRequest)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  username_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  oldpassword_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  newpassword_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+  if (GetArenaNoVirtual() == nullptr && base_ != nullptr) {
+    delete base_;
+  }
+  base_ = nullptr;
+  ::memset(&created_utc_timestamps_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&modified_utc_timestamps_) -
+      reinterpret_cast<char*>(&created_utc_timestamps_)) + sizeof(modified_utc_timestamps_));
+  _internal_metadata_.Clear();
+}
+
+#if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+const char* UpdateCredentialRequest::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    ::PROTOBUF_NAMESPACE_ID::uint32 tag;
+    ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
+    CHK_(ptr);
+    switch (tag >> 3) {
+      // .milvus.proto.common.MsgBase base = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 10)) {
+          ptr = ctx->ParseMessage(mutable_base(), ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string username = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 18)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_username(), ptr, ctx, "milvus.proto.milvus.UpdateCredentialRequest.username");
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string oldPassword = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 26)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_oldpassword(), ptr, ctx, "milvus.proto.milvus.UpdateCredentialRequest.oldPassword");
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // string newPassword = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 34)) {
+          ptr = ::PROTOBUF_NAMESPACE_ID::internal::InlineGreedyStringParserUTF8(mutable_newpassword(), ptr, ctx, "milvus.proto.milvus.UpdateCredentialRequest.newPassword");
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // uint64 created_utc_timestamps = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 40)) {
+          created_utc_timestamps_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      // uint64 modified_utc_timestamps = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 48)) {
+          modified_utc_timestamps_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      default: {
+      handle_unusual:
+        if ((tag & 7) == 4 || tag == 0) {
+          ctx->SetLastTag(tag);
+          goto success;
+        }
+        ptr = UnknownFieldParse(tag, &_internal_metadata_, ptr, ctx);
+        CHK_(ptr != nullptr);
+        continue;
+      }
+    }  // switch
+  }  // while
+success:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto success;
+#undef CHK_
+}
+#else  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+bool UpdateCredentialRequest::MergePartialFromCodedStream(
+    ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) {
+#define DO_(EXPRESSION) if (!PROTOBUF_PREDICT_TRUE(EXPRESSION)) goto failure
+  ::PROTOBUF_NAMESPACE_ID::uint32 tag;
+  // @@protoc_insertion_point(parse_start:milvus.proto.milvus.UpdateCredentialRequest)
+  for (;;) {
+    ::std::pair<::PROTOBUF_NAMESPACE_ID::uint32, bool> p = input->ReadTagWithCutoffNoLastTag(127u);
+    tag = p.first;
+    if (!p.second) goto handle_unusual;
+    switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
+      // .milvus.proto.common.MsgBase base = 1;
+      case 1: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (10 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadMessage(
+               input, mutable_base()));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // string username = 2;
+      case 2: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (18 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_username()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->username().data(), static_cast<int>(this->username().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.milvus.UpdateCredentialRequest.username"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // string oldPassword = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (26 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_oldpassword()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->oldpassword().data(), static_cast<int>(this->oldpassword().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.milvus.UpdateCredentialRequest.oldPassword"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // string newPassword = 4;
+      case 4: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (34 & 0xFF)) {
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadString(
+                input, this->mutable_newpassword()));
+          DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+            this->newpassword().data(), static_cast<int>(this->newpassword().length()),
+            ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE,
+            "milvus.proto.milvus.UpdateCredentialRequest.newPassword"));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // uint64 created_utc_timestamps = 5;
+      case 5: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (40 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                 input, &created_utc_timestamps_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // uint64 modified_utc_timestamps = 6;
+      case 6: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (48 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::uint64, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_UINT64>(
+                 input, &modified_utc_timestamps_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      default: {
+      handle_unusual:
+        if (tag == 0) {
+          goto success;
+        }
+        DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SkipField(
+              input, tag, _internal_metadata_.mutable_unknown_fields()));
+        break;
+      }
+    }
+  }
+success:
+  // @@protoc_insertion_point(parse_success:milvus.proto.milvus.UpdateCredentialRequest)
+  return true;
+failure:
+  // @@protoc_insertion_point(parse_failure:milvus.proto.milvus.UpdateCredentialRequest)
+  return false;
+#undef DO_
+}
+#endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+
+void UpdateCredentialRequest::SerializeWithCachedSizes(
+    ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const {
+  // @@protoc_insertion_point(serialize_start:milvus.proto.milvus.UpdateCredentialRequest)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .milvus.proto.common.MsgBase base = 1;
+  if (this->has_base()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteMessageMaybeToArray(
+      1, _Internal::base(this), output);
+  }
+
+  // string username = 2;
+  if (this->username().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->username().data(), static_cast<int>(this->username().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.UpdateCredentialRequest.username");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      2, this->username(), output);
+  }
+
+  // string oldPassword = 3;
+  if (this->oldpassword().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->oldpassword().data(), static_cast<int>(this->oldpassword().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.UpdateCredentialRequest.oldPassword");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      3, this->oldpassword(), output);
+  }
+
+  // string newPassword = 4;
+  if (this->newpassword().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->newpassword().data(), static_cast<int>(this->newpassword().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.UpdateCredentialRequest.newPassword");
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringMaybeAliased(
+      4, this->newpassword(), output);
+  }
+
+  // uint64 created_utc_timestamps = 5;
+  if (this->created_utc_timestamps() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(5, this->created_utc_timestamps(), output);
+  }
+
+  // uint64 modified_utc_timestamps = 6;
+  if (this->modified_utc_timestamps() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64(6, this->modified_utc_timestamps(), output);
+  }
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
+        _internal_metadata_.unknown_fields(), output);
+  }
+  // @@protoc_insertion_point(serialize_end:milvus.proto.milvus.UpdateCredentialRequest)
+}
+
+::PROTOBUF_NAMESPACE_ID::uint8* UpdateCredentialRequest::InternalSerializeWithCachedSizesToArray(
+    ::PROTOBUF_NAMESPACE_ID::uint8* target) const {
+  // @@protoc_insertion_point(serialize_to_array_start:milvus.proto.milvus.UpdateCredentialRequest)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .milvus.proto.common.MsgBase base = 1;
+  if (this->has_base()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessageToArray(
+        1, _Internal::base(this), target);
+  }
+
+  // string username = 2;
+  if (this->username().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->username().data(), static_cast<int>(this->username().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.UpdateCredentialRequest.username");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        2, this->username(), target);
+  }
+
+  // string oldPassword = 3;
+  if (this->oldpassword().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->oldpassword().data(), static_cast<int>(this->oldpassword().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.UpdateCredentialRequest.oldPassword");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        3, this->oldpassword(), target);
+  }
+
+  // string newPassword = 4;
+  if (this->newpassword().size() > 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->newpassword().data(), static_cast<int>(this->newpassword().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.milvus.UpdateCredentialRequest.newPassword");
+    target =
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteStringToArray(
+        4, this->newpassword(), target);
+  }
+
+  // uint64 created_utc_timestamps = 5;
+  if (this->created_utc_timestamps() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(5, this->created_utc_timestamps(), target);
+  }
+
+  // uint64 modified_utc_timestamps = 6;
+  if (this->modified_utc_timestamps() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteUInt64ToArray(6, this->modified_utc_timestamps(), target);
+  }
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields(), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:milvus.proto.milvus.UpdateCredentialRequest)
+  return target;
+}
+
+size_t UpdateCredentialRequest::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:milvus.proto.milvus.UpdateCredentialRequest)
+  size_t total_size = 0;
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::ComputeUnknownFieldsSize(
+        _internal_metadata_.unknown_fields());
+  }
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string username = 2;
+  if (this->username().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->username());
+  }
+
+  // string oldPassword = 3;
+  if (this->oldpassword().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->oldpassword());
+  }
+
+  // string newPassword = 4;
+  if (this->newpassword().size() > 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->newpassword());
+  }
+
+  // .milvus.proto.common.MsgBase base = 1;
+  if (this->has_base()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *base_);
+  }
+
+  // uint64 created_utc_timestamps = 5;
+  if (this->created_utc_timestamps() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+        this->created_utc_timestamps());
+  }
+
+  // uint64 modified_utc_timestamps = 6;
+  if (this->modified_utc_timestamps() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::UInt64Size(
+        this->modified_utc_timestamps());
+  }
+
+  int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void UpdateCredentialRequest::MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
+// @@protoc_insertion_point(generalized_merge_from_start:milvus.proto.milvus.UpdateCredentialRequest)
+  GOOGLE_DCHECK_NE(&from, this);
+  const UpdateCredentialRequest* source =
+      ::PROTOBUF_NAMESPACE_ID::DynamicCastToGenerated<UpdateCredentialRequest>(
+          &from);
+  if (source == nullptr) {
+  // @@protoc_insertion_point(generalized_merge_from_cast_fail:milvus.proto.milvus.UpdateCredentialRequest)
+    ::PROTOBUF_NAMESPACE_ID::internal::ReflectionOps::Merge(from, this);
+  } else {
+  // @@protoc_insertion_point(generalized_merge_from_cast_success:milvus.proto.milvus.UpdateCredentialRequest)
+    MergeFrom(*source);
+  }
+}
+
+void UpdateCredentialRequest::MergeFrom(const UpdateCredentialRequest& from) {
+// @@protoc_insertion_point(class_specific_merge_from_start:milvus.proto.milvus.UpdateCredentialRequest)
+  GOOGLE_DCHECK_NE(&from, this);
+  _internal_metadata_.MergeFrom(from._internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from.username().size() > 0) {
+
+    username_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.username_);
+  }
+  if (from.oldpassword().size() > 0) {
+
+    oldpassword_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.oldpassword_);
+  }
+  if (from.newpassword().size() > 0) {
+
+    newpassword_.AssignWithDefault(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), from.newpassword_);
+  }
+  if (from.has_base()) {
+    mutable_base()->::milvus::proto::common::MsgBase::MergeFrom(from.base());
+  }
+  if (from.created_utc_timestamps() != 0) {
+    set_created_utc_timestamps(from.created_utc_timestamps());
+  }
+  if (from.modified_utc_timestamps() != 0) {
+    set_modified_utc_timestamps(from.modified_utc_timestamps());
+  }
+}
+
+void UpdateCredentialRequest::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
+// @@protoc_insertion_point(generalized_copy_from_start:milvus.proto.milvus.UpdateCredentialRequest)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+void UpdateCredentialRequest::CopyFrom(const UpdateCredentialRequest& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:milvus.proto.milvus.UpdateCredentialRequest)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool UpdateCredentialRequest::IsInitialized() const {
+  return true;
+}
+
+void UpdateCredentialRequest::InternalSwap(UpdateCredentialRequest* other) {
+  using std::swap;
+  _internal_metadata_.Swap(&other->_internal_metadata_);
+  username_.Swap(&other->username_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  oldpassword_.Swap(&other->oldpassword_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  newpassword_.Swap(&other->newpassword_, &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+    GetArenaNoVirtual());
+  swap(base_, other->base_);
+  swap(created_utc_timestamps_, other->created_utc_timestamps_);
+  swap(modified_utc_timestamps_, other->modified_utc_timestamps_);
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata UpdateCredentialRequest::GetMetadata() const {
+  return GetMetadataStatic();
+}
+
+
+// ===================================================================
+
 void DeleteCredentialRequest::InitAsDefaultInstance() {
   ::milvus::proto::milvus::_DeleteCredentialRequest_default_instance_._instance.get_mutable()->base_ = const_cast< ::milvus::proto::common::MsgBase*>(
       ::milvus::proto::common::MsgBase::internal_default_instance());
@@ -40960,6 +41549,9 @@ template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::ShardReplica* Arena::Creat
 }
 template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::CreateCredentialRequest* Arena::CreateMaybeMessage< ::milvus::proto::milvus::CreateCredentialRequest >(Arena* arena) {
   return Arena::CreateInternal< ::milvus::proto::milvus::CreateCredentialRequest >(arena);
+}
+template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::UpdateCredentialRequest* Arena::CreateMaybeMessage< ::milvus::proto::milvus::UpdateCredentialRequest >(Arena* arena) {
+  return Arena::CreateInternal< ::milvus::proto::milvus::UpdateCredentialRequest >(arena);
 }
 template<> PROTOBUF_NOINLINE ::milvus::proto::milvus::DeleteCredentialRequest* Arena::CreateMaybeMessage< ::milvus::proto::milvus::DeleteCredentialRequest >(Arena* arena) {
   return Arena::CreateInternal< ::milvus::proto::milvus::DeleteCredentialRequest >(arena);

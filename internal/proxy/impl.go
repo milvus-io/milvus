@@ -4098,10 +4098,17 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	return result, err
 }
 
-func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
-	// validate params
-	rawPassword, err := crypto.Base64Decode(req.Password)
+	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
+	if err != nil {
+		log.Error("decode old password fail", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
+			Reason:    "decode old password fail when updating:" + req.Username,
+		}, nil
+	}
+	rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
 	if err != nil {
 		log.Error("decode password fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
@@ -4109,14 +4116,31 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.CreateCre
 			Reason:    "decode password fail when updating:" + req.Username,
 		}, nil
 	}
-	if err = ValidatePassword(rawPassword); err != nil {
+	// valid new password
+	if err = ValidatePassword(rawNewPassword); err != nil {
 		log.Error("illegal password", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    err.Error(),
 		}, nil
 	}
-	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
+	// check old password is correct
+	oldCredInfo, err := globalMetaCache.GetCredentialInfo(ctx, req.Username)
+	if err != nil {
+		log.Error("found no credential", zap.String("username", req.Username), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
+			Reason:    "found no credential:" + req.Username,
+		}, nil
+	}
+	if !crypto.PasswordVerify(rawOldPassword, oldCredInfo.EncryptedPassword) {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
+			Reason:    "old password is not correct:" + req.Username,
+		}, nil
+	}
+	// update meta data
+	encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
 	if err != nil {
 		log.Error("encrypt password fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
@@ -4124,11 +4148,11 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.CreateCre
 			Reason:    "encrypt password fail when updating:" + req.Username,
 		}, nil
 	}
-	credInfo := &internalpb.CredentialInfo{
+	updateCredReq := &internalpb.CredentialInfo{
 		Username:          req.Username,
 		EncryptedPassword: encryptedPassword,
 	}
-	result, err := node.rootCoord.UpdateCredential(ctx, credInfo)
+	result, err := node.rootCoord.UpdateCredential(ctx, updateCredReq)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("update credential fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
