@@ -3,6 +3,7 @@ from time import time, sleep
 
 import pytest
 from pymilvus.grpc_gen.common_pb2 import SegmentState
+from pymilvus.exceptions import MilvusException
 
 from base.client_base import TestcaseBase
 from common import common_func as cf
@@ -457,7 +458,7 @@ class TestCompactionOperation(TestcaseBase):
                 log.debug(segment_info)
                 break
             if time() - start > cost:
-                raise BaseException(1, f"Handoff after compact and index cost more than {cost}s")
+                raise MilvusException(1, f"Handoff after compact and index cost more than {cost}s")
 
         # verify search result
         search_res_two, _ = collection_w.search(df[ct.default_binary_vec_field_name][:ct.default_nq].to_list(),
@@ -854,7 +855,7 @@ class TestCompactionOperation(TestcaseBase):
                 break
             end = time()
             if end - start > cost:
-                raise BaseException(1, "Compact auto-merge more than 60s")
+                raise MilvusException(1, "Compact auto-merge more than 60s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_less_threshold_no_merge(self):

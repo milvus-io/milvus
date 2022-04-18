@@ -56,7 +56,7 @@ class TestDataNodeScale:
         else:
             # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
             # mic.uninstall(release_name, namespace=constants.NAMESPACE)
-            raise BaseException(f'Milvus healthy timeout 1200s')
+            raise MilvusException(message=f'Milvus healthy timeout 1200s')
 
         try:
             # connect

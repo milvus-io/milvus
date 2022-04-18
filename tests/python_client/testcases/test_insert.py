@@ -6,6 +6,7 @@ import pandas as pd
 import random
 import pytest
 from pymilvus import Index, DataType
+from pymilvus.exceptions import MilvusException
 
 from base.client_base import TestcaseBase
 from utils.util_log import test_log as log
@@ -219,7 +220,6 @@ class TestInsertParams(TestcaseBase):
         assert collection_w.num_entities == 1
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_dim_not_match(self):
         """
         target: test insert with not match dim
@@ -235,7 +235,6 @@ class TestInsertParams(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="exception not Milvus Exception")
     def test_insert_binary_dim_not_match(self):
         """
         target: test insert binary with dim not match
@@ -796,8 +795,8 @@ class TestInsertAsync(TestcaseBase):
         nb = 100000
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_default_dataframe_data(nb)
-        future, _ = collection_w.insert(data=df, _async=True, _callback=assert_mutation_result, timeout=1)
-        with pytest.raises(Exception):
+        future, _ = collection_w.insert(data=df, _async=True, _callback=None, timeout=0.2)
+        with pytest.raises(MilvusException):
             future.result()
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -825,7 +824,7 @@ class TestInsertAsync(TestcaseBase):
         err_msg = "partitionID of partitionName:p can not be find"
         future, _ = collection_w.insert(data=df, partition_name="p", _async=True)
         future.done()
-        with pytest.raises(Exception, match=err_msg):
+        with pytest.raises(MilvusException, match=err_msg):
             future.result()
 
     @pytest.mark.tags(CaseLabel.L2)
