@@ -308,3 +308,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.querynode.GetMetrics(ctx, req)
 }
+
+func (s *Server) Search(ctx context.Context, req *querypb.SearchRequest) (*commonpb.Status, error) {
+	return s.querynode.Search(ctx, req)
+}

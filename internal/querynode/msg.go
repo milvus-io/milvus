@@ -41,6 +41,7 @@ var _ queryMsg = (*retrieveMsg)(nil)
 
 const (
 	maxTopKMergeRatio = 10.0
+	maxNQ             = 10000
 )
 
 type queryMsg interface {
@@ -302,6 +303,9 @@ func canMerge(msg1 queryMsg, msg2 queryMsg) bool {
 		return false
 	}
 	if after/pre > maxTopKMergeRatio {
+		return false
+	}
+	if newMsg1.NQ+newMsg2.NQ > maxNQ {
 		return false
 	}
 	return true

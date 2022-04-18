@@ -29,6 +29,8 @@ import (
 	"time"
 	"unsafe"
 
+	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -1135,6 +1137,8 @@ type searchTask struct {
 	tr           *timerecord.TimeRecorder
 	perfTR       *timerecord.TimeRecorder
 	collectionID UniqueID
+
+	qnClients []*grpcquerynodeclient.Client
 }
 
 func (st *searchTask) TraceCtx() context.Context {
@@ -1429,7 +1433,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	st.SearchRequest.PlaceholderGroup = st.query.PlaceholderGroup
 	st.SearchRequest.Nq = int64(st.query.Nq)
 
-	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "PreExecute"),
+	log.Info(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "PreExecute"),
 		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
 		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, st.perfTR.ElapseSpan().Microseconds()))
 
@@ -1443,21 +1447,21 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", st.ID()))
 	defer tr.Elapse("done")
 
-	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
-		SearchRequest: *st.SearchRequest,
-		BaseMsg: msgstream.BaseMsg{
-			Ctx:            ctx,
-			HashValues:     []uint32{uint32(Params.ProxyCfg.ProxyID)},
-			BeginTimestamp: st.Base.Timestamp,
-			EndTimestamp:   st.Base.Timestamp,
-		},
-	}
-	msgPack := msgstream.MsgPack{
-		BeginTs: st.Base.Timestamp,
-		EndTs:   st.Base.Timestamp,
-		Msgs:    make([]msgstream.TsMsg, 1),
-	}
-	msgPack.Msgs[0] = tsMsg
+	//var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
+	//	SearchRequest: *st.SearchRequest,
+	//	BaseMsg: msgstream.BaseMsg{
+	//		Ctx:            ctx,
+	//		HashValues:     []uint32{uint32(Params.ProxyCfg.ProxyID)},
+	//		BeginTimestamp: st.Base.Timestamp,
+	//		EndTimestamp:   st.Base.Timestamp,
+	//	},
+	//}
+	//msgPack := msgstream.MsgPack{
+	//	BeginTs: st.Base.Timestamp,
+	//	EndTs:   st.Base.Timestamp,
+	//	Msgs:    make([]msgstream.TsMsg, 1),
+	//}
+	//msgPack.Msgs[0] = tsMsg
 
 	collectionName := st.query.CollectionName
 	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
@@ -1466,46 +1470,62 @@ func (st *searchTask) Execute(ctx context.Context) error {
 	}
 	st.collectionName = info.schema.Name
 
-	stream, err := st.chMgr.getDQLStream(info.collID)
-	if err != nil {
-		err = st.chMgr.createDQLStream(info.collID)
-		if err != nil {
-			st.result = &milvuspb.SearchResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}
-			return err
-		}
-		stream, err = st.chMgr.getDQLStream(info.collID)
-		if err != nil {
-			st.result = &milvuspb.SearchResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}
-			return err
-		}
+	//stream, err := st.chMgr.getDQLStream(info.collID)
+	//if err != nil {
+	//	err = st.chMgr.createDQLStream(info.collID)
+	//	if err != nil {
+	//		st.result = &milvuspb.SearchResults{
+	//			Status: &commonpb.Status{
+	//				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//				Reason:    err.Error(),
+	//			},
+	//		}
+	//		return err
+	//	}
+	//	stream, err = st.chMgr.getDQLStream(info.collID)
+	//	if err != nil {
+	//		st.result = &milvuspb.SearchResults{
+	//			Status: &commonpb.Status{
+	//				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//				Reason:    err.Error(),
+	//			},
+	//		}
+	//		return err
+	//	}
+	//}
+	req := &querypb.SearchRequest{
+		Request:        st.SearchRequest,
+		CollectionID:   info.collID,
+		BeginTimestamp: st.Base.Timestamp,
+		EndTimestamp:   st.Base.Timestamp,
 	}
 	tr.Record("get used message stream")
-	err = stream.Produce(&msgPack)
-	if err != nil {
-		log.Debug("proxy", zap.String("send search request failed", err.Error()))
+	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "SendMsgToMessageStorage"),
+		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
+		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, time.Now().UnixNano()))
+	for _, client := range st.qnClients {
+		status, err := client.Search(st.ctx, req)
+		if err != nil {
+			log.Warn("search failed", zap.Error(err))
+			return err
+		}
+		if status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("search illegal")
+		}
 	}
+	//err = stream.Produce(&msgPack)
+	//if err != nil {
+	//	log.Debug("proxy", zap.String("send search request failed", err.Error()))
+	//}
 	sendDur := st.tr.Record("send message done")
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "SendMsgToPulsar"),
 		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
 		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, sendDur.Microseconds()))
-	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "SendMsgToMessageStorage"),
-		zap.Int64(log.BenchmarkCollectionID, st.CollectionID),
-		zap.Int64(log.BenchmarkMsgID, st.ID()), zap.Int64(log.BenchmarkDuration, time.Now().UnixNano()))
 	metrics.ProxySendMessageLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), collectionName, metrics.SearchLabel).Observe(float64(sendDur.Milliseconds()))
 	log.Debug("proxy sent one searchMsg",
 		zap.Int64("collectionID", st.CollectionID),
-		zap.Int64("msgID", tsMsg.ID()),
-		zap.Int("length of search msg", len(msgPack.Msgs)),
+		//zap.Int64("msgID", tsMsg.ID()),
+		//zap.Int("length of search msg", len(msgPack.Msgs)),
 		zap.Uint64("timeoutTs", st.SearchRequest.TimeoutTimestamp))
 
 	log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.ProxyRole), zap.String(log.BenchmarkStep, "Execute"),

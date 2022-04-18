@@ -127,6 +127,10 @@ func (m *MockQueryNode) SetIndexCoord(index types.IndexCoord) error {
 	return m.err
 }
 
+func (m *MockQueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
 	types.RootCoord

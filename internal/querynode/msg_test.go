@@ -79,7 +79,7 @@ func TestMsg_canMerge(t *testing.T) {
 	ok = canMerge(msg1, msg2)
 	assert.Equal(t, true, ok)
 
-	msg1.NQ = 10000
+	msg1.NQ = 1000
 	msg1.TopK = 0
 	msg1.OrigNQs = nil
 	maxTopK := int64(0)

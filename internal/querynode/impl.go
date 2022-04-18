@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -570,4 +572,32 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		},
 		Response: "",
 	}, nil
+}
+
+func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*commonpb.Status, error) {
+	log.Info("QueryNode receive a search request")
+	tsMsg := &msgstream.SearchMsg{
+		SearchRequest: *req.Request,
+		BaseMsg: msgstream.BaseMsg{
+			Ctx:            ctx,
+			HashValues:     []uint32{uint32(Params.ProxyCfg.ProxyID)},
+			BeginTimestamp: req.BeginTimestamp,
+			EndTimestamp:   req.EndTimestamp,
+		},
+	}
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	qc, err := node.queryService.getQueryCollection(req.CollectionID)
+	if err != nil {
+		return status, err
+	}
+	newMsg := convertSearchMsg(tsMsg)
+	err = qc.receiveQueryMsg(newMsg)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+	}
+
+	return status, nil
 }
