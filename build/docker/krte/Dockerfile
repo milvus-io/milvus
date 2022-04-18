@@ -16,7 +16,9 @@ ENV KRTE_IMAGE=${IMAGE_ARG} \
     PATH=/home/go/bin:/usr/local/go/bin:${PATH} \
     KIND_VERSION=0.11.1 \
     DOCKER_COMPOSE_VERSION=1.29.1 \
-    CONTAINER=docker
+    CONTAINER=docker \
+    YQ_VERSION=v4.24.5 \
+    YQ_BINARY=yq_linux_amd64
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -53,7 +55,10 @@ RUN echo "Installing Packages ..." \
             software-properties-common \
             unzip \
             jq \
-        && python3 -m pip install --no-cache-dir --upgrade pip \
+            wget \
+            vim \
+    && python3 -m pip install --no-cache-dir --upgrade pip \
+        && python3 -m pip install --no-cache-dir -r https://raw.githubusercontent.com/milvus-io/milvus/master/tests/python_client/requirements.txt \
         && rm -rf /var/lib/apt/lists/* \
     && echo "Installing Go ..." \
         && export GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"\
@@ -85,6 +90,9 @@ RUN echo "Installing Packages ..." \
     && echo "Installing KinD ..." \
         && curl -fsSL -o /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/v${KIND_VERSION}/kind-linux-amd64" \
         && chmod +x /usr/local/bin/kind \
+    && echo "Installing yq ..." \
+        && wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY} -O /usr/bin/yq \ 
+        && chmod +x /usr/bin/yq \
     && echo "Ensuring Legacy Iptables ..." \
         && update-alternatives --set iptables /usr/sbin/iptables-legacy \
         && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
