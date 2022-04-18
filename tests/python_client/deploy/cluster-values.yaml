@@ -12,6 +12,11 @@ minio:
   resources:
     requests:
       memory: 256Mi
+
+kafka:
+  enabled: false
+  replicaCount: 3
+
 pulsar:
   enabled: true
   extra:

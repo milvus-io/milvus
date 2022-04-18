@@ -6,7 +6,7 @@ on:
       old_image_repo:
         description: The image repository name to use for the deploy test
         required: true
-        default: 'milvusdb/milvus'      
+        default: 'milvusdb/milvus'
 
       old_image_tag:
         description: The old image tag to use for the deploy test
@@ -65,29 +65,29 @@ jobs:
           echo "PREVIOUS_RELEASE_VERSION=${{ github.event.inputs.previous_release_version || env.DEFAULT_PREVIOUS_RELEASE_VERSION }}" >> $GITHUB_ENV
           echo "NEW_IMAGE_REPO=${{ github.event.inputs.new_image_repo || env.DEFAULT_NEW_IMAGE_REPO }}" >> $GITHUB_ENV
           echo "NEW_IMAGE_TAG=${{ github.event.inputs.new_image_tag || env.DEFAULT_NEW_IMAGE_TAG }}" >> $GITHUB_ENV
-      
+
       - uses: actions/checkout@v2
 
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
-      
+
       - name: Install dependency
         shell: bash
         working-directory: tests/python_client
         run: |
           pip install -r requirements.txt --trusted-host https://test.pypi.org
-      
+
       - name: First Milvus deployment
-        timeout-minutes: 60
+        timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
-          if [ ${{ matrix.task }} == "reinstall" ]; then  
+          if [ ${{ matrix.task }} == "reinstall" ]; then
             wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${{ matrix.mode }}/docker-compose.yml -O docker-compose.yml;
             MILVUS_IMAGE="${{ env.NEW_IMAGE_REPO }}:${{ env.NEW_IMAGE_TAG }}" docker-compose up -d;
-            
+
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
             wget https://github.com/milvus-io/milvus/releases/download/${{ env.PREVIOUS_RELEASE_VERSION }}/milvus-${{ matrix.mode }}-docker-compose.yml -O docker-compose.yml;
@@ -97,31 +97,31 @@ jobs:
           docker-compose ps -a
           sleep 10s
       - name: Run first test
-        timeout-minutes: 60
+        timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/deploy/scripts
         run: |
-          if [ ${{ matrix.task }} == "reinstall" ]; then  
+          if [ ${{ matrix.task }} == "reinstall" ]; then
             python3 action_before_reinstall.py
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
             python3 action_before_upgrade.py
           fi
       - name: Second Milvus deployment
-        timeout-minutes: 60
+        timeout-minutes: 15
         shell: bash
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
           if [ ${{ matrix.task }} == "reinstall" ]; then
-            docker-compose restart    
+            docker-compose restart
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
             wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${{ matrix.mode }}/docker-compose.yml -O docker-compose.yml;
-            MILVUS_IMAGE="${{ env.NEW_IMAGE_REPO }}:${{ env.NEW_IMAGE_TAG }}" docker-compose up -d; 
+            MILVUS_IMAGE="${{ env.NEW_IMAGE_REPO }}:${{ env.NEW_IMAGE_TAG }}" docker-compose up -d;
           fi
           bash ../check_healthy.sh
           docker-compose ps -a
-          
+
           echo "sleep 120s for the second deployment to be ready"
           sleep 120s
       - name: Run second test
@@ -129,7 +129,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy/scripts
         run: |
-          if [ ${{ matrix.task }} == "reinstall" ]; then  
+          if [ ${{ matrix.task }} == "reinstall" ]; then
             python3 action_after_reinstall.py
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
@@ -168,13 +168,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        mq_type: [pulsar, kafka]
         mode: [standalone,cluster]
-        task: [reinstall,upgrade]    
+        task: [reinstall,upgrade]
+        exclude:
+          - mq_type: kafka
+            mode: standalone
+          - mq_type: kafka
+            task: upgrade
+
     steps:
-      
+
       - name: Creating kind cluster
         uses: helm/kind-action@v1.2.0
-      
+
       - name: Print cluster information
         run: |
           kubectl config view
@@ -197,12 +204,21 @@ jobs:
         run: |
           pip install -r requirements.txt
           # update pymilvus to latest version
-          pip install -i https://test.pypi.org/simple/ pymilvus==2.0.0rc10.dev2         
-      
-      - name: First Milvus Deployment
-        timeout-minutes: 60
+          pip install -i https://test.pypi.org/simple/ pymilvus==2.0.0rc10.dev2
+
+      - name: Modify chart value config
+        timeout-minutes: 1
         shell: bash
-        working-directory: tests/python_client/deploy     
+        working-directory: tests/python_client/deploy
+        run: |
+          yq -i ".kafka.enabled = false" cluster-values.yaml
+          yq -i ".pulsar.enabled = false" cluster-values.yaml
+          yq -i ".${{ matrix.mq_type }}.enabled = true" cluster-values.yaml          
+
+      - name: First Milvus Deployment
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/deploy
         run: |
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
@@ -237,24 +253,34 @@ jobs:
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
 
+      - name: Run first test
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
           # first test
           if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_before_reinstall.py; fi
           if [ ${{ matrix.task }} == "upgrade" ]; then python scripts/action_before_upgrade.py; fi
 
-
+      - name: Restart Milvus
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
           # uninstall milvus
           if [[ $(date +%w) -eq 0 || $(data +%w) -eq 6 ]]; then sleep 1800s; fi
-          if [ ${{ matrix.mode }} == "standalone" ]; 
+          if [ ${{ matrix.mode }} == "standalone" ];
           then
             kubectl delete pod -l app.kubernetes.io/instance=deploy-testing --grace-period=0 --force;
             kubectl delete pod -l release=deploy-testing --grace-period=0 --force;
           else
             helm uninstall deploy-testing
           fi
+
       - name: Seconde Milvus Deployment
-        timeout-minutes: 60
+        timeout-minutes: 15
         shell: bash
-        working-directory: tests/python_client/deploy     
+        working-directory: tests/python_client/deploy
         run: |
           if [ ${{ matrix.mode }} == "cluster" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml; fi
           if [ ${{ matrix.mode }} == "standalone" ]; then helm upgrade --wait --timeout 720s deploy-testing milvus/milvus -f standalone-values.yaml; fi
@@ -266,11 +292,16 @@ jobs:
           sleep 120s
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
-          
+
+      - name: Run second test
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
           # second test
           if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_after_reinstall.py; fi
           if [ ${{ matrix.task }} == "upgrade" ]; then python scripts/action_after_upgrade.py; fi
-        
+
       - name: Export logs
         if: ${{ always() }}
         shell: bash
@@ -279,16 +310,10 @@ jobs:
           kubectl get pod
           # export k8s log for milvus
           bash ../../scripts/export_log_k8s.sh default deploy-testing
-      
+
       - name: Upload logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v2
         with:
           name: helm-log-${{ matrix.mode }}-${{ matrix.task }}
-          path: tests/python_client/deploy/k8s_logs       
-          
-
-
-      
-
-        
+          path: tests/python_client/deploy/k8s_logs
