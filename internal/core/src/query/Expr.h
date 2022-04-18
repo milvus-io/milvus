@@ -112,6 +112,49 @@ enum class OpType {
     NotEqual = 6,
 };
 
+enum class ArithOpType {
+    Unknown = 0,
+    Add = 1,
+    Sub = 2,
+    Mul = 3,
+    Div = 4,
+    Mod = 5,
+};
+
+static const std::map<std::string, ArithOpType> arith_op_mapping_ = {
+    // arith_op_name -> arith_op
+    {"add", ArithOpType::Add}, {"sub", ArithOpType::Sub}, {"mul", ArithOpType::Mul},
+    {"div", ArithOpType::Div}, {"mod", ArithOpType::Mod},
+};
+
+static const std::map<ArithOpType, std::string> mapping_arith_op_ = {
+    // arith_op_name -> arith_op
+    {ArithOpType::Add, "add"}, {ArithOpType::Sub, "sub"}, {ArithOpType::Mul, "mul"},
+    {ArithOpType::Div, "div"}, {ArithOpType::Mod, "mod"},
+};
+
+struct BinaryArithOpEvalRangeExpr : Expr {
+    const FieldOffset field_offset_;
+    const DataType data_type_;
+    const OpType op_type_;
+    const ArithOpType arith_op_;
+
+ protected:
+    // prevent accidential instantiation
+    BinaryArithOpEvalRangeExpr() = delete;
+
+    BinaryArithOpEvalRangeExpr(const FieldOffset field_offset,
+                               const DataType data_type,
+                               const OpType op_type,
+                               const ArithOpType arith_op)
+        : field_offset_(field_offset), data_type_(data_type), op_type_(op_type), arith_op_(arith_op) {
+    }
+
+ public:
+    void
+    accept(ExprVisitor&) override;
+};
+
 static const std::map<std::string, OpType> mapping_ = {
     // op_name -> op
     {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},

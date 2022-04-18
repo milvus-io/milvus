@@ -544,3 +544,95 @@ vector_anns: <
     auto ref_plan = CreatePlan(*schema, dsl_text);
     plan->check_identical(*ref_plan);
 }
+
+TEST_P(PlanProtoTest, BinaryArithOpEvalRange) {
+    // xxx.query(predicates = "int64field > 3", topk = 10, ...)
+    auto data_type = std::get<0>(GetParam());
+    auto data_type_str = spb::DataType_Name(data_type);
+    auto field_id = 100 + (int)data_type;
+    auto field_name = data_type_str + "Field";
+    string value_tag = "bool_val";
+    if (datatype_is_floating((DataType)data_type)) {
+        value_tag = "float_val";
+    } else if (datatype_is_integer((DataType)data_type)) {
+        value_tag = "int64_val";
+    }
+
+    auto fmt1 = boost::format(R"(
+vector_anns: <
+  field_id: 201
+  predicates: <
+    binary_arith_op_eval_range_expr: <
+      column_info: <
+        field_id: %1%
+        data_type: %2%
+      >
+      arith_op: Add
+      right_operand: <
+        %3%: 1029
+      >
+      op: Equal
+      value: <
+        %3%: 2016
+      >
+    >
+  >
+  query_info: <
+    topk: 10
+    round_decimal: 3
+    metric_type: "L2"
+    search_params: "{\"nprobe\": 10}"
+  >
+  placeholder_tag: "$0"
+>
+)") % field_id % data_type_str %
+                value_tag;
+
+    auto proto_text = fmt1.str();
+    planpb::PlanNode node_proto;
+    google::protobuf::TextFormat::ParseFromString(proto_text, &node_proto);
+    // std::cout << node_proto.DebugString();
+    auto plan = ProtoParser(*schema).CreatePlan(node_proto);
+
+    ShowPlanNodeVisitor visitor;
+    auto json = visitor.call_child(*plan->plan_node_);
+    // std::cout << json.dump(2);
+    auto extra_info = plan->extra_info_opt_.value();
+
+    std::string dsl_text = boost::str(boost::format(R"(
+{
+    "bool": {
+        "must": [
+            {
+                "range": {
+                    "%1%": {
+                        "EQ": {
+                          "ADD": {
+                            "right_operand": 1029,
+                            "value": 2016
+                          }
+                        }
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "FloatVectorField": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 10,
+                        "round_decimal": 3
+                    }
+                }
+            }
+        ]
+    }
+}
+)") % field_name);
+
+    auto ref_plan = CreatePlan(*schema, dsl_text);
+    plan->check_identical(*ref_plan);
+}

@@ -248,4 +248,53 @@ ShowExprVisitor::visit(CompareExpr& expr) {
     json_opt_ = res;
 }
 
+template <typename T>
+static Json
+BinaryArithOpEvalRangeExtract(const BinaryArithOpEvalRangeExpr& expr_raw) {
+    using proto::plan::ArithOpType;
+    using proto::plan::ArithOpType_Name;
+    using proto::plan::OpType;
+    using proto::plan::OpType_Name;
+
+    auto expr = dynamic_cast<const BinaryArithOpEvalRangeExprImpl<T>*>(&expr_raw);
+    AssertInfo(expr, "[ShowExprVisitor]BinaryArithOpEvalRangeExpr cast to BinaryArithOpEvalRangeExprImpl failed");
+
+    Json res{{"expr_type", "BinaryArithOpEvalRange"},
+             {"field_offset", expr->field_offset_.get()},
+             {"data_type", datatype_name(expr->data_type_)},
+             {"arith_op", ArithOpType_Name(static_cast<ArithOpType>(expr->arith_op_))},
+             {"right_operand", expr->right_operand_},
+             {"op", OpType_Name(static_cast<OpType>(expr->op_type_))},
+             {"value", expr->value_}};
+    return res;
+}
+
+void
+ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
+    AssertInfo(!json_opt_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
+    AssertInfo(datatype_is_vector(expr.data_type_) == false, "[ShowExprVisitor]Data type of expr isn't vector type");
+    switch (expr.data_type_) {
+        case DataType::INT8:
+            json_opt_ = BinaryArithOpEvalRangeExtract<int8_t>(expr);
+            return;
+        case DataType::INT16:
+            json_opt_ = BinaryArithOpEvalRangeExtract<int16_t>(expr);
+            return;
+        case DataType::INT32:
+            json_opt_ = BinaryArithOpEvalRangeExtract<int32_t>(expr);
+            return;
+        case DataType::INT64:
+            json_opt_ = BinaryArithOpEvalRangeExtract<int64_t>(expr);
+            return;
+        case DataType::DOUBLE:
+            json_opt_ = BinaryArithOpEvalRangeExtract<double>(expr);
+            return;
+        case DataType::FLOAT:
+            json_opt_ = BinaryArithOpEvalRangeExtract<float>(expr);
+            return;
+        default:
+            PanicInfo("unsupported type");
+    }
+}
+
 }  // namespace milvus::query

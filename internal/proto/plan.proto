@@ -14,6 +14,15 @@ enum OpType {
   NotEqual = 6;
 };
 
+enum ArithOpType {
+  Unknown = 0;
+  Add = 1;
+  Sub = 2;
+  Mul = 3;
+  Div = 4;
+  Mod = 5;
+};
+
 message GenericValue {
   oneof val {
     bool bool_val = 1;
@@ -82,6 +91,20 @@ message BinaryExpr {
   Expr right = 3;
 }
 
+message BinaryArithOp {
+  ColumnInfo column_info = 1;
+  ArithOpType arith_op = 2;
+  GenericValue right_operand = 3;
+}
+
+message BinaryArithOpEvalRangeExpr {
+  ColumnInfo column_info = 1;
+  ArithOpType arith_op = 2;
+  GenericValue right_operand = 3;
+  OpType op = 4;
+  GenericValue value = 5;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -90,6 +113,7 @@ message Expr {
     CompareExpr compare_expr = 4;
     UnaryRangeExpr unary_range_expr = 5;
     BinaryRangeExpr binary_range_expr = 6;
+    BinaryArithOpEvalRangeExpr binary_arith_op_eval_range_expr = 7;
   };
 }
 

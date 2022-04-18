@@ -32,6 +32,9 @@ class ExprVisitor {
     visit(UnaryRangeExpr&) = 0;
 
     virtual void
+    visit(BinaryArithOpEvalRangeExpr&) = 0;
+
+    virtual void
     visit(BinaryRangeExpr&) = 0;
 
     virtual void
