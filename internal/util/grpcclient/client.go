@@ -209,7 +209,7 @@ func (c *ClientBase) callOnce(ctx context.Context, caller func(client interface{
 		return nil, err2
 	}
 
-	log.Debug(c.GetRole()+" ClientBase grpc error, start to reset connection", zap.Error(err2))
+	log.Warn(c.GetRole()+" ClientBase grpc error, start to reset connection", zap.Error(err2))
 
 	c.resetConnection(client)
 	return ret, err2

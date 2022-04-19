@@ -1065,6 +1065,7 @@ type QueryNode interface {
 
 	// GetMetrics gets the metrics about QueryNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	Search(ctx context.Context, req *querypb.SearchRequest) (*commonpb.Status, error)
 }
 
 // QueryNodeComponent is used by grpc server of QueryNode

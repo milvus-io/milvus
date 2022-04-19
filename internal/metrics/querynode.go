@@ -244,6 +244,26 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	QueryNodeReceiveReqs = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "receive_reqs",
+			Help:      "the number of requests querynode receive",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeExecuteReqs = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "executed_reqs",
+			Help:      "the number of requests querynode executed",
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 //RegisterQueryNode registers QueryNode metrics
@@ -265,8 +285,9 @@ func RegisterQueryNode() {
 	prometheus.MustRegister(QueryNodeLoadSegmentLatency)
 	prometheus.MustRegister(QueryNodeServiceTime)
 	prometheus.MustRegister(QueryNodeNumFlowGraphs)
-
 	prometheus.MustRegister(QueryNodeSearchNQ)
 	prometheus.MustRegister(QueryNodeWaitForExecuteReqs)
 	prometheus.MustRegister(QueryNodeWaitForMergeReqs)
+	prometheus.MustRegister(QueryNodeReceiveReqs)
+	prometheus.MustRegister(QueryNodeExecuteReqs)
 }

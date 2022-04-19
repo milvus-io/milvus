@@ -49,9 +49,17 @@ service QueryNode {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+  rpc Search(SearchRequest) returns (common.Status) {}
 }
 
 //--------------------QueryCoord grpc request and response proto------------------
+message SearchRequest {
+  internal.SearchRequest request = 1;
+  int64 collectionID = 2;
+  uint64 begin_timestamp = 3;
+  uint64 end_timestamp = 4;
+}
+
 message ShowCollectionsRequest {
   common.MsgBase base = 1;
   // Not useful for now

@@ -290,6 +290,22 @@ var (
 			Help:      "The latency for searching",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName, collectionIDLabelName})
+
+	ProxySendReqsNum = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "send_reqs",
+			Help:      "The number for proxy send reqs",
+		}, []string{nodeIDLabelName, collectionIDLabelName})
+
+	ProxyReceiveReqsNum = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "receive_search_req_num",
+			Help:      "The number for proxy receive search reqs",
+		}, []string{nodeIDLabelName, collectionIDLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
@@ -330,4 +346,7 @@ func RegisterProxy() {
 	prometheus.MustRegister(ProxyDDLReqLatency)
 	prometheus.MustRegister(ProxyDMLReqLatency)
 	prometheus.MustRegister(ProxyDQLReqLatency)
+
+	prometheus.MustRegister(ProxySendReqsNum)
+	prometheus.MustRegister(ProxyReceiveReqsNum)
 }

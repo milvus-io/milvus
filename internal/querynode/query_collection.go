@@ -500,6 +500,7 @@ func (q *queryCollection) executeSearchMsgs() {
 					}
 					q.addToPublishChan(pubRet)
 					q.executeNQNum.Store(q.executeNQNum.Load().(int64) - msg.(*searchMsg).NQ)
+					metrics.QueryNodeExecuteReqs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Add(float64(len(msg.(*searchMsg).ReqIDs)))
 					if len(q.notifyChan) == 0 {
 						q.notifyChan <- true
 					}
@@ -604,6 +605,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	if len(q.receiveMsgChan) == 0 {
 		q.receiveMsgChan <- true
 	}
+	metrics.QueryNodeReceiveReqs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
 	sp.Finish()
 	tr.Record("add msg to unSolved queue")
 	return nil
@@ -664,6 +666,9 @@ func (q *queryCollection) schedulerSearchMsgs() {
 			return
 		case <-q.notifyChan:
 			q.needWaitNewTsafeMsgs = append(q.needWaitNewTsafeMsgs, q.popAllUnsolvedMsg()...)
+			if len(q.needWaitNewTsafeMsgs) == 0 && len(q.mergedMsgs) == 0 {
+				continue
+			}
 			q.mergedMsgs, q.needWaitNewTsafeMsgs = q.mergeSearchReqsByMaxNQ(q.mergedMsgs, q.needWaitNewTsafeMsgs)
 			q.popAndAddToQuery()
 
@@ -674,8 +679,12 @@ func (q *queryCollection) schedulerSearchMsgs() {
 
 		case <-q.tsafeUpdateChan:
 			q.needWaitNewTsafeMsgs = append(q.needWaitNewTsafeMsgs, q.popAllUnsolvedMsg()...)
+			if len(q.needWaitNewTsafeMsgs) == 0 && len(q.mergedMsgs) == 0 {
+				continue
+			}
 			q.mergedMsgs, q.needWaitNewTsafeMsgs = q.mergeSearchReqsByMaxNQ(q.mergedMsgs, q.needWaitNewTsafeMsgs)
 			q.popAndAddToQuery()
+			//runtime.GC()
 		}
 	}
 }
@@ -1090,7 +1099,7 @@ func (q *queryCollection) search(qMsg queryMsg) (*pubSearchResults, error) {
 		reduceTime := tr.RecordSpan()
 		log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "QNReduceSearchResults"),
 			zap.Int64(log.BenchmarkCollectionID, collectionID),
-			zap.Int64(log.BenchmarkMsgID, searchMsg.ID()), zap.Int64(log.BenchmarkDuration, reduceTime.Microseconds()))
+			zap.Int64(log.BenchmarkMsgID, reqID), zap.Int64(log.BenchmarkDuration, reduceTime.Microseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(reduceTime.Milliseconds()))
 
 		ret := &internalpb.SearchResults{
@@ -1193,10 +1202,11 @@ func (q *queryCollection) mergeSearchReqsByMaxNQ(mergedMsgs []queryMsg, queryMsg
 					if canMerge(mergedMsg, msg) {
 						mergedMsgs[j] = mergeSearchMsg(mergedMsg, msg)
 						merge = true
-						log.Debug("Merge search message", zap.Int("num", mergedMsg.GetNumMerged()))
+						log.Info("Merge search message", zap.Int("num", mergedMsg.GetNumMerged()),
+							zap.Int64("mergedMsgID", mergedMsg.ID()), zap.Int64("msgID", msg.ID()),
+							zap.Int("merged msg nq", msg.GetNumMerged()))
 						break
 					}
-
 				}
 				if !merge {
 					mergedMsgs = append(mergedMsgs, msg)

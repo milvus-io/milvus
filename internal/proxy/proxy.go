@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -97,6 +98,10 @@ type Proxy struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	queryNodeClients map[UniqueID]*grpcquerynodeclient.Client
+	qnClientLock     sync.RWMutex
+	eventChan        <-chan *sessionutil.SessionEvent
 }
 
 // NewProxy returns a Proxy struct.
@@ -260,6 +265,23 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
+	sessions, revision, err := node.session.GetSessions(typeutil.QueryNodeRole)
+	log.Debug("IndexCoord", zap.Int("session number", len(sessions)), zap.Int64("revision", revision))
+	if err != nil {
+		log.Error("IndexCoord Get IndexNode Sessions error", zap.Error(err))
+		return err
+	}
+	node.queryNodeClients = make(map[UniqueID]*grpcquerynodeclient.Client)
+	for _, session := range sessions {
+		session := session
+		client, err := grpcquerynodeclient.NewClient(context.TODO(), session.Address)
+		if err != nil {
+			log.Warn("proxy create querynode grpc client error", zap.Error(err))
+			continue
+		}
+		node.setQueryNodeClient(session.ServerID, client)
+	}
+	node.eventChan = node.session.WatchServices(typeutil.QueryNodeRole, revision+1, nil)
 	return nil
 }
 
@@ -366,6 +388,7 @@ func (node *Proxy) Start() error {
 	log.Debug("start channels time ticker done", zap.String("role", typeutil.ProxyRole))
 
 	node.sendChannelsTimeTickLoop()
+	node.watchQueryNodes()
 
 	// Start callbacks
 	for _, cb := range node.startCallbacks {
@@ -461,4 +484,63 @@ func (node *Proxy) SetDataCoordClient(cli types.DataCoord) {
 // SetQueryCoordClient sets QueryCoord client for proxy.
 func (node *Proxy) SetQueryCoordClient(cli types.QueryCoord) {
 	node.queryCoord = cli
+}
+
+func (node *Proxy) setQueryNodeClient(serverID UniqueID, cli *grpcquerynodeclient.Client) {
+	node.qnClientLock.Lock()
+	defer node.qnClientLock.Unlock()
+	node.queryNodeClients[serverID] = cli
+}
+
+func (node *Proxy) deleteQueryNodeClient(serverID UniqueID) {
+	node.qnClientLock.Lock()
+	defer node.qnClientLock.Unlock()
+	delete(node.queryNodeClients, serverID)
+}
+
+func (node *Proxy) getQueryNodeClients() []*grpcquerynodeclient.Client {
+	node.qnClientLock.RLock()
+	defer node.qnClientLock.RUnlock()
+	ans := make([]*grpcquerynodeclient.Client, 0)
+	for key := range node.queryNodeClients {
+		ans = append(ans, node.queryNodeClients[key])
+	}
+	return ans
+}
+
+func (node *Proxy) watchQueryNodes() {
+	node.wg.Add(1)
+	go func() {
+		ctx, cancel := context.WithCancel(node.ctx)
+		defer cancel()
+		defer node.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-node.eventChan:
+				if !ok {
+					// ErrCompacted is handled inside SessionWatcher
+					go node.Stop()
+					if node.session.TriggerKill {
+						syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+					}
+					return
+				}
+				switch event.EventType {
+				case sessionutil.SessionAddEvent:
+					serverID := event.Session.ServerID
+					client, err := grpcquerynodeclient.NewClient(context.TODO(), event.Session.Address)
+					if err != nil {
+						log.Warn("querynode grpc client created failed", zap.Error(err))
+					}
+					node.setQueryNodeClient(serverID, client)
+				case sessionutil.SessionDelEvent:
+					serverID := event.Session.ServerID
+					node.deleteQueryNodeClient(serverID)
+				}
+			}
+		}
+	}()
+
 }

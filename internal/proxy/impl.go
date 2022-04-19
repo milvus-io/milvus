@@ -2401,13 +2401,14 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			Status: unhealthyStatus(),
 		}, nil
 	}
+	metrics.ProxyReceiveReqsNum.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
+		request.CollectionName).Inc()
 	method := "Search"
 	tr := timerecord.NewTimeRecorder(method)
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
-
 	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -2423,6 +2424,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		qc:        node.queryCoord,
 		tr:        timerecord.NewTimeRecorder("search"),
 		perfTR:    timerecord.NewTimeRecorder("performance-search"),
+
+		qnClients: node.getQueryNodeClients(),
 	}
 
 	travelTs := request.TravelTimestamp
