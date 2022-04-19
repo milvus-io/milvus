@@ -2,6 +2,7 @@ import threading
 import time
 
 import pytest
+from pymilvus.exceptions import MilvusException
 from base.client_base import TestcaseBase
 from base.utility_wrapper import ApiUtilityWrapper
 from utils.util_log import test_log as log
@@ -709,7 +710,7 @@ class TestUtilityBase(TestcaseBase):
             if 0 < res['indexed_rows'] <= nb:
                 break
             if time.time() - start > 5:
-                raise BaseException(1, f"Index build completed in more than 5s")
+                raise MilvusException(1, f"Index build completed in more than 5s")
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_index_collection_not_existed(self):
@@ -760,6 +761,7 @@ class TestUtilityBase(TestcaseBase):
         assert res["indexed_rows"] == nb
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_without_loading(self):
         """
         target: test loading progress without loading
@@ -820,6 +822,7 @@ class TestUtilityBase(TestcaseBase):
         assert exp_res == res
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_after_release(self):
         """
         target: test loading progress without loading
@@ -833,6 +836,7 @@ class TestUtilityBase(TestcaseBase):
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_with_release_partition(self):
         """
         target: test loading progress after release part partitions
@@ -848,6 +852,7 @@ class TestUtilityBase(TestcaseBase):
         assert res[loading_progress] == '50%'
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_with_load_partition(self):
         """
         target: test loading progress after load partition

@@ -11,6 +11,7 @@ from common.code_mapping import IndexErrorMessage as iem
 
 from utils.util_pymilvus import *
 from common.constants import *
+from pymilvus.exceptions import MilvusException
 
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
@@ -430,7 +431,7 @@ class TestIndexBase:
         """
         tmp_field_name = gen_unique_str()
         result = connect.insert(collection, default_entities)
-        with pytest.raises(Exception) as e:
+        with pytest.raises(MilvusException) as e:
             connect.create_index(collection, tmp_field_name, get_simple_index)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -442,8 +443,7 @@ class TestIndexBase:
         """
         tmp_field_name = "int64"
         result = connect.insert(collection, default_entities)
-        with pytest.raises(Exception) as e:
-            connect.create_index(collection, tmp_field_name, get_simple_index)
+        connect.create_index(collection, tmp_field_name, get_simple_index)
 
     @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
