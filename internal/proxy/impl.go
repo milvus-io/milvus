@@ -23,6 +23,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -4165,6 +4167,12 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 
 func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
 	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	if req.Username == util.UserRoot {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_DeleteCredentialFailure,
+			Reason:    "user root cannot be deleted",
+		}, nil
+	}
 	result, err := node.rootCoord.DeleteCredential(ctx, req)
 	if err != nil { // for error like conntext timeout etc.
 		log.Error("delete credential fail", zap.String("username", req.Username), zap.Error(err))
