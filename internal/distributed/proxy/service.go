@@ -727,7 +727,7 @@ func (s *Server) CreateCredential(ctx context.Context, req *milvuspb.CreateCrede
 	return s.proxy.CreateCredential(ctx, req)
 }
 
-func (s *Server) UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+func (s *Server) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 	return s.proxy.UpdateCredential(ctx, req)
 }
 

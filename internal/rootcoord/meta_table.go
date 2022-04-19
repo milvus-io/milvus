@@ -1360,7 +1360,12 @@ func (mt *MetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
 		return fmt.Errorf("username is empty")
 	}
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credInfo.Username)
-	err := mt.txn.Save(k, credInfo.EncryptedPassword)
+	v, err := proto.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credInfo.EncryptedPassword})
+	if err != nil {
+		log.Error("MetaTable marshal credential info fail", zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("metaTable marshal credential info fail key:%s, err:%w", k, err)
+	}
+	err = mt.txn.Save(k, string(v))
 	if err != nil {
 		log.Error("MetaTable save fail", zap.Error(err))
 		return fmt.Errorf("save credential fail key:%s, err:%w", credInfo.Username, err)
@@ -1379,7 +1384,13 @@ func (mt *MetaTable) getCredential(username string) (*internalpb.CredentialInfo,
 		log.Warn("MetaTable load fail", zap.String("key", k), zap.Error(err))
 		return nil, err
 	}
-	return &internalpb.CredentialInfo{Username: username, EncryptedPassword: v}, nil
+
+	credentialInfo := internalpb.CredentialInfo{}
+	err = proto.Unmarshal([]byte(v), &credentialInfo)
+	if err != nil {
+		return nil, fmt.Errorf("get credential unmarshal err:%w", err)
+	}
+	return &internalpb.CredentialInfo{Username: username, EncryptedPassword: credentialInfo.EncryptedPassword}, nil
 }
 
 // DeleteCredential delete credential

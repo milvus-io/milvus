@@ -44,6 +44,7 @@ func TestValidSourceID(t *testing.T) {
 
 func TestAuthenticationInterceptor(t *testing.T) {
 	ctx := context.Background()
+	Params.CommonCfg.AuthorizationEnabled = true // mock authorization is turned on
 	// no metadata
 	_, err := AuthenticationInterceptor(ctx)
 	assert.NotNil(t, err)

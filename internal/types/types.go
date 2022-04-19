@@ -1134,7 +1134,7 @@ type ProxyComponent interface {
 	// CreateCredential create new user and password
 	CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error)
 	// UpdateCredential update password for a user
-	UpdateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error)
+	UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error)
 	// DeleteCredential delete a user
 	DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error)
 	// ListCredUsers list all usernames

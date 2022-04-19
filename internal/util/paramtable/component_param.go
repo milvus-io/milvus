@@ -125,6 +125,8 @@ type commonConfig struct {
 	SimdType       string
 	IndexSliceSize int64
 	StorageType    string
+
+	AuthorizationEnabled bool
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -160,6 +162,8 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initSimdType()
 	p.initIndexSliceSize()
 	p.initStorageType()
+
+	p.initEnableAuthorization()
 }
 
 func (p *commonConfig) initClusterPrefix() {
@@ -346,6 +350,10 @@ func (p *commonConfig) initIndexSliceSize() {
 
 func (p *commonConfig) initStorageType() {
 	p.StorageType = p.Base.LoadWithDefault("storageType", "minio")
+}
+
+func (p *commonConfig) initEnableAuthorization() {
+	p.AuthorizationEnabled = p.Base.ParseBool("common.security.authorizationEnabled", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
