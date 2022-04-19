@@ -345,7 +345,7 @@ func (p *commonConfig) initIndexSliceSize() {
 }
 
 func (p *commonConfig) initStorageType() {
-	p.StorageType = p.Base.LoadWithDefault("storageType", "minio")
+	p.StorageType = p.Base.LoadWithDefault("common.storageType", "minio")
 }
 
 ///////////////////////////////////////////////////////////////////////////////
