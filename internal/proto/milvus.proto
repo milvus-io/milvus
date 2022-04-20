@@ -343,6 +343,8 @@ message LoadPartitionsRequest {
   string collection_name = 3;
   // The partition names you want to load
   repeated string partition_names = 4;
+  // The replicas number you would load, 1 by default
+  int32 replica_number = 5;
 }
 
 /*
@@ -755,6 +757,7 @@ message LoadBalanceRequest {
   int64 src_nodeID = 2;
   repeated int64 dst_nodeIDs = 3;
   repeated int64 sealed_segmentIDs = 4;
+  string collectionName = 5;
 }
 
 message ManualCompactionRequest {
@@ -857,8 +860,6 @@ message ShardReplica {
     repeated int64 node_ids = 4;
 }
 
-
-
 service ProxyService {
   rpc RegisterLink(RegisterLinkRequest) returns (RegisterLinkResponse) {}
 }
@@ -911,3 +912,4 @@ message ListCredUsersRequest {
   // Not useful for now
   common.MsgBase base = 1;
 }
+

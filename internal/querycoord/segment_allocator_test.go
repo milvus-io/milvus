@@ -18,6 +18,8 @@ package querycoord
 
 import (
 	"context"
+	"math/rand"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,8 +41,14 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-	factory := dependency.NewDefaultFactory(true)
-	meta, err := newMeta(baseCtx, kv, factory, nil)
+	factory := dependency.NewDefaultFactory(true) //msgstream.NewPmsFactory()
+
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
 	assert.Nil(t, err)
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
@@ -83,7 +91,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	reqs := []*querypb.LoadSegmentsRequest{firstReq, secondReq}
 
 	t.Run("Test shuffleSegmentsWithoutQueryNode", func(t *testing.T) {
-		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, meta, false, nil, nil)
+		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, meta, false, nil, nil, -1)
 		assert.NotNil(t, err)
 	})
 
@@ -95,7 +103,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	waitQueryNodeOnline(cluster, node1ID)
 
 	t.Run("Test shuffleSegmentsToQueryNode", func(t *testing.T) {
-		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, meta, false, nil, nil)
+		err = shuffleSegmentsToQueryNode(baseCtx, reqs, cluster, meta, false, nil, nil, -1)
 		assert.Nil(t, err)
 
 		assert.Equal(t, node1ID, firstReq.DstNodeID)
@@ -111,13 +119,13 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	cluster.stopNode(node1ID)
 
 	t.Run("Test shuffleSegmentsToQueryNodeV2", func(t *testing.T) {
-		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, meta, false, nil, nil)
+		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, meta, false, nil, nil, -1)
 		assert.Nil(t, err)
 
 		assert.Equal(t, node2ID, firstReq.DstNodeID)
 		assert.Equal(t, node2ID, secondReq.DstNodeID)
 
-		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, meta, true, nil, nil)
+		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, meta, true, nil, nil, -1)
 		assert.Nil(t, err)
 
 		assert.Equal(t, node2ID, firstReq.DstNodeID)

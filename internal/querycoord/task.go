@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -353,13 +354,20 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 }
 
 func (lct *loadCollectionTask) preExecute(ctx context.Context) error {
+	if lct.ReplicaNumber < 1 {
+		log.Warn("replicaNumber is less than 1 for load collection request, will set it to 1",
+			zap.Int32("replicaNumber", lct.ReplicaNumber))
+		lct.ReplicaNumber = 1
+	}
+
 	collectionID := lct.CollectionID
 	schema := lct.Schema
 	lct.setResultInfo(nil)
 	log.Debug("start do loadCollectionTask",
 		zap.Int64("msgID", lct.getTaskID()),
 		zap.Int64("collectionID", collectionID),
-		zap.Stringer("schema", schema))
+		zap.Stringer("schema", schema),
+		zap.Int32("replicaNumber", lct.ReplicaNumber))
 	return nil
 }
 
@@ -367,22 +375,24 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 	defer lct.reduceRetryCount()
 	collectionID := lct.CollectionID
 
-	toLoadPartitionIDs, err := lct.broker.showPartitionIDs(ctx, collectionID)
+	partitionIds, err := lct.broker.showPartitionIDs(ctx, collectionID)
 	if err != nil {
 		log.Error("loadCollectionTask: showPartition failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
 		lct.setResultInfo(err)
 		return err
 	}
-	log.Debug("loadCollectionTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toLoadPartitionIDs), zap.Int64("msgID", lct.Base.MsgID))
+	log.Debug("loadCollectionTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIds), zap.Int64("msgID", lct.Base.MsgID))
 
 	var (
-		loadSegmentReqs    = []*querypb.LoadSegmentsRequest{}
-		watchDmChannelReqs = []*querypb.WatchDmChannelsRequest{}
-		deltaChannelInfos  = []*datapb.VchannelInfo{}
-		dmChannelInfos     = []*datapb.VchannelInfo{}
+		replicas          = make([]*milvuspb.ReplicaInfo, lct.ReplicaNumber)
+		replicaIds        = make([]int64, lct.ReplicaNumber)
+		segmentLoadInfos  = make([]*querypb.SegmentLoadInfo, 0)
+		deltaChannelInfos = make([]*datapb.VchannelInfo, 0)
+		dmChannelInfos    = make([]*datapb.VchannelInfo, 0)
+		collectionSize    uint64
 	)
 
-	for _, partitionID := range toLoadPartitionIDs {
+	for _, partitionID := range partitionIds {
 		vChannelInfos, binlogs, err := lct.broker.getRecoveryInfo(lct.ctx, collectionID, partitionID)
 		if err != nil {
 			log.Error("loadCollectionTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
@@ -392,21 +402,8 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 
 		for _, segmentBinlog := range binlogs {
 			segmentLoadInfo := lct.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBinlog, true, lct.Schema)
-			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
-			msgBase.MsgType = commonpb.MsgType_LoadSegments
-			loadSegmentReq := &querypb.LoadSegmentsRequest{
-				Base:         msgBase,
-				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
-				Schema:       lct.Schema,
-				CollectionID: collectionID,
-				LoadMeta: &querypb.LoadMetaInfo{
-					LoadType:     querypb.LoadType_LoadCollection,
-					CollectionID: collectionID,
-					PartitionIDs: toLoadPartitionIDs,
-				},
-			}
-
-			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+			collectionSize += uint64(segmentLoadInfo.SegmentSize)
+			segmentLoadInfos = append(segmentLoadInfos, segmentLoadInfo)
 		}
 
 		for _, info := range vChannelInfos {
@@ -420,6 +417,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			dmChannelInfos = append(dmChannelInfos, info)
 		}
 	}
+
 	mergedDeltaChannels := mergeWatchDeltaChannelInfo(deltaChannelInfos)
 	// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
 	err = lct.meta.setDeltaChannel(collectionID, mergedDeltaChannels)
@@ -429,40 +427,108 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		return err
 	}
 
-	//TODO:: queryNode receive dm message according partitionID cache
-	//TODO:: queryNode add partitionID to cache if receive create partition message from dmChannel
 	mergedDmChannel := mergeDmChannelInfo(dmChannelInfos)
-	for _, info := range mergedDmChannel {
-		msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
-		msgBase.MsgType = commonpb.MsgType_WatchDmChannels
-		watchRequest := &querypb.WatchDmChannelsRequest{
-			Base:         msgBase,
-			CollectionID: collectionID,
-			//PartitionIDs: toLoadPartitionIDs,
-			Infos:  []*datapb.VchannelInfo{info},
-			Schema: lct.Schema,
-			LoadMeta: &querypb.LoadMetaInfo{
-				LoadType:     querypb.LoadType_LoadCollection,
-				CollectionID: collectionID,
-				PartitionIDs: toLoadPartitionIDs,
-			},
+
+	for i := range replicas {
+		replica, err := lct.meta.generateReplica(lct.CollectionID, partitionIds)
+		if err != nil {
+			lct.setResultInfo(err)
+			return err
 		}
 
-		watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
+		replicas[i] = replica
+		replicaIds[i] = replica.ReplicaID
 	}
 
-	internalTasks, err := assignInternalTask(ctx, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, nil)
+	err = lct.cluster.assignNodesToReplicas(ctx, replicas, collectionSize)
 	if err != nil {
-		log.Error("loadCollectionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
+		log.Error("failed to assign nodes to replicas",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64s("partitionIDs", partitionIds),
+			zap.Int64("msgID", lct.Base.MsgID),
+			zap.Int32("replicaNumber", lct.ReplicaNumber),
+			zap.Error(err))
 		lct.setResultInfo(err)
 		return err
 	}
-	for _, internalTask := range internalTasks {
-		lct.addChildTask(internalTask)
-		log.Debug("loadCollectionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())), zap.Int64("msgID", lct.Base.MsgID))
+
+	for _, replica := range replicas {
+		var (
+			loadSegmentReqs    = []*querypb.LoadSegmentsRequest{}
+			watchDmChannelReqs = []*querypb.WatchDmChannelsRequest{}
+		)
+
+		for _, segmentLoadInfo := range segmentLoadInfos {
+			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_LoadSegments
+			loadSegmentReq := &querypb.LoadSegmentsRequest{
+				Base:         msgBase,
+				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+				Schema:       lct.Schema,
+				CollectionID: collectionID,
+				LoadMeta: &querypb.LoadMetaInfo{
+					LoadType:     querypb.LoadType_LoadCollection,
+					CollectionID: collectionID,
+					PartitionIDs: partitionIds,
+				},
+				ReplicaID: replica.ReplicaID,
+			}
+
+			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+		}
+
+		//TODO:: queryNode receive dm message according partitionID cache
+		//TODO:: queryNode add partitionID to cache if receive create partition message from dmChannel
+		for _, info := range mergedDmChannel {
+			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
+			watchRequest := &querypb.WatchDmChannelsRequest{
+				Base:         msgBase,
+				CollectionID: collectionID,
+				//PartitionIDs: toLoadPartitionIDs,
+				Infos:  []*datapb.VchannelInfo{info},
+				Schema: lct.Schema,
+				LoadMeta: &querypb.LoadMetaInfo{
+					LoadType:     querypb.LoadType_LoadCollection,
+					CollectionID: collectionID,
+					PartitionIDs: partitionIds,
+				},
+				ReplicaID: replica.GetReplicaID(),
+			}
+
+			watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
+		}
+
+		internalTasks, err := assignInternalTask(ctx, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1)
+		if err != nil {
+			log.Error("loadCollectionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
+			lct.setResultInfo(err)
+			return err
+		}
+		for _, internalTask := range internalTasks {
+			lct.addChildTask(internalTask)
+			if task, ok := internalTask.(*watchDmChannelTask); ok {
+				nodeInfo, err := lct.cluster.getNodeInfoByID(task.NodeID)
+				if err != nil {
+					log.Error("loadCollectionTask: get shard leader node info failed",
+						zap.Int64("collectionID", collectionID),
+						zap.Int64("msgID", lct.Base.MsgID),
+						zap.Int64("nodeID", task.NodeID),
+						zap.Error(err))
+					lct.setResultInfo(err)
+					return err
+				}
+				replica.ShardReplicas = append(replica.ShardReplicas, &milvuspb.ShardReplica{
+					LeaderID:      task.NodeID,
+					LeaderAddr:    nodeInfo.(*queryNode).address,
+					DmChannelName: task.WatchDmChannelsRequest.Infos[0].ChannelName,
+				})
+			}
+			log.Debug("loadCollectionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())), zap.Int64("msgID", lct.Base.MsgID))
+		}
+		metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
+		log.Debug("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
 	}
-	metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
-	log.Debug("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
 
 	err = lct.meta.addCollection(collectionID, querypb.LoadType_LoadCollection, lct.Schema)
 	if err != nil {
@@ -470,11 +536,21 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		lct.setResultInfo(err)
 		return err
 	}
-	err = lct.meta.addPartitions(collectionID, toLoadPartitionIDs)
+
+	err = lct.meta.addPartitions(collectionID, partitionIds)
 	if err != nil {
-		log.Error("loadCollectionTask: add partitions to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toLoadPartitionIDs), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
+		log.Error("loadCollectionTask: add partitions to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIds), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
 		lct.setResultInfo(err)
 		return err
+	}
+
+	for _, replica := range replicas {
+		err = lct.meta.addReplica(replica)
+		if err != nil {
+			log.Error("failed to add replica", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIds), zap.Int64("msgID", lct.Base.MsgID), zap.Int32("replicaNumber", lct.ReplicaNumber))
+			lct.setResultInfo(err)
+			return err
+		}
 	}
 
 	log.Debug("LoadCollection execute done",
@@ -596,6 +672,7 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 			return err
 		}
 
+		// TODO(yah01): broadcast to all nodes? Or only nodes serve the collection
 		onlineNodeIDs := rct.cluster.onlineNodeIDs()
 		for _, nodeID := range onlineNodeIDs {
 			req := proto.Clone(rct.ReleaseCollectionRequest).(*querypb.ReleaseCollectionRequest)
@@ -720,6 +797,12 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 }
 
 func (lpt *loadPartitionTask) preExecute(context.Context) error {
+	if lpt.ReplicaNumber < 1 {
+		log.Warn("replicaNumber is less than 1 for load partitions request, will set it to 1",
+			zap.Int32("replicaNumber", lpt.ReplicaNumber))
+		lpt.ReplicaNumber = 1
+	}
+
 	collectionID := lpt.CollectionID
 	lpt.setResultInfo(nil)
 	log.Debug("start do loadPartitionTask",
@@ -733,10 +816,15 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	collectionID := lpt.CollectionID
 	partitionIDs := lpt.PartitionIDs
 
-	var loadSegmentReqs []*querypb.LoadSegmentsRequest
-	var watchDmChannelReqs []*querypb.WatchDmChannelsRequest
-	var deltaChannelInfos []*datapb.VchannelInfo
-	var dmChannelInfos []*datapb.VchannelInfo
+	var (
+		replicas          = make([]*milvuspb.ReplicaInfo, lpt.ReplicaNumber)
+		replicaIds        = make([]int64, lpt.ReplicaNumber)
+		segmentLoadInfos  = make([]*querypb.SegmentLoadInfo, 0)
+		deltaChannelInfos = make([]*datapb.VchannelInfo, 0)
+		dmChannelInfos    = make([]*datapb.VchannelInfo, 0)
+		collectionSize    uint64
+	)
+
 	for _, partitionID := range partitionIDs {
 		vChannelInfos, binlogs, err := lpt.broker.getRecoveryInfo(lpt.ctx, collectionID, partitionID)
 		if err != nil {
@@ -747,20 +835,8 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 
 		for _, segmentBingLog := range binlogs {
 			segmentLoadInfo := lpt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, lpt.Schema)
-			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
-			msgBase.MsgType = commonpb.MsgType_LoadSegments
-			loadSegmentReq := &querypb.LoadSegmentsRequest{
-				Base:         msgBase,
-				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
-				Schema:       lpt.Schema,
-				CollectionID: collectionID,
-				LoadMeta: &querypb.LoadMetaInfo{
-					LoadType:     querypb.LoadType_LoadPartition,
-					CollectionID: collectionID,
-					PartitionIDs: partitionIDs,
-				},
-			}
-			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+			segmentLoadInfos = append(segmentLoadInfos, segmentLoadInfo)
+			collectionSize += uint64(segmentLoadInfo.SegmentSize)
 		}
 
 		for _, info := range vChannelInfos {
@@ -784,37 +860,105 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	}
 
 	mergedDmChannel := mergeDmChannelInfo(dmChannelInfos)
-	for _, info := range mergedDmChannel {
-		msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
-		msgBase.MsgType = commonpb.MsgType_WatchDmChannels
-		watchRequest := &querypb.WatchDmChannelsRequest{
-			Base:         msgBase,
-			CollectionID: collectionID,
-			PartitionIDs: partitionIDs,
-			Infos:        []*datapb.VchannelInfo{info},
-			Schema:       lpt.Schema,
-			LoadMeta: &querypb.LoadMetaInfo{
-				LoadType:     querypb.LoadType_LoadPartition,
-				CollectionID: collectionID,
-				PartitionIDs: partitionIDs,
-			},
+
+	for i := range replicas {
+		replica, err := lpt.meta.generateReplica(lpt.CollectionID, partitionIDs)
+		if err != nil {
+			lpt.setResultInfo(err)
+			return err
 		}
 
-		watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
+		replicas[i] = replica
+		replicaIds[i] = replica.ReplicaID
 	}
 
-	internalTasks, err := assignInternalTask(ctx, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, nil)
+	err = lpt.cluster.assignNodesToReplicas(ctx, replicas, collectionSize)
 	if err != nil {
-		log.Error("loadPartitionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
+		log.Error("failed to assign nodes to replicas",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64s("partitionIDs", partitionIDs),
+			zap.Int64("msgID", lpt.Base.MsgID),
+			zap.Int32("replicaNumber", lpt.ReplicaNumber),
+			zap.Error(err))
 		lpt.setResultInfo(err)
 		return err
 	}
-	for _, internalTask := range internalTasks {
-		lpt.addChildTask(internalTask)
-		log.Debug("loadPartitionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())))
+
+	for _, replica := range replicas {
+		var (
+			loadSegmentReqs    = []*querypb.LoadSegmentsRequest{}
+			watchDmChannelReqs = []*querypb.WatchDmChannelsRequest{}
+		)
+
+		for _, segmentLoadInfo := range segmentLoadInfos {
+			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_LoadSegments
+			loadSegmentReq := &querypb.LoadSegmentsRequest{
+				Base:         msgBase,
+				Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+				Schema:       lpt.Schema,
+				CollectionID: collectionID,
+				LoadMeta: &querypb.LoadMetaInfo{
+					LoadType:     querypb.LoadType_LoadPartition,
+					CollectionID: collectionID,
+					PartitionIDs: partitionIDs,
+				},
+				ReplicaID: replica.ReplicaID,
+			}
+			loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+		}
+
+		for _, info := range mergedDmChannel {
+			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
+			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
+			watchRequest := &querypb.WatchDmChannelsRequest{
+				Base:         msgBase,
+				CollectionID: collectionID,
+				PartitionIDs: partitionIDs,
+				Infos:        []*datapb.VchannelInfo{info},
+				Schema:       lpt.Schema,
+				LoadMeta: &querypb.LoadMetaInfo{
+					LoadType:     querypb.LoadType_LoadPartition,
+					CollectionID: collectionID,
+					PartitionIDs: partitionIDs,
+				},
+				ReplicaID: replica.GetReplicaID(),
+			}
+
+			watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
+		}
+
+		internalTasks, err := assignInternalTask(ctx, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1)
+		if err != nil {
+			log.Error("loadPartitionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
+			lpt.setResultInfo(err)
+			return err
+		}
+		for _, internalTask := range internalTasks {
+			lpt.addChildTask(internalTask)
+			if task, ok := internalTask.(*watchDmChannelTask); ok {
+				nodeInfo, err := lpt.cluster.getNodeInfoByID(task.NodeID)
+				if err != nil {
+					log.Error("loadCollectionTask: get shard leader node info failed",
+						zap.Int64("collectionID", collectionID),
+						zap.Int64("msgID", lpt.Base.MsgID),
+						zap.Int64("nodeID", task.NodeID),
+						zap.Error(err))
+					lpt.setResultInfo(err)
+					return err
+				}
+
+				replica.ShardReplicas = append(replica.ShardReplicas, &milvuspb.ShardReplica{
+					LeaderID:      task.NodeID,
+					LeaderAddr:    nodeInfo.(*queryNode).address,
+					DmChannelName: task.WatchDmChannelsRequest.Infos[0].ChannelName,
+				})
+			}
+			log.Debug("loadPartitionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())))
+		}
+		metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
+		log.Debug("loadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID))
 	}
-	metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
-	log.Debug("loadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID))
 
 	err = lpt.meta.addCollection(collectionID, querypb.LoadType_LoadPartition, lpt.Schema)
 	if err != nil {
@@ -828,6 +972,15 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		log.Error("loadPartitionTask: add partition to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
 		lpt.setResultInfo(err)
 		return err
+	}
+
+	for _, replica := range replicas {
+		err = lpt.meta.addReplica(replica)
+		if err != nil {
+			log.Error("failed to add replica", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID), zap.Int32("replicaNumber", lpt.ReplicaNumber))
+			lpt.setResultInfo(err)
+			return err
+		}
 	}
 
 	log.Debug("loadPartitionTask Execute done",
@@ -1098,6 +1251,7 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 				CollectionID: lst.GetCollectionID(),
 				PartitionIDs: lst.GetLoadMeta().GetPartitionIDs(),
 			},
+			ReplicaID: lst.ReplicaID,
 		}
 		loadSegmentReqs = append(loadSegmentReqs, req)
 	}
@@ -1110,7 +1264,7 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 	if lst.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
 		wait2AssignTaskSuccess = true
 	}
-	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, wait2AssignTaskSuccess, lst.excludeNodeIDs, nil)
+	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, wait2AssignTaskSuccess, lst.excludeNodeIDs, nil, lst.ReplicaID)
 	if err != nil {
 		log.Error("loadSegment reschedule failed", zap.Int64s("excludeNodes", lst.excludeNodeIDs), zap.Int64("taskID", lst.getTaskID()), zap.Error(err))
 		return nil, err
@@ -1277,6 +1431,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 				CollectionID: collectionID,
 				PartitionIDs: wdt.GetLoadMeta().GetPartitionIDs(),
 			},
+			ReplicaID: wdt.GetReplicaID(),
 		}
 		watchDmChannelReqs = append(watchDmChannelReqs, req)
 	}
@@ -1289,7 +1444,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 	if wdt.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
 		wait2AssignTaskSuccess = true
 	}
-	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, wait2AssignTaskSuccess, wdt.excludeNodeIDs, nil)
+	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, wait2AssignTaskSuccess, wdt.excludeNodeIDs, nil, wdt.ReplicaID)
 	if err != nil {
 		log.Error("watchDmChannel reschedule failed", zap.Int64("taskID", wdt.getTaskID()), zap.Int64s("excludeNodes", wdt.excludeNodeIDs), zap.Error(err))
 		return nil, err
@@ -1578,11 +1733,29 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				ht.setResultInfo(err)
 				return err
 			}
-			internalTasks, err := assignInternalTask(ctx, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{loadSegmentReq}, nil, true, nil, nil)
+			replicas, err := ht.meta.getReplicasByCollectionID(collectionID)
 			if err != nil {
-				log.Error("handoffTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.Error(err))
 				ht.setResultInfo(err)
 				return err
+			}
+			var internalTasks []task
+			for _, replica := range replicas {
+				if len(replica.NodeIds) == 0 {
+					log.Warn("handoffTask: find empty replica", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.Int64("replicaID", replica.GetReplicaID()))
+					err := fmt.Errorf("replica %d of collection %d is empty", replica.GetReplicaID(), collectionID)
+					ht.setResultInfo(err)
+					return err
+				}
+				// we should copy a request because assignInternalTask will change DstNodeID of LoadSegmentRequest
+				clonedReq := proto.Clone(loadSegmentReq).(*querypb.LoadSegmentsRequest)
+				clonedReq.ReplicaID = replica.ReplicaID
+				tasks, err := assignInternalTask(ctx, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{clonedReq}, nil, true, nil, nil, replica.GetReplicaID())
+				if err != nil {
+					log.Error("handoffTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.Error(err))
+					ht.setResultInfo(err)
+					return err
+				}
+				internalTasks = append(internalTasks, tasks...)
 			}
 			for _, internalTask := range internalTasks {
 				ht.addChildTask(internalTask)
@@ -1629,9 +1802,10 @@ func (ht *handoffTask) rollBack(ctx context.Context) []task {
 type loadBalanceTask struct {
 	*baseTask
 	*querypb.LoadBalanceRequest
-	broker  *globalMetaBroker
-	cluster Cluster
-	meta    Meta
+	broker    *globalMetaBroker
+	cluster   Cluster
+	meta      Meta
+	replicaID int64
 }
 
 func (lbt *loadBalanceTask) msgBase() *commonpb.MsgBase {
@@ -1660,16 +1834,76 @@ func (lbt *loadBalanceTask) preExecute(context.Context) error {
 	return nil
 }
 
+func (lbt *loadBalanceTask) checkForManualLoadBalance() error {
+	// check segments belong to the same collection
+	collectionID := lbt.GetCollectionID()
+	for _, sid := range lbt.SealedSegmentIDs {
+		segment, err := lbt.meta.getSegmentInfoByID(sid)
+		if err != nil {
+			return err
+		}
+		if collectionID == 0 {
+			collectionID = segment.GetCollectionID()
+		} else if collectionID != segment.GetCollectionID() {
+			err := errors.New("segments of a load balance task do not belong to the same collection")
+			return err
+		}
+	}
+
+	if collectionID == 0 {
+		err := errors.New("a load balance task has to specify a collectionID or pass segments of a collection")
+		return err
+	}
+
+	// check source and dst nodes belong to the same replica
+	var replicaID int64 = -1
+	for _, nodeID := range lbt.SourceNodeIDs {
+		replica, err := lbt.getReplica(nodeID, collectionID)
+		if err != nil {
+			return err
+		}
+		if replicaID == -1 {
+			replicaID = replica.GetReplicaID()
+		} else if replicaID != replica.GetReplicaID() {
+			err := errors.New("source nodes and destination nodes must be in the same replica group")
+			return err
+		}
+	}
+
+	if replicaID == -1 {
+		return errors.New("source nodes is empty")
+	}
+
+	for _, nodeID := range lbt.DstNodeIDs {
+		replica, err := lbt.getReplica(nodeID, collectionID)
+		if err != nil {
+			return err
+		}
+		if replicaID != replica.GetReplicaID() {
+			err := errors.New("source nodes and destination nodes must be in the same replica group")
+			return err
+		}
+	}
+
+	lbt.replicaID = replicaID
+
+	log.Debug("start do loadBalanceTask",
+		zap.Int32("trigger type", int32(lbt.triggerCondition)),
+		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
+		zap.Any("balanceReason", lbt.BalanceReason),
+		zap.Int64("taskID", lbt.getTaskID()))
+	return nil
+}
+
 func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 	defer lbt.reduceRetryCount()
 
 	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
-		segmentID2Info := make(map[UniqueID]*querypb.SegmentInfo)
-		dmChannel2WatchInfo := make(map[string]*querypb.DmChannelWatchInfo)
-		loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
-		watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
-		recoveredCollectionIDs := make(map[UniqueID]struct{})
+		var internalTasks []task
 		for _, nodeID := range lbt.SourceNodeIDs {
+			segmentID2Info := make(map[UniqueID]*querypb.SegmentInfo)
+			dmChannel2WatchInfo := make(map[string]*querypb.DmChannelWatchInfo)
+			recoveredCollectionIDs := make(map[UniqueID]struct{})
 			segmentInfos := lbt.meta.getSegmentInfosByNode(nodeID)
 			for _, segmentInfo := range segmentInfos {
 				segmentID2Info[segmentInfo.SegmentID] = segmentInfo
@@ -1680,113 +1914,127 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 				dmChannel2WatchInfo[watchInfo.DmChannel] = watchInfo
 				recoveredCollectionIDs[watchInfo.CollectionID] = struct{}{}
 			}
-		}
 
-		for collectionID := range recoveredCollectionIDs {
-			collectionInfo, err := lbt.meta.getCollectionInfoByID(collectionID)
-			if err != nil {
-				log.Error("loadBalanceTask: get collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Error(err))
-				lbt.setResultInfo(err)
-				return err
-			}
-			schema := collectionInfo.Schema
-			var deltaChannelInfos []*datapb.VchannelInfo
-			var dmChannelInfos []*datapb.VchannelInfo
-
-			var toRecoverPartitionIDs []UniqueID
-			if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
-				toRecoverPartitionIDs, err = lbt.broker.showPartitionIDs(ctx, collectionID)
+			for collectionID := range recoveredCollectionIDs {
+				loadSegmentReqs := make([]*querypb.LoadSegmentsRequest, 0)
+				watchDmChannelReqs := make([]*querypb.WatchDmChannelsRequest, 0)
+				collectionInfo, err := lbt.meta.getCollectionInfoByID(collectionID)
 				if err != nil {
-					log.Error("loadBalanceTask: show collection's partitionIDs failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+					log.Error("loadBalanceTask: get collectionInfo from meta failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+					lbt.setResultInfo(err)
+					return err
+				}
+				schema := collectionInfo.Schema
+				var deltaChannelInfos []*datapb.VchannelInfo
+				var dmChannelInfos []*datapb.VchannelInfo
+
+				var toRecoverPartitionIDs []UniqueID
+				if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
+					toRecoverPartitionIDs, err = lbt.broker.showPartitionIDs(ctx, collectionID)
+					if err != nil {
+						log.Error("loadBalanceTask: show collection's partitionIDs failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+						lbt.setResultInfo(err)
+						panic(err)
+					}
+				} else {
+					toRecoverPartitionIDs = collectionInfo.PartitionIDs
+				}
+				log.Debug("loadBalanceTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toRecoverPartitionIDs))
+				replica, err := lbt.getReplica(nodeID, collectionID)
+				if err != nil {
+					lbt.setResultInfo(err)
+					return err
+				}
+
+				for _, partitionID := range toRecoverPartitionIDs {
+					vChannelInfos, binlogs, err := lbt.broker.getRecoveryInfo(lbt.ctx, collectionID, partitionID)
+					if err != nil {
+						log.Error("loadBalanceTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
+						lbt.setResultInfo(err)
+						panic(err)
+					}
+
+					for _, segmentBingLog := range binlogs {
+						segmentID := segmentBingLog.SegmentID
+						if info, ok := segmentID2Info[segmentID]; ok {
+							segmentLoadInfo := lbt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, schema)
+							msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+							msgBase.MsgType = commonpb.MsgType_LoadSegments
+							for _, replica := range info.ReplicaIds {
+								loadSegmentReq := &querypb.LoadSegmentsRequest{
+									Base:         msgBase,
+									Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+									Schema:       schema,
+									CollectionID: collectionID,
+
+									LoadMeta: &querypb.LoadMetaInfo{
+										LoadType:     collectionInfo.LoadType,
+										CollectionID: collectionID,
+										PartitionIDs: toRecoverPartitionIDs,
+									},
+									ReplicaID: replica,
+								}
+
+								loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+							}
+						}
+					}
+
+					for _, info := range vChannelInfos {
+						deltaChannel, err := generateWatchDeltaChannelInfo(info)
+						if err != nil {
+							log.Error("loadBalanceTask: generateWatchDeltaChannelInfo failed", zap.Int64("collectionID", collectionID), zap.String("channelName", info.ChannelName), zap.Error(err))
+							lbt.setResultInfo(err)
+							panic(err)
+						}
+						deltaChannelInfos = append(deltaChannelInfos, deltaChannel)
+						dmChannelInfos = append(dmChannelInfos, info)
+					}
+				}
+
+				mergedDeltaChannel := mergeWatchDeltaChannelInfo(deltaChannelInfos)
+				// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
+				err = lbt.meta.setDeltaChannel(collectionID, mergedDeltaChannel)
+				if err != nil {
+					log.Error("loadBalanceTask: set delta channel info meta failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 					lbt.setResultInfo(err)
 					panic(err)
 				}
-			} else {
-				toRecoverPartitionIDs = collectionInfo.PartitionIDs
-			}
-			log.Debug("loadBalanceTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toRecoverPartitionIDs))
 
-			for _, partitionID := range toRecoverPartitionIDs {
-				vChannelInfos, binlogs, err := lbt.broker.getRecoveryInfo(lbt.ctx, collectionID, partitionID)
-				if err != nil {
-					log.Error("loadBalanceTask: getRecoveryInfo failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
-					lbt.setResultInfo(err)
-					panic(err)
-				}
-
-				for _, segmentBingLog := range binlogs {
-					segmentID := segmentBingLog.SegmentID
-					if _, ok := segmentID2Info[segmentID]; ok {
-						segmentLoadInfo := lbt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, schema)
+				mergedDmChannel := mergeDmChannelInfo(dmChannelInfos)
+				for channelName, vChannelInfo := range mergedDmChannel {
+					if info, ok := dmChannel2WatchInfo[channelName]; ok {
 						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
-						msgBase.MsgType = commonpb.MsgType_LoadSegments
-						loadSegmentReq := &querypb.LoadSegmentsRequest{
+						msgBase.MsgType = commonpb.MsgType_WatchDmChannels
+						watchRequest := &querypb.WatchDmChannelsRequest{
 							Base:         msgBase,
-							Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
-							Schema:       schema,
 							CollectionID: collectionID,
+							Infos:        []*datapb.VchannelInfo{vChannelInfo},
+							Schema:       schema,
 							LoadMeta: &querypb.LoadMetaInfo{
 								LoadType:     collectionInfo.LoadType,
 								CollectionID: collectionID,
 								PartitionIDs: toRecoverPartitionIDs,
 							},
+							ReplicaID: info.ReplicaID,
 						}
 
-						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+						if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
+							watchRequest.PartitionIDs = toRecoverPartitionIDs
+						}
+
+						watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 					}
 				}
 
-				for _, info := range vChannelInfos {
-					deltaChannel, err := generateWatchDeltaChannelInfo(info)
-					if err != nil {
-						log.Error("loadBalanceTask: generateWatchDeltaChannelInfo failed", zap.Int64("collectionID", collectionID), zap.String("channelName", info.ChannelName), zap.Error(err))
-						lbt.setResultInfo(err)
-						panic(err)
-					}
-					deltaChannelInfos = append(deltaChannelInfos, deltaChannel)
-					dmChannelInfos = append(dmChannelInfos, info)
+				tasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs, replica.GetReplicaID())
+				if err != nil {
+					log.Error("loadBalanceTask: assign child task failed", zap.Int64("sourceNodeID", nodeID))
+					lbt.setResultInfo(err)
+					panic(err)
 				}
+				internalTasks = append(internalTasks, tasks...)
 			}
-
-			mergedDeltaChannel := mergeWatchDeltaChannelInfo(deltaChannelInfos)
-			// If meta is not updated here, deltaChannel meta will not be available when loadSegment reschedule
-			err = lbt.meta.setDeltaChannel(collectionID, mergedDeltaChannel)
-			if err != nil {
-				log.Error("loadBalanceTask: set delta channel info meta failed", zap.Int64("collectionID", collectionID), zap.Error(err))
-				lbt.setResultInfo(err)
-				panic(err)
-			}
-
-			mergedDmChannel := mergeDmChannelInfo(dmChannelInfos)
-			for channelName, vChannelInfo := range mergedDmChannel {
-				if _, ok := dmChannel2WatchInfo[channelName]; ok {
-					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
-					msgBase.MsgType = commonpb.MsgType_WatchDmChannels
-					watchRequest := &querypb.WatchDmChannelsRequest{
-						Base:         msgBase,
-						CollectionID: collectionID,
-						Infos:        []*datapb.VchannelInfo{vChannelInfo},
-						Schema:       schema,
-						LoadMeta: &querypb.LoadMetaInfo{
-							LoadType:     collectionInfo.LoadType,
-							CollectionID: collectionID,
-							PartitionIDs: toRecoverPartitionIDs,
-						},
-					}
-
-					if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
-						watchRequest.PartitionIDs = toRecoverPartitionIDs
-					}
-
-					watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
-				}
-			}
-		}
-		internalTasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs)
-		if err != nil {
-			log.Error("loadBalanceTask: assign child task failed", zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
-			lbt.setResultInfo(err)
-			panic(err)
 		}
 		for _, internalTask := range internalTasks {
 			lbt.addChildTask(internalTask)
@@ -1796,6 +2044,10 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 	}
 
 	if lbt.triggerCondition == querypb.TriggerCondition_LoadBalance {
+		if err := lbt.checkForManualLoadBalance(); err != nil {
+			lbt.setResultInfo(err)
+			return err
+		}
 		if len(lbt.SourceNodeIDs) == 0 {
 			err := errors.New("loadBalanceTask: empty source Node list to balance")
 			log.Error(err.Error())
@@ -1879,17 +2131,21 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						log.Warn("loadBalanceTask: can't find binlog of segment to balance, may be has been compacted", zap.Int64("segmentID", segmentID))
 						continue
 					}
-					segmentBingLog := segmentID2Binlog[segmentID]
-					segmentLoadInfo := lbt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, collectionInfo.Schema)
-					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
-					msgBase.MsgType = commonpb.MsgType_LoadSegments
-					loadSegmentReq := &querypb.LoadSegmentsRequest{
-						Base:         msgBase,
-						Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
-						Schema:       collectionInfo.Schema,
-						CollectionID: collectionID,
+
+					for _, replica := range segmentInfo.ReplicaIds {
+						segmentBingLog := segmentID2Binlog[segmentID]
+						segmentLoadInfo := lbt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, collectionInfo.Schema)
+						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+						msgBase.MsgType = commonpb.MsgType_LoadSegments
+						loadSegmentReq := &querypb.LoadSegmentsRequest{
+							Base:         msgBase,
+							Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+							Schema:       collectionInfo.Schema,
+							CollectionID: collectionID,
+							ReplicaID:    replica,
+						}
+						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 					}
-					loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 				}
 
 				for _, info := range dmChannelInfos {
@@ -1909,7 +2165,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 				return err
 			}
 		}
-		internalTasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, nil, false, lbt.SourceNodeIDs, lbt.DstNodeIDs)
+		internalTasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, nil, false, lbt.SourceNodeIDs, lbt.DstNodeIDs, lbt.replicaID)
 		if err != nil {
 			log.Error("loadBalanceTask: assign child task failed", zap.Any("balance request", lbt.LoadBalanceRequest))
 			lbt.setResultInfo(err)
@@ -1928,6 +2184,19 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		zap.Any("balanceReason", lbt.BalanceReason),
 		zap.Int64("taskID", lbt.getTaskID()))
 	return nil
+}
+
+func (lbt *loadBalanceTask) getReplica(nodeID, collectionID int64) (*milvuspb.ReplicaInfo, error) {
+	replicas, err := lbt.meta.getReplicasByNodeID(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	for _, replica := range replicas {
+		if replica.GetCollectionID() == collectionID {
+			return replica, nil
+		}
+	}
+	return nil, fmt.Errorf("unable to find replicas of collection %d and node %d", collectionID, nodeID)
 }
 
 func (lbt *loadBalanceTask) postExecute(context.Context) error {
@@ -1960,17 +2229,17 @@ func assignInternalTask(ctx context.Context,
 	parentTask task, meta Meta, cluster Cluster,
 	loadSegmentRequests []*querypb.LoadSegmentsRequest,
 	watchDmChannelRequests []*querypb.WatchDmChannelsRequest,
-	wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) ([]task, error) {
+	wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) ([]task, error) {
 	log.Debug("assignInternalTask: start assign task to query node")
 	internalTasks := make([]task, 0)
-	err := cluster.allocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs, includeNodeIDs)
+	err := cluster.allocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs, includeNodeIDs, replicaID)
 	if err != nil {
 		log.Error("assignInternalTask: assign segment to node failed", zap.Any("load segments requests", loadSegmentRequests))
 		return nil, err
 	}
 	log.Debug("assignInternalTask: assign segment to node success")
 
-	err = cluster.allocateChannelsToQueryNode(ctx, watchDmChannelRequests, wait, excludeNodeIDs)
+	err = cluster.allocateChannelsToQueryNode(ctx, watchDmChannelRequests, wait, excludeNodeIDs, includeNodeIDs, replicaID)
 	if err != nil {
 		log.Error("assignInternalTask: assign dmChannel to node failed", zap.Any("watch dmChannel requests", watchDmChannelRequests))
 		return nil, err

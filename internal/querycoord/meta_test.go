@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
+	"sync/atomic"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -68,7 +70,12 @@ func TestReplica_Release(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	meta, err := newMeta(context.Background(), etcdKV, nil, nil)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+	meta, err := newMeta(context.Background(), etcdKV, nil, idAllocator)
 	assert.Nil(t, err)
 	err = meta.addCollection(1, querypb.LoadType_LoadCollection, nil)
 	require.NoError(t, err)
@@ -294,13 +301,20 @@ func TestReloadMetaFromKV(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
 	meta := &MetaReplica{
 		client:            kv,
+		idAllocator:       idAllocator,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		deltaChannelInfos: map[UniqueID][]*datapb.VchannelInfo{},
 		segmentsInfo:      newSegmentsInfo(kv),
+		replicas:          NewReplicaInfos(),
 	}
 
 	kvs := make(map[string]string)
@@ -349,10 +363,17 @@ func TestReloadMetaFromKV(t *testing.T) {
 
 	assert.Equal(t, 1, len(meta.collectionInfos))
 	assert.Equal(t, 1, len(meta.segmentsInfo.getSegments()))
-	_, ok := meta.collectionInfos[defaultCollectionID]
-	assert.Equal(t, true, ok)
+	collectionInfo, err = meta.getCollectionInfoByID(collectionInfo.CollectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(collectionInfo.ReplicaIds))
+	assert.Equal(t, int32(1), collectionInfo.ReplicaNumber)
 	segment := meta.segmentsInfo.getSegment(defaultSegmentID)
 	assert.NotNil(t, segment)
+
+	replicas, err := meta.getReplicasByCollectionID(collectionInfo.CollectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(replicas))
+	assert.Equal(t, collectionInfo.CollectionID, replicas[0].CollectionID)
 }
 
 func TestCreateQueryChannel(t *testing.T) {

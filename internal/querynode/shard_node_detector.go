@@ -65,6 +65,7 @@ func (nd *etcdShardNodeDetector) Close() {
 
 // watchNodes lists current online nodes and returns a channel for incoming events.
 func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64, vchannelName string) ([]nodeEvent, <-chan nodeEvent) {
+	log.Debug("nodeDetector watch", zap.Int64("collectionID", collectionID), zap.Int64("replicaID", replicaID), zap.String("vchannelName", vchannelName))
 	resp, err := nd.client.Get(context.Background(), nd.path, clientv3.WithPrefix())
 	if err != nil {
 		log.Warn("Etcd NodeDetector get replica info failed", zap.Error(err))
@@ -264,5 +265,8 @@ func (nd *etcdShardNodeDetector) handleDelEvent(e *clientv3.Event, collectionID,
 func (nd *etcdShardNodeDetector) parseReplicaInfo(bs []byte) (*milvuspb.ReplicaInfo, error) {
 	info := &milvuspb.ReplicaInfo{}
 	err := proto.Unmarshal(bs, info)
+	if err == nil {
+		log.Debug("ReplicaInfo", zap.Any("info", info))
+	}
 	return info, err
 }

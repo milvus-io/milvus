@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -52,6 +53,7 @@ type Cache interface {
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
+	GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) ([]*querypb.ShardLeadersList, error)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
 
@@ -67,6 +69,7 @@ type collectionInfo struct {
 	collID              typeutil.UniqueID
 	schema              *schemapb.CollectionSchema
 	partInfo            map[string]*partitionInfo
+	shardLeaders        []*querypb.ShardLeadersList
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 }
@@ -160,6 +163,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 		collInfo = m.collInfo[collectionName]
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}
+
 	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "GetCollectionInfo", metrics.CacheHitLabel).Inc()
 	return &collectionInfo{
 		collID:              collInfo.collID,
@@ -167,6 +171,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 		partInfo:            collInfo.partInfo,
 		createdTimestamp:    collInfo.createdTimestamp,
 		createdUtcTimestamp: collInfo.createdUtcTimestamp,
+		shardLeaders:        collInfo.shardLeaders,
 	}, nil
 }
 
@@ -519,4 +524,42 @@ func (m *MetaCache) GetCredUsernames(ctx context.Context) ([]string, error) {
 	}
 
 	return usernames, nil
+}
+
+// GetShards update cache if withCache == false
+func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) ([]*querypb.ShardLeadersList, error) {
+	info, err := m.GetCollectionInfo(ctx, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	if withCache {
+		if len(info.shardLeaders) > 0 {
+			return info.shardLeaders, nil
+		}
+		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord",
+			zap.String("collectionName", collectionName))
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	req := &querypb.GetShardLeadersRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_GetShardLeaders,
+			SourceID: Params.ProxyCfg.ProxyID,
+		},
+		CollectionID: info.collID,
+	}
+	resp, err := qc.GetShardLeaders(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
+	}
+
+	shards := resp.GetShards()
+
+	m.collInfo[collectionName].shardLeaders = shards
+	return shards, nil
 }

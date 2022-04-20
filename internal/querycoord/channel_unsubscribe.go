@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -51,7 +52,7 @@ type channelUnsubscribeHandler struct {
 }
 
 // newChannelUnsubscribeHandler create a new handler service to unsubscribe channels
-func newChannelUnsubscribeHandler(ctx context.Context, kv *etcdkv.EtcdKV, factory msgstream.Factory) (*channelUnsubscribeHandler, error) {
+func newChannelUnsubscribeHandler(ctx context.Context, kv *etcdkv.EtcdKV, factory dependency.Factory) (*channelUnsubscribeHandler, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	handler := &channelUnsubscribeHandler{
 		ctx:      childCtx,

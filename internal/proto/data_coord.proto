@@ -303,6 +303,7 @@ message SegmentBinlogs {
   int64 num_of_rows = 3;
   repeated FieldBinlog statslogs = 4;
   repeated FieldBinlog deltalogs = 5;
+  string insert_channel = 6;
 }
 
 message FieldBinlog{
@@ -367,6 +368,7 @@ message CompactionSegmentBinlogs {
   repeated FieldBinlog fieldBinlogs = 2;
   repeated FieldBinlog field2StatslogPaths = 3;
   repeated FieldBinlog deltalogs = 4;
+  string insert_channel = 5;
 }
 
 message CompactionPlan {

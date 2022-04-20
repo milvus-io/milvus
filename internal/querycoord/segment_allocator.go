@@ -34,12 +34,12 @@ func defaultSegAllocatePolicy() SegmentAllocatePolicy {
 const shuffleWaitInterval = 1 * time.Second
 
 // SegmentAllocatePolicy helper function definition to allocate Segment to queryNode
-type SegmentAllocatePolicy func(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error
+type SegmentAllocatePolicy func(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error
 
 // shuffleSegmentsToQueryNode shuffle segments to online nodes
 // returned are noded id for each segment, which satisfies:
 //     len(returnedNodeIds) == len(segmentIDs) && segmentIDs[i] is assigned to returnedNodeIds[i]
-func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
+func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error {
 	if len(reqs) == 0 {
 		return nil
 	}
@@ -95,7 +95,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 	}
 }
 
-func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64) error {
+func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error {
 	// key = offset, value = segmentSize
 	if len(reqs) == 0 {
 		return nil
@@ -115,7 +115,16 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 		totalMem := make(map[int64]uint64)
 		memUsage := make(map[int64]uint64)
 		memUsageRate := make(map[int64]float64)
-		onlineNodeIDs := cluster.onlineNodeIDs()
+		var onlineNodeIDs []int64
+		if replicaID == -1 {
+			onlineNodeIDs = cluster.onlineNodeIDs()
+		} else {
+			replica, err := metaCache.getReplicaByID(replicaID)
+			if err != nil {
+				return err
+			}
+			onlineNodeIDs = replica.GetNodeIds()
+		}
 		if len(onlineNodeIDs) == 0 && !wait {
 			err := errors.New("no online queryNode to allocate")
 			log.Error("shuffleSegmentsToQueryNode failed", zap.Error(err))

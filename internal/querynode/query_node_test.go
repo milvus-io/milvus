@@ -18,7 +18,9 @@ package querynode
 
 import (
 	"context"
+	"io/ioutil"
 	"math/rand"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -29,6 +31,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/server/v3/embed"
 
 	"github.com/milvus-io/milvus/internal/util/dependency"
 
@@ -41,6 +44,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
+
+var embedetcdServer *embed.Etcd
 
 // mock of query coordinator client
 type queryCoordMock struct {
@@ -224,9 +229,41 @@ func newMessageStreamFactory() dependency.Factory {
 	return dependency.NewDefaultFactory(true)
 }
 
+func startEmbedEtcdServer() (*embed.Etcd, error) {
+	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	config := embed.NewConfig()
+
+	config.Dir = os.TempDir()
+	config.LogLevel = "warn"
+	config.LogOutputs = []string{"default"}
+	u, err := url.Parse("http://localhost:2389")
+	if err != nil {
+		return nil, err
+	}
+	config.LCUrls = []url.URL{*u}
+	u, err = url.Parse("http://localhost:2390")
+	if err != nil {
+		return nil, err
+	}
+	config.LPUrls = []url.URL{*u}
+
+	return embed.StartEtcd(config)
+}
+
 func TestMain(m *testing.M) {
 	setup()
 	Params.CommonCfg.QueryNodeStats = Params.CommonCfg.QueryNodeStats + strconv.Itoa(rand.Int())
+	// init embed etcd
+	var err error
+	embedetcdServer, err = startEmbedEtcdServer()
+	if err != nil {
+		os.Exit(1)
+	}
+	defer embedetcdServer.Close()
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -278,16 +315,17 @@ func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context) (*QueryNode, e
 		return nil, err
 	}
 
-	err = node.queryService.addQueryCollection(defaultCollectionID)
-	if err != nil {
-		return nil, err
-	}
+	/*
+		err = node.queryService.addQueryCollection(defaultCollectionID)
+		if err != nil {
+			return nil, err
+		}
 
-	qc, err := node.queryService.getQueryCollection(defaultCollectionID)
-	if err != nil {
-		return nil, err
-	}
-	qc.globalSegmentManager.addGlobalSegmentInfo(genSimpleSegmentInfo())
+		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
+		if err != nil {
+			return nil, err
+		}*/
+	//qc.globalSegmentManager.addGlobalSegmentInfo(genSimpleSegmentInfo())
 	return node, nil
 }
 
@@ -330,10 +368,11 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
 		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.QueryNodeID
 
-		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
-		assert.NoError(t, err)
-		qc.globalSegmentManager.removeGlobalSealedSegmentInfo(defaultSegmentID)
-
+		/*
+			qc, err := node.queryService.getQueryCollection(defaultCollectionID)
+			assert.NoError(t, err)
+			qc.globalSegmentManager.removeGlobalSealedSegmentInfo(defaultSegmentID)
+		*/
 		err = node.removeSegments(segmentChangeInfos)
 		assert.Error(t, err)
 	})
@@ -402,9 +441,10 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
 		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.QueryNodeID
 
-		qc, err := node.queryService.getQueryCollection(defaultCollectionID)
-		assert.NoError(t, err)
-		qc.globalSegmentManager.removeGlobalSealedSegmentInfo(defaultSegmentID)
+		/*
+			qc, err := node.queryService.getQueryCollection(defaultCollectionID)
+			assert.NoError(t, err)
+		qc.globalSegmentManager.removeGlobalSealedSegmentInfo(defaultSegmentID)*/
 
 		go node.watchChangeInfo()
 

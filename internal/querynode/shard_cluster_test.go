@@ -61,7 +61,8 @@ func (m *mockShardQueryNode) Query(_ context.Context, _ *querypb.QueryRequest) (
 	return m.queryResult, m.queryErr
 }
 
-func (m *mockShardQueryNode) Stop() {
+func (m *mockShardQueryNode) Stop() error {
+	return nil
 }
 
 func buildMockQueryNode(nodeID int64, addr string) shardQueryNode {

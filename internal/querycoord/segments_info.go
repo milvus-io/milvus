@@ -45,8 +45,6 @@ func newSegmentsInfo(kv kv.TxnKV) *segmentsInfo {
 func (s *segmentsInfo) loadSegments() error {
 	var err error
 	s.loadOnce.Do(func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
 		var values []string
 		_, values, err = s.kv.LoadWithPrefix(util.SegmentMetaPrefix)
 		if err != nil {
@@ -60,6 +58,16 @@ func (s *segmentsInfo) loadSegments() error {
 			}
 			s.segmentIDMap[segment.GetSegmentID()] = segment
 			numRowsCnt += float64(segment.NumRows)
+
+			// Compatibility for old meta format
+			if len(segment.NodeIds) == 0 {
+				segment.NodeIds = append(segment.NodeIds, segment.NodeID)
+			}
+			// rewrite segment info
+			err = s.saveSegment(segment)
+			if err != nil {
+				return
+			}
 		}
 		metrics.QueryCoordNumEntities.WithLabelValues().Add(numRowsCnt)
 

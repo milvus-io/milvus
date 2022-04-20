@@ -20,11 +20,8 @@ import (
 	"context"
 	"math"
 	"math/rand"
-	"testing"
-	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -129,6 +126,7 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 	return err
 }
 
+/*
 func TestSearch_Search(t *testing.T) {
 	const N = 10000
 	const DIM = 16
@@ -258,3 +256,4 @@ func TestQueryService_addQueryCollection(t *testing.T) {
 	qs.close()
 	assert.Len(t, qs.queryCollections, 0)
 }
+*/
