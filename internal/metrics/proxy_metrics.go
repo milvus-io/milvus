@@ -306,6 +306,47 @@ var (
 			Name:      "receive_search_req_num",
 			Help:      "The number for proxy receive search reqs",
 		}, []string{nodeIDLabelName, collectionIDLabelName})
+	ProxyServerSearch = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "server_search",
+		}, []string{nodeIDLabelName})
+
+	ProxyInQueue = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_in_queue",
+		}, []string{nodeIDLabelName})
+
+	ProxySearchValidateAndShowCollection = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_validate_show_collection",
+		}, []string{nodeIDLabelName})
+
+	ProxySearchPreExecute = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_pre_execute",
+		}, []string{nodeIDLabelName})
+
+	ProxySearchExecute = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_execute",
+		}, []string{nodeIDLabelName})
+
+	ProxySearchPostExecute = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "search_post_execute",
+		}, []string{nodeIDLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
@@ -349,4 +390,10 @@ func RegisterProxy() {
 
 	prometheus.MustRegister(ProxySendReqsNum)
 	prometheus.MustRegister(ProxyReceiveReqsNum)
+	prometheus.MustRegister(ProxyServerSearch)
+	prometheus.MustRegister(ProxyInQueue)
+	prometheus.MustRegister(ProxySearchValidateAndShowCollection)
+	prometheus.MustRegister(ProxySearchPreExecute)
+	prometheus.MustRegister(ProxySearchExecute)
+	prometheus.MustRegister(ProxySearchPostExecute)
 }

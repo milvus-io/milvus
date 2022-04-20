@@ -453,6 +453,7 @@ func (q *queryCollection) publishResultLoop() {
 						if el != nil {
 							log.Warn("publishSearchResult failed", zap.Error(el))
 						}
+						metrics.QueryNodeSearch.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(msg.Msg.GetTimeRecorder().ElapseSpan().Microseconds()))
 					case commonpb.MsgType_Retrieve:
 						err := q.publishRetrieveResult(msg.RetrieveRet, msg.Msg.SourceID())
 						if err != nil {
@@ -998,11 +999,13 @@ func (q *queryCollection) search(qMsg queryMsg) (*pubSearchResults, error) {
 		deleteSearchResults(searchResults)
 	}()
 	// historical search
+	trHis := timerecord.NewTimeRecorder("hisRecorder")
 	log.Debug("historical search start", zap.Int64("msgID", searchMsg.ID()))
 	hisSearchResults, sealedSegmentSearched, sealedPartitionSearched, err := q.historical.search(searchReq, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
 	if err != nil {
 		return nil, err
 	}
+	metrics.QueryNodeSearchHistorical.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(trHis.ElapseSpan().Microseconds()))
 	searchResults = append(searchResults, hisSearchResults...)
 
 	log.Debug("historical search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("searched partitionIDs", sealedPartitionSearched), zap.Int64s("searched segmentIDs", sealedSegmentSearched))
@@ -1101,6 +1104,7 @@ func (q *queryCollection) search(qMsg queryMsg) (*pubSearchResults, error) {
 			zap.Int64(log.BenchmarkCollectionID, collectionID),
 			zap.Int64(log.BenchmarkMsgID, reqID), zap.Int64(log.BenchmarkDuration, reduceTime.Microseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(metrics.SearchLabel, fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Observe(float64(reduceTime.Milliseconds()))
+		metrics.QueryNodeSearchReduce.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(reduceTime.Microseconds()))
 
 		ret := &internalpb.SearchResults{
 			Base: &commonpb.MsgBase{
