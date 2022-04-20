@@ -24,7 +24,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -970,10 +969,6 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 
 	collectionID := collMeta.ID
 	cnt := 0
-
-	defer func() {
-		metrics.RootCoordNumOfIndexedSegments.WithLabelValues(strconv.FormatInt(collectionID, 10)).Add(float64(cnt))
-	}()
 
 	for _, segID := range segIDs {
 		info := etcdpb.SegmentIndexInfo{

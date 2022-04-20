@@ -777,7 +777,6 @@ func (dct *dropCollectionTask) Execute(ctx context.Context) error {
 
 	_ = dct.chMgr.removeDMLStream(collID)
 	_ = dct.chMgr.removeDQLStream(collID)
-
 	return nil
 }
 
