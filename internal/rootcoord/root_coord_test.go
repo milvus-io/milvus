@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -624,6 +625,56 @@ func TestRootCoordInit(t *testing.T) {
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
+}
+
+func TestRootCoordInitData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	coreFactory := dependency.NewDefaultFactory(true)
+	Params.Init()
+	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+
+	core, err := NewCore(ctx, coreFactory)
+	assert.NoError(t, err)
+	core.SetEtcdClient(etcdCli)
+
+	randVal := rand.Int()
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+
+	// 1. normal init
+	err = core.Init()
+	assert.NoError(t, err)
+
+	// 2. mock init data error
+	// firstly delete data
+	err = core.MetaTable.DeleteCredential(util.UserRoot)
+	assert.NoError(t, err)
+
+	snapshotKV, err := newMetaSnapshot(etcdCli, Params.EtcdCfg.MetaRootPath, TimestampPrefix, 7)
+	assert.NotNil(t, snapshotKV)
+	assert.NoError(t, err)
+	txnKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	mt, err := NewMetaTable(txnKV, snapshotKV)
+	assert.NoError(t, err)
+	mockTxnKV := &mockTestTxnKV{
+		TxnKV:  mt.txn,
+		save:   func(key, value string) error { return txnKV.Save(key, value) },
+		remove: func(key string) error { return txnKV.Remove(key) },
+	}
+	mt.txn = mockTxnKV
+	// mock save data error
+	mockTxnKV.save = func(key, value string) error {
+		return fmt.Errorf("save error")
+	}
+	core.MetaTable = mt
+	err = core.initData()
+	assert.Error(t, err)
 }
 
 func TestRootCoord_Base(t *testing.T) {
