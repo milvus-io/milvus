@@ -75,7 +75,7 @@ TimestampIndex::GenerateBitset(Timestamp query_timestamp,
     bitset.resize(beg, true);
     bitset.resize(size, false);
     for (int64_t i = beg; i < end; ++i) {
-        bitset[i] = timestamps[i] <= query_timestamp;
+        bitset[i] = timestamps[i] > query_timestamp;
     }
     return bitset;
 }
