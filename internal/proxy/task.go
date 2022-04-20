@@ -1651,49 +1651,86 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
-	var skipDupCnt int64
-	var realTopK int64 = -1
-	for i := int64(0); i < nq; i++ {
-		offsets := make([]int64, len(searchResultData))
-
-		var idSet = make(map[int64]struct{})
-		var j int64
-		for j = 0; j < topk; {
-			sel := selectSearchResultData(searchResultData, offsets, topk, i)
-			if sel == -1 {
+	if len(searchResultData) == 1 { // skip global reduce
+		ret.Results = searchResultData[0]
+		ret.GetResults().Topks = make([]int64, int(nq))
+		for i := 0; i < int(nq); i++ {
+			ret.GetResults().Topks[i] = topk
+		}
+		ids := ret.GetResults().GetIds().GetIntId().GetData()
+		scores := ret.GetResults().GetScores()
+		// get realTopK
+		realTopK := 0
+		for i := int(topk - 1); i >= 0; i-- {
+			if ids[i] != -1 {
+				realTopK = i + 1
 				break
 			}
-			idx := i*topk + offsets[sel]
-
-			id := searchResultData[sel].Ids.GetIntId().Data[idx]
-			score := searchResultData[sel].Scores[idx]
-			// ignore invalid search result
-			if id == -1 {
-				continue
-			}
-
-			// remove duplicates
-			if _, ok := idSet[id]; !ok {
-				typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
-				ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
-				ret.Results.Scores = append(ret.Results.Scores, score)
-				idSet[id] = struct{}{}
-				j++
-			} else {
-				// skip entity with same id
-				skipDupCnt++
-			}
-			offsets[sel]++
 		}
-		if realTopK != -1 && realTopK != j {
-			log.Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-			// return nil, errors.New("the length (topk) between all result of query is different")
+		if int64(realTopK) != topk {
+			// copy real topK ids and scores if realTopK != topK
+			resIDs := make([]int64, int(nq)*realTopK)
+			resScores := make([]float32, int(nq)*realTopK)
+			topKs := make([]int64, int(nq))
+			for nqOffset := 0; nqOffset < int(nq); nqOffset++ {
+				srcBegin := int(topk) * nqOffset
+				srcEnd := int(topk)*nqOffset + realTopK
+				dstBegin := realTopK * nqOffset
+				if srcEnd <= len(ids) && srcEnd <= len(scores) {
+					copy(resIDs[dstBegin:], ids[srcBegin:srcEnd])
+					copy(resScores[dstBegin:], scores[srcBegin:srcEnd])
+				}
+				topKs[nqOffset] = int64(realTopK)
+			}
+			ret.GetResults().GetIds().GetIntId().Data = resIDs
+			ret.GetResults().Scores = resScores
+			ret.GetResults().Topks = topKs
 		}
-		realTopK = j
-		ret.Results.Topks = append(ret.Results.Topks, realTopK)
+	} else {
+		var skipDupCnt int64
+		var realTopK int64 = -1
+		for i := int64(0); i < nq; i++ {
+			offsets := make([]int64, len(searchResultData))
+
+			var idSet = make(map[int64]struct{})
+			var j int64
+			for j = 0; j < topk; {
+				sel := selectSearchResultData(searchResultData, offsets, topk, i)
+				if sel == -1 {
+					break
+				}
+				idx := i*topk + offsets[sel]
+
+				id := searchResultData[sel].Ids.GetIntId().Data[idx]
+				score := searchResultData[sel].Scores[idx]
+				// ignore invalid search result
+				if id == -1 {
+					continue
+				}
+
+				// remove duplicates
+				if _, ok := idSet[id]; !ok {
+					typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
+					ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
+					ret.Results.Scores = append(ret.Results.Scores, score)
+					idSet[id] = struct{}{}
+					j++
+				} else {
+					// skip entity with same id
+					skipDupCnt++
+				}
+				offsets[sel]++
+			}
+			if realTopK != -1 && realTopK != j {
+				log.Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
+				// return nil, errors.New("the length (topk) between all result of query is different")
+			}
+			realTopK = j
+			ret.Results.Topks = append(ret.Results.Topks, realTopK)
+		}
+		log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
+		ret.Results.TopK = realTopK
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
-	ret.Results.TopK = realTopK
 
 	if !distance.PositivelyRelated(metricType) {
 		for k := range ret.Results.Scores {
