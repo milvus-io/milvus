@@ -78,7 +78,7 @@ func Test_ImportRowBased(t *testing.T) {
 	defer cm.RemoveWithPrefix("")
 
 	rowCount := 0
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -122,7 +122,6 @@ func Test_ImportRowBased(t *testing.T) {
 	files = append(files, "/dummy/dummy.json")
 	err = wrapper.Import(files, true, false)
 	assert.NotNil(t, err)
-
 }
 
 func Test_ImportColumnBased_json(t *testing.T) {
@@ -164,7 +163,7 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	assert.NoError(t, err)
 
 	rowCount := 0
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -254,7 +253,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	files = append(files, filePath)
 
 	rowCount := 0
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -388,7 +387,7 @@ func Test_ImportRowBased_perf(t *testing.T) {
 
 	// parse the json file
 	parseCount := 0
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())
@@ -486,7 +485,7 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 
 	// parse the json file
 	parseCount := 0
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
 		count := 0
 		for _, data := range fields {
 			assert.Less(t, 0, data.RowNum())

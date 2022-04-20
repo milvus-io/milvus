@@ -278,6 +278,9 @@ type DataCoord interface {
 	// the `tasks` in `ImportResponse` return an id list of tasks.
 	// error is always nil
 	Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+
+	// UpdateSegmentStatistics updates a segment's stats.
+	UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.

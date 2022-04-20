@@ -126,3 +126,7 @@ func (m *DataCoordClient) SetSegmentState(ctx context.Context, req *datapb.SetSe
 func (m *DataCoordClient) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*datapb.ImportTaskResponse, error) {
 	return &datapb.ImportTaskResponse{}, m.Err
 }
+
+func (m *DataCoordClient) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

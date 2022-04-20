@@ -183,7 +183,7 @@ func (mgr *singleTypeChannelsMgr) getLatestVID(collectionID UniqueID) (int, erro
 
 	ids, ok := mgr.collectionID2VIDs[collectionID]
 	if !ok || len(ids) <= 0 {
-		return 0, fmt.Errorf("collection %d not found", collectionID)
+		return 0, fmt.Errorf("v-channel ID is not found for collection %d", collectionID)
 	}
 
 	return ids[len(ids)-1], nil

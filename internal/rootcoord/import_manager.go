@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 const (
 	Bucket               = "bucket"
 	FailedReason         = "failed_reason"
+	Files                = "files"
 	MaxPendingCount      = 32
 	delimiter            = "/"
 	taskExpiredMsgPrefix = "task has expired after "
@@ -187,7 +189,7 @@ func (m *importManager) genReqID() int64 {
 
 // importJob processes the import request, generates import tasks, sends these tasks to DataCoord, and returns
 // immediately.
-func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportRequest, cID int64) *milvuspb.ImportResponse {
+func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportRequest, cID int64, pID int64) *milvuspb.ImportResponse {
 	if req == nil || len(req.Files) == 0 {
 		return &milvuspb.ImportResponse{
 			Status: &commonpb.Status{
@@ -210,11 +212,13 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
+		Tasks: make([]int64, 0),
 	}
 
 	log.Debug("request received",
 		zap.String("collection name", req.GetCollectionName()),
-		zap.Int64("collection ID", cID))
+		zap.Int64("collection ID", cID),
+		zap.Int64("partition ID", pID))
 	func() {
 		m.pendingLock.Lock()
 		defer m.pendingLock.Unlock()
@@ -254,6 +258,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					Id:           m.nextTaskID,
 					RequestId:    reqID,
 					CollectionId: cID,
+					PartitionId:  pID,
 					ChannelNames: req.ChannelNames,
 					Bucket:       bucket,
 					RowBased:     req.GetRowBased(),
@@ -263,6 +268,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 						StateCode: commonpb.ImportState_ImportPending,
 					},
 				}
+				resp.Tasks = append(resp.Tasks, newTask.GetId())
 				taskList[i] = newTask.GetId()
 				m.nextTaskID++
 				log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
@@ -277,6 +283,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				Id:           m.nextTaskID,
 				RequestId:    reqID,
 				CollectionId: cID,
+				PartitionId:  pID,
 				ChannelNames: req.ChannelNames,
 				Bucket:       bucket,
 				RowBased:     req.GetRowBased(),
@@ -286,6 +293,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					StateCode: commonpb.ImportState_ImportPending,
 				},
 			}
+			resp.Tasks = append(resp.Tasks, newTask.GetId())
 			m.nextTaskID++
 			log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 			m.pendingTasks = append(m.pendingTasks, newTask)
@@ -345,6 +353,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "import task id doesn't exist",
 		},
+		Infos: make([]*commonpb.KeyValuePair, 0),
 	}
 
 	log.Debug("getting import task state", zap.Int64("taskID", tID))
@@ -358,6 +367,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 					ErrorCode: commonpb.ErrorCode_Success,
 				}
 				resp.State = commonpb.ImportState_ImportPending
+				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(m.pendingTasks[i].GetFiles(), ",")})
 				found = true
 				break
 			}
@@ -378,6 +388,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 			resp.State = v.GetState().GetStateCode()
 			resp.RowCount = v.GetState().GetRowCount()
 			resp.IdList = v.GetState().GetRowIds()
+			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(v.GetFiles(), ",")})
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{
 				Key:   FailedReason,
 				Value: v.GetState().GetErrorMessage(),

@@ -335,3 +335,8 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	return s.dataCoord.Import(ctx, req)
 }
+
+// UpdateSegmentStatistics is the dataCoord service caller of UpdateSegmentStatistics.
+func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
+	return s.dataCoord.UpdateSegmentStatistics(ctx, req)
+}

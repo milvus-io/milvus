@@ -120,6 +120,15 @@ func Test_NewClient(t *testing.T) {
 
 		r21, err := client.DropVirtualChannel(ctx, nil)
 		retCheck(retNotNil, r21, err)
+
+		r22, err := client.SetSegmentState(ctx, nil)
+		retCheck(retNotNil, r22, err)
+
+		r23, err := client.Import(ctx, nil)
+		retCheck(retNotNil, r23, err)
+
+		r24, err := client.UpdateSegmentStatistics(ctx, nil)
+		retCheck(retNotNil, r24, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{

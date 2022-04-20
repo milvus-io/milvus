@@ -313,9 +313,11 @@ func Test_JSONRowConsumer(t *testing.T) {
 		]
 	}`)
 
+	var shardNum int32 = 2
 	var callTime int32
 	var totalCount int
-	consumeFunc := func(fields map[storage.FieldID]storage.FieldData) error {
+	consumeFunc := func(fields map[storage.FieldID]storage.FieldData, shard int) error {
+		assert.Equal(t, int(callTime), shard)
 		callTime++
 		rowCount := 0
 		for _, data := range fields {
@@ -329,7 +331,6 @@ func Test_JSONRowConsumer(t *testing.T) {
 		return nil
 	}
 
-	var shardNum int32 = 2
 	consumer := NewJSONRowConsumer(schema, idAllocator, shardNum, 1, consumeFunc)
 	assert.NotNil(t, consumer)
 
