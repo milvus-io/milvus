@@ -1971,7 +1971,7 @@ func TestProxy(t *testing.T) {
 	})
 
 	username := "test_username_" + funcutil.RandomString(15)
-	password := "xxx"
+	password := "password"
 
 	wg.Add(1)
 	t.Run("credential CREATE api", func(t *testing.T) {
@@ -2020,7 +2020,7 @@ func TestProxy(t *testing.T) {
 		defer wg.Done()
 
 		// 2. update credential
-		newPassword := "yyy"
+		newPassword := "new_password"
 		constructUpdateCredentialRequest := func() *milvuspb.UpdateCredentialRequest {
 			return &milvuspb.UpdateCredentialRequest{
 				Base:        nil,
@@ -2076,7 +2076,7 @@ func TestProxy(t *testing.T) {
 		defer wg.Done()
 
 		// 3. get credential
-		newPassword := "yyy"
+		newPassword := "new_password"
 		constructGetCredentialRequest := func() *rootcoordpb.GetCredentialRequest {
 			return &rootcoordpb.GetCredentialRequest{
 				Base:     nil,
@@ -2898,6 +2898,14 @@ func TestProxy(t *testing.T) {
 	t.Run("UpdateCredential fail, timeout", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.UpdateCredential(shortCtx, &milvuspb.UpdateCredentialRequest{Username: "xxx"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("DeleteCredential fail, user root cannot be deleted", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.DeleteCredential(shortCtx, &milvuspb.DeleteCredentialRequest{Username: "root"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})

@@ -26,4 +26,6 @@ const (
 	// MemberCredID id for Milvus members (data/index/query node/coord component)
 	MemberCredID        = "@@milvus-member@@"
 	CredentialSeperator = ":"
+	UserRoot            = "root"
+	DefaultRootPassword = "Milvus"
 )

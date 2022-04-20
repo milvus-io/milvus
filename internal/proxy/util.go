@@ -520,9 +520,9 @@ func ValidateUsername(username string) error {
 }
 
 func ValidatePassword(password string) error {
-	if int64(len(password)) > Params.ProxyCfg.MaxPasswordLength {
-		msg := "The length of password must be less than " +
-			strconv.FormatInt(Params.ProxyCfg.MaxPasswordLength, 10) + " characters."
+	if int64(len(password)) < Params.ProxyCfg.MinPasswordLength || int64(len(password)) > Params.ProxyCfg.MaxPasswordLength {
+		msg := "The length of password must be great than " + strconv.FormatInt(Params.ProxyCfg.MinPasswordLength, 10) +
+			" and less than " + strconv.FormatInt(Params.ProxyCfg.MaxPasswordLength, 10) + " characters."
 		return errors.New(msg)
 	}
 	return nil

@@ -29,6 +29,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/crypto"
+
 	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/golang/protobuf/proto"
@@ -1119,6 +1122,13 @@ func (c *Core) Init() error {
 			c.impTaskKv,
 			c.CallImportService,
 		)
+		// init data
+		encryptedRootPassword, _ := crypto.PasswordEncrypt(util.DefaultRootPassword)
+		initError = c.MetaTable.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		if initError != nil {
+			return
+		}
+		log.Debug("RootCoord init user root done")
 	})
 	if initError != nil {
 		log.Debug("RootCoord init error", zap.Error(initError))

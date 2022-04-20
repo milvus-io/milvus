@@ -157,6 +157,21 @@ func TestComponentParam(t *testing.T) {
 			Params.initMaxNameLength()
 		})
 
+		shouldPanic(t, "proxy.maxUsernameLength", func() {
+			Params.Base.Save("proxy.maxUsernameLength", "abc")
+			Params.initMaxUsernameLength()
+		})
+
+		shouldPanic(t, "proxy.minPasswordLength", func() {
+			Params.Base.Save("proxy.minPasswordLength", "abc")
+			Params.initMinPasswordLength()
+		})
+
+		shouldPanic(t, "proxy.maxPasswordLength", func() {
+			Params.Base.Save("proxy.maxPasswordLength", "abc")
+			Params.initMaxPasswordLength()
+		})
+
 		shouldPanic(t, "proxy.maxFieldNum", func() {
 			Params.Base.Save("proxy.maxFieldNum", "abc")
 			Params.initMaxFieldNum()

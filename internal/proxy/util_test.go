@@ -550,11 +550,11 @@ func TestValidateUsername(t *testing.T) {
 func TestValidatePassword(t *testing.T) {
 	Params.InitOnce()
 	// only spaces
-	res := ValidatePassword(" ")
-	assert.Nil(t, res)
+	res := ValidatePassword("")
+	assert.NotNil(t, res)
 	//
 	res = ValidatePassword("1abc")
-	assert.Nil(t, res)
+	assert.NotNil(t, res)
 	//
 	res = ValidatePassword("a1^7*).,")
 	assert.Nil(t, res)

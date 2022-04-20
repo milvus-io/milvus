@@ -408,6 +408,7 @@ type proxyConfig struct {
 	MsgStreamTimeTickBufSize int64
 	MaxNameLength            int64
 	MaxUsernameLength        int64
+	MinPasswordLength        int64
 	MaxPasswordLength        int64
 	MaxFieldNum              int64
 	MaxShardNum              int32
@@ -433,6 +434,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.initMsgStreamTimeTickBufSize()
 	p.initMaxNameLength()
+	p.initMinPasswordLength()
 	p.initMaxUsernameLength()
 	p.initMaxPasswordLength()
 	p.initMaxFieldNum()
@@ -475,6 +477,15 @@ func (p *proxyConfig) initMaxUsernameLength() {
 		panic(err)
 	}
 	p.MaxUsernameLength = maxUsernameLength
+}
+
+func (p *proxyConfig) initMinPasswordLength() {
+	str := p.Base.LoadWithDefault("proxy.minPasswordLength", "6")
+	minPasswordLength, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MinPasswordLength = minPasswordLength
 }
 
 func (p *proxyConfig) initMaxPasswordLength() {
