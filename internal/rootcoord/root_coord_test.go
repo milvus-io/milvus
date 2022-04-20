@@ -1368,10 +1368,15 @@ func TestRootCoord_Base(t *testing.T) {
 			Files:          []string{"f1", "f2", "f3"},
 		}
 		core.MetaTable.collName2ID["new"+collName] = 123
+		core.MetaTable.collID2Meta[123] = etcdpb.CollectionInfo{
+			ID:             123,
+			PartitionIDs:   []int64{456},
+			PartitionNames: []string{"testPartition"}}
 		rsp, err := core.Import(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 		delete(core.MetaTable.collName2ID, "new"+collName)
+		delete(core.MetaTable.collID2Meta, 123)
 
 		reqIR := &rootcoordpb.ImportResult{
 			TaskId:   3,

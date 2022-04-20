@@ -3027,6 +3027,8 @@ func TestProxy_GetComponentStates_state_code(t *testing.T) {
 
 func TestProxy_Import(t *testing.T) {
 	rc := NewRootCoordMock()
+	master := newMockGetChannelsService()
+	msgStreamFactory := newSimpleMockMsgStreamFactory()
 	rc.Start()
 	defer rc.Stop()
 	err := InitMetaCache(rc)
@@ -3044,19 +3046,20 @@ func TestProxy_Import(t *testing.T) {
 	defer cancel()
 	factory := dependency.NewDefaultFactory(localMsg)
 	proxy, err := NewProxy(ctx, factory)
+	proxy.rootCoord = rc
 	assert.NoError(t, err)
 	var wg sync.WaitGroup
 	wg.Add(1)
-	t.Run("test import get vChannel failed", func(t *testing.T) {
+	t.Run("test import get vChannel failed (the first one)", func(t *testing.T) {
 		defer wg.Done()
 		proxy.stateCode.Store(internalpb.StateCode_Healthy)
-		proxy.chMgr = newChannelsMgrImpl(nil, nil, nil, nil, nil)
+		proxy.chMgr = newChannelsMgrImpl(master.GetChannels, nil, nil, nil, msgStreamFactory)
 		resp, err := proxy.Import(context.TODO(),
 			&milvuspb.ImportRequest{
 				CollectionName: "import_collection",
 			})
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Error(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NoError(t, err)
 	})
 	wg.Add(1)
 	t.Run("test import with unhealthy", func(t *testing.T) {

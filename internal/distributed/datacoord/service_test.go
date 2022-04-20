@@ -57,6 +57,7 @@ type MockDataCoord struct {
 	dropVChanResp        *datapb.DropVirtualChannelResponse
 	setSegmentStateResp  *datapb.SetSegmentStateResponse
 	importResp           *datapb.ImportTaskResponse
+	updateSegStatResp    *commonpb.Status
 }
 
 func (m *MockDataCoord) Init() error {
@@ -172,6 +173,10 @@ func (m *MockDataCoord) SetSegmentState(ctx context.Context, req *datapb.SetSegm
 
 func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	return m.importResp, m.err
+}
+
+func (m *MockDataCoord) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
+	return m.updateSegStatResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -393,13 +398,24 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	t.Run("Import", func(t *testing.T) {
+	t.Run("import", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{
 			importResp: &datapb.ImportTaskResponse{
 				Status: &commonpb.Status{},
 			},
 		}
 		resp, err := server.Import(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("update seg stat", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			updateSegStatResp: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+		resp, err := server.UpdateSegmentStatistics(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

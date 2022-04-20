@@ -2445,6 +2445,34 @@ func TestImport(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
 		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.NodeID), resp.Status.GetReason())
 	})
+
+	t.Run("test update segment stat", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
+			Stats: []*datapb.SegmentStats{{
+				SegmentID: 100,
+				NumRows:   int64(1),
+			}},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
+	t.Run("test update segment stat w/ closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+
+		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
+			Stats: []*datapb.SegmentStats{{
+				SegmentID: 100,
+				NumRows:   int64(1),
+			}},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	})
 }
 
 // https://github.com/milvus-io/milvus/issues/15659

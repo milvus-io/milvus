@@ -240,6 +240,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	segmentID UniqueID,
 	flushed bool,
 	dropped bool,
+	importing bool,
 	binlogs, statslogs, deltalogs []*datapb.FieldBinlog,
 	checkpoints []*datapb.CheckPoint,
 	startPositions []*datapb.SegmentStartPosition,
@@ -248,13 +249,16 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	defer m.Unlock()
 
 	segment := m.segments.GetSegment(segmentID)
+	if importing {
+		m.segments.SetRowCount(segmentID, segment.currRows)
+		segment = m.segments.GetSegment(segmentID)
+	}
 	if segment == nil || !isSegmentHealthy(segment) {
 		return nil
 	}
 
 	clonedSegment := segment.Clone()
 
-	kv := make(map[string]string)
 	modSegments := make(map[UniqueID]*SegmentInfo)
 
 	if flushed {
@@ -352,6 +356,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		modSegments[cp.GetSegmentID()] = s
 	}
 
+	kv := make(map[string]string)
 	for _, segment := range modSegments {
 		segBytes, err := proto.Marshal(segment.SegmentInfo)
 		if err != nil {
@@ -366,6 +371,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	}
 
 	if err := m.saveKvTxn(kv); err != nil {
+		log.Error("failed to store flush segment info into Etcd", zap.Error(err))
 		return err
 	}
 	oldSegmentState := segment.GetState()

@@ -29,15 +29,15 @@ type ImportWrapper struct {
 	cancel           context.CancelFunc         // for canceling parse process
 	collectionSchema *schemapb.CollectionSchema // collection schema
 	shardNum         int32                      // sharding number of the collection
-	segmentSize      int64                      // maximum size of a segment in MB
+	segmentSize      int64                      // maximum size of a segment(unit:byte)
 	rowIDAllocator   *allocator.IDAllocator     // autoid allocator
 	chunkManager     storage.ChunkManager
 
-	callFlushFunc func(fields map[storage.FieldID]storage.FieldData) error // call back function to flush a segment
+	callFlushFunc ImportFlushFunc // call back function to flush a segment
 }
 
 func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.CollectionSchema, shardNum int32, segmentSize int64,
-	idAlloc *allocator.IDAllocator, cm storage.ChunkManager, flushFunc func(fields map[storage.FieldID]storage.FieldData) error) *ImportWrapper {
+	idAlloc *allocator.IDAllocator, cm storage.ChunkManager, flushFunc ImportFlushFunc) *ImportWrapper {
 	if collectionSchema == nil {
 		log.Error("import error: collection schema is nil")
 		return nil
@@ -89,7 +89,7 @@ func (p *ImportWrapper) printFieldsDataInfo(fieldsData map[storage.FieldID]stora
 	if len(files) > 0 {
 		stats = append(stats, zap.Any("files", files))
 	}
-	log.Debug(msg, stats...)
+	log.Info(msg, stats...)
 }
 
 func getFileNameAndExt(filePath string) (string, string) {
@@ -110,7 +110,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 		for i := 0; i < len(filePaths); i++ {
 			filePath := filePaths[i]
 			_, fileType := getFileNameAndExt(filePath)
-			log.Debug("imprort wrapper:  row-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
+			log.Info("imprort wrapper:  row-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
 
 			if fileType == JSONFileExt {
 				err := func() error {
@@ -124,9 +124,9 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					parser := NewJSONParser(p.ctx, p.collectionSchema)
 					var consumer *JSONRowConsumer
 					if !onlyValidate {
-						flushFunc := func(fields map[storage.FieldID]storage.FieldData) error {
+						flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
 							p.printFieldsDataInfo(fields, "import wrapper: prepare to flush segment", filePaths)
-							return p.callFlushFunc(fields)
+							return p.callFlushFunc(fields, shardNum)
 						}
 						consumer = NewJSONRowConsumer(p.collectionSchema, p.rowIDAllocator, p.shardNum, p.segmentSize, flushFunc)
 					}
@@ -147,7 +147,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 			}
 		}
 	} else {
-		// parse and consume row-based files
+		// parse and consume column-based files
 		// for column-based files, the XXXColumnConsumer only output map[string]storage.FieldData
 		// after all columns are parsed/consumed, we need to combine map[string]storage.FieldData into one
 		// and use splitFieldsData() to split fields data into segments according to shard number
@@ -193,7 +193,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 		for i := 0; i < len(filePaths); i++ {
 			filePath := filePaths[i]
 			fileName, fileType := getFileNameAndExt(filePath)
-			log.Debug("imprort wrapper:  column-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
+			log.Info("imprort wrapper:  column-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
 
 			if fileType == JSONFileExt {
 				err := func() error {
@@ -434,7 +434,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	for i := 0; i < int(p.shardNum); i++ {
 		segmentData := segmentsData[i]
 		p.printFieldsDataInfo(segmentData, "import wrapper: prepare to flush segment", files)
-		err := p.callFlushFunc(segmentData)
+		err := p.callFlushFunc(segmentData, i)
 		if err != nil {
 			return err
 		}

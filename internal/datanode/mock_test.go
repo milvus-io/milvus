@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -223,6 +224,12 @@ func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
+	}, nil
+}
+
+func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 
@@ -927,6 +934,16 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
+	}, nil
+}
+
+func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	v := ctx.Value(ctxKey{}).(string)
+	if v == returnError {
+		return nil, fmt.Errorf("injected error")
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 

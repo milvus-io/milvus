@@ -9,6 +9,9 @@ import "internal.proto";
 import "milvus.proto";
 import "schema.proto";
 
+// TODO: import google/protobuf/empty.proto
+message Empty {}
+
 service DataCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
@@ -45,6 +48,7 @@ service DataCoord {
   rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
   rpc Import(ImportTaskRequest) returns (ImportTaskResponse) {}
+  rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -472,4 +476,9 @@ message ImportTaskRequest {
   common.MsgBase base = 1;
   ImportTask import_task = 2;          // Target import task.
   repeated int64 working_nodes = 3;    // DataNodes that are currently working.
+}
+
+message UpdateSegmentStatisticsRequest {
+  common.MsgBase base = 1;
+  repeated SegmentStats stats = 2;
 }

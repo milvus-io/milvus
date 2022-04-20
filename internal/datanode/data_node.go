@@ -820,8 +820,28 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		}, nil
 	}
 	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.NodeID)
-	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize/(1024*1024), idAllocator, node.chunkManager, importFlushReqFunc(node, req, schema, ts))
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     req.GetImportTask().TaskId,
+		DatanodeId: node.NodeID,
+		State:      commonpb.ImportState_ImportPersisted,
+		Segments:   make([]int64, 0),
+		RowCount:   0,
+	}
+	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize, idAllocator, node.chunkManager,
+		importFlushReqFunc(node, req, importResult, schema, ts))
 	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	// report root coord that the import task has been finished
+	_, err = node.rootCoord.ReportImport(ctx, importResult)
 	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -835,16 +855,23 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	return resp, nil
 }
 
-type importFlushFunc func(fields map[storage.FieldID]storage.FieldData) error
-
-func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *schemapb.CollectionSchema, ts Timestamp) importFlushFunc {
-	return func(fields map[storage.FieldID]storage.FieldData) error {
+func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoordpb.ImportResult, schema *schemapb.CollectionSchema, ts Timestamp) importutil.ImportFlushFunc {
+	return func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
+		if shardNum >= len(req.GetImportTask().GetChannelNames()) {
+			log.Error("import task returns invalid shard number",
+				zap.Int("# of shards", shardNum),
+				zap.Int("# of channels", len(req.GetImportTask().GetChannelNames())),
+				zap.Any("channel names", req.GetImportTask().GetChannelNames()),
+			)
+			return fmt.Errorf("syncSegmentID Failed: invalid shard number %d", shardNum)
+		}
+		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardNum", shardNum))
 		segReqs := []*datapb.SegmentIDRequest{
 			{
-				ChannelName:  "test-channel",
+				ChannelName:  req.ImportTask.ChannelNames[shardNum],
 				Count:        1,
 				CollectionID: req.GetImportTask().GetCollectionId(),
-				PartitionID:  req.GetImportTask().GetCollectionId(),
+				PartitionID:  req.GetImportTask().GetPartitionId(),
 			},
 		}
 		segmentIDReq := &datapb.AssignSegmentIDRequest{
@@ -884,6 +911,15 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *s
 			}
 		}
 		fields[common.RowIDField] = fields[pkFieldID]
+		if status, _ := node.dataCoord.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
+			Stats: []*datapb.SegmentStats{{
+				SegmentID: segmentID,
+				NumRows:   int64(rowNum),
+			}},
+		}); status.GetErrorCode() != commonpb.ErrorCode_Success {
+			// TODO: reportImport the failure.
+			return fmt.Errorf(status.GetReason())
+		}
 
 		data := BufferData{buffer: &InsertData{
 			Data: fields,
@@ -985,6 +1021,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *s
 			Field2BinlogPaths:   fieldInsert,
 			Field2StatslogPaths: fieldStats,
 			Importing:           true,
+			Flushed:             true,
 		}
 
 		err = retry.Do(context.Background(), func() error {
@@ -1005,7 +1042,9 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *s
 			return err
 		}
 
+		log.Info("segment imported and persisted", zap.Int64("segmentID", segmentID))
+		res.Segments = append(res.Segments, segmentID)
+		res.RowCount += int64(rowNum)
 		return nil
 	}
-
 }
