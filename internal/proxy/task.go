@@ -2675,9 +2675,10 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 			Timestamp: lct.Base.Timestamp,
 			SourceID:  lct.Base.SourceID,
 		},
-		DbID:         0,
-		CollectionID: collID,
-		Schema:       collSchema,
+		DbID:          0,
+		CollectionID:  collID,
+		Schema:        collSchema,
+		ReplicaNumber: lct.ReplicaNumber,
 	}
 	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
@@ -2869,10 +2870,11 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 			Timestamp: lpt.Base.Timestamp,
 			SourceID:  lpt.Base.SourceID,
 		},
-		DbID:         0,
-		CollectionID: collID,
-		PartitionIDs: partitionIDs,
-		Schema:       collSchema,
+		DbID:          0,
+		CollectionID:  collID,
+		PartitionIDs:  partitionIDs,
+		Schema:        collSchema,
+		ReplicaNumber: lpt.ReplicaNumber,
 	}
 	lpt.result, err = lpt.queryCoord.LoadPartitions(ctx, request)
 	return err

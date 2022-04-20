@@ -884,6 +884,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 		zap.Int64s("source nodeIDs", req.SourceNodeIDs),
 		zap.Int64s("dst nodeIDs", req.DstNodeIDs),
 		zap.Int64s("balanced segments", req.SealedSegmentIDs),
+		zap.Int64("collectionID", req.CollectionID),
 		zap.Int64("msgID", req.Base.MsgID))
 
 	status := &commonpb.Status{
@@ -930,6 +931,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 		zap.Int64s("source nodeIDs", req.SourceNodeIDs),
 		zap.Int64s("dst nodeIDs", req.DstNodeIDs),
 		zap.Int64s("balanced segments", req.SealedSegmentIDs),
+		zap.Int64("collectionID", req.CollectionID),
 		zap.Int64("msgID", req.Base.MsgID))
 
 	return status, nil
@@ -1018,22 +1020,132 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 // GetReplicas gets replicas of a certain collection
 func (qc *QueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	// TODO: to impl
+	log.Debug("GetReplicas received",
+		zap.String("role", typeutil.QueryCoordRole),
+		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("msgID", req.Base.MsgID))
+
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+
+	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		err := errors.New("QueryCoord is not healthy")
+		status.Reason = err.Error()
+		log.Error("GetReplicasResponse failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+		return &milvuspb.GetReplicasResponse{
+			Status: status,
+		}, nil
+	}
+
+	replicas, err := qc.meta.getReplicasByCollectionID(req.CollectionID)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_MetaFailed
+		status.Reason = err.Error()
+		log.Error("GetReplicasResponse failed to get replicas",
+			zap.String("role", typeutil.QueryCoordRole),
+			zap.Int64("collectionID", req.CollectionID),
+			zap.Int64("msgID", req.Base.MsgID),
+			zap.Error(err))
+
+		return &milvuspb.GetReplicasResponse{
+			Status: status,
+		}, nil
+	}
+
+	if req.WithShardNodes {
+		shardNodes := make(map[string]map[UniqueID]struct{})
+		segments := qc.meta.showSegmentInfos(req.CollectionID, nil)
+		for _, segment := range segments {
+			nodes, ok := shardNodes[segment.DmChannel]
+			if !ok {
+				nodes = make(map[UniqueID]struct{})
+			}
+
+			for _, nodeID := range segment.NodeIds {
+				nodes[nodeID] = struct{}{}
+			}
+
+			shardNodes[segment.DmChannel] = nodes
+		}
+
+		for _, replica := range replicas {
+			for _, shard := range replica.ShardReplicas {
+				for nodeID := range shardNodes[shard.DmChannelName] {
+					shard.NodeIds = append(shard.NodeIds, nodeID)
+				}
+			}
+		}
+	}
+
 	return &milvuspb.GetReplicasResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "Not implemented",
-		},
+		Status:   status,
+		Replicas: replicas,
 	}, nil
 }
 
 // GetShardLeaders gets shard leaders of a certain collection
 func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	// TODO: to impl
+	log.Debug("GetShardLeaders received",
+		zap.String("role", typeutil.QueryCoordRole),
+		zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("msgID", req.Base.MsgID))
+
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+
+	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		err := errors.New("QueryCoord is not healthy")
+		status.Reason = err.Error()
+		log.Error("GetShardLeadersResponse failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+		return &querypb.GetShardLeadersResponse{
+			Status: status,
+		}, nil
+	}
+
+	replicas, err := qc.meta.getReplicasByCollectionID(req.CollectionID)
+	if err != nil {
+		status.ErrorCode = commonpb.ErrorCode_MetaFailed
+		status.Reason = err.Error()
+		log.Error("GetShardLeadersResponse failed to get replicas",
+			zap.String("role", typeutil.QueryCoordRole),
+			zap.Int64("collectionID", req.CollectionID),
+			zap.Int64("msgID", req.Base.MsgID),
+			zap.Error(err))
+
+		return &querypb.GetShardLeadersResponse{
+			Status: status,
+		}, nil
+	}
+
+	shards := make(map[string]*querypb.ShardLeadersList)
+	for _, replica := range replicas {
+		for _, shard := range replica.ShardReplicas {
+			list, ok := shards[shard.DmChannelName]
+			if !ok {
+				list = &querypb.ShardLeadersList{
+					ChannelName: shard.DmChannelName,
+					NodeIds:     make([]int64, 0),
+					NodeAddrs:   make([]string, 0),
+				}
+			}
+
+			list.NodeIds = append(list.NodeIds, shard.LeaderID)
+			list.NodeAddrs = append(list.NodeAddrs, shard.LeaderAddr)
+			shards[shard.DmChannelName] = list
+		}
+	}
+
+	shardLeaderLists := make([]*querypb.ShardLeadersList, 0, len(shards))
+	for _, shard := range shards {
+		shardLeaderLists = append(shardLeaderLists, shard)
+	}
+
 	return &querypb.GetShardLeadersResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "Not implemented",
-		},
+		Status: status,
+		Shards: shardLeaderLists,
 	}, nil
 }

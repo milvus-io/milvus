@@ -18,7 +18,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -227,7 +226,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
+	log.Debug("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID), zap.Int64("replicaID", in.GetReplicaID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -557,12 +556,119 @@ func (node *QueryNode) isHealthy() bool {
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*internalpb.SearchResults, error) {
-	return nil, errors.New("not implemented")
+	if !node.isHealthy() {
+		return &internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID),
+			},
+		}, nil
+	}
+
+	log.Debug("Received SearchRequest", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	if node.queryShardService == nil {
+		return &internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "queryShardService is nil",
+			},
+		}, nil
+	}
+
+	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
+		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0) // TODO: add replicaID in request or remove it in query shard
+		if err != nil {
+			return &internalpb.SearchResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+	}
+
+	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
+	if err != nil {
+		return &internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	results, err := qs.search(ctx, req)
+	if err != nil {
+		log.Warn("QueryService failed to search", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Error(err))
+		return &internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+	log.Debug("Search Shard Done", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	return results, err
 }
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	return nil, errors.New("not implemented")
+	if !node.isHealthy() {
+		return &internalpb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID),
+			},
+		}, nil
+	}
+	log.Debug("Received QueryRequest", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	if node.queryShardService == nil {
+		return &internalpb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "queryShardService is nil",
+			},
+		}, nil
+	}
+
+	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
+		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0) // TODO: add replicaID in request or remove it in query shard
+		if err != nil {
+			return &internalpb.RetrieveResults{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+	}
+
+	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
+	if err != nil {
+		return &internalpb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	results, err := qs.query(ctx, req)
+	if err != nil {
+		log.Warn("QueryService failed to query", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Error(err))
+		return &internalpb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+	log.Debug("Query Shard Done", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	return results, nil
 }
 
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...

@@ -201,6 +201,7 @@ message WatchDmChannelsRequest {
   schema.CollectionSchema schema = 6;
   repeated data.SegmentInfo exclude_infos = 7;
   LoadMetaInfo load_meta = 8;
+  int64 replicaID = 9;
 }
 
 message WatchDeltaChannelsRequest {
@@ -224,6 +225,7 @@ message SegmentLoadInfo {
   repeated int64 compactionFrom = 10; // segmentIDs compacted from
   repeated FieldIndexInfo index_infos = 11;
   int64 segment_size = 12;
+  string insert_channel = 13;
 }
 
 message FieldIndexInfo {
@@ -245,6 +247,7 @@ message LoadSegmentsRequest {
   int64 source_nodeID = 5;
   int64 collectionID = 6;
   LoadMetaInfo load_meta = 7;
+  int64 replicaID = 8;
 }
 
 message ReleaseSegmentsRequest {
@@ -281,6 +284,7 @@ message LoadBalanceRequest {
   TriggerCondition balance_reason = 3;
   repeated int64 dst_nodeIDs = 4;
   repeated int64 sealed_segmentIDs = 5;
+  int64 collectionID = 6;
 }
 
 //-------------------- internal meta proto------------------
@@ -312,6 +316,7 @@ message DmChannelWatchInfo {
   int64 collectionID = 1;
   string dmChannel = 2;
   int64 nodeID_loaded = 3;
+  int64 replicaID = 4;
 }
 
 message QueryChannelInfo {
@@ -380,4 +385,3 @@ message SealedSegmentsChangeInfo {
   common.MsgBase base = 1;
   repeated SegmentChangeInfo infos = 2;
 }
-

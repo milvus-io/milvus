@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/util/distance"
@@ -34,94 +35,108 @@ import (
 type searchTask struct {
 	Condition
 	*internalpb.SearchRequest
-	ctx            context.Context
-	resultBuf      chan []*internalpb.SearchResults
+	ctx context.Context
+
 	result         *milvuspb.SearchResults
-	query          *milvuspb.SearchRequest
-	chMgr          channelsMgr
+	request        *milvuspb.SearchRequest
 	qc             types.QueryCoord
+	tr             *timerecord.TimeRecorder
 	collectionName string
 
-	tr           *timerecord.TimeRecorder
-	collectionID UniqueID
+	resultBuf       chan *internalpb.SearchResults
+	toReduceResults []*internalpb.SearchResults
+	runningGroup    *errgroup.Group
+	runningGroupCtx context.Context
+
+	getQueryNodePolicy getQueryNodePolicy
+	searchShardPolicy  pickShardPolicy
 }
 
-func (st *searchTask) PreExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PreExecute")
-	defer sp.Finish()
-	st.Base.MsgType = commonpb.MsgType_Search
-	st.Base.SourceID = Params.ProxyCfg.ProxyID
+func (t *searchTask) PreExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PreExecute")
 
-	collectionName := st.query.CollectionName
+	if t.getQueryNodePolicy == nil {
+		t.getQueryNodePolicy = defaultGetQueryNodePolicy
+	}
+
+	if t.searchShardPolicy == nil {
+		t.searchShardPolicy = roundRobinPolicy
+	}
+
+	defer sp.Finish()
+	t.Base.MsgType = commonpb.MsgType_Search
+	t.Base.SourceID = Params.ProxyCfg.ProxyID
+
+	collectionName := t.request.CollectionName
+	if err := validateCollectionName(collectionName); err != nil {
+		return err
+	}
+
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
-	st.collectionID = collID
+	t.CollectionID = collID
+	t.collectionName = collectionName
+	t.PartitionIDs = []UniqueID{}
 
-	if err := validateCollectionName(st.query.CollectionName); err != nil {
-		return err
-	}
-
-	for _, tag := range st.query.PartitionNames {
+	for _, tag := range t.request.PartitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
 			return err
 		}
 	}
 
-	// check if collection was already loaded into query node
-	showResp, err := st.qc.ShowCollections(st.ctx, &querypb.ShowCollectionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowCollections,
-			MsgID:     st.Base.MsgID,
-			Timestamp: st.Base.Timestamp,
-			SourceID:  Params.ProxyCfg.ProxyID,
-		},
-		DbID: 0, // TODO(dragondriver)
-	})
+	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
 	if err != nil {
 		return err
 	}
-	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(showResp.Status.Reason)
-	}
-	log.Debug("successfully get collections from QueryCoord",
-		zap.String("target collection name", collectionName),
-		zap.Int64("target collection ID", collID),
-		zap.Any("collections", showResp.CollectionIDs),
-	)
-	collectionLoaded := false
 
-	for _, collectionID := range showResp.CollectionIDs {
-		if collectionID == collID {
-			collectionLoaded = true
-			break
+	partitionsRecord := make(map[UniqueID]bool)
+	for _, partitionName := range t.request.PartitionNames {
+		pattern := fmt.Sprintf("^%s$", partitionName)
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return errors.New("invalid partition names")
+		}
+		found := false
+		for name, pID := range partitionsMap {
+			if re.MatchString(name) {
+				if _, exist := partitionsRecord[pID]; !exist {
+					t.PartitionIDs = append(t.PartitionIDs, pID)
+					partitionsRecord[pID] = true
+				}
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("partition name %s not found", partitionName)
 		}
 	}
-	if !collectionLoaded {
-		return fmt.Errorf("collection %v was not loaded into memory", collectionName)
+
+	// check if collection/partitions are loaded into query node
+	if !t.checkIfLoaded(collID, t.PartitionIDs) {
+		return fmt.Errorf("collection:%v or partitions:%v not loaded into memory", collectionName, t.request.GetPartitionNames())
 	}
 
 	// TODO(dragondriver): necessary to check if partition was loaded into query node?
-
-	st.Base.MsgType = commonpb.MsgType_Search
+	t.Base.MsgType = commonpb.MsgType_Search
 
 	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 
-	outputFields, err := translateOutputFields(st.query.OutputFields, schema, false)
+	outputFields, err := translateOutputFields(t.request.OutputFields, schema, false)
 	if err != nil {
 		return err
 	}
 	log.Debug("translate output fields", zap.Any("OutputFields", outputFields))
-	st.query.OutputFields = outputFields
+	t.request.OutputFields = outputFields
 
-	if st.query.GetDslType() == commonpb.DslType_BoolExprV1 {
-		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, st.query.SearchParams)
+	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
+		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.SearchParams)
 		if err != nil {
 			return errors.New(AnnsFieldKey + " not found in search_params")
 		}
 
-		topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, st.query.SearchParams)
+		topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, t.request.SearchParams)
 		if err != nil {
 			return errors.New(TopKKey + " not found in search_params")
 		}
@@ -130,16 +145,16 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			return errors.New(TopKKey + " " + topKStr + " is not invalid")
 		}
 
-		metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, st.query.SearchParams)
+		metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, t.request.SearchParams)
 		if err != nil {
 			return errors.New(MetricTypeKey + " not found in search_params")
 		}
 
-		searchParams, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, st.query.SearchParams)
+		searchParams, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, t.request.SearchParams)
 		if err != nil {
 			return errors.New(SearchParamsKey + " not found in search_params")
 		}
-		roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, st.query.SearchParams)
+		roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, t.request.SearchParams)
 		if err != nil {
 			roundDecimalStr = "-1"
 		}
@@ -161,22 +176,22 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 
 		log.Debug("create query plan",
 			//zap.Any("schema", schema),
-			zap.String("dsl", st.query.Dsl),
+			zap.String("dsl", t.request.Dsl),
 			zap.String("anns field", annsField),
 			zap.Any("query info", queryInfo))
 
-		plan, err := createQueryPlan(schema, st.query.Dsl, annsField, queryInfo)
+		plan, err := createQueryPlan(schema, t.request.Dsl, annsField, queryInfo)
 		if err != nil {
 			log.Debug("failed to create query plan",
 				zap.Error(err),
 				//zap.Any("schema", schema),
-				zap.String("dsl", st.query.Dsl),
+				zap.String("dsl", t.request.Dsl),
 				zap.String("anns field", annsField),
 				zap.Any("query info", queryInfo))
 
 			return fmt.Errorf("failed to create query plan: %v", err)
 		}
-		for _, name := range st.query.OutputFields {
+		for _, name := range t.request.OutputFields {
 			hitField := false
 			for _, field := range schema.Fields {
 				if field.Name == name {
@@ -184,7 +199,7 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 						return errors.New("search doesn't support vector field as output_fields")
 					}
 
-					st.SearchRequest.OutputFieldsId = append(st.SearchRequest.OutputFieldsId, field.FieldID)
+					t.SearchRequest.OutputFieldsId = append(t.SearchRequest.OutputFieldsId, field.FieldID)
 					plan.OutputFieldIds = append(plan.OutputFieldIds, field.FieldID)
 					hitField = true
 					break
@@ -196,238 +211,315 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 			}
 		}
 
-		st.SearchRequest.DslType = commonpb.DslType_BoolExprV1
-		st.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
+		t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
+		t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
 		if err != nil {
 			return err
 		}
 		log.Debug("Proxy::searchTask::PreExecute", zap.Any("plan.OutputFieldIds", plan.OutputFieldIds),
 			zap.Any("plan", plan.String()))
 	}
-	travelTimestamp := st.query.TravelTimestamp
+	travelTimestamp := t.request.TravelTimestamp
 	if travelTimestamp == 0 {
-		travelTimestamp = st.BeginTs()
+		travelTimestamp = t.BeginTs()
 	} else {
-		durationSeconds := tsoutil.CalculateDuration(st.BeginTs(), travelTimestamp) / 1000
+		durationSeconds := tsoutil.CalculateDuration(t.BeginTs(), travelTimestamp) / 1000
 		if durationSeconds > Params.CommonCfg.RetentionDuration {
 			duration := time.Second * time.Duration(durationSeconds)
 			return fmt.Errorf("only support to travel back to %s so far", duration.String())
 		}
 	}
-	guaranteeTimestamp := st.query.GuaranteeTimestamp
+	guaranteeTimestamp := t.request.GuaranteeTimestamp
 	if guaranteeTimestamp == 0 {
-		guaranteeTimestamp = st.BeginTs()
+		guaranteeTimestamp = t.BeginTs()
 	}
-	st.SearchRequest.TravelTimestamp = travelTimestamp
-	st.SearchRequest.GuaranteeTimestamp = guaranteeTimestamp
-	deadline, ok := st.TraceCtx().Deadline()
+	t.TravelTimestamp = travelTimestamp
+	t.GuaranteeTimestamp = guaranteeTimestamp
+	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
-		st.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
+		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
 
-	st.SearchRequest.ResultChannelID = Params.ProxyCfg.SearchResultChannelNames[0]
-	st.SearchRequest.DbID = 0 // todo
-	st.SearchRequest.CollectionID = collID
-	st.SearchRequest.PartitionIDs = make([]UniqueID, 0)
+	t.DbID = 0 // todo
+	t.SearchRequest.Dsl = t.request.Dsl
+	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 
-	partitionsMap, err := globalMetaCache.GetPartitions(ctx, collectionName)
-	if err != nil {
-		return err
-	}
-
-	partitionsRecord := make(map[UniqueID]bool)
-	for _, partitionName := range st.query.PartitionNames {
-		pattern := fmt.Sprintf("^%s$", partitionName)
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return errors.New("invalid partition names")
-		}
-		found := false
-		for name, pID := range partitionsMap {
-			if re.MatchString(name) {
-				if _, exist := partitionsRecord[pID]; !exist {
-					st.PartitionIDs = append(st.PartitionIDs, pID)
-					partitionsRecord[pID] = true
-				}
-				found = true
-			}
-		}
-		if !found {
-			errMsg := fmt.Sprintf("PartitonName: %s not found", partitionName)
-			return errors.New(errMsg)
-		}
-	}
-
-	st.SearchRequest.Dsl = st.query.Dsl
-	st.SearchRequest.PlaceholderGroup = st.query.PlaceholderGroup
-
+	log.Info("search PreExecute done.",
+		zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "search"))
 	return nil
 }
 
-func (st *searchTask) Execute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-Execute")
+func (t *searchTask) Execute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-Execute")
 	defer sp.Finish()
 
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", st.ID()))
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.Elapse("done")
 
-	var tsMsg msgstream.TsMsg = &msgstream.SearchMsg{
-		SearchRequest: *st.SearchRequest,
-		BaseMsg: msgstream.BaseMsg{
-			Ctx:            ctx,
-			HashValues:     []uint32{uint32(Params.ProxyCfg.ProxyID)},
-			BeginTimestamp: st.Base.Timestamp,
-			EndTimestamp:   st.Base.Timestamp,
-		},
-	}
-	msgPack := msgstream.MsgPack{
-		BeginTs: st.Base.Timestamp,
-		EndTs:   st.Base.Timestamp,
-		Msgs:    make([]msgstream.TsMsg, 1),
-	}
-	msgPack.Msgs[0] = tsMsg
+	executeSearch := func(withCache bool) error {
+		shards, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName, t.qc)
+		if err != nil {
+			return err
+		}
 
-	collectionName := st.query.CollectionName
-	info, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
-	if err != nil { // err is not nil if collection not exists
+		t.resultBuf = make(chan *internalpb.SearchResults, len(shards))
+		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shards))
+		t.runningGroup, t.runningGroupCtx = errgroup.WithContext(ctx)
+
+		// TODO: try to merge rpc send to different shard leaders.
+		// If two shard leader is on the same querynode maybe we should merge request to save rpc
+		for _, shard := range shards {
+			s := shard
+			t.runningGroup.Go(func() error {
+				log.Debug("proxy starting to query one shard",
+					zap.Int64("collectionID", t.CollectionID),
+					zap.String("collection name", t.collectionName),
+					zap.String("shard channel", s.GetChannelName()),
+					zap.Uint64("timeoutTs", t.TimeoutTimestamp))
+
+				err := t.searchShard(t.runningGroupCtx, s)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+		}
+
+		err = t.runningGroup.Wait()
 		return err
 	}
-	st.collectionName = info.schema.Name
 
-	stream, err := st.chMgr.getDQLStream(info.collID)
-	if err != nil {
-		err = st.chMgr.createDQLStream(info.collID)
-		if err != nil {
-			st.result = &milvuspb.SearchResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}
-			return err
-		}
-		stream, err = st.chMgr.getDQLStream(info.collID)
-		if err != nil {
-			st.result = &milvuspb.SearchResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}
-			return err
-		}
+	err := executeSearch(WithCache)
+	if err == errInvalidShardLeaders {
+		log.Warn("invalid shard leaders from cache, updating shardleader caches and retry search")
+		return executeSearch(WithoutCache)
 	}
-	tr.Record("get used message stream")
-	err = stream.Produce(&msgPack)
 	if err != nil {
-		log.Debug("proxy", zap.String("send search request failed", err.Error()))
+		return err
 	}
-	st.tr.Record("send message done")
-	log.Debug("proxy sent one searchMsg",
-		zap.Int64("collectionID", st.CollectionID),
-		zap.Int64("msgID", tsMsg.ID()),
-		zap.Int("length of search msg", len(msgPack.Msgs)),
-		zap.Uint64("timeoutTs", st.SearchRequest.TimeoutTimestamp))
-	sendMsgDur := tr.Record("send search msg to message stream")
-	metrics.ProxySendMessageLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10),
-		metrics.SearchLabel).Observe(float64(sendMsgDur.Milliseconds()))
 
-	return err
+	log.Info("Search Execute done.",
+		zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "search"))
+	return nil
 }
 
-func (st *searchTask) PostExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(st.TraceCtx(), "Proxy-Search-PostExecute")
+func (t *searchTask) PostExecute(ctx context.Context) error {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PostExecute")
 	defer sp.Finish()
 	tr := timerecord.NewTimeRecorder("searchTask PostExecute")
 	defer func() {
 		tr.Elapse("done")
 	}()
-	for {
-		select {
-		case <-st.TraceCtx().Done():
-			log.Debug("Proxy searchTask PostExecute Loop exit caused by ctx.Done", zap.Int64("taskID", st.ID()))
-			return fmt.Errorf("searchTask:wait to finish failed, timeout: %d", st.ID())
-		case searchResults := <-st.resultBuf:
-			// fmt.Println("searchResults: ", searchResults)
-			filterSearchResults := make([]*internalpb.SearchResults, 0)
-			var filterReason string
-			errNum := 0
-			for _, partialSearchResult := range searchResults {
-				if partialSearchResult.Status.ErrorCode == commonpb.ErrorCode_Success {
-					filterSearchResults = append(filterSearchResults, partialSearchResult)
-					// For debugging, please don't delete.
-					// printSearchResult(partialSearchResult)
-				} else {
-					errNum++
-					filterReason += partialSearchResult.Status.Reason + "\n"
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		for {
+			select {
+			case <-t.TraceCtx().Done():
+				log.Debug("wait to finish timeout!", zap.Int64("taskID", t.ID()))
+				return
+			case <-t.runningGroupCtx.Done():
+				log.Debug("all searches are finished or canceled", zap.Any("taskID", t.ID()))
+				close(t.resultBuf)
+				for res := range t.resultBuf {
+					t.toReduceResults = append(t.toReduceResults, res)
+					log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Any("taskID", t.ID()))
+				}
+				wg.Done()
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	tr.Record("decodeResultStart")
+	validSearchResults, err := decodeSearchResults(t.toReduceResults)
+	if err != nil {
+		return err
+	}
+	metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	log.Debug("proxy search post execute stage 2", zap.Any("len(validSearchResults)", len(validSearchResults)))
+	if len(validSearchResults) <= 0 {
+		log.Warn("search result is empty", zap.Any("requestID", t.Base.MsgID), zap.String("requestType", "search"))
+
+		t.result = &milvuspb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "search result is empty",
+			},
+			CollectionName: t.collectionName,
+		}
+		// add information if any
+		if len(t.toReduceResults) > 0 {
+			t.result.Results = &schemapb.SearchResultData{
+				NumQueries: t.toReduceResults[0].NumQueries,
+				Topks:      make([]int64, t.toReduceResults[0].NumQueries),
+			}
+		}
+		return nil
+	}
+
+	tr.Record("reduceResultStart")
+	t.result, err = reduceSearchResultData(validSearchResults, t.toReduceResults[0].NumQueries, t.toReduceResults[0].TopK, t.toReduceResults[0].MetricType)
+	if err != nil {
+		return err
+	}
+	metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SuccessLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	t.result.CollectionName = t.collectionName
+
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.CollectionName)
+	if err != nil {
+		return err
+	}
+	if len(t.request.OutputFields) != 0 && len(t.result.Results.FieldsData) != 0 {
+		for k, fieldName := range t.request.OutputFields {
+			for _, field := range schema.Fields {
+				if t.result.Results.FieldsData[k] != nil && field.Name == fieldName {
+					t.result.Results.FieldsData[k].FieldName = field.Name
+					t.result.Results.FieldsData[k].FieldId = field.FieldID
+					t.result.Results.FieldsData[k].Type = field.DataType
 				}
 			}
-
-			log.Debug("Proxy Search PostExecute stage1",
-				zap.Any("len(filterSearchResults)", len(filterSearchResults)))
-			metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SearchLabel).Observe(float64(st.tr.RecordSpan().Milliseconds()))
-			tr.Record("Proxy Search PostExecute stage1 done")
-			if len(filterSearchResults) <= 0 || errNum > 0 {
-				st.result = &milvuspb.SearchResults{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    filterReason,
-					},
-					CollectionName: st.collectionName,
-				}
-				return fmt.Errorf("QueryNode search fail, reason %s: id %d", filterReason, st.ID())
-			}
-			tr.Record("decodeResultStart")
-			validSearchResults, err := decodeSearchResults(filterSearchResults)
-			if err != nil {
-				return err
-			}
-			metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
-			log.Debug("Proxy Search PostExecute stage2", zap.Any("len(validSearchResults)", len(validSearchResults)))
-			if len(validSearchResults) <= 0 {
-				filterReason += "empty search result\n"
-				log.Debug("Proxy Search PostExecute stage2 failed", zap.Any("filterReason", filterReason))
-
-				st.result = &milvuspb.SearchResults{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_Success,
-						Reason:    filterReason,
-					},
-					Results: &schemapb.SearchResultData{
-						NumQueries: searchResults[0].NumQueries,
-						Topks:      make([]int64, searchResults[0].NumQueries),
-					},
-					CollectionName: st.collectionName,
-				}
-				return nil
-			}
-
-			tr.Record("reduceResultStart")
-			st.result, err = reduceSearchResultData(validSearchResults, searchResults[0].NumQueries, searchResults[0].TopK, searchResults[0].MetricType)
-			if err != nil {
-				return err
-			}
-			metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SuccessLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
-			st.result.CollectionName = st.collectionName
-
-			schema, err := globalMetaCache.GetCollectionSchema(ctx, st.query.CollectionName)
-			if err != nil {
-				return err
-			}
-			if len(st.query.OutputFields) != 0 && len(st.result.Results.FieldsData) != 0 {
-				for k, fieldName := range st.query.OutputFields {
-					for _, field := range schema.Fields {
-						if st.result.Results.FieldsData[k] != nil && field.Name == fieldName {
-							st.result.Results.FieldsData[k].FieldName = field.Name
-							st.result.Results.FieldsData[k].FieldId = field.FieldID
-							st.result.Results.FieldsData[k].Type = field.DataType
-						}
-					}
-				}
-			}
-			return nil
 		}
 	}
+	log.Info("Search post execute done", zap.Any("requestID", t.Base.MsgID), zap.String("requestType", "search"))
+	return nil
+}
+
+func (t *searchTask) searchShard(ctx context.Context, leaders *querypb.ShardLeadersList) error {
+
+	search := func(nodeID UniqueID, qn types.QueryNode) error {
+		req := &querypb.SearchRequest{
+			Req:        t.SearchRequest,
+			DmlChannel: leaders.GetChannelName(),
+		}
+
+		result, err := qn.Search(ctx, req)
+		if err != nil {
+			log.Warn("QueryNode search returns error", zap.Int64("nodeID", nodeID),
+				zap.Error(err))
+			return errInvalidShardLeaders
+		}
+		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Warn("QueryNode search result error", zap.Int64("nodeID", nodeID),
+				zap.String("reason", result.GetStatus().GetReason()))
+			return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
+		}
+
+		t.resultBuf <- result
+		return nil
+	}
+
+	err := t.searchShardPolicy(t.TraceCtx(), t.getQueryNodePolicy, search, leaders)
+	if err != nil {
+		log.Warn("fail to search to all shard leaders", zap.Any("shard leaders", leaders.GetNodeIds()))
+		return err
+	}
+
+	return nil
+}
+
+func (t *searchTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []UniqueID) bool {
+	// If request to search partitions
+	if len(searchPartitionIDs) > 0 {
+		resp, err := t.qc.ShowPartitions(t.ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgID:     t.Base.MsgID,
+				Timestamp: t.Base.Timestamp,
+				SourceID:  Params.ProxyCfg.ProxyID,
+			},
+			CollectionID: collectionID,
+			PartitionIDs: searchPartitionIDs,
+		})
+		if err != nil {
+			log.Warn("fail to show partitions by QueryCoord",
+				zap.Int64("requestID", t.Base.MsgID),
+				zap.Int64("collectionID", collectionID),
+				zap.Int64s("partitionIDs", searchPartitionIDs),
+				zap.String("requestType", "search"),
+				zap.Error(err))
+			return false
+		}
+
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("fail to show partitions by QueryCoord",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64s("partitionIDs", searchPartitionIDs),
+				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
+				zap.String("reason", resp.GetStatus().GetReason()))
+			return false
+		}
+		// Current logic: show partitions won't return error if the given partitions are all loaded
+		return true
+	}
+
+	// If request to search collection
+	resp, err := t.qc.ShowCollections(t.ctx, &querypb.ShowCollectionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_ShowCollections,
+			MsgID:     t.Base.MsgID,
+			Timestamp: t.Base.Timestamp,
+			SourceID:  Params.ProxyCfg.ProxyID,
+		},
+	})
+	if err != nil {
+		log.Warn("fail to show collections by QueryCoord",
+			zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
+			zap.Error(err))
+		return false
+	}
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn("fail to show collections by QueryCoord",
+			zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
+			zap.String("reason", resp.GetStatus().GetReason()))
+		return false
+	}
+
+	loaded := false
+	for index, collID := range resp.CollectionIDs {
+		if collID == collectionID && resp.GetInMemoryPercentages()[index] >= int64(100) {
+			loaded = true
+			break
+		}
+	}
+
+	if !loaded {
+		resp, err := t.qc.ShowPartitions(t.ctx, &querypb.ShowPartitionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgID:     t.Base.MsgID,
+				Timestamp: t.Base.Timestamp,
+				SourceID:  Params.ProxyCfg.ProxyID,
+			},
+			CollectionID: collectionID,
+		})
+		if err != nil {
+			log.Warn("fail to show partitions by QueryCoord",
+				zap.Int64("requestID", t.Base.MsgID),
+				zap.Int64("collectionID", collectionID),
+				zap.String("requestType", "search"),
+				zap.Error(err))
+			return false
+		}
+
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("fail to show partitions by QueryCoord",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
+				zap.String("reason", resp.GetStatus().GetReason()))
+			return false
+		}
+
+		if len(resp.GetPartitionIDs()) > 0 {
+			log.Warn("collection not fully loaded, search on these partitions", zap.Int64s("partitionIDs", resp.GetPartitionIDs()))
+			return true
+		}
+	}
+
+	return loaded
 }
 
 func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
@@ -457,18 +549,22 @@ func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64
 	if data.TopK != topk {
 		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
-	if len(data.Ids.GetIntId().Data) != (int)(nq*topk) {
-		return fmt.Errorf("search result's id length %d invalid", len(data.Ids.GetIntId().Data))
+
+	expectedLength := (int)(nq * topk)
+	if len(data.Ids.GetIntId().Data) != expectedLength {
+		return fmt.Errorf("search result's ID length invalid, ID length=%d, expectd length=%d",
+			len(data.Ids.GetIntId().Data), expectedLength)
 	}
-	if len(data.Scores) != (int)(nq*topk) {
-		return fmt.Errorf("search result's score length %d invalid", len(data.Scores))
+	if len(data.Scores) != expectedLength {
+		return fmt.Errorf("search result's score length invalid, score length=%d, expectedLength=%d",
+			len(data.Scores), expectedLength)
 	}
 	return nil
 }
 
 func selectSearchResultData(dataArray []*schemapb.SearchResultData, offsets []int64, topk int64, qi int64) int {
 	sel := -1
-	maxDistance := minFloat32
+	maxDistance := minFloat32        // distance here means score :)
 	for i, offset := range offsets { // query num, the number of ways to merge
 		if offset >= topk {
 			continue
@@ -518,11 +614,12 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 
 	for i, sData := range searchResultData {
 		log.Debug("reduceSearchResultData",
-			zap.Int("i", i),
+			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
 			zap.Any("len(FieldsData)", len(sData.FieldsData)))
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
+			log.Warn("invalid search results", zap.Error(err))
 			return ret, err
 		}
 		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
@@ -577,7 +674,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 			ret.Results.Scores[k] *= -1
 		}
 	}
-
+	// printSearchResultData(ret.Results, "proxy reduce result")
 	return ret, nil
 }
 
@@ -605,79 +702,79 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 //     }
 // }
 
-func (st *searchTask) TraceCtx() context.Context {
-	return st.ctx
+func (t *searchTask) TraceCtx() context.Context {
+	return t.ctx
 }
 
-func (st *searchTask) ID() UniqueID {
-	return st.Base.MsgID
+func (t *searchTask) ID() UniqueID {
+	return t.Base.MsgID
 }
 
-func (st *searchTask) SetID(uid UniqueID) {
-	st.Base.MsgID = uid
+func (t *searchTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
 }
 
-func (st *searchTask) Name() string {
+func (t *searchTask) Name() string {
 	return SearchTaskName
 }
 
-func (st *searchTask) Type() commonpb.MsgType {
-	return st.Base.MsgType
+func (t *searchTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
 }
 
-func (st *searchTask) BeginTs() Timestamp {
-	return st.Base.Timestamp
+func (t *searchTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
 }
 
-func (st *searchTask) EndTs() Timestamp {
-	return st.Base.Timestamp
+func (t *searchTask) EndTs() Timestamp {
+	return t.Base.Timestamp
 }
 
-func (st *searchTask) SetTs(ts Timestamp) {
-	st.Base.Timestamp = ts
+func (t *searchTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
 }
 
-func (st *searchTask) OnEnqueue() error {
-	st.Base = &commonpb.MsgBase{}
-	st.Base.MsgType = commonpb.MsgType_Search
-	st.Base.SourceID = Params.ProxyCfg.ProxyID
+func (t *searchTask) OnEnqueue() error {
+	t.Base = &commonpb.MsgBase{}
+	t.Base.MsgType = commonpb.MsgType_Search
+	t.Base.SourceID = Params.ProxyCfg.ProxyID
 	return nil
 }
 
-func (st *searchTask) getChannels() ([]pChan, error) {
-	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
-	if err != nil {
-		return nil, err
-	}
+// func (t *searchTaskV2) getChannels() ([]pChan, error) {
+//     collID, err := globalMetaCache.GetCollectionID(t.ctx, t.request.CollectionName)
+//     if err != nil {
+//         return nil, err
+//     }
+//
+//     var channels []pChan
+//     channels, err = t.chMgr.getChannels(collID)
+//     if err != nil {
+//         err := t.chMgr.createDMLMsgStream(collID)
+//         if err != nil {
+//             return nil, err
+//         }
+//         return t.chMgr.getChannels(collID)
+//     }
+//
+//     return channels, nil
+// }
 
-	var channels []pChan
-	channels, err = st.chMgr.getChannels(collID)
-	if err != nil {
-		err := st.chMgr.createDMLMsgStream(collID)
-		if err != nil {
-			return nil, err
-		}
-		return st.chMgr.getChannels(collID)
-	}
-
-	return channels, nil
-}
-
-func (st *searchTask) getVChannels() ([]vChan, error) {
-	collID, err := globalMetaCache.GetCollectionID(st.ctx, st.query.CollectionName)
-	if err != nil {
-		return nil, err
-	}
-
-	var channels []vChan
-	channels, err = st.chMgr.getVChannels(collID)
-	if err != nil {
-		err := st.chMgr.createDMLMsgStream(collID)
-		if err != nil {
-			return nil, err
-		}
-		return st.chMgr.getVChannels(collID)
-	}
-
-	return channels, nil
-}
+// func (t *searchTaskV2) getVChannels() ([]vChan, error) {
+//     collID, err := globalMetaCache.GetCollectionID(t.ctx, t.request.CollectionName)
+//     if err != nil {
+//         return nil, err
+//     }
+//
+//     var channels []vChan
+//     channels, err = t.chMgr.getVChannels(collID)
+//     if err != nil {
+//         err := t.chMgr.createDMLMsgStream(collID)
+//         if err != nil {
+//             return nil, err
+//         }
+//         return t.chMgr.getVChannels(collID)
+//     }
+//
+//     return channels, nil
+// }

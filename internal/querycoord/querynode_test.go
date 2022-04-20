@@ -118,8 +118,9 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
-		CollectionID: defaultCollectionID,
-		Schema:       genDefaultCollectionSchema(false),
+		CollectionID:  defaultCollectionID,
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
 	})
 	_, err = queryCoord.ReleaseCollection(baseCtx, &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -157,8 +158,9 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
-		CollectionID: defaultCollectionID,
-		Schema:       genDefaultCollectionSchema(false),
+		CollectionID:  defaultCollectionID,
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
 	})
 	queryNode1.stop()
 	err = removeNodeSession(queryNode1.queryNodeID)
@@ -256,8 +258,9 @@ func TestSealedSegmentChangeAfterQueryNodeStop(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
-		CollectionID: defaultCollectionID,
-		Schema:       genDefaultCollectionSchema(false),
+		CollectionID:  defaultCollectionID,
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
 	})
 
 	queryNode2, err := startQueryNodeServer(baseCtx)

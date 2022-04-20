@@ -61,7 +61,7 @@ func (s *streaming) close() {
 	s.replica.freeAll()
 }
 
-func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
+func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *RetrievePlan, filters ...func(segment *Segment) bool) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 	retrieveResults := make([]*segcorepb.RetrieveResults, 0)
 	retrieveSegmentIDs := make([]UniqueID, 0)
 
@@ -90,6 +90,15 @@ func (s *streaming) retrieve(collID UniqueID, partIDs []UniqueID, plan *Retrieve
 			seg, err := s.replica.getSegmentByID(segID)
 			if err != nil {
 				return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
+			}
+			filtered := false
+			for _, filter := range filters {
+				if !filter(seg) {
+					filtered = true
+				}
+			}
+			if filtered {
+				continue
 			}
 			result, err := seg.retrieve(plan)
 			if err != nil {

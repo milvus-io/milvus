@@ -68,16 +68,17 @@ type nodeEvent struct {
 }
 
 type segmentEvent struct {
-	eventType segmentEventType
-	segmentID int64
-	nodeID    int64
-	state     segmentState
+	eventType   segmentEventType
+	segmentID   int64
+	partitionID int64
+	nodeID      int64
+	state       segmentState
 }
 
 type shardQueryNode interface {
 	Search(context.Context, *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	Query(context.Context, *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
-	Stop()
+	Stop() error
 }
 
 type shardNode struct {
@@ -87,9 +88,10 @@ type shardNode struct {
 }
 
 type shardSegmentInfo struct {
-	segmentID int64
-	nodeID    int64
-	state     segmentState
+	segmentID   int64
+	partitionID int64
+	nodeID      int64
+	state       segmentState
 }
 
 // ShardNodeDetector provides method to detect node events
@@ -159,6 +161,7 @@ func (sc *ShardCluster) Close() {
 
 // addNode add a node into cluster
 func (sc *ShardCluster) addNode(evt nodeEvent) {
+	log.Debug("ShardCluster add node", zap.Int64("nodeID", evt.nodeID))
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
 
@@ -202,15 +205,18 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 
 // updateSegment apply segment change to shard cluster
 func (sc *ShardCluster) updateSegment(evt segmentEvent) {
+
+	log.Debug("ShardCluster update segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
 
 	old, ok := sc.segments[evt.segmentID]
 	if !ok { // newly add
 		sc.segments[evt.segmentID] = &shardSegmentInfo{
-			nodeID:    evt.nodeID,
-			segmentID: evt.segmentID,
-			state:     evt.state,
+			nodeID:      evt.nodeID,
+			partitionID: evt.partitionID,
+			segmentID:   evt.segmentID,
+			state:       evt.state,
 		}
 		return
 	}
@@ -302,6 +308,7 @@ func (sc *ShardCluster) watchNodes(evtCh <-chan nodeEvent) {
 	for {
 		select {
 		case evt, ok := <-evtCh:
+			log.Debug("node event", zap.Any("evt", evt))
 			if !ok {
 				log.Warn("ShardCluster node channel closed", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID))
 				return
@@ -324,6 +331,7 @@ func (sc *ShardCluster) watchSegments(evtCh <-chan segmentEvent) {
 	for {
 		select {
 		case evt, ok := <-evtCh:
+			log.Debug("segment event", zap.Any("evt", evt))
 			if !ok {
 				log.Warn("ShardCluster segment channel closed", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID))
 				return
@@ -365,19 +373,23 @@ func (sc *ShardCluster) getSegment(segmentID int64) (*shardSegmentInfo, bool) {
 		return nil, false
 	}
 	return &shardSegmentInfo{
-		segmentID: segment.segmentID,
-		nodeID:    segment.nodeID,
-		state:     segment.state,
+		segmentID:   segment.segmentID,
+		nodeID:      segment.nodeID,
+		partitionID: segment.partitionID,
+		state:       segment.state,
 	}, true
 }
 
 // segmentAllocations returns node to segments mappings.
-func (sc *ShardCluster) segmentAllocations() map[int64][]int64 {
+func (sc *ShardCluster) segmentAllocations(partitionIDs []int64) map[int64][]int64 {
 	result := make(map[int64][]int64) // nodeID => segmentIDs
 	sc.mut.RLock()
 	defer sc.mut.RUnlock()
 
 	for _, segment := range sc.segments {
+		if len(partitionIDs) > 0 && !inList(partitionIDs, segment.partitionID) {
+			continue
+		}
 		result[segment.nodeID] = append(result[segment.nodeID], segment.segmentID)
 	}
 	return result
@@ -386,16 +398,22 @@ func (sc *ShardCluster) segmentAllocations() map[int64][]int64 {
 // Search preforms search operation on shard cluster.
 func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
 	if sc.state.Load() != int32(available) {
-		return nil, fmt.Errorf("SharcCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 	}
 
 	if sc.vchannelName != req.GetDmlChannel() {
 		return nil, fmt.Errorf("ShardCluster for %s does not match to request channel :%s", sc.vchannelName, req.GetDmlChannel())
 	}
 
-	// get node allocation
-	segAllocs := sc.segmentAllocations()
+	//req.GetReq().GetPartitionIDs()
 
+	// get node allocation
+	segAllocs := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
+
+	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)))
+	for nodeID, segmentIDs := range segAllocs {
+		log.Debug("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
+	}
 	// TODO dispatch to local queryShardService query dml channel growing segments
 
 	// concurrent visiting nodes
@@ -409,7 +427,6 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 
 	for nodeID, segments := range segAllocs {
 		nodeReq := proto.Clone(req).(*querypb.SearchRequest)
-		nodeReq.DmlChannel = ""
 		nodeReq.SegmentIDs = segments
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
@@ -441,7 +458,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 // Query performs query operation on shard cluster.
 func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	if sc.state.Load() != int32(available) {
-		return nil, fmt.Errorf("SharcCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 	}
 
 	// handles only the dml channel part, segment ids is dispatch by cluster itself
@@ -450,7 +467,7 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([
 	}
 
 	// get node allocation
-	segAllocs := sc.segmentAllocations()
+	segAllocs := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
 
 	// TODO dispatch to local queryShardService query dml channel growing segments
 
@@ -465,7 +482,6 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([
 
 	for nodeID, segments := range segAllocs {
 		nodeReq := proto.Clone(req).(*querypb.QueryRequest)
-		nodeReq.DmlChannel = ""
 		nodeReq.SegmentIDs = segments
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error

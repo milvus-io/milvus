@@ -19,6 +19,7 @@ package querycoord
 import (
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
@@ -28,17 +29,17 @@ type ReplicaInfos struct {
 	globalGuard sync.RWMutex // We have to make sure atomically update replicas and index
 
 	// Persistent Info
-	replicas map[UniqueID]*milvuspb.ReplicaInfo // replica_id -> *ReplicaInfo
+	replicas map[UniqueID]*milvuspb.ReplicaInfo // replicaID -> *ReplicaInfo
 
 	// Non-persistent info
-	nodeIndex map[UniqueID][]*milvuspb.ReplicaInfo // node_id -> []*ReplicaInfo
+	nodeIndex map[UniqueID]map[UniqueID]*milvuspb.ReplicaInfo // nodeID, replicaID -> []*ReplicaInfo
 }
 
 func NewReplicaInfos() *ReplicaInfos {
 	return &ReplicaInfos{
 		globalGuard: sync.RWMutex{},
 		replicas:    make(map[int64]*milvuspb.ReplicaInfo),
-		nodeIndex:   make(map[int64][]*milvuspb.ReplicaInfo),
+		nodeIndex:   make(map[int64]map[int64]*milvuspb.ReplicaInfo),
 	}
 }
 
@@ -47,7 +48,8 @@ func (rep *ReplicaInfos) Get(replicaID UniqueID) (*milvuspb.ReplicaInfo, bool) {
 	defer rep.globalGuard.RUnlock()
 
 	info, ok := rep.replicas[replicaID]
-	return info, ok
+	clone := proto.Clone(info).(*milvuspb.ReplicaInfo)
+	return clone, ok
 }
 
 // Make sure atomically update replica and index
@@ -56,23 +58,25 @@ func (rep *ReplicaInfos) Insert(info *milvuspb.ReplicaInfo) {
 	defer rep.globalGuard.Unlock()
 
 	old, ok := rep.replicas[info.ReplicaID]
-	// This updates ReplicaInfo, not inserts a new one
-	// No need to update nodeIndex
-	if ok {
-		*old = *info
-		return
-	}
 
+	info = proto.Clone(info).(*milvuspb.ReplicaInfo)
 	rep.replicas[info.ReplicaID] = info
+
+	// This updates ReplicaInfo, not inserts a new one
+	if ok {
+		for _, nodeID := range old.NodeIds {
+			nodeReplicas := rep.nodeIndex[nodeID]
+			delete(nodeReplicas, old.ReplicaID)
+		}
+	}
 
 	for _, nodeID := range info.NodeIds {
 		replicas, ok := rep.nodeIndex[nodeID]
 		if !ok {
-			replicas = make([]*milvuspb.ReplicaInfo, 0)
-			rep.nodeIndex[nodeID] = replicas
+			replicas = make(map[UniqueID]*milvuspb.ReplicaInfo)
 		}
 
-		replicas = append(replicas, info)
+		replicas[info.ReplicaID] = info
 		rep.nodeIndex[nodeID] = replicas
 	}
 }
@@ -87,5 +91,24 @@ func (rep *ReplicaInfos) GetReplicasByNodeID(nodeID UniqueID) []*milvuspb.Replic
 		return nil
 	}
 
-	return replicas
+	clones := make([]*milvuspb.ReplicaInfo, 0, len(replicas))
+	for _, replica := range replicas {
+		clones = append(clones, proto.Clone(replica).(*milvuspb.ReplicaInfo))
+	}
+
+	return clones
+}
+
+func (rep *ReplicaInfos) Remove(replicaIds ...UniqueID) {
+	rep.globalGuard.Lock()
+	defer rep.globalGuard.Unlock()
+
+	for _, replicaID := range replicaIds {
+		delete(rep.replicas, replicaID)
+	}
+	for _, replicaIndex := range rep.nodeIndex {
+		for _, replicaID := range replicaIds {
+			delete(replicaIndex, replicaID)
+		}
+	}
 }

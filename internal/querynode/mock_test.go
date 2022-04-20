@@ -79,6 +79,7 @@ const (
 	defaultCollectionID = UniqueID(0)
 	defaultPartitionID  = UniqueID(1)
 	defaultSegmentID    = UniqueID(2)
+	defaultReplicaID    = UniqueID(10)
 
 	defaultCollectionName = "query-node-unittest-default-collection"
 	defaultPartitionName  = "query-node-unittest-default-partition"
@@ -1748,18 +1749,27 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 
 	// start task scheduler
 	go node.scheduler.Start()
+	/*
+		vectorStorage, err := node.factory.NewVectorStorageChunkManager(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cacheStorage, err := node.factory.NewCacheStorageChunkManager(ctx)
+		if err != nil {
+			return nil, err
+		}*/
+	/*
+		qs := newQueryService(ctx, node.historical, node.streaming, vectorStorage, cacheStorage, fac)
+		defer qs.close()
+		node.queryService = qs
+			qs := newQueryService(ctx, node.historical, node.streaming, node.msFactory)
+			defer qs.close()
+			node.queryService = qs*/
 
-	vectorStorage, err := node.factory.NewVectorStorageChunkManager(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cacheStorage, err := node.factory.NewCacheStorageChunkManager(ctx)
-	if err != nil {
-		return nil, err
-	}
-	qs := newQueryService(ctx, node.historical, node.streaming, vectorStorage, cacheStorage, fac)
-	defer qs.close()
-	node.queryService = qs
+	// init shard cluster service
+	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
+
+	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx, node.historical, node.streaming, node.ShardClusterService, node.factory)
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 

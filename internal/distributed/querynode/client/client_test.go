@@ -21,7 +21,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +28,7 @@ import (
 )
 
 func Test_NewClient(t *testing.T) {
-	proxy.Params.InitOnce()
+	ClientParams.InitOnce(typeutil.QueryNodeRole)
 
 	ctx := context.Background()
 	client, err := NewClient(ctx, "")

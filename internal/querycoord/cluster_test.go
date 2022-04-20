@@ -21,8 +21,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -412,7 +414,12 @@ func TestReloadClusterFromKV(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 		handler, err := newChannelUnsubscribeHandler(ctx, kv, factory)
 		assert.Nil(t, err)
-		meta, err := newMeta(ctx, kv, factory, nil)
+		id := UniqueID(rand.Int31())
+		idAllocator := func() (UniqueID, error) {
+			newID := atomic.AddInt64(&id, 1)
+			return newID, nil
+		}
+		meta, err := newMeta(ctx, kv, factory, idAllocator)
 		assert.Nil(t, err)
 
 		cluster := &queryNodeCluster{

@@ -19,9 +19,6 @@ package querynode
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
-	"net/url"
-	"os"
 	"path"
 	"strconv"
 	"testing"
@@ -33,41 +30,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 )
 
-func startEmbedEtcdServer() (*embed.Etcd, error) {
-	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	config := embed.NewConfig()
-
-	config.Dir = os.TempDir()
-	config.LogLevel = "warn"
-	config.LogOutputs = []string{"default"}
-	u, err := url.Parse("http://localhost:2389")
-	if err != nil {
-		return nil, err
-	}
-	config.LCUrls = []url.URL{*u}
-	u, err = url.Parse("http://localhost:2390")
-	if err != nil {
-		return nil, err
-	}
-	config.LPUrls = []url.URL{*u}
-
-	return embed.StartEtcd(config)
-}
-
 func TestEtcdShardNodeDetector_watch(t *testing.T) {
-	etcdServer, err := startEmbedEtcdServer()
-	require.NoError(t, err)
-	defer etcdServer.Close()
 
-	client := v3client.New(etcdServer.Server)
+	client := v3client.New(embedetcdServer.Server)
 	defer client.Close()
 
 	type testCase struct {

@@ -21,11 +21,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestQueryShardService(t *testing.T) {
-	qss := newQueryShardService(context.Background())
-	err := qss.addQueryShard(0, "vchan1")
+	qn, err := genSimpleQueryNode(context.Background())
+	require.NoError(t, err)
+
+	qss := newQueryShardService(context.Background(), qn.historical, qn.streaming, qn.ShardClusterService, qn.factory)
+	err = qss.addQueryShard(0, "vchan1", 0)
 	assert.NoError(t, err)
 	found1 := qss.hasQueryShard("vchan1")
 	assert.Equal(t, true, found1)

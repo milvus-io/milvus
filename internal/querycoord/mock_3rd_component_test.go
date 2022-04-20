@@ -344,20 +344,6 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 		}, nil
 	}
 
-	if _, ok := data.partitionID2Segment[partitionID]; !ok {
-		segmentIDs := make([]UniqueID, 0)
-		for i := 0; i < data.channelNumPerCol; i++ {
-			segmentID := data.baseSegmentID
-			if _, ok := data.Segment2Binlog[segmentID]; !ok {
-				segmentBinlog := generateInsertBinLog(segmentID)
-				data.Segment2Binlog[segmentID] = segmentBinlog
-			}
-			segmentIDs = append(segmentIDs, segmentID)
-			data.baseSegmentID++
-		}
-		data.partitionID2Segment[partitionID] = segmentIDs
-	}
-
 	if _, ok := data.col2DmChannels[collectionID]; !ok {
 		channelInfos := make([]*datapb.VchannelInfo, 0)
 		data.collections = append(data.collections, collectionID)
@@ -374,6 +360,21 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 			channelInfos = append(channelInfos, channelInfo)
 		}
 		data.col2DmChannels[collectionID] = channelInfos
+	}
+
+	if _, ok := data.partitionID2Segment[partitionID]; !ok {
+		segmentIDs := make([]UniqueID, 0)
+		for i := 0; i < data.channelNumPerCol; i++ {
+			segmentID := data.baseSegmentID
+			if _, ok := data.Segment2Binlog[segmentID]; !ok {
+				segmentBinlog := generateInsertBinLog(segmentID)
+				segmentBinlog.InsertChannel = data.col2DmChannels[collectionID][i].ChannelName
+				data.Segment2Binlog[segmentID] = segmentBinlog
+			}
+			segmentIDs = append(segmentIDs, segmentID)
+			data.baseSegmentID++
+		}
+		data.partitionID2Segment[partitionID] = segmentIDs
 	}
 
 	binlogs := make([]*datapb.SegmentBinlogs, 0)

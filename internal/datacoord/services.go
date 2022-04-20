@@ -528,6 +528,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segment2Binlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2StatsBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
 	segment2DeltaBinlogs := make(map[UniqueID][]*datapb.FieldBinlog)
+	segment2InsertChannel := make(map[UniqueID]string)
 	segmentsNumOfRows := make(map[UniqueID]int64)
 
 	flushedIDs := make(map[int64]struct{})
@@ -542,6 +543,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing {
 			continue
 		}
+		segment2InsertChannel[segment.ID] = segment.InsertChannel
 		binlogs := segment.GetBinlogs()
 
 		if len(binlogs) == 0 {
@@ -590,11 +592,12 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	binlogs := make([]*datapb.SegmentBinlogs, 0, len(segment2Binlogs))
 	for segmentID := range flushedIDs {
 		sbl := &datapb.SegmentBinlogs{
-			SegmentID:    segmentID,
-			NumOfRows:    segmentsNumOfRows[segmentID],
-			FieldBinlogs: segment2Binlogs[segmentID],
-			Statslogs:    segment2StatsBinlogs[segmentID],
-			Deltalogs:    segment2DeltaBinlogs[segmentID],
+			SegmentID:     segmentID,
+			NumOfRows:     segmentsNumOfRows[segmentID],
+			FieldBinlogs:  segment2Binlogs[segmentID],
+			Statslogs:     segment2StatsBinlogs[segmentID],
+			Deltalogs:     segment2DeltaBinlogs[segmentID],
+			InsertChannel: segment2InsertChannel[segmentID],
 		}
 		binlogs = append(binlogs, sbl)
 	}

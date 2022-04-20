@@ -95,6 +95,29 @@ func (h *historical) retrieve(collID UniqueID, partIDs []UniqueID, vcm storage.C
 	return retrieveResults, retrieveSegmentIDs, retrievePartIDs, nil
 }
 
+// retrieveBySegmentIDs retrieves records from segments specified by their IDs
+func (h *historical) retrieveBySegmentIDs(collID UniqueID, segmentIDs []UniqueID, vcm storage.ChunkManager, plan *RetrievePlan) (
+	retrieveResults []*segcorepb.RetrieveResults, err error) {
+
+	for _, segID := range segmentIDs {
+		seg, err := h.replica.getSegmentByID(segID)
+		if err != nil {
+			return nil, err
+		}
+		result, err := seg.retrieve(plan)
+		if err != nil {
+			return nil, err
+		}
+		err = seg.fillIndexedFieldsData(collID, vcm, result)
+		if err != nil {
+			return nil, err
+		}
+		retrieveResults = append(retrieveResults, result)
+	}
+
+	return retrieveResults, nil
+}
+
 // search will search all the target segments in historical
 func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partIDs []UniqueID, plan *SearchPlan,
 	searchTs Timestamp) (searchResults []*SearchResult, searchSegmentIDs []UniqueID, searchPartIDs []UniqueID, err error) {

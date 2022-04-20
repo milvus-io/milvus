@@ -22,17 +22,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/crypto"
-
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type MockRootCoordClientInterface struct {
@@ -309,4 +309,52 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	assert.NotNil(t, err)
 	log.Debug(err.Error())
 	assert.Equal(t, id, typeutil.UniqueID(0))
+}
+
+func TestMetaCache_GetShards(t *testing.T) {
+	client := &MockRootCoordClientInterface{}
+	err := InitMetaCache(client)
+	require.Nil(t, err)
+
+	var (
+		ctx            = context.TODO()
+		collectionName = "collection1"
+		qc             = NewQueryCoordMock()
+	)
+	qc.Init()
+	qc.Start()
+	defer qc.Stop()
+
+	t.Run("No collection in meta cache", func(t *testing.T) {
+		shards, err := globalMetaCache.GetShards(ctx, true, "non-exists", qc)
+		assert.Error(t, err)
+		assert.Empty(t, shards)
+	})
+
+	t.Run("without shardLeaders in collection info invalid shardLeaders", func(t *testing.T) {
+		qc.validShardLeaders = false
+		shards, err := globalMetaCache.GetShards(ctx, false, collectionName, qc)
+		assert.Error(t, err)
+		assert.Empty(t, shards)
+	})
+
+	t.Run("without shardLeaders in collection info", func(t *testing.T) {
+		qc.validShardLeaders = true
+		shards, err := globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, shards)
+		assert.Equal(t, 1, len(shards))
+		assert.Equal(t, 3, len(shards[0].GetNodeAddrs()))
+		assert.Equal(t, 3, len(shards[0].GetNodeIds()))
+
+		// get from cache
+		qc.validShardLeaders = false
+		shards, err = globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		assert.NoError(t, err)
+		assert.NotEmpty(t, shards)
+		assert.Equal(t, 1, len(shards))
+		assert.Equal(t, 3, len(shards[0].GetNodeAddrs()))
+		assert.Equal(t, 3, len(shards[0].GetNodeIds()))
+	})
+
 }

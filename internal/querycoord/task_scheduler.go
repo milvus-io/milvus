@@ -905,6 +905,8 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
 	default:
 		// save new segmentInfo when load segment
+		segments := make(map[UniqueID]*querypb.SegmentInfo)
+
 		for _, childTask := range triggerTask.getChildTask() {
 			if childTask.msgType() == commonpb.MsgType_LoadSegments {
 				req := childTask.(*loadSegmentTask).LoadSegmentsRequest
@@ -912,18 +914,30 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 				for _, loadInfo := range req.Infos {
 					collectionID := loadInfo.CollectionID
 					segmentID := loadInfo.SegmentID
-					segmentInfo := &querypb.SegmentInfo{
-						SegmentID:      segmentID,
-						CollectionID:   loadInfo.CollectionID,
-						PartitionID:    loadInfo.PartitionID,
-						NodeID:         dstNodeID,
-						SegmentState:   commonpb.SegmentState_Sealed,
-						CompactionFrom: loadInfo.CompactionFrom,
+
+					segment, ok := segments[segmentID]
+					if !ok {
+						segment = &querypb.SegmentInfo{
+							SegmentID:      segmentID,
+							CollectionID:   loadInfo.CollectionID,
+							PartitionID:    loadInfo.PartitionID,
+							NodeID:         dstNodeID,
+							DmChannel:      loadInfo.InsertChannel,
+							SegmentState:   commonpb.SegmentState_Sealed,
+							CompactionFrom: loadInfo.CompactionFrom,
+							ReplicaIds:     []UniqueID{req.ReplicaID},
+							NodeIds:        []UniqueID{dstNodeID},
+						}
+						segments[segmentID] = segment
+					} else {
+						segment.ReplicaIds = append(segment.ReplicaIds, req.ReplicaID)
+						segment.NodeIds = append(segment.NodeIds, dstNodeID)
 					}
+
 					if _, ok := segmentInfosToSave[collectionID]; !ok {
 						segmentInfosToSave[collectionID] = make([]*querypb.SegmentInfo, 0)
 					}
-					segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segmentInfo)
+					segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segment)
 				}
 			}
 		}

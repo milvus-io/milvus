@@ -35,8 +35,9 @@ func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCol
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
-		CollectionID: defaultCollectionID,
-		Schema:       genDefaultCollectionSchema(false),
+		CollectionID:  defaultCollectionID,
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	loadCollectionTask := &loadCollectionTask{
@@ -55,9 +56,10 @@ func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *loadPart
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
 		},
-		CollectionID: defaultCollectionID,
-		PartitionIDs: []UniqueID{defaultPartitionID},
-		Schema:       genDefaultCollectionSchema(false),
+		CollectionID:  defaultCollectionID,
+		PartitionIDs:  []UniqueID{defaultPartitionID},
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	loadPartitionTask := &loadPartitionTask{
@@ -162,8 +164,9 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
-		CollectionID: defaultCollectionID,
-		Schema:       genDefaultCollectionSchema(false),
+		CollectionID:  defaultCollectionID,
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
 	}
 	baseParentTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	baseParentTask.taskID = 10
@@ -219,8 +222,9 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
 		},
-		CollectionID: defaultCollectionID,
-		Schema:       genDefaultCollectionSchema(false),
+		CollectionID:  defaultCollectionID,
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
 	}
 	baseParentTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
 	baseParentTask.taskID = 10
@@ -297,9 +301,15 @@ func TestTriggerTask(t *testing.T) {
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
-	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	node3, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+	waitQueryNodeOnline(queryCoord.cluster, node3.queryNodeID)
 
 	t.Run("Test LoadCollection", func(t *testing.T) {
 		loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
@@ -328,10 +338,38 @@ func TestTriggerTask(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	err = node.stop()
-	queryCoord.Stop()
-	err = removeAllSession()
-	assert.Nil(t, err)
+	t.Run("Test LoadCollection With Replicas", func(t *testing.T) {
+		loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+		loadCollectionTask.ReplicaNumber = 3
+		err = queryCoord.scheduler.processTask(loadCollectionTask)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleaseCollection With Replicas", func(t *testing.T) {
+		releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
+		err = queryCoord.scheduler.processTask(releaseCollectionTask)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test LoadPartition With Replicas", func(t *testing.T) {
+		loadPartitionTask := genLoadPartitionTask(ctx, queryCoord)
+		loadPartitionTask.ReplicaNumber = 3
+		err = queryCoord.scheduler.processTask(loadPartitionTask)
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleasePartition With Replicas", func(t *testing.T) {
+		releasePartitionTask := genReleaseCollectionTask(ctx, queryCoord)
+
+		err = queryCoord.scheduler.processTask(releasePartitionTask)
+		assert.Nil(t, err)
+	})
+
+	assert.NoError(t, node1.stop())
+	assert.NoError(t, node2.stop())
+	assert.NoError(t, node3.stop())
+	assert.NoError(t, queryCoord.Stop())
+	assert.NoError(t, removeAllSession())
 }
 
 func Test_LoadCollectionAfterLoadPartition(t *testing.T) {
@@ -437,6 +475,30 @@ func Test_LoadCollectionExecuteFail(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestLoadCollectionNoEnoughNodeFail(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	node2, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+
+	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
+	loadCollectionTask.ReplicaNumber = 3
+	err = queryCoord.scheduler.processTask(loadCollectionTask)
+	assert.Error(t, err)
+
+	assert.NoError(t, node1.stop())
+	assert.NoError(t, node2.stop())
+	assert.NoError(t, queryCoord.Stop())
+	assert.NoError(t, removeAllSession())
 }
 
 func Test_LoadPartitionAssignTaskFail(t *testing.T) {
@@ -577,10 +639,11 @@ func Test_RescheduleDmChannel(t *testing.T) {
 	loadCollectionTask := watchDmChannelTask.parentTask
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskFailed)
 
 	queryCoord.Stop()
 	err = removeAllSession()
+
 	assert.Nil(t, err)
 }
 
@@ -604,7 +667,7 @@ func Test_RescheduleSegment(t *testing.T) {
 	loadCollectionTask := loadSegmentTask.parentTask
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
-	waitTaskFinalState(loadCollectionTask, taskExpired)
+	waitTaskFinalState(loadCollectionTask, taskFailed)
 
 	queryCoord.Stop()
 	err = removeAllSession()
@@ -703,7 +766,7 @@ func Test_AssignInternalTask(t *testing.T) {
 		loadSegmentRequests = append(loadSegmentRequests, req)
 	}
 
-	internalTasks, err := assignInternalTask(queryCoord.loopCtx, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false, nil, nil)
+	internalTasks, err := assignInternalTask(queryCoord.loopCtx, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false, nil, nil, -1)
 	assert.Nil(t, err)
 
 	assert.NotEqual(t, 1, len(internalTasks))
@@ -870,6 +933,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 					MsgType: commonpb.MsgType_LoadBalanceSegments,
 				},
 				SourceNodeIDs: []int64{node1.queryNodeID},
+				CollectionID:  defaultCollectionID,
 			},
 			broker:  queryCoord.broker,
 			cluster: queryCoord.cluster,

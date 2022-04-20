@@ -19,18 +19,18 @@ package querycoord
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"sync/atomic"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 var indexCheckerTestDir = "/tmp/milvus_test/index_checker"
@@ -42,7 +42,12 @@ func TestReloadFromKV(t *testing.T) {
 	defer etcdCli.Close()
 	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	meta, err := newMeta(baseCtx, kv, nil, nil)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+	meta, err := newMeta(baseCtx, kv, nil, idAllocator)
 	assert.Nil(t, err)
 
 	segmentInfo := &querypb.SegmentInfo{
@@ -98,7 +103,13 @@ func TestCheckIndexLoop(t *testing.T) {
 	defer etcdCli.Close()
 	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	meta, err := newMeta(ctx, kv, nil, nil)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+
+	meta, err := newMeta(ctx, kv, nil, idAllocator)
 	assert.Nil(t, err)
 
 	rootCoord := newRootCoordMock(ctx)
@@ -168,7 +179,12 @@ func TestHandoffNotExistSegment(t *testing.T) {
 	defer etcdCli.Close()
 	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	meta, err := newMeta(ctx, kv, nil, nil)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+	meta, err := newMeta(ctx, kv, nil, idAllocator)
 	assert.Nil(t, err)
 
 	rootCoord := newRootCoordMock(ctx)
@@ -222,20 +238,19 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	defer etcdCli.Close()
 
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	meta, err := newMeta(ctx, kv, nil, nil)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+	meta, err := newMeta(ctx, kv, nil, idAllocator)
 	assert.Nil(t, err)
 	taskScheduler := &TaskScheduler{
 		ctx:              ctx,
 		cancel:           cancel,
 		client:           kv,
 		triggerTaskQueue: newTaskQueue(),
-	}
-	idAllocatorKV := tsoutil.NewTSOKVBase(etcdCli, Params.EtcdCfg.KvRootPath, "queryCoordTaskID")
-	idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
-	err = idAllocator.Initialize()
-	assert.Nil(t, err)
-	taskScheduler.taskIDAllocator = func() (UniqueID, error) {
-		return idAllocator.AllocOne()
+		taskIDAllocator:  idAllocator,
 	}
 	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, taskScheduler, nil)
 	assert.Nil(t, err)

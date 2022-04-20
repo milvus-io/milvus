@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -99,8 +100,9 @@ type QueryCoord struct {
 
 	stateCode atomic.Value
 
-	factory      dependency.Factory
-	chunkManager storage.ChunkManager
+	factory       dependency.Factory
+	chunkManager  storage.ChunkManager
+	groupBalancer balancer
 }
 
 // Register register query service at etcd
@@ -168,6 +170,7 @@ func (qc *QueryCoord) Init() error {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
 			return
 		}
+		qc.groupBalancer = newReplicaBalancer(qc.meta)
 
 		// init channelUnsubscribeHandler
 		qc.handler, initError = newChannelUnsubscribeHandler(qc.loopCtx, qc.kvClient, qc.factory)
@@ -183,7 +186,17 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 
-		qc.chunkManager, initError = qc.factory.NewVectorStorageChunkManager(qc.loopCtx)
+		// NOTE: ignore the returned error
+		// we only try best to reload the leader addresses
+		reloadShardLeaderAddress(qc.meta, qc.cluster)
+
+		qc.chunkManager, initError = storage.NewMinioChunkManager(qc.loopCtx,
+			storage.Address(Params.MinioCfg.Address),
+			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+			storage.UseSSL(Params.MinioCfg.UseSSL),
+			storage.BucketName(Params.MinioCfg.BucketName),
+			storage.CreateBucket(true))
 
 		if initError != nil {
 			log.Error("query coordinator init cluster failed", zap.Error(initError))
@@ -337,6 +350,13 @@ func (qc *QueryCoord) watchNodeLoop() {
 	defer qc.loopWg.Done()
 	log.Debug("QueryCoord start watch node loop")
 
+	unallocatedNodes := qc.getUnallocatedNodes()
+	for _, n := range unallocatedNodes {
+		if err := qc.allocateNode(n); err != nil {
+			log.Warn("unable to allcoate node", zap.Int64("nodeID", n), zap.Error(err))
+		}
+	}
+
 	offlineNodeIDs := qc.cluster.offlineNodeIDs()
 	if len(offlineNodeIDs) != 0 {
 		loadBalanceSegment := &querypb.LoadBalanceRequest{
@@ -366,6 +386,70 @@ func (qc *QueryCoord) watchNodeLoop() {
 	qc.handleNodeEvent(ctx)
 }
 
+func (qc *QueryCoord) allocateNode(nodeID int64) error {
+	plans, err := qc.groupBalancer.addNode(nodeID)
+	if err != nil {
+		return err
+	}
+	for _, p := range plans {
+		if err := qc.applyBalancePlan(p); err != nil {
+			log.Warn("failed to apply balance plan", zap.Error(err), zap.Any("plan", p))
+		}
+	}
+	return nil
+}
+func (qc *QueryCoord) getUnallocatedNodes() []int64 {
+	onlines := qc.cluster.onlineNodeIDs()
+	var ret []int64
+	for _, n := range onlines {
+		replica, err := qc.meta.getReplicasByNodeID(n)
+		if err != nil {
+			log.Warn("failed to get replica", zap.Int64("nodeID", n), zap.Error(err))
+			continue
+		}
+		if replica == nil {
+			ret = append(ret, n)
+		}
+	}
+	return ret
+}
+
+func (qc *QueryCoord) applyBalancePlan(p *balancePlan) error {
+	if p.sourceReplica != -1 {
+		replica, err := qc.meta.getReplicaByID(p.sourceReplica)
+		if err != nil {
+			return err
+		}
+		replica = removeNodeFromReplica(replica, p.nodeID)
+		if err := qc.meta.setReplicaInfo(replica); err != nil {
+			return err
+		}
+	}
+	if p.targetReplica != -1 {
+		replica, err := qc.meta.getReplicaByID(p.targetReplica)
+		if err != nil {
+			return err
+		}
+
+		replica.NodeIds = append(replica.NodeIds, p.nodeID)
+		if err := qc.meta.setReplicaInfo(replica); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeNodeFromReplica(replica *milvuspb.ReplicaInfo, nodeID int64) *milvuspb.ReplicaInfo {
+	for i := 0; i < len(replica.NodeIds); i++ {
+		if replica.NodeIds[i] != nodeID {
+			continue
+		}
+		replica.NodeIds = append(replica.NodeIds[:i], replica.NodeIds[i+1:]...)
+		return replica
+	}
+	return replica
+}
+
 func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 	for {
 		select {
@@ -390,6 +474,10 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 				err := qc.cluster.registerNode(ctx, event.Session, serverID, disConnect)
 				if err != nil {
 					log.Error("QueryCoord failed to register a QueryNode", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
+					continue
+				}
+				if err := qc.allocateNode(serverID); err != nil {
+					log.Error("unable to allcoate node", zap.Int64("nodeID", serverID), zap.Error(err))
 				}
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
@@ -480,81 +568,104 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 
 	timer := time.NewTicker(time.Duration(Params.QueryCoordCfg.BalanceIntervalSeconds) * time.Second)
 
+	var collectionInfos []*querypb.CollectionInfo
+	pos := 0
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			onlineNodeIDs := qc.cluster.onlineNodeIDs()
-			if len(onlineNodeIDs) == 0 {
-				log.Error("[auto balance]there is no online QueryNode to do balance")
-				continue
+			if pos == len(collectionInfos) {
+				pos = 0
+				collectionInfos = qc.meta.showCollections()
 			}
 			// get mem info of online nodes from cluster
 			nodeID2MemUsageRate := make(map[int64]float64)
 			nodeID2MemUsage := make(map[int64]uint64)
 			nodeID2TotalMem := make(map[int64]uint64)
-			nodeID2SegmentInfos := make(map[int64]map[UniqueID]*querypb.SegmentInfo)
-			var availableNodeIDs []int64
-			for _, nodeID := range onlineNodeIDs {
-				nodeInfo, err := qc.cluster.getNodeInfoByID(nodeID)
+			loadBalanceTasks := make([]*loadBalanceTask, 0)
+			// balance at most 20 collections in a round
+			for i := 0; pos < len(collectionInfos) && i < 20; i, pos = i+1, pos+1 {
+				info := collectionInfos[pos]
+				replicas, err := qc.meta.getReplicasByCollectionID(info.GetCollectionID())
 				if err != nil {
-					log.Warn("loadBalanceSegmentLoop: get node info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					log.Warn("unable to get replicas of collection", zap.Int64("collectionID", info.GetCollectionID()))
 					continue
 				}
-
-				updateSegmentInfoDone := true
-				leastSegmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
-				segmentInfos := qc.meta.getSegmentInfosByNode(nodeID)
-				for _, segmentInfo := range segmentInfos {
-					leastInfo, err := qc.cluster.getSegmentInfoByID(ctx, segmentInfo.SegmentID)
-					if err != nil {
-						log.Warn("[auto balance] failed to get segment information from QueryNode", zap.Int64("nodeID", nodeID), zap.Error(err))
-						updateSegmentInfoDone = false
-						break
+				for _, replica := range replicas {
+					// auto balance is executed on replica level
+					onlineNodeIDs := replica.GetNodeIds()
+					if len(onlineNodeIDs) == 0 {
+						log.Error("loadBalanceSegmentLoop: there are no online QueryNode to balance")
+						continue
 					}
-					leastSegmentInfos[segmentInfo.SegmentID] = leastInfo
-				}
-				if updateSegmentInfoDone {
-					nodeID2MemUsageRate[nodeID] = nodeInfo.(*queryNode).memUsageRate
-					nodeID2MemUsage[nodeID] = nodeInfo.(*queryNode).memUsage
-					nodeID2TotalMem[nodeID] = nodeInfo.(*queryNode).totalMem
-					availableNodeIDs = append(availableNodeIDs, nodeID)
-					nodeID2SegmentInfos[nodeID] = leastSegmentInfos
-				}
-			}
-			log.Debug("loadBalanceSegmentLoop: memory usage rate of all online QueryNode", zap.Any("mem rate", nodeID2MemUsageRate))
-			if len(availableNodeIDs) <= 1 {
-				log.Warn("loadBalanceSegmentLoop: there are too few available query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs), zap.Int64s("availableNodeIDs", availableNodeIDs))
-				continue
-			}
+					var availableNodeIDs []int64
+					nodeID2SegmentInfos := make(map[int64]map[UniqueID]*querypb.SegmentInfo)
+					for _, nodeID := range onlineNodeIDs {
+						if _, ok := nodeID2MemUsage[nodeID]; !ok {
+							nodeInfo, err := qc.cluster.getNodeInfoByID(nodeID)
+							if err != nil {
+								log.Warn("loadBalanceSegmentLoop: get node info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+								continue
+							}
+							nodeID2MemUsageRate[nodeID] = nodeInfo.(*queryNode).memUsageRate
+							nodeID2MemUsage[nodeID] = nodeInfo.(*queryNode).memUsage
+							nodeID2TotalMem[nodeID] = nodeInfo.(*queryNode).totalMem
+						}
 
-			// check which nodes need balance and determine which segments on these nodes need to be migrated to other nodes
-			memoryInsufficient := false
-			loadBalanceTasks := make([]*loadBalanceTask, 0)
-			for {
-				sort.Slice(availableNodeIDs, func(i, j int) bool {
-					return nodeID2MemUsageRate[availableNodeIDs[i]] > nodeID2MemUsageRate[availableNodeIDs[j]]
-				})
-
-				// the memoryUsageRate of the sourceNode is higher than other query node
-				sourceNodeID := availableNodeIDs[0]
-				dstNodeID := availableNodeIDs[len(availableNodeIDs)-1]
-				memUsageRateDiff := nodeID2MemUsageRate[sourceNodeID] - nodeID2MemUsageRate[dstNodeID]
-				// if memoryUsageRate of source node is greater than 90%, and the max memUsageDiff is greater than 30%
-				// then migrate the segments on source node to other query nodes
-				if nodeID2MemUsageRate[sourceNodeID] > Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage ||
-					memUsageRateDiff > Params.QueryCoordCfg.MemoryUsageMaxDifferencePercentage {
-					segmentInfos := nodeID2SegmentInfos[sourceNodeID]
-					// select the segment that needs balance on the source node
-					selectedSegmentInfo, err := chooseSegmentToBalance(sourceNodeID, dstNodeID, segmentInfos, nodeID2MemUsage, nodeID2TotalMem, nodeID2MemUsageRate)
-					if err != nil {
-						// no enough memory on query nodes to balance, then notify proxy to stop insert
-						memoryInsufficient = true
-						break
+						updateSegmentInfoDone := true
+						leastSegmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
+						segmentInfos := qc.meta.getSegmentInfosByNodeAndCollection(nodeID, replica.GetCollectionID())
+						for _, segmentInfo := range segmentInfos {
+							leastInfo, err := qc.cluster.getSegmentInfoByID(ctx, segmentInfo.SegmentID)
+							if err != nil {
+								log.Warn("loadBalanceSegmentLoop: get segment info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+								updateSegmentInfoDone = false
+								break
+							}
+							leastSegmentInfos[segmentInfo.SegmentID] = leastInfo
+						}
+						if updateSegmentInfoDone {
+							availableNodeIDs = append(availableNodeIDs, nodeID)
+							nodeID2SegmentInfos[nodeID] = leastSegmentInfos
+						}
 					}
-					// select a segment to balance successfully, then recursive traversal whether there are other segments that can balance
-					if selectedSegmentInfo != nil {
+					log.Debug("loadBalanceSegmentLoop: memory usage rate of all online QueryNode", zap.Any("mem rate", nodeID2MemUsageRate))
+					if len(availableNodeIDs) <= 1 {
+						log.Warn("loadBalanceSegmentLoop: there are too few available query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs), zap.Int64s("availableNodeIDs", availableNodeIDs))
+						continue
+					}
+
+					// check which nodes need balance and determine which segments on these nodes need to be migrated to other nodes
+					memoryInsufficient := false
+					for {
+						sort.Slice(availableNodeIDs, func(i, j int) bool {
+							return nodeID2MemUsageRate[availableNodeIDs[i]] > nodeID2MemUsageRate[availableNodeIDs[j]]
+						})
+
+						// the memoryUsageRate of the sourceNode is higher than other query node
+						sourceNodeID := availableNodeIDs[0]
+						dstNodeID := availableNodeIDs[len(availableNodeIDs)-1]
+						memUsageRateDiff := nodeID2MemUsageRate[sourceNodeID] - nodeID2MemUsageRate[dstNodeID]
+						if nodeID2MemUsageRate[sourceNodeID] <= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage &&
+							memUsageRateDiff <= Params.QueryCoordCfg.MemoryUsageMaxDifferencePercentage {
+							break
+						}
+						// if memoryUsageRate of source node is greater than 90%, and the max memUsageDiff is greater than 30%
+						// then migrate the segments on source node to other query nodes
+						segmentInfos := nodeID2SegmentInfos[sourceNodeID]
+						// select the segment that needs balance on the source node
+						selectedSegmentInfo, err := chooseSegmentToBalance(sourceNodeID, dstNodeID, segmentInfos, nodeID2MemUsage, nodeID2TotalMem, nodeID2MemUsageRate)
+						if err != nil {
+							// no enough memory on query nodes to balance, then notify proxy to stop insert
+							memoryInsufficient = true
+							break
+						}
+						if selectedSegmentInfo == nil {
+							break
+						}
+						// select a segment to balance successfully, then recursive traversal whether there are other segments that can balance
 						req := &querypb.LoadBalanceRequest{
 							Base: &commonpb.MsgBase{
 								MsgType: commonpb.MsgType_LoadBalanceSegments,
@@ -580,35 +691,28 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 						delete(nodeID2SegmentInfos[sourceNodeID], selectedSegmentInfo.SegmentID)
 						nodeID2SegmentInfos[dstNodeID][selectedSegmentInfo.SegmentID] = selectedSegmentInfo
 						continue
-					} else {
-						// moving any segment will not improve the balance status
-						break
 					}
+					if memoryInsufficient {
+						// no enough memory on query nodes to balance, then notify proxy to stop insert
+						//TODO:: xige-16
+						log.Warn("loadBalanceSegmentLoop: QueryNode has insufficient memory, stop inserting data")
+					}
+				}
+			}
+			for _, t := range loadBalanceTasks {
+				qc.scheduler.Enqueue(t)
+				log.Debug("loadBalanceSegmentLoop: enqueue a loadBalance task", zap.Any("task", t))
+				err := t.waitToFinish()
+				if err != nil {
+					// if failed, wait for next balance loop
+					// it may be that the collection/partition of the balanced segment has been released
+					// it also may be other abnormal errors
+					log.Error("loadBalanceSegmentLoop: balance task execute failed", zap.Any("task", t))
 				} else {
-					// all query node's memoryUsageRate is less than 90%, and the max memUsageDiff is less than 30%
-					break
+					log.Debug("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
 				}
 			}
-			if !memoryInsufficient {
-				for _, t := range loadBalanceTasks {
-					qc.scheduler.Enqueue(t)
-					log.Debug("loadBalanceSegmentLoop: enqueue a loadBalance task", zap.Any("task", t))
-					err := t.waitToFinish()
-					if err != nil {
-						// if failed, wait for next balance loop
-						// it may be that the collection/partition of the balanced segment has been released
-						// it also may be other abnormal errors
-						log.Error("loadBalanceSegmentLoop: balance task execute failed", zap.Any("task", t))
-					} else {
-						log.Debug("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
-					}
-				}
-				log.Debug("loadBalanceSegmentLoop: load balance Done in this loop", zap.Any("tasks", loadBalanceTasks))
-			} else {
-				// no enough memory on query nodes to balance, then notify proxy to stop insert
-				//TODO:: xige-16
-				log.Error("loadBalanceSegmentLoop: QueryNode has insufficient memory, stop inserting data")
-			}
+			log.Debug("loadBalanceSegmentLoop: load balance Done in this loop", zap.Any("tasks", loadBalanceTasks))
 		}
 	}
 }

@@ -226,6 +226,7 @@ func TestUnMarshalTask(t *testing.T) {
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_LoadCollection,
 				},
+				ReplicaNumber: 1,
 			},
 		}
 		blobs, err := loadTask.marshal()
@@ -478,6 +479,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 				Timestamp: 1,
 				MsgType:   commonpb.MsgType_LoadCollection,
 			},
+			ReplicaNumber: 1,
 		},
 	}
 	triggerBlobs, err := triggerTask.marshal()

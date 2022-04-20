@@ -33,14 +33,23 @@ func defaultChannelAllocatePolicy() ChannelAllocatePolicy {
 }
 
 // ChannelAllocatePolicy helper function definition to allocate dmChannel to queryNode
-type ChannelAllocatePolicy func(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64) error
+type ChannelAllocatePolicy func(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error
 
-func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64) error {
+func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, cluster Cluster, metaCache Meta, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error {
 	if len(reqs) == 0 {
 		return nil
 	}
+	var onlineNodeIDs []int64
 	for {
-		onlineNodeIDs := cluster.onlineNodeIDs()
+		if replicaID == -1 {
+			onlineNodeIDs = cluster.onlineNodeIDs()
+		} else {
+			replica, err := metaCache.getReplicaByID(replicaID)
+			if err != nil {
+				return err
+			}
+			onlineNodeIDs = replica.GetNodeIds()
+		}
 		if len(onlineNodeIDs) == 0 {
 			err := errors.New("no online QueryNode to allocate")
 			log.Error("shuffleChannelsToQueryNode failed", zap.Error(err))
@@ -54,6 +63,11 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 		var availableNodeIDs []int64
 		nodeID2NumChannels := make(map[int64]int)
 		for _, nodeID := range onlineNodeIDs {
+			// nodeID not in includeNodeIDs
+			if len(includeNodeIDs) > 0 && !nodeIncluded(nodeID, includeNodeIDs) {
+				continue
+			}
+
 			// nodeID in excludeNodeIDs
 			if nodeIncluded(nodeID, excludeNodeIDs) {
 				continue
