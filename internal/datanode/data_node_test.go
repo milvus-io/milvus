@@ -400,6 +400,15 @@ func TestDataNode(t *testing.T) {
 		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.ErrorCode)
+
+		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, returnError), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+
+		node.State.Store(internalpb.StateCode_Abnormal)
+		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
 	})
 
 	t.Run("Test BackGroundGC", func(t *testing.T) {

@@ -775,19 +775,39 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		zap.Any("channel names", req.GetImportTask().GetChannelNames()),
 		zap.Any("working dataNodes", req.WorkingNodes))
 
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     req.GetImportTask().TaskId,
+		DatanodeId: node.NodeID,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		_, err := node.rootCoord.ReportImport(ctx, res)
+		return err
+	}
+
 	if !node.isHealthy() {
-		log.Warn("DataNode.Import failed",
+		log.Warn("DataNode import failed",
 			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
 			zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
 			zap.Int64("taskID", req.GetImportTask().GetTaskId()),
 			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)))
 
+		msg := msgDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID)
+		importResult.State = commonpb.ImportState_ImportFailed
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: msg})
+		reportFunc(importResult)
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.NodeID),
+			Reason:    msg,
 		}, nil
 	}
-	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
+	rep, err := node.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,
@@ -796,11 +816,17 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		},
 		Count: 1,
 	})
+
 	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
+		msg := "DataNode alloc ts failed"
+		log.Warn(msg)
+		importResult.State = commonpb.ImportState_ImportFailed
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: msg})
+		reportFunc(importResult)
 		if err != nil {
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "DataNode alloc ts failed",
+				Reason:    msg,
 			}, nil
 		}
 	}
@@ -810,35 +836,27 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	metaService := newMetaService(node.rootCoord, req.GetImportTask().GetCollectionId())
 	schema, err := metaService.getCollectionSchema(ctx, req.GetImportTask().GetCollectionId(), 0)
 	if err != nil {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
-	}
-	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.NodeID)
-	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		TaskId:     req.GetImportTask().TaskId,
-		DatanodeId: node.NodeID,
-		State:      commonpb.ImportState_ImportPersisted,
-		Segments:   make([]int64, 0),
-		RowCount:   0,
-	}
-	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize, idAllocator, node.chunkManager,
-		importFlushReqFunc(node, req, importResult, schema, ts))
-	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
-	if err != nil {
+		importResult.State = commonpb.ImportState_ImportFailed
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
+		reportFunc(importResult)
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 
-	// report root coord that the import task has been finished
-	_, err = node.rootCoord.ReportImport(ctx, importResult)
+	// temp id allocator service
+	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.NodeID)
+	_ = idAllocator.Start()
+	defer idAllocator.Close()
+
+	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize, idAllocator, node.chunkManager,
+		importFlushReqFunc(node, req, importResult, schema, ts), importResult, reportFunc)
+	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
 	if err != nil {
+		importResult.State = commonpb.ImportState_ImportFailed
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
+		reportFunc(importResult)
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),

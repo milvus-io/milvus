@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -29,7 +30,8 @@ func Test_NewImportWrapper(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewVectorStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	wrapper := NewImportWrapper(ctx, nil, 2, 1, nil, cm, nil)
+
+	wrapper := NewImportWrapper(ctx, nil, 2, 1, nil, cm, nil, nil, nil)
 	assert.Nil(t, wrapper)
 
 	schema := &schemapb.CollectionSchema{
@@ -47,7 +49,7 @@ func Test_NewImportWrapper(t *testing.T) {
 		Description:  "int64",
 		DataType:     schemapb.DataType_Int64,
 	})
-	wrapper = NewImportWrapper(ctx, schema, 2, 1, nil, cm, nil)
+	wrapper = NewImportWrapper(ctx, schema, 2, 1, nil, cm, nil, nil, nil)
 	assert.NotNil(t, wrapper)
 
 	err = wrapper.Cancel()
@@ -93,12 +95,27 @@ func Test_ImportRowBased(t *testing.T) {
 	}
 
 	// success case
-	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, true, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)
+	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// parse error
 	content = []byte(`{
@@ -111,11 +128,13 @@ func Test_ImportRowBased(t *testing.T) {
 	err = cm.Write(filePath, content)
 	assert.NoError(t, err)
 
-	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
+	importResult.State = commonpb.ImportState_ImportStarted
+	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, true, false)
 	assert.NotNil(t, err)
+	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
@@ -178,12 +197,27 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	}
 
 	// success case
-	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, false, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)
+	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// parse error
 	content = []byte(`{
@@ -194,11 +228,13 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	err = cm.Write(filePath, content)
 	assert.NoError(t, err)
 
-	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
+	importResult.State = commonpb.ImportState_ImportStarted
+	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, false, false)
 	assert.NotNil(t, err)
+	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
@@ -268,11 +304,26 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	}
 
 	// success case
-	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 
 	err = wrapper.Import(files, false, false)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)
+	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// parse error
 	content = []byte(`{
@@ -283,11 +334,12 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	err = cm.Write(filePath, content)
 	assert.NoError(t, err)
 
-	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc)
+	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, false, false)
 	assert.NotNil(t, err)
+	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
@@ -403,7 +455,21 @@ func Test_ImportRowBased_perf(t *testing.T) {
 
 	schema := perfSchema(dim)
 
-	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, flushFunc)
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
 	err = wrapper.Import(files, true, false)
@@ -501,7 +567,21 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 
 	schema := perfSchema(dim)
 
-	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, flushFunc)
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath1)
 	files = append(files, filePath2)

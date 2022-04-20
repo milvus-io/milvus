@@ -890,6 +890,13 @@ func (m *RootCoordFactory) AllocTimestamp(ctx context.Context, in *rootcoordpb.A
 		Status:    &commonpb.Status{},
 		Timestamp: 1000,
 	}
+
+	v := ctx.Value(ctxKey{})
+	if v != nil && v.(string) == returnError {
+		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		return resp, fmt.Errorf("injected error")
+	}
+
 	return resp, nil
 }
 
