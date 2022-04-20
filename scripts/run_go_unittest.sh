@@ -27,42 +27,35 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
-unameOut="$(uname -s)"
-if [[ "$unameOut" == "Darwin" ]]; then
-  export MallocNanoZone=0
+if [[ $(uname -s) == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+  APPLE_SILICON_FLAG="-tags dynamic"
 fi
 
 # ignore MinIO,S3 unittes
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo "Running go unittest under $MILVUS_DIR"
 
-go test -race -cover "${MILVUS_DIR}/allocator/..." -failfast
-go test -race -cover "${MILVUS_DIR}/kv/..." -failfast
-go test -race -cover $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast
-go test -race -cover "${MILVUS_DIR}/storage" -failfast
-go test -race -cover "${MILVUS_DIR}/tso/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/funcutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/paramtable/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/retry/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/sessionutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/trace/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/typeutil/..." -failfast
-go test -race -cover "${MILVUS_DIR}/util/importutil/..." -failfast
-
-# TODO: remove to distributed
-#go test -race -cover "${MILVUS_DIR}/proxy/..." -failfast
-go test -race -cover "${MILVUS_DIR}/datanode/..." -failfast
-go test -race -cover "${MILVUS_DIR}/indexnode/..." -failfast
-
-# TODO: enable ut on mac os
-case "${unameOut}" in
-    Linux*)     go test -race -cover "${MILVUS_DIR}/querynode/..." -failfast;;
-    *)          echo "Skip querynode unit tests, unsupported os:${unameOut}";
-esac
-
-go test -race -cover "${MILVUS_DIR}/distributed/rootcoord" -failfast
-go test -race -cover "${MILVUS_DIR}/rootcoord" -failfast
-go test -race -cover "${MILVUS_DIR}/datacoord/..." -failfast
-go test -race -cover "${MILVUS_DIR}/indexcoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/allocator/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/kv/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/storage" -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/tso/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/funcutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/paramtable/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/retry/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/trace/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/importutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datanode/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexnode/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast;;
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/rootcoord" -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/datacoord" -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querycoord" -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/rootcoord" -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datacoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexcoord/..." -failfast
 
 echo " Go unittest finished"
