@@ -40,7 +40,7 @@ type channelEventManager struct {
 	eventChan         chan event
 	closeChan         chan struct{}
 	handlePutEvent    func(watchInfo *datapb.ChannelWatchInfo, version int64) error // node.handlePutEvent
-	handleDeleteEvent func(vChanName string)                                        // node.handleDeleteEvent
+	handleDeleteEvent func(vChanName string) bool                                   // node.handleDeleteEvent
 	retryInterval     time.Duration
 }
 
@@ -50,7 +50,7 @@ const (
 )
 
 func newChannelEventManager(handlePut func(*datapb.ChannelWatchInfo, int64) error,
-	handleDel func(string), retryInterval time.Duration) *channelEventManager {
+	handleDel func(string) bool, retryInterval time.Duration) *channelEventManager {
 	return &channelEventManager{
 		eventChan:         make(chan event, 10),
 		closeChan:         make(chan struct{}),
