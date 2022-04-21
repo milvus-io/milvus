@@ -382,7 +382,7 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 	if len(searchPartitionIDs) > 0 {
 		resp, err := t.qc.ShowPartitions(t.ctx, &querypb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgType:   commonpb.MsgType_ShowPartitions,
 				MsgID:     t.Base.MsgID,
 				Timestamp: t.Base.Timestamp,
 				SourceID:  Params.ProxyCfg.ProxyID,
@@ -438,6 +438,10 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 	loaded := false
 	for index, collID := range resp.CollectionIDs {
 		if collID == collectionID && resp.GetInMemoryPercentages()[index] >= int64(100) {
+			log.Debug("collection is loaded and ready to query",
+				zap.Int64("collectionID", collectionID),
+				zap.String("collectionName", t.collectionName),
+				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "query"))
 			loaded = true
 			break
 		}
@@ -446,7 +450,7 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 	if !loaded {
 		resp, err := t.qc.ShowPartitions(t.ctx, &querypb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
+				MsgType:   commonpb.MsgType_ShowPartitions,
 				MsgID:     t.Base.MsgID,
 				Timestamp: t.Base.Timestamp,
 				SourceID:  Params.ProxyCfg.ProxyID,
@@ -471,7 +475,9 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 		}
 
 		if len(resp.GetPartitionIDs()) > 0 {
-			log.Warn("collection not fully loaded, search on these partitions", zap.Int64s("partitionIDs", resp.GetPartitionIDs()))
+			log.Warn("collection not fully loaded, search on these partitions",
+				zap.Int64s("partitionIDs", resp.GetPartitionIDs()),
+				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"))
 			return true
 		}
 	}
