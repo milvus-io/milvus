@@ -65,7 +65,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-create"
 
 	testPath := "/test/datanode/root/meta"
-	err := clearEtcd(testPath)
+	err := clearEtcd(t, testPath)
 	require.NoError(t, err)
 	Params.EtcdCfg.MetaRootPath = testPath
 
@@ -151,7 +151,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
 	defer cm.RemoveWithPrefix("")
 	testPath := "/test/datanode/root/meta"
-	err := clearEtcd(testPath)
+	err := clearEtcd(t, testPath)
 	require.NoError(t, err)
 	Params.EtcdCfg.MetaRootPath = testPath
 
@@ -346,7 +346,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	defer cancel()
 
 	testPath := "/test/datanode/root/meta"
-	err := clearEtcd(testPath)
+	err := clearEtcd(t, testPath)
 	require.NoError(t, err)
 	Params.EtcdCfg.MetaRootPath = testPath
 
@@ -617,7 +617,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
 
 	testPath := "/test/datanode/root/meta"
-	err := clearEtcd(testPath)
+	err := clearEtcd(t, testPath)
 	require.NoError(t, err)
 	Params.EtcdCfg.MetaRootPath = testPath
 

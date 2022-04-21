@@ -510,8 +510,7 @@ func TestRootCoordInit(t *testing.T) {
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	core, err := NewCore(ctx, coreFactory)
@@ -655,8 +654,7 @@ func TestRootCoord_Base(t *testing.T) {
 	Params.CommonCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
 	Params.CommonCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
@@ -2068,7 +2066,7 @@ func TestRootCoord_Base(t *testing.T) {
 		p2 := sessionutil.Session{
 			ServerID: 101,
 		}
-		ctx2, cancel2 := context.WithTimeout(ctx, RequestTimeout)
+		ctx2, cancel2 := context.WithTimeout(ctx, etcdkv.RequestTimeout)
 		defer cancel2()
 		s1, err := json.Marshal(&p1)
 		assert.NoError(t, err)
@@ -2622,8 +2620,7 @@ func TestRootCoord2(t *testing.T) {
 	core, err := NewCore(ctx, msFactory)
 	assert.NoError(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	randVal := rand.Int()
@@ -2935,8 +2932,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 		return nil, nil
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	core.SetEtcdClient(etcdCli)
 	err = core.Init()
@@ -3090,8 +3086,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 		return nil, nil
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	core.SetEtcdClient(etcdCli)

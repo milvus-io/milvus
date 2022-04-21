@@ -151,13 +151,14 @@ func (s *Server) init() error {
 		return err
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&indexnode.Params.EtcdCfg)
-	if err != nil {
-		log.Debug("IndexNode connect to etcd failed", zap.Error(err))
-		return err
+	if s.etcdCli == nil {
+		etcdCli, err := etcd.GetEtcdClient(&indexnode.Params.EtcdCfg)
+		if err != nil {
+			log.Debug("IndexNode connect to etcd failed", zap.Error(err))
+			return err
+		}
+		s.SetEtcdClient(etcdCli)
 	}
-	s.etcdCli = etcdCli
-	s.indexnode.SetEtcdClient(etcdCli)
 	err = s.indexnode.Init()
 	if err != nil {
 		log.Error("IndexNode Init failed", zap.Error(err))
@@ -214,6 +215,7 @@ func (s *Server) SetClient(indexNodeClient types.IndexNodeComponent) error {
 
 // SetEtcdClient sets the etcd client for QueryNode component.
 func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
+	s.etcdCli = etcdCli
 	s.indexnode.SetEtcdClient(etcdCli)
 }
 

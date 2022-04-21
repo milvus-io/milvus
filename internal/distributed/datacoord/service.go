@@ -89,15 +89,16 @@ func (s *Server) init() error {
 	datacoord.Params.DataCoordCfg.Port = Params.Port
 	datacoord.Params.DataCoordCfg.Address = Params.GetAddress()
 
-	etcdCli, err := etcd.GetEtcdClient(&datacoord.Params.EtcdCfg)
-	if err != nil {
-		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
-		return err
+	if s.etcdCli == nil {
+		etcdCli, err := etcd.GetEtcdClient(&datacoord.Params.EtcdCfg)
+		if err != nil {
+			log.Debug("DataCoord connect to etcd failed", zap.Error(err))
+			return err
+		}
+		s.SetEtcdClient(etcdCli)
 	}
-	s.etcdCli = etcdCli
-	s.dataCoord.SetEtcdClient(etcdCli)
 
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		log.Debug("DataCoord startGrpc failed", zap.Error(err))
 		return err
@@ -214,6 +215,12 @@ func (s *Server) Run() error {
 	}
 	log.Debug("DataCoord start done ...")
 	return nil
+}
+
+// SetEtcdClient sets the etcd client for Daatacoord component.
+func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
+	s.etcdCli = etcdCli
+	s.dataCoord.SetEtcdClient(etcdCli)
 }
 
 // GetComponentStates gets states of datacoord and datanodes

@@ -477,7 +477,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	nq := int64(10)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
@@ -874,7 +874,7 @@ func TestSegment_indexInfo(t *testing.T) {
 	defer cancel()
 
 	tSafe := newTSafeReplica()
-	h, err := genSimpleHistorical(ctx, tSafe)
+	h, err := genSimpleHistorical(ctx, tSafe, t)
 	assert.NoError(t, err)
 
 	seg, err := h.replica.getSegmentByID(defaultSegmentID)
@@ -1504,7 +1504,7 @@ func Test_fillFieldData(t *testing.T) {
 
 func TestUpdateBloomFilter(t *testing.T) {
 	t.Run("test int64 pk", func(t *testing.T) {
-		historical, err := genSimpleReplica()
+		historical, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -1528,7 +1528,7 @@ func TestUpdateBloomFilter(t *testing.T) {
 		}
 	})
 	t.Run("test string pk", func(t *testing.T) {
-		historical, err := genSimpleReplica()
+		historical, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,

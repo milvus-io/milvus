@@ -134,6 +134,12 @@ func (s *Server) setClient() {
 	}
 }
 
+// Set etcdclient sets etcd client for rootcoord
+func (s *Server) SetEtcdClient(etcdClient *clientv3.Client) {
+	s.etcdCli = etcdClient
+	s.rootCoord.SetEtcdClient(etcdClient)
+}
+
 // Run initializes and starts RootCoord's grpc service.
 func (s *Server) Run() error {
 	if err := s.init(); err != nil {
@@ -159,16 +165,17 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("root_coord")
 	s.closer = closer
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		log.Debug("RootCoord connect to etcd failed", zap.Error(err))
-		return err
+	if s.etcdCli == nil {
+		etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+		if err != nil {
+			log.Debug("RootCoord connect to etcd failed", zap.Error(err))
+			return err
+		}
+		s.SetEtcdClient(etcdCli)
 	}
-	s.etcdCli = etcdCli
-	s.rootCoord.SetEtcdClient(s.etcdCli)
 	log.Debug("etcd connect done ...")
 
-	err = s.startGrpc(Params.Port)
+	err := s.startGrpc(Params.Port)
 	if err != nil {
 		return err
 	}

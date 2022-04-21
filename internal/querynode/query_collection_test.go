@@ -42,18 +42,19 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*queryCollection, error) {
+func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc, t testutil.TB) (*queryCollection, error) {
 	tSafe := newTSafeReplica()
-	historical, err := genSimpleHistorical(ctx, tSafe)
+	historical, err := genSimpleHistorical(ctx, tSafe, t)
 	if err != nil {
 		return nil, err
 	}
 
-	streaming, err := genSimpleStreaming(ctx, tSafe)
+	streaming, err := genSimpleStreaming(ctx, tSafe, t)
 	if err != nil {
 		return nil, err
 	}
@@ -123,9 +124,9 @@ func updateTSafe(queryCollection *queryCollection, timestamp Timestamp) error {
 
 func TestQueryCollection_withoutVChannel(t *testing.T) {
 	ctx := context.Background()
+
 	factory := dependency.NewDefaultFactory(true)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
@@ -137,7 +138,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 
 	//add a segment to historical data
 	historical.replica.addCollection(0, schema)
-	err = historical.replica.addPartition(0, 1)
+	err := historical.replica.addPartition(0, 1)
 	assert.Nil(t, err)
 	err = historical.replica.addSegment(2, 1, 0, "testChannel", segmentTypeSealed, true)
 	assert.Nil(t, err)
@@ -241,7 +242,7 @@ func TestQueryCollection_withoutVChannel(t *testing.T) {
 func TestQueryCollection_unsolvedMsg(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 	assert.NoError(t, err)
 
 	qm, err := genSimpleSearchMsg(IndexFaissIDMap)
@@ -258,7 +259,7 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	runConsumeQuery := func(msg msgstream.TsMsg) {
-		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.NoError(t, err)
 
 		queryChannel := genQueryChannel()
@@ -475,7 +476,7 @@ func TestQueryCollection_TranslateHits(t *testing.T) {
 func TestQueryCollection_serviceableTime(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 	assert.NoError(t, err)
 
 	st := Timestamp(1000)
@@ -490,7 +491,7 @@ func TestQueryCollection_serviceableTime(t *testing.T) {
 func TestQueryCollection_tSafeWatcher(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 	assert.NoError(t, err)
 
 	err = queryCollection.addTSafeWatcher(defaultDMLChannel)
@@ -507,7 +508,7 @@ func TestQueryCollection_tSafeWatcher(t *testing.T) {
 func TestQueryCollection_waitNewTSafe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 	assert.NoError(t, err)
 
 	timestamp := Timestamp(1000)
@@ -574,7 +575,7 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	t.Run("test doUnsolvedQueryMsg", func(t *testing.T) {
-		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.NoError(t, err)
 
 		sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
@@ -598,7 +599,7 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 	})
 
 	t.Run("test doUnsolvedQueryMsg timeout", func(t *testing.T) {
-		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.NoError(t, err)
 
 		sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
@@ -626,7 +627,7 @@ func TestQueryCollection_doUnsolvedQueryMsg(t *testing.T) {
 func TestQueryCollection_search(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 	assert.NoError(t, err)
 
 	// queryChannel := genQueryChannel()
@@ -655,7 +656,7 @@ func TestQueryCollection_search(t *testing.T) {
 func TestQueryCollection_retrieve(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+	queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 	assert.NoError(t, err)
 
 	// queryChannel := genQueryChannel()
@@ -682,7 +683,7 @@ func TestQueryCollection_retrieve(t *testing.T) {
 
 func TestQueryCollection_AddPopUnsolvedMsg(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
-	qCollection, err := genSimpleQueryCollection(ctx, cancel)
+	qCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 	assert.Nil(t, err)
 	var i int64
 	for i = 0; i < 3; i++ {
@@ -719,7 +720,7 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test adjustByChangeInfo", func(t *testing.T) {
 		defer wg.Done()
-		qc, err := genSimpleQueryCollection(ctx, cancel)
+		qc, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.Nil(t, err)
 
 		segmentChangeInfos := genSimpleSealedSegmentsChangeInfoMsg()
@@ -741,7 +742,7 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test mismatch collectionID when adjustByChangeInfo", func(t *testing.T) {
 		defer wg.Done()
-		qc, err := genSimpleQueryCollection(ctx, cancel)
+		qc, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.Nil(t, err)
 
 		segmentChangeInfos := genSimpleSealedSegmentsChangeInfoMsg()
@@ -756,7 +757,7 @@ func TestQueryCollection_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test no segment when adjustByChangeInfo", func(t *testing.T) {
 		defer wg.Done()
-		qc, err := genSimpleQueryCollection(ctx, cancel)
+		qc, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.Nil(t, err)
 
 		err = qc.historical.replica.removeSegment(defaultSegmentID)
@@ -778,7 +779,7 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 	wgAll.Add(1)
 	t.Run("test search while release collection", func(t *testing.T) {
 		defer wgAll.Done()
-		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.NoError(t, err)
 
 		// queryChannel := genQueryChannel()
@@ -823,7 +824,7 @@ func TestQueryCollection_search_while_release(t *testing.T) {
 	wgAll.Add(1)
 	t.Run("test search while release partition", func(t *testing.T) {
 		defer wgAll.Done()
-		queryCollection, err := genSimpleQueryCollection(ctx, cancel)
+		queryCollection, err := genSimpleQueryCollection(ctx, cancel, t)
 		assert.NoError(t, err)
 
 		// queryChannel := genQueryChannel()

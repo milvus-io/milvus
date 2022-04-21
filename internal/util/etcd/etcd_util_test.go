@@ -18,7 +18,6 @@ package etcd
 
 import (
 	"context"
-	"os"
 	"path"
 	"testing"
 
@@ -30,18 +29,9 @@ var Params paramtable.ServiceParam
 
 func TestEtcd(t *testing.T) {
 	Params.Init()
-	Params.EtcdCfg.UseEmbedEtcd = true
-	Params.EtcdCfg.DataDir = "/tmp/data"
-	err := InitEtcdServer(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	defer os.RemoveAll(Params.EtcdCfg.DataDir)
-	defer StopEtcdServer()
-
-	etcdCli, err := GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-
+	etcdCli := GetEtcdTestClient(t)
 	key := path.Join("test", "test")
-	_, err = etcdCli.Put(context.TODO(), key, "value")
+	_, err := etcdCli.Put(context.TODO(), key, "value")
 	assert.NoError(t, err)
 
 	resp, err := etcdCli.Get(context.TODO(), key)

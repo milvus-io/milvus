@@ -33,13 +33,12 @@ func TestFlowGraphManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 	node.SetEtcdClient(etcdCli)
-	err = node.Init()
+	err := node.Init()
 	require.Nil(t, err)
 	err = node.Start()
 	require.Nil(t, err)

@@ -22,6 +22,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"testing"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -110,12 +111,9 @@ func (qs *queryNodeServerMock) setRPCInterface(interfacePointer *rpcHandler, new
 	*interfacePointer = newhandler
 }
 
-func (qs *queryNodeServerMock) Register() error {
+func (qs *queryNodeServerMock) Register(t *testing.T) error {
 	log.Debug("query node session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath))
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		return err
-	}
+	etcdCli := etcd.GetEtcdTestClient(t)
 	qs.session = sessionutil.NewSession(qs.ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
 	qs.session.Init(typeutil.QueryNodeRole, qs.queryNodeIP+":"+strconv.FormatInt(qs.queryNodePort, 10), false, false)
 	qs.queryNodeID = qs.session.ServerID
@@ -126,7 +124,7 @@ func (qs *queryNodeServerMock) Register() error {
 	return nil
 }
 
-func (qs *queryNodeServerMock) init() error {
+func (qs *queryNodeServerMock) init(t *testing.T) error {
 	qs.queryNodeIP = funcutil.GetLocalIP()
 	grpcPort := Params.QueryCoordCfg.Port
 
@@ -161,7 +159,7 @@ func (qs *queryNodeServerMock) init() error {
 		return err
 	}
 
-	if err := qs.Register(); err != nil {
+	if err := qs.Register(t); err != nil {
 		return err
 	}
 
@@ -181,8 +179,8 @@ func (qs *queryNodeServerMock) stop() error {
 	return nil
 }
 
-func (qs *queryNodeServerMock) run() error {
-	if err := qs.init(); err != nil {
+func (qs *queryNodeServerMock) run(t *testing.T) error {
+	if err := qs.init(t); err != nil {
 		return err
 	}
 
@@ -308,9 +306,9 @@ func (qs *queryNodeServerMock) GetMetrics(ctx context.Context, req *milvuspb.Get
 	return response, nil
 }
 
-func startQueryNodeServer(ctx context.Context) (*queryNodeServerMock, error) {
+func startQueryNodeServer(ctx context.Context, t *testing.T) (*queryNodeServerMock, error) {
 	node := newQueryNodeServerMock(ctx)
-	err := node.run()
+	err := node.run(t)
 	if err != nil {
 		return nil, err
 	}

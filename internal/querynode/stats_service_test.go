@@ -28,7 +28,7 @@ import (
 
 // NOTE: start pulsar before test
 func TestStatsService_start(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	initTestMeta(t, node, 0, 0)
 
 	factory := dependency.NewDefaultFactory(true)
@@ -42,7 +42,7 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	const receiveBufSize = 1024

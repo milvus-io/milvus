@@ -509,7 +509,7 @@ func (node *QueryNode) waitChangeInfo(segmentChangeInfos *querypb.SealedSegments
 		return nil
 	}
 
-	return retry.Do(node.queryNodeLoopCtx, fn, retry.Attempts(50))
+	return retry.Do(node.queryNodeLoopCtx, fn, retry.Attempts(10))
 }
 
 // remove the segments since it's already compacted or balanced to other QueryNodes

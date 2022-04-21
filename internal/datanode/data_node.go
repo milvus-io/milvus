@@ -73,9 +73,6 @@ const (
 
 	// MetricRequestsSuccess is used to count the num of successful requests
 	MetricRequestsSuccess = "success"
-
-	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
-	ConnectEtcdMaxRetryTime = 1000
 )
 
 const illegalRequestErrStr = "Illegal request"
@@ -451,15 +448,8 @@ func (node *DataNode) Start() error {
 		return err
 	}
 
-	connectEtcdFn := func() error {
-		etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
-		node.watchKv = etcdKV
-		return nil
-	}
-	err = retry.Do(node.ctx, connectEtcdFn, retry.Attempts(ConnectEtcdMaxRetryTime))
-	if err != nil {
-		return errors.New("DataNode fail to connect etcd")
-	}
+	etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
+	node.watchKv = etcdKV
 
 	chunkManager, err := node.factory.NewVectorStorageChunkManager(node.ctx)
 
@@ -472,6 +462,7 @@ func (node *DataNode) Start() error {
 	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
 		return errors.New("DataNode fail to start")
 	}
+	log.Info("connect to minio successfully")
 
 	FilterThreshold = rep.GetTimestamp()
 
@@ -486,6 +477,7 @@ func (node *DataNode) Start() error {
 	Params.DataNodeCfg.UpdatedTime = time.Now()
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Info("Datacoord init successfully", zap.Any("nodeId", node.NodeID))
 	return nil
 }
 

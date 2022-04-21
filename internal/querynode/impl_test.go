@@ -39,7 +39,7 @@ import (
 func TestImpl_GetComponentStates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	node.session.UpdateRegistered(true)
@@ -63,7 +63,7 @@ func TestImpl_GetComponentStates(t *testing.T) {
 func TestImpl_GetTimeTickChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	rsp, err := node.GetTimeTickChannel(ctx)
@@ -74,7 +74,7 @@ func TestImpl_GetTimeTickChannel(t *testing.T) {
 func TestImpl_GetStatisticsChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	rsp, err := node.GetStatisticsChannel(ctx)
@@ -85,7 +85,7 @@ func TestImpl_GetStatisticsChannel(t *testing.T) {
 func TestImpl_AddQueryChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	req := &queryPb.AddQueryChannelRequest{
@@ -112,7 +112,7 @@ func TestImpl_AddQueryChannel(t *testing.T) {
 func TestImpl_RemoveQueryChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	status, err := node.RemoveQueryChannel(ctx, nil)
@@ -123,7 +123,7 @@ func TestImpl_RemoveQueryChannel(t *testing.T) {
 func TestImpl_WatchDmChannels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	schema := genSimpleSegCoreSchema()
@@ -152,7 +152,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 func TestImpl_LoadSegments(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	schema := genSimpleSegCoreSchema()
@@ -179,7 +179,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 func TestImpl_ReleaseCollection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	req := &queryPb.ReleaseCollectionRequest{
@@ -204,7 +204,7 @@ func TestImpl_ReleaseCollection(t *testing.T) {
 func TestImpl_ReleasePartitions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	req := &queryPb.ReleasePartitionsRequest{
@@ -232,7 +232,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	defer cancel()
 
 	t.Run("test GetSegmentInfo", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -261,7 +261,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test no collection in historical", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.historical.replica.removeCollection(defaultCollectionID)
@@ -282,7 +282,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test no collection in streaming", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.streaming.replica.removeCollection(defaultCollectionID)
@@ -303,7 +303,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test different segment type", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -335,7 +335,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test GetSegmentInfo with indexed segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		seg, err := node.historical.replica.getSegmentByID(defaultSegmentID)
@@ -369,7 +369,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test GetSegmentInfo without streaming partition", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -388,7 +388,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test GetSegmentInfo without streaming segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -407,7 +407,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test GetSegmentInfo without historical partition", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -426,7 +426,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 
 	t.Run("test GetSegmentInfo without historical segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -448,7 +448,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 func TestImpl_isHealthy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	isHealthy := node.isHealthy()
@@ -459,15 +459,14 @@ func TestImpl_GetMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	t.Run("test GetMetrics", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
 
@@ -491,7 +490,7 @@ func TestImpl_GetMetrics(t *testing.T) {
 	wg.Add(1)
 	t.Run("test ParseMetricType failed", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &milvuspb.GetMetricsRequest{
@@ -519,7 +518,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 	wg.Add(1)
 	t.Run("test valid", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
@@ -536,7 +535,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 	wg.Add(1)
 	t.Run("test invalid query node", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
@@ -554,7 +553,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 	wg.Add(1)
 	t.Run("test segment not exists", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
@@ -581,7 +580,7 @@ func TestImpl_Search(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	require.NoError(t, err)
 
 	req, err := genSimpleSearchRequest(IndexFaissIDMap)
@@ -600,7 +599,7 @@ func TestImpl_Query(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	require.NoError(t, err)
 
 	req, err := genSimpleRetrieveRequest()

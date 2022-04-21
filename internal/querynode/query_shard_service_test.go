@@ -25,7 +25,7 @@ import (
 )
 
 func TestQueryShardService(t *testing.T) {
-	qn, err := genSimpleQueryNode(context.Background())
+	qn, err := genSimpleQueryNode(context.Background(), t)
 	require.NoError(t, err)
 
 	qss := newQueryShardService(context.Background(), qn.historical, qn.streaming, qn.ShardClusterService, qn.factory)

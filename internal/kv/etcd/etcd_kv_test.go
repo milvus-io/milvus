@@ -40,9 +40,9 @@ func TestMain(m *testing.M) {
 }
 
 func TestEtcdKV_Load(te *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(te)
 	defer etcdCli.Close()
-	assert.NoError(te, err)
+	var err error
 	te.Run("EtcdKV SaveAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandload"
 		etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)

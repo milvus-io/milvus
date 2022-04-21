@@ -70,10 +70,9 @@ func TestIndexNode(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	in.SetEtcdClient(etcdCli)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
+	in.SetEtcdClient(etcdCli)
 
 	err = in.Init()
 	assert.Nil(t, err)
@@ -485,10 +484,9 @@ func TestCreateIndexFailed(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	in.SetEtcdClient(etcdCli)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
+	in.SetEtcdClient(etcdCli)
 
 	err = in.Init()
 	assert.Nil(t, err)
@@ -759,10 +757,9 @@ func TestIndexNode_Error(t *testing.T) {
 	assert.Nil(t, err)
 	Params.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	in.SetEtcdClient(etcdCli)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
+	in.SetEtcdClient(etcdCli)
 
 	err = in.Init()
 	assert.Nil(t, err)

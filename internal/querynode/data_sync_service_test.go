@@ -27,10 +27,10 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streamingReplica, err := genSimpleReplica()
+	streamingReplica, err := genSimpleReplica(t)
 	assert.NoError(t, err)
 
-	historicalReplica, err := genSimpleReplica()
+	historicalReplica, err := genSimpleReplica(t)
 	assert.NoError(t, err)
 
 	fac := genFactory()
@@ -81,10 +81,10 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streamingReplica, err := genSimpleReplica()
+	streamingReplica, err := genSimpleReplica(t)
 	assert.NoError(t, err)
 
-	historicalReplica, err := genSimpleReplica()
+	historicalReplica, err := genSimpleReplica(t)
 	assert.NoError(t, err)
 
 	fac := genFactory()

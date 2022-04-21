@@ -150,6 +150,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 }
 
 func (s *Server) SetEtcdClient(client *clientv3.Client) {
+	s.etcdCli = client
 	s.datanode.SetEtcdClient(client)
 }
 
@@ -226,19 +227,20 @@ func (s *Server) init() error {
 	dn.Params.DataNodeCfg.Port = Params.Port
 	dn.Params.DataNodeCfg.IP = Params.IP
 
-	etcdCli, err := etcd.GetEtcdClient(&dn.Params.EtcdCfg)
-	if err != nil {
-		log.Debug("DataNode connect to etcd failed", zap.Error(err))
-		return err
+	if s.etcdCli == nil {
+		etcdCli, err := etcd.GetEtcdClient(&dn.Params.EtcdCfg)
+		if err != nil {
+			log.Debug("DataNode connect to etcd failed", zap.Error(err))
+			return err
+		}
+		s.SetEtcdClient(etcdCli)
 	}
-	s.etcdCli = etcdCli
-	s.SetEtcdClient(s.etcdCli)
 	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))
 
-	err = s.startGrpc()
+	err := s.startGrpc()
 	if err != nil {
 		return err
 	}

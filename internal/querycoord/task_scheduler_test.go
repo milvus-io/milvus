@@ -168,11 +168,11 @@ func (tt *testTask) postExecute(ctx context.Context) error {
 func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	refreshParams()
 	baseCtx := context.Background()
-	queryCoord, err := startQueryCoord(baseCtx)
+	queryCoord, err := startQueryCoord(baseCtx, t)
 	assert.Nil(t, err)
 	activeTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
 	assert.Nil(t, err)
-	queryNode, err := startQueryNodeServer(baseCtx)
+	queryNode, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	queryNode.addQueryChannels = returnFailedResult
 
@@ -194,7 +194,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	queryCoord.scheduler.Enqueue(testTask)
 
 	queryNode.stop()
-	err = removeNodeSession(queryNode.queryNodeID)
+	err = removeNodeSession(queryNode.queryNodeID, t)
 	assert.Nil(t, err)
 	for {
 		newActiveTaskIDKeys, _, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
@@ -204,14 +204,13 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 		}
 	}
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestUnMarshalTask(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	baseCtx, cancel := context.WithCancel(context.Background())
@@ -459,11 +458,9 @@ func TestUnMarshalTask(t *testing.T) {
 
 func TestReloadTaskFromKV(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	assert.Nil(t, err)
 	baseCtx, cancel := context.WithCancel(context.Background())
 	taskScheduler := &TaskScheduler{
 		ctx:              baseCtx,
@@ -515,7 +512,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 func Test_saveInternalTaskToEtcd(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 	defer queryCoord.Stop()
 
@@ -552,9 +549,9 @@ func Test_saveInternalTaskToEtcd(t *testing.T) {
 func Test_generateDerivedInternalTasks(t *testing.T) {
 	refreshParams()
 	baseCtx := context.Background()
-	queryCoord, err := startQueryCoord(baseCtx)
+	queryCoord, err := startQueryCoord(baseCtx, t)
 	assert.Nil(t, err)
-	node1, err := startQueryNodeServer(baseCtx)
+	node1, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -581,6 +578,6 @@ func Test_generateDerivedInternalTasks(t *testing.T) {
 	}
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }

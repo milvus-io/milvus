@@ -24,14 +24,18 @@ import (
 
 	kvi "github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"go.uber.org/zap"
 )
 
 const (
+	//TODO make etcd configurable
 	// RequestTimeout is default timeout for etcd request.
 	RequestTimeout = 10 * time.Second
+	// retry of etcd
+	DefaultRetry = 20
 )
 
 // EtcdKV implements TxnKV interface, it supports to process multiple kvs in a transaction.
@@ -65,8 +69,18 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key, clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -86,8 +100,19 @@ func (kv *EtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key, clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -107,8 +132,19 @@ func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, erro
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key, clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -130,11 +166,23 @@ func (kv *EtcdKV) LoadBytesWithPrefix2(key string) ([]string, [][]byte, []int64,
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key, clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
 	keys := make([]string, 0, resp.Count)
 	values := make([][]byte, 0, resp.Count)
 	versions := make([]int64, 0, resp.Count)
@@ -153,10 +201,22 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key)
+
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key)
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return "", err
 	}
+
 	if resp.Count <= 0 {
 		return "", fmt.Errorf("there is no value on key = %s", key)
 	}
@@ -170,10 +230,21 @@ func (kv *EtcdKV) LoadBytes(key string) ([]byte, error) {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key)
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key)
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return []byte{}, err
 	}
+
 	if resp.Count <= 0 {
 		return []byte{}, fmt.Errorf("there is no value on key = %s", key)
 	}
@@ -191,7 +262,18 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+
+	var resp *clientv3.TxnResponse
+	txnFunc := func() error {
+		var errTxn error
+		resp, errTxn = kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return []string{}, err
 	}
@@ -226,11 +308,20 @@ func (kv *EtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	var resp *clientv3.TxnResponse
+	txnFunc := func() error {
+		var errTxn error
+		resp, errTxn = kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return [][]byte{}, err
 	}
-
 	result := make([][]byte, 0, len(keys))
 	invalid := make([]string, 0, len(keys))
 	for index, rp := range resp.Responses {
@@ -257,11 +348,23 @@ func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key, clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
 	keys := make([]string, 0, resp.Count)
 	values := make([]string, 0, resp.Count)
 	for _, kv := range resp.Kvs {
@@ -278,11 +381,22 @@ func (kv *EtcdKV) LoadBytesWithRevision(key string) ([]string, [][]byte, int64, 
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = kv.client.Get(ctx, key, clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return nil, nil, 0, err
 	}
+
 	keys := make([]string, 0, resp.Count)
 	values := make([][]byte, 0, resp.Count)
 	for _, kv := range resp.Kvs {
@@ -299,7 +413,19 @@ func (kv *EtcdKV) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	_, err := kv.client.Put(ctx, key, value)
+	putFunc := func() error {
+		_, errPut := kv.client.Put(ctx, key, value)
+		if errPut != nil {
+			return errPut
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, putFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation save")
 	return err
 }
@@ -310,7 +436,19 @@ func (kv *EtcdKV) SaveBytes(key string, value []byte) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	_, err := kv.client.Put(ctx, key, string(value))
+
+	putFunc := func() error {
+		_, errPut := kv.client.Put(ctx, key, string(value))
+		if errPut != nil {
+			return errPut
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, putFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation save")
 	return err
 }
@@ -322,7 +460,19 @@ func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithLease(id))
+
+	putFunc := func() error {
+		_, errPut := kv.client.Put(ctx, key, value, clientv3.WithLease(id))
+		if errPut != nil {
+			return errPut
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, putFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation save with lease")
 	return err
 }
@@ -345,7 +495,20 @@ func (kv *EtcdKV) SaveBytesWithLease(key string, value []byte, id clientv3.Lease
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	_, err := kv.client.Put(ctx, key, string(value), clientv3.WithLease(id))
+
+	putFunc := func() error {
+		_, errPut := kv.client.Put(ctx, key, string(value), clientv3.WithLease(id))
+		if errPut != nil {
+			return errPut
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, putFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation save with lease")
 	return err
 }
@@ -357,11 +520,22 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	for key, value := range kvs {
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
-
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errPut := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errPut != nil {
+			return errPut
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation multi save")
 	return err
 }
@@ -377,7 +551,19 @@ func (kv *EtcdKV) MultiSaveBytes(kvs map[string][]byte) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errPut := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errPut != nil {
+			return errPut
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation multi save")
 	return err
 }
@@ -389,7 +575,19 @@ func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Delete(ctx, key, clientv3.WithPrefix())
+	delFunc := func() error {
+		_, errDel := kv.client.Delete(ctx, key, clientv3.WithPrefix())
+		if errDel != nil {
+			return errDel
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, delFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation remove with prefix")
 	return err
 }
@@ -400,8 +598,18 @@ func (kv *EtcdKV) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
+	delFunc := func() error {
+		_, errDel := kv.client.Delete(ctx, key, clientv3.WithPrefix())
+		if errDel != nil {
+			return errDel
+		}
+		return nil
+	}
 
-	_, err := kv.client.Delete(ctx, key)
+	err := retry.Do(ctx, delFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation remove")
 	return err
 }
@@ -417,7 +625,19 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errDel := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errDel != nil {
+			return errDel
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation multi remove")
 	return err
 }
@@ -437,7 +657,19 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errTxn := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and remove")
 	return err
 }
@@ -457,7 +689,18 @@ func (kv *EtcdKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []st
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errTxn := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and remove")
 	return err
 }
@@ -500,7 +743,19 @@ func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errTxn := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation multi remove with prefix")
 	return err
 }
@@ -520,7 +775,19 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errTxn := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and move with prefix")
 	return err
 }
@@ -540,15 +807,44 @@ func (kv *EtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, rem
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	txnFunc := func() error {
+		_, errTxn := kv.client.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and move with prefix")
 	return err
 }
 
 // Grant creates a new lease implemented in etcd grant interface.
-func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
+func (kv *EtcdKV) Grant(ttl int64) (clientv3.LeaseID, error) {
 	start := time.Now()
-	resp, err := kv.client.Grant(context.Background(), ttl)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	var resp *clientv3.LeaseGrantResponse
+	grantFunc := func() error {
+		var errGrant error
+		resp, errGrant = kv.client.Grant(context.Background(), ttl)
+		if errGrant != nil {
+			return errGrant
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, grantFunc, retry.Attempts(DefaultRetry))
+	if err != nil {
+		return -1, err
+	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation grant")
 	return resp.ID, err
 }
@@ -557,10 +853,24 @@ func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
 // Implemented in etcd interface.
 func (kv *EtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	start := time.Now()
-	ch, err := kv.client.KeepAlive(context.Background(), id)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	var ch <-chan *clientv3.LeaseKeepAliveResponse
+	grantFunc := func() error {
+		var errKeepAlvie error
+		ch, errKeepAlvie = kv.client.KeepAlive(context.Background(), id)
+		if errKeepAlvie != nil {
+			return errKeepAlvie
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, grantFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return nil, err
 	}
+
 	CheckElapseAndWarn(start, "Slow etcd operation keepAlive")
 	return ch, nil
 }
@@ -571,15 +881,27 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			value)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
+
+	var resp *clientv3.TxnResponse
+	txnFunc := func() error {
+		var errTxn error
+		resp, errTxn = kv.client.Txn(ctx).If(
+			clientv3.Compare(
+				clientv3.Value(path.Join(kv.rootPath, key)),
+				"=",
+				value)).
+			Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return err
 	}
+
 	if !resp.Succeeded {
 		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key))
 	}
@@ -590,23 +912,7 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv
 // CompareValueAndSwapBytes compares the existing value with compare, and if they are
 // equal, the target is stored in etcd.
 func (kv *EtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opts ...clientv3.OpOption) error {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			string(value))).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
-	if err != nil {
-		return err
-	}
-	if !resp.Succeeded {
-		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key))
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare value and swap")
-	return nil
+	return kv.CompareValueAndSwap(key, string(value), string(target), opts...)
 }
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
@@ -615,12 +921,23 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string,
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Version(path.Join(kv.rootPath, key)),
-			"=",
-			source)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
+
+	var resp *clientv3.TxnResponse
+	txnFunc := func() error {
+		var errTxn error
+		resp, errTxn = kv.client.Txn(ctx).If(
+			clientv3.Compare(
+				clientv3.Version(path.Join(kv.rootPath, key)),
+				"=",
+				source)).
+			Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, txnFunc, retry.Attempts(DefaultRetry))
 	if err != nil {
 		return err
 	}
@@ -635,24 +952,7 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string,
 // CompareVersionAndSwapBytes compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
 func (kv *EtcdKV) CompareVersionAndSwapBytes(key string, source int64, target []byte, opts ...clientv3.OpOption) error {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Version(path.Join(kv.rootPath, key)),
-			"=",
-			source)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
-	if err != nil {
-		return err
-	}
-	if !resp.Succeeded {
-		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s,"+
-			" source version: %d, target version: %s", key, source, target))
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation compare version and swap")
-	return nil
+	return kv.CompareVersionAndSwap(key, source, string(target), opts...)
 }
 
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.

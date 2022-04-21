@@ -263,8 +263,7 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	require.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	defer etcdkv.Close()
@@ -315,8 +314,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	require.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
 	defer etcdkv.Close()
@@ -391,11 +389,9 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	require.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	require.Nil(t, err)
 	defer etcdkv.Close()
 
 	var vtso typeutil.Timestamp

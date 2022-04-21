@@ -19,7 +19,6 @@ package distributed
 import (
 	"context"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +42,7 @@ func TestConnectionManager(t *testing.T) {
 	Params.Init()
 	ctx := context.Background()
 
-	session := initSession(ctx)
+	session := initSession(ctx, t)
 	cm := NewConnectionManager(session)
 	cm.AddDependency(typeutil.RootCoordRole)
 	cm.AddDependency(typeutil.QueryCoordRole)
@@ -231,7 +230,7 @@ type testIndexNode struct {
 	indexpb.IndexNodeServer
 }
 
-func initSession(ctx context.Context) *sessionutil.Session {
+func initSession(ctx context.Context, t *testing.T) *sessionutil.Session {
 	rootPath, err := Params.Load("etcd.rootPath")
 	if err != nil {
 		panic(err)
@@ -242,19 +241,9 @@ func initSession(ctx context.Context) *sessionutil.Session {
 	}
 	metaRootPath := rootPath + "/" + subPath
 
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-	etcdEndpoints := strings.Split(endpoints, ",")
-
 	log.Debug("metaRootPath", zap.Any("metaRootPath", metaRootPath))
-	log.Debug("etcdPoints", zap.Any("etcdPoints", etcdEndpoints))
 
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	if err != nil {
-		panic(err)
-	}
+	etcdCli := etcd.GetEtcdTestClient(t)
 	session := sessionutil.NewSession(ctx, metaRootPath, etcdCli)
 	return session
 }

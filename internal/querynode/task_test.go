@@ -71,7 +71,7 @@ func TestTask_AddQueryChannel(t *testing.T) {
 	})
 
 	t.Run("test execute", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := addQueryChannelTask{
@@ -83,7 +83,7 @@ func TestTask_AddQueryChannel(t *testing.T) {
 		assert.NoError(t, err)
 	})
 	t.Run("test execute has queryCollection", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := addQueryChannelTask{
@@ -94,8 +94,9 @@ func TestTask_AddQueryChannel(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 	})
+
 	t.Run("test execute nil query service", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		node.queryShardService = nil
@@ -109,27 +110,8 @@ func TestTask_AddQueryChannel(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	/*
-		t.Run("test execute add query collection failed", func(t *testing.T) {
-			node, err := genSimpleQueryNode(ctx)
-			assert.NoError(t, err)
-
-			err = node.streaming.replica.removeCollection(defaultCollectionID)
-			assert.NoError(t, err)
-			err = node.historical.replica.removeCollection(defaultCollectionID)
-			assert.NoError(t, err)
-
-			task := addQueryChannelTask{
-				req:  genAddQueryChanelRequest(),
-				node: node,
-			}
-
-			err = task.Execute(ctx)
-			assert.Error(t, err)
-		})*/
-
 	t.Run("test execute init global sealed segments", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := addQueryChannelTask{
@@ -148,7 +130,7 @@ func TestTask_AddQueryChannel(t *testing.T) {
 	})
 
 	t.Run("test execute not init global sealed segments", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := addQueryChannelTask{
@@ -165,31 +147,6 @@ func TestTask_AddQueryChannel(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 	})
-	/*
-			t.Run("test execute seek error", func(t *testing.T) {
-				node, err := genSimpleQueryNode(ctx)
-				assert.NoError(t, err)
-
-		t.Run("test execute seek error", func(t *testing.T) {
-			node, err := genSimpleQueryNode(ctx)
-			assert.NoError(t, err)
-
-			position := &internalpb.MsgPosition{
-				ChannelName: genQueryChannel(),
-				MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
-				MsgGroup:    defaultSubName,
-				Timestamp:   0,
-			}
-				task := addQueryChannelTask{
-					req:  genAddQueryChanelRequest(),
-					node: node,
-				}
-
-				task.req.SeekPosition = position
-
-				err = task.Execute(ctx)
-				assert.Error(t, err)
-			})*/
 }
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
@@ -232,7 +189,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	})
 
 	t.Run("test execute loadCollection", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDmChannelsTask{
@@ -251,7 +208,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	})
 
 	t.Run("test execute loadPartition", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDmChannelsTask{
@@ -274,7 +231,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	})
 
 	t.Run("test execute loadPartition without init collection and partition", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDmChannelsTask{
@@ -293,34 +250,9 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	//t.Run("test execute seek error", func(t *testing.T) {
-	//
-	//	node, err := genSimpleQueryNode(ctx)
-	//	assert.NoError(t, err)
-	//
-	//	task := watchDmChannelsTask{
-	//		req:  genWatchDMChannelsRequest(),
-	//		node: node,
-	//	}
-	//	task.req.Infos = []*datapb.VchannelInfo{
-	//		{
-	//			CollectionID: defaultCollectionID,
-	//			ChannelName:  defaultDMLChannel,
-	//			SeekPosition: &msgstream.MsgPosition{
-	//				ChannelName: defaultDMLChannel,
-	//				MsgID:       []byte{1, 2, 3},
-	//				MsgGroup:    defaultSubName,
-	//				Timestamp:   0,
-	//			},
-	//		},
-	//	}
-	//	err = task.Execute(ctx)
-	//	assert.Error(t, err)
-	//})
-
 	t.Run("test add excluded segment for flushed segment", func(t *testing.T) {
 
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDmChannelsTask{
@@ -352,7 +284,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	})
 
 	t.Run("test add excluded segment for dropped segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDmChannelsTask{
@@ -384,7 +316,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	})
 
 	t.Run("test load growing segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDmChannelsTask{
@@ -454,7 +386,7 @@ func TestTask_watchDeltaChannelsTask(t *testing.T) {
 	})
 
 	t.Run("test execute", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDeltaChannelsTask{
@@ -479,7 +411,7 @@ func TestTask_watchDeltaChannelsTask(t *testing.T) {
 	})
 
 	t.Run("test execute without init collection", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := watchDeltaChannelsTask{
@@ -544,7 +476,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test execute grpc", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		schema := genSimpleInsertDataSchema()
@@ -574,7 +506,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test execute grpc error", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := loadSegmentsTask{
@@ -593,7 +525,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test execute node down", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := loadSegmentsTask{
@@ -612,7 +544,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test OOM", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		totalRAM := Params.QueryNodeCfg.CacheSize * 1024 * 1024 * 1024
@@ -683,12 +615,8 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 	})
 
 	t.Run("test execute", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
-
-		/*
-			err = node.queryService.addQueryCollection(defaultCollectionID)
-			assert.NoError(t, err)*/
 
 		task := releaseCollectionTask{
 			req:  genReleaseCollectionRequest(),
@@ -699,7 +627,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 	})
 
 	t.Run("test execute no collection", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.streaming.replica.removeCollection(defaultCollectionID)
@@ -716,13 +644,8 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 	})
 
 	t.Run("test execute remove deltaVChannel tSafe", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
-
-		/*
-			err = node.queryService.addQueryCollection(defaultCollectionID)
-			assert.NoError(t, err)*/
-
 		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
@@ -774,12 +697,8 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	})
 
 	t.Run("test execute", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
-
-		/*
-			err = node.queryService.addQueryCollection(defaultCollectionID)
-			assert.NoError(t, err)*/
 
 		task := releasePartitionsTask{
 			req:  genReleasePartitionsRequest(),
@@ -792,7 +711,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	})
 
 	t.Run("test execute no collection", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		task := releasePartitionsTask{
@@ -810,7 +729,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 	})
 
 	t.Run("test execute remove deltaVChannel", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		col, err := node.historical.replica.getCollectionByID(defaultCollectionID)
@@ -821,10 +740,6 @@ func TestTask_releasePartitionTask(t *testing.T) {
 
 		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
 		col.setLoadType(loadTypePartition)
-
-		/*
-			err = node.queryService.addQueryCollection(defaultCollectionID)
-			assert.NoError(t, err)*/
 
 		task := releasePartitionsTask{
 			req:  genReleasePartitionsRequest(),

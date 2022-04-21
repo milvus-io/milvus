@@ -79,7 +79,7 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 		}
 		return nil
 	}
-	err = retry.Do(ctx, checkBucketFn, retry.Attempts(300))
+	err = retry.Do(ctx, checkBucketFn, retry.Attempts(10))
 	if err != nil {
 		return nil, err
 	}

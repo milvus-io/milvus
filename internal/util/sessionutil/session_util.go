@@ -23,8 +23,6 @@ const (
 	DefaultServiceRoot = "session/"
 	// DefaultIDKey default id key for Session
 	DefaultIDKey = "id"
-	// DefaultRetryTimes default retry times when registerService or getServerByID
-	DefaultRetryTimes = 30
 	// DefaultTTL default ttl value when granting a lease
 	DefaultTTL = 60
 )
@@ -61,7 +59,8 @@ type Session struct {
 	Exclusive   bool   `json:"Exclusive,omitempty"`
 	TriggerKill bool
 
-	liveCh  <-chan bool
+	liveCh <-chan bool
+	// use etcd as service discovery
 	etcdCli *clientv3.Client
 	leaseID *clientv3.LeaseID
 
@@ -82,23 +81,20 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client) *
 
 	session.UpdateRegistered(false)
 
-	connectEtcdFn := func() error {
-		log.Debug("Session try to connect to etcd")
-		ctx2, cancel2 := context.WithTimeout(session.ctx, 5*time.Second)
-		defer cancel2()
-		if _, err := client.Get(ctx2, "health"); err != nil {
-			return err
-		}
-		session.etcdCli = client
-		return nil
+	ctx2, cancel2 := context.WithTimeout(session.ctx, 5*time.Second)
+	defer cancel2()
+	session.etcdCli = client
+
+	healthCheck := func() error {
+		_, err := client.Get(ctx2, "health")
+		return err
 	}
-	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(300))
+	err := retry.Do(ctx2, healthCheck, retry.Attempts(20))
 	if err != nil {
-		log.Warn("failed to initialize session",
-			zap.Error(err))
+		log.Warn("failed to initialize session", zap.String("metaroot", metaRoot), zap.Error(err))
 		return nil
 	}
-	log.Debug("Session connect to etcd success")
+	log.Debug("Session connect to etcd success", zap.String("metaroot", metaRoot))
 	return session
 }
 
@@ -136,18 +132,39 @@ func (s *Session) getServerID() (int64, error) {
 	return s.getServerIDWithKey(DefaultIDKey)
 }
 
-func (s *Session) checkIDExist() {
-	s.etcdCli.Txn(s.ctx).If(
-		clientv3.Compare(
-			clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
-			"=",
-			0)).
-		Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), "1")).Commit()
+func (s *Session) checkIDExist() error {
+	checkIDFunc := func() error {
+		txn := s.etcdCli.Txn(s.ctx).If(
+			clientv3.Compare(
+				clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey)),
+				"=",
+				0)).
+			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, DefaultIDKey), "1"))
+		_, err := txn.Commit()
+		return err
+	}
+	err := retry.Do(s.ctx, checkIDFunc, retry.Attempts(20))
+	if err != nil {
+		log.Warn("failed to check id from etcd", zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 func (s *Session) getServerIDWithKey(key string) (int64, error) {
 	for {
-		getResp, err := s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
+
+		var getResp *clientv3.GetResponse
+		getFunc := func() error {
+			var errGet error
+			getResp, errGet = s.etcdCli.Get(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, key))
+			if errGet != nil {
+				return errGet
+			}
+			return nil
+		}
+
+		err := retry.Do(s.ctx, getFunc, retry.Attempts(20))
 		if err != nil {
 			log.Warn("Session get etcd key error", zap.String("key", key), zap.Error(err))
 			return -1, err
@@ -162,12 +179,19 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 			log.Warn("Session ParseInt error", zap.String("value", value), zap.Error(err))
 			continue
 		}
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(
-			clientv3.Compare(
-				clientv3.Value(path.Join(s.metaRoot, DefaultServiceRoot, key)),
-				"=",
-				value)).
-			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), strconv.FormatInt(valueInt+1, 10))).Commit()
+
+		var txnResp *clientv3.TxnResponse
+		txnFunc := func() error {
+			txn := s.etcdCli.Txn(s.ctx).If(
+				clientv3.Compare(
+					clientv3.Value(path.Join(s.metaRoot, DefaultServiceRoot, key)),
+					"=",
+					value)).
+				Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), strconv.FormatInt(valueInt+1, 10)))
+			txnResp, err = txn.Commit()
+			return err
+		}
+		err = retry.Do(s.ctx, txnFunc, retry.Attempts(20))
 		if err != nil {
 			log.Warn("Session Txn failed", zap.String("key", key), zap.Error(err))
 			return -1, err
@@ -197,7 +221,7 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Debug("Session Register Begin", zap.String("ServerName", s.ServerName))
+	log.Info("Session Register Begin", zap.String("ServerName", s.ServerName))
 	registerFn := func() error {
 		resp, err := s.etcdCli.Grant(s.ctx, DefaultTTL)
 		if err != nil {
@@ -228,6 +252,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 
 		if !txnResp.Succeeded {
+			log.Warn("function CompareAndSwap error for compare is false", zap.Any("resp", txnResp), zap.String("key!!", key))
 			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
 		}
 
@@ -235,13 +260,13 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		s.keepAliveCancel = keepAliveCancel
 		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
 		if err != nil {
-			fmt.Printf("keep alive error %s\n", err)
+			log.Error("keep alive error %s\n", zap.Error(err))
 			return err
 		}
-		log.Debug("Session register successfully", zap.Int64("ServerID", s.ServerID))
+		log.Info("Session register successfully", zap.Int64("ServerID", s.ServerID))
 		return nil
 	}
-	err := retry.Do(s.ctx, registerFn, retry.Attempts(DefaultRetryTimes), retry.Sleep(500*time.Millisecond))
+	err := retry.Do(s.ctx, registerFn, retry.Attempts(20))
 	if err != nil {
 		return nil, err
 	}
@@ -282,10 +307,21 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 // GetSessions will get all sessions registered in etcd.
 // Revision is returned for WatchServices to prevent key events from being missed.
 func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error) {
+	if s.etcdCli.Ctx().Err() != nil {
+		return nil, 0, s.etcdCli.Ctx().Err()
+	}
 	res := make(map[string]*Session)
 	key := path.Join(s.metaRoot, DefaultServiceRoot, prefix)
-	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		return errGet
+	}
+
+	err := retry.Do(s.ctx, getFunc, retry.Attempts(20))
 	if err != nil {
 		return nil, 0, err
 	}

@@ -76,11 +76,11 @@ func TestDataNode(t *testing.T) {
 	defer cancel()
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
+
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
-	err = node.Init()
+	err := node.Init()
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
@@ -434,11 +434,11 @@ func TestDataNode(t *testing.T) {
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
+
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
-	err = node.Init()
+	err := node.Init()
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)

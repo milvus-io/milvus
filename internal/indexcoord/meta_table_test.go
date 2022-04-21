@@ -31,10 +31,8 @@ import (
 
 func TestMetaTable(t *testing.T) {
 	Params.Init()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	assert.NoError(t, err)
-	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 	req := &indexpb.BuildIndexRequest{
@@ -314,12 +312,12 @@ func TestMetaTable(t *testing.T) {
 
 func TestMetaTable_Error(t *testing.T) {
 	Params.Init()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	assert.NoError(t, err)
 
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
+	var err error
 	t.Run("reloadFromKV error", func(t *testing.T) {
 		value := "indexMeta-1"
 		key := "indexes/" + strconv.FormatInt(2, 10)

@@ -28,7 +28,7 @@ func TestStreaming_streaming(t *testing.T) {
 	defer cancel()
 
 	tSafe := newTSafeReplica()
-	streaming, err := genSimpleStreaming(ctx, tSafe)
+	streaming, err := genSimpleStreaming(ctx, tSafe, t)
 	assert.NoError(t, err)
 	defer streaming.close()
 
@@ -41,7 +41,7 @@ func TestStreaming_search(t *testing.T) {
 
 	t.Run("test search", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		streaming, err := genSimpleStreaming(ctx, tSafe)
+		streaming, err := genSimpleStreaming(ctx, tSafe, t)
 		assert.NoError(t, err)
 		defer streaming.close()
 
@@ -60,7 +60,7 @@ func TestStreaming_search(t *testing.T) {
 
 	t.Run("test run empty partition", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		streaming, err := genSimpleStreaming(ctx, tSafe)
+		streaming, err := genSimpleStreaming(ctx, tSafe, t)
 		assert.NoError(t, err)
 		defer streaming.close()
 
@@ -79,7 +79,7 @@ func TestStreaming_search(t *testing.T) {
 
 	t.Run("test run empty partition and loadCollection", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		streaming, err := genSimpleStreaming(ctx, tSafe)
+		streaming, err := genSimpleStreaming(ctx, tSafe, t)
 		assert.NoError(t, err)
 		defer streaming.close()
 
@@ -105,7 +105,7 @@ func TestStreaming_search(t *testing.T) {
 
 	t.Run("test run empty partition and loadPartition", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		streaming, err := genSimpleStreaming(ctx, tSafe)
+		streaming, err := genSimpleStreaming(ctx, tSafe, t)
 		assert.NoError(t, err)
 		defer streaming.close()
 
@@ -130,7 +130,7 @@ func TestStreaming_search(t *testing.T) {
 
 	t.Run("test no partitions in collection", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		streaming, err := genSimpleStreaming(ctx, tSafe)
+		streaming, err := genSimpleStreaming(ctx, tSafe, t)
 		assert.NoError(t, err)
 		defer streaming.close()
 
@@ -152,7 +152,7 @@ func TestStreaming_search(t *testing.T) {
 
 	t.Run("test search failed", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		streaming, err := genSimpleStreaming(ctx, tSafe)
+		streaming, err := genSimpleStreaming(ctx, tSafe, t)
 		assert.NoError(t, err)
 		defer streaming.close()
 
@@ -179,7 +179,7 @@ func TestStreaming_retrieve(t *testing.T) {
 	defer cancel()
 
 	tSafe := newTSafeReplica()
-	streaming, err := genSimpleStreaming(ctx, tSafe)
+	streaming, err := genSimpleStreaming(ctx, tSafe, t)
 	assert.NoError(t, err)
 	defer streaming.close()
 

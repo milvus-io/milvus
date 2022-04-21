@@ -116,18 +116,19 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("querycoord")
 	s.closer = closer
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
-		return err
+	if s.etcdCli == nil {
+		etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+		if err != nil {
+			log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
+			return err
+		}
+		s.SetEtcdClient(etcdCli)
 	}
-	s.etcdCli = etcdCli
-	s.SetEtcdClient(etcdCli)
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
-	err = <-s.grpcErrChan
+	err := <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
@@ -298,8 +299,9 @@ func (s *Server) Stop() error {
 	return err
 }
 
-// SetRootCoord sets root coordinator's client
+// Set etcdclient sets etcd client for querycoord
 func (s *Server) SetEtcdClient(etcdClient *clientv3.Client) {
+	s.etcdCli = etcdClient
 	s.queryCoord.SetEtcdClient(etcdClient)
 }
 

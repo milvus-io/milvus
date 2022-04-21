@@ -28,8 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func getFilterDeleteNode(ctx context.Context) (*filterDeleteNode, error) {
-	historical, err := genSimpleReplica()
+func getFilterDeleteNode(t *testing.T) (*filterDeleteNode, error) {
+	historical, err := genSimpleReplica(t)
 	if err != nil {
 		return nil, err
 	}
@@ -39,21 +39,21 @@ func getFilterDeleteNode(ctx context.Context) (*filterDeleteNode, error) {
 }
 
 func TestFlowGraphFilterDeleteNode_filterDeleteNode(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	fg, err := getFilterDeleteNode(ctx)
+	fg, err := getFilterDeleteNode(t)
 	assert.NoError(t, err)
 	fg.Name()
 }
 
 func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	t.Run("delete valid test", func(t *testing.T) {
 		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode(t)
 		assert.NoError(t, err)
 		res := fg.filterInvalidDeleteMessage(msg)
 		assert.NotNil(t, res)
@@ -63,7 +63,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		msg.CollectionID = UniqueID(1003)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode(t)
 		assert.NoError(t, err)
 		res := fg.filterInvalidDeleteMessage(msg)
 		assert.Nil(t, res)
@@ -72,7 +72,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	t.Run("test delete not target collection", func(t *testing.T) {
 		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode(t)
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
 		res := fg.filterInvalidDeleteMessage(msg)
@@ -82,7 +82,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	t.Run("test delete no data", func(t *testing.T) {
 		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
 		assert.NoError(t, err)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode(t)
 		assert.NoError(t, err)
 		msg.Timestamps = make([]Timestamp, 0)
 		msg.Int64PrimaryKeys = make([]IntPrimaryKey, 0)
@@ -95,7 +95,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 }
 
 func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	genFilterDeleteMsg := func() []flowgraph.Msg {
@@ -107,7 +107,7 @@ func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
 
 	t.Run("valid test", func(t *testing.T) {
 		msg := genFilterDeleteMsg()
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode(t)
 		assert.NoError(t, err)
 		res := fg.Operate(msg)
 		assert.NotNil(t, res)
@@ -115,7 +115,7 @@ func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
 
 	t.Run("invalid input length", func(t *testing.T) {
 		msg := genFilterDeleteMsg()
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode(t)
 		assert.NoError(t, err)
 		var m flowgraph.Msg
 		msg = append(msg, m)

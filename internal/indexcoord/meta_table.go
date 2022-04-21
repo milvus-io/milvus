@@ -17,7 +17,6 @@
 package indexcoord
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -32,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 // Meta is used to record the state of the index.
@@ -193,18 +191,12 @@ func (mt *metaTable) BuildIndex(indexBuildID UniqueID, nodeID int64) error {
 
 	err := mt.saveIndexMeta(&meta)
 	if err != nil {
-		fn := func() error {
-			m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
-			if m == nil {
-				return err
-			}
-			m.indexMeta.NodeID = nodeID
-			return mt.saveIndexMeta(m)
+		m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+		if err != nil {
+			return err
 		}
-		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
-		if err2 != nil {
-			return err2
-		}
+		m.indexMeta.NodeID = nodeID
+		return mt.saveIndexMeta(m)
 	}
 
 	return nil
@@ -231,17 +223,12 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 
 	err := mt.saveIndexMeta(&meta)
 	if err != nil {
-		fn := func() error {
-			m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
-			if m == nil {
-				return err
-			}
-			m.indexMeta.Version = m.indexMeta.Version + 1
-
-			return mt.saveIndexMeta(m)
+		m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+		if m == nil {
+			return err
 		}
-		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
-		return err2
+		m.indexMeta.Version = m.indexMeta.Version + 1
+		return mt.saveIndexMeta(m)
 	}
 
 	return nil
@@ -261,19 +248,13 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 			/* #nosec G601 */
 			if err := mt.saveIndexMeta(&meta); err != nil {
 				log.Error("IndexCoord metaTable MarkIndexAsDeleted saveIndexMeta failed", zap.Error(err))
-				fn := func() error {
-					m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
-					if m == nil {
-						return err
-					}
+				m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+				if m == nil {
+					return err
+				}
 
-					m.indexMeta.MarkDeleted = true
-					return mt.saveIndexMeta(m)
-				}
-				err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
-				if err2 != nil {
-					return err2
-				}
+				m.indexMeta.MarkDeleted = true
+				return mt.saveIndexMeta(m)
 			}
 		}
 	}
@@ -363,20 +344,17 @@ func (mt *metaTable) UpdateRecycleState(indexBuildID UniqueID) error {
 
 	meta.indexMeta.Recycled = true
 	if err := mt.saveIndexMeta(&meta); err != nil {
-		fn := func() error {
-			m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
-			if m == nil {
-				return err
-			}
-
-			m.indexMeta.Recycled = true
-			return mt.saveIndexMeta(m)
+		m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+		if err != nil {
+			return err
 		}
-		err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
-		if err2 != nil {
+
+		m.indexMeta.Recycled = true
+		err = mt.saveIndexMeta(m)
+		if err != nil {
 			meta.indexMeta.Recycled = false
-			log.Error("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err2))
-			return err2
+			log.Error("IndexCoord metaTable UpdateRecycleState failed", zap.Error(err))
+			return err
 		}
 	}
 
@@ -503,8 +481,6 @@ func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable LoadMetaFromETCD", zap.Int64("indexBuildID", indexBuildID),
-		zap.Int64("revision", revision), zap.Bool("ok", ok))
 	if ok {
 		log.Debug("IndexCoord metaTable LoadMetaFromETCD",
 			zap.Int64("meta.revision", meta.revision),

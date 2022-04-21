@@ -30,9 +30,7 @@ var gTestIDAllocator *GlobalIDAllocator
 var Params paramtable.ComponentParam
 
 func TestGlobalTSOAllocator_All(t *testing.T) {
-	Params.Init()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := tsoutil.NewTSOKVBase(etcdCli, "/test/root/kv", "gidTest")
 

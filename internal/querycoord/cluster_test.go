@@ -372,85 +372,86 @@ func TestQueryNodeCluster_getMetrics(t *testing.T) {
 	log.Info("TestQueryNodeCluster_getMetrics, todo")
 }
 
-func TestReloadClusterFromKV(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+func TestLoadOnlineNodes(t *testing.T) {
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
+
+	refreshParams()
+	baseCtx := context.Background()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
+	clusterSession.Register()
+	cluster := &queryNodeCluster{
+		ctx:       baseCtx,
+		client:    kv,
+		nodes:     make(map[int64]Node),
+		newNodeFn: newQueryNodeTest,
+		session:   clusterSession,
+	}
+
+	queryNode, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
-	t.Run("Test LoadOnlineNodes", func(t *testing.T) {
-		refreshParams()
-		baseCtx := context.Background()
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
-		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-		clusterSession.Register()
-		cluster := &queryNodeCluster{
-			ctx:       baseCtx,
-			client:    kv,
-			nodes:     make(map[int64]Node),
-			newNodeFn: newQueryNodeTest,
-			session:   clusterSession,
-		}
 
-		queryNode, err := startQueryNodeServer(baseCtx)
-		assert.Nil(t, err)
+	cluster.reloadFromKV()
 
-		cluster.reloadFromKV()
+	nodeID := queryNode.queryNodeID
+	waitQueryNodeOnline(cluster, nodeID)
 
-		nodeID := queryNode.queryNodeID
-		waitQueryNodeOnline(cluster, nodeID)
+	queryNode.stop()
+	err = removeNodeSession(queryNode.queryNodeID, t)
+	assert.Nil(t, err)
+}
 
-		queryNode.stop()
-		err = removeNodeSession(queryNode.queryNodeID)
-		assert.Nil(t, err)
-	})
+func TestLoadOfflineNodes(t *testing.T) {
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
 
-	t.Run("Test LoadOfflineNodes", func(t *testing.T) {
-		refreshParams()
-		ctx, cancel := context.WithCancel(context.Background())
-		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-		clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
-		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-		clusterSession.Register()
-		factory := dependency.NewDefaultFactory(true)
-		handler, err := newChannelUnsubscribeHandler(ctx, kv, factory)
-		assert.Nil(t, err)
-		id := UniqueID(rand.Int31())
-		idAllocator := func() (UniqueID, error) {
-			newID := atomic.AddInt64(&id, 1)
-			return newID, nil
-		}
-		meta, err := newMeta(ctx, kv, factory, idAllocator)
-		assert.Nil(t, err)
+	refreshParams()
+	ctx, cancel := context.WithCancel(context.Background())
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
+	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
+	clusterSession.Register()
+	factory := dependency.NewDefaultFactory(true)
+	handler, err := newChannelUnsubscribeHandler(ctx, kv, factory)
+	assert.Nil(t, err)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+	meta, err := newMeta(ctx, kv, factory, idAllocator)
+	assert.Nil(t, err)
 
-		cluster := &queryNodeCluster{
-			client:      kv,
-			handler:     handler,
-			clusterMeta: meta,
-			nodes:       make(map[int64]Node),
-			newNodeFn:   newQueryNodeTest,
-			session:     clusterSession,
-		}
+	cluster := &queryNodeCluster{
+		client:      kv,
+		handler:     handler,
+		clusterMeta: meta,
+		nodes:       make(map[int64]Node),
+		newNodeFn:   newQueryNodeTest,
+		session:     clusterSession,
+	}
 
-		kvs := make(map[string]string)
-		session := &sessionutil.Session{
-			ServerID: 100,
-			Address:  "localhost",
-		}
-		sessionBlob, err := json.Marshal(session)
-		assert.Nil(t, err)
-		sessionKey := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, 100)
-		kvs[sessionKey] = string(sessionBlob)
+	kvs := make(map[string]string)
+	session := &sessionutil.Session{
+		ServerID: 100,
+		Address:  "localhost",
+	}
+	sessionBlob, err := json.Marshal(session)
+	assert.Nil(t, err)
+	sessionKey := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, 100)
+	kvs[sessionKey] = string(sessionBlob)
 
-		err = kv.MultiSave(kvs)
-		assert.Nil(t, err)
+	err = kv.MultiSave(kvs)
+	assert.Nil(t, err)
 
-		cluster.reloadFromKV()
-		assert.Equal(t, 1, len(cluster.nodes))
+	cluster.reloadFromKV()
+	assert.Equal(t, 1, len(cluster.nodes))
 
-		err = removeAllSession()
-		assert.Nil(t, err)
-		cancel()
-	})
+	err = removeAllSession(t)
+	assert.Nil(t, err)
+	cancel()
 }
 
 func TestGrpcRequest(t *testing.T) {
@@ -501,7 +502,7 @@ func TestGrpcRequest(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	node, err := startQueryNodeServer(baseCtx)
+	node, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	nodeSession := node.session
 	nodeID := node.queryNodeID
@@ -639,7 +640,7 @@ func TestGrpcRequest(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
@@ -674,7 +675,7 @@ func TestSetNodeState(t *testing.T) {
 		session:     clusterSession,
 	}
 
-	node, err := startQueryNodeServer(baseCtx)
+	node, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	err = cluster.registerNode(baseCtx, node.session, node.queryNodeID, disConnect)
 	assert.Nil(t, err)
@@ -700,6 +701,6 @@ func TestSetNodeState(t *testing.T) {
 	assert.Equal(t, 1, len(handler.downNodeChan))
 
 	node.stop()
-	removeAllSession()
+	removeAllSession(t)
 	cancel()
 }

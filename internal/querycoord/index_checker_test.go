@@ -38,9 +38,8 @@ var indexCheckerTestDir = "/tmp/milvus_test/index_checker"
 func TestReloadFromKV(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	id := UniqueID(rand.Int31())
 	idAllocator := func() (UniqueID, error) {
@@ -99,9 +98,8 @@ func TestReloadFromKV(t *testing.T) {
 func TestCheckIndexLoop(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	id := UniqueID(rand.Int31())
 	idAllocator := func() (UniqueID, error) {
@@ -175,9 +173,8 @@ func TestCheckIndexLoop(t *testing.T) {
 func TestHandoffNotExistSegment(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	id := UniqueID(rand.Int31())
 	idAllocator := func() (UniqueID, error) {
@@ -233,8 +230,7 @@ func TestHandoffNotExistSegment(t *testing.T) {
 func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	refreshParams()
 	ctx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)

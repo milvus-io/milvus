@@ -43,8 +43,8 @@ func TestIndexNodeServer(t *testing.T) {
 
 	inm := &indexnode.Mock{}
 	ParamsGlobal.InitOnce()
-	etcdCli, err := etcd.GetEtcdClient(&ParamsGlobal.EtcdCfg)
-	assert.NoError(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
 	inm.SetEtcdClient(etcdCli)
 	err = server.SetClient(inm)
 	assert.Nil(t, err)

@@ -1289,7 +1289,7 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 
 func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_tt_msg_seekInvalid"
-	etcdKV := initRmq(rocksdbName)
+	etcdKV := initRmq(t, rocksdbName)
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -1392,20 +1392,12 @@ func TestStream_MqMsgStream_SeekLatest(t *testing.T) {
 
 /****************************************Rmq test******************************************/
 
-func initRmq(name string) *etcdkv.EtcdKV {
-	endpoints := os.Getenv("ETCD_ENDPOINTS")
-	if endpoints == "" {
-		endpoints = "localhost:2379"
-	}
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	if err != nil {
-		log.Fatalf("New clientv3 error = %v", err)
-	}
+func initRmq(t *testing.T, name string) *etcdkv.EtcdKV {
+	etcdCli := etcd.GetEtcdTestClient(t)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
-	_ = idAllocator.Initialize()
-
+	err := idAllocator.Initialize()
+	assert.NoError(t, err)
 	err = server.InitRmq(name, idAllocator)
 
 	if err != nil {
@@ -1484,7 +1476,7 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
 	rocksdbName := "/tmp/rocksmq_insert"
-	etcdKV := initRmq(rocksdbName)
+	etcdKV := initRmq(t, rocksdbName)
 	ctx := context.Background()
 	inputStream, outputStream := initRmqStream(ctx, producerChannels, consumerChannels, consumerGroupName)
 	err := inputStream.Produce(&msgPack)
@@ -1510,7 +1502,7 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
 	rocksdbName := "/tmp/rocksmq_insert_tt"
-	etcdKV := initRmq(rocksdbName)
+	etcdKV := initRmq(t, rocksdbName)
 	ctx := context.Background()
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
@@ -1529,7 +1521,7 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 
 func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	rocksdbName := "/tmp/rocksmq_tt_msg_seek"
-	etcdKV := initRmq(rocksdbName)
+	etcdKV := initRmq(t, rocksdbName)
 
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
@@ -2072,7 +2064,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	consumerSubName := "subInsert"
 
 	rocksdbName := "/tmp/rocksmq_asconsumer_withpos"
-	etcdKV := initRmq(rocksdbName)
+	etcdKV := initRmq(t, rocksdbName)
 	factory := ProtoUDFactory{}
 
 	rmqClient, _ := rmq.NewClientWithDefaultOptions()

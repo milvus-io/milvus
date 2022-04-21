@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type mockTestKV struct {
@@ -229,8 +228,7 @@ func TestMetaTable(t *testing.T) {
 		return vtso
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	require.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
@@ -1179,8 +1177,8 @@ func TestMetaWithTimestamp(t *testing.T) {
 		vtso++
 		return vtso
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
@@ -1336,8 +1334,7 @@ func TestFixIssue10540(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)

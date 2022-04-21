@@ -26,7 +26,7 @@ import (
 
 //----------------------------------------------------------------------------------------------------- collection
 func TestCollectionReplica_getCollectionNum(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	initTestMeta(t, node, 0, 0)
 	assert.Equal(t, node.historical.replica.getCollectionNum(), 1)
 	err := node.Stop()
@@ -34,14 +34,14 @@ func TestCollectionReplica_getCollectionNum(t *testing.T) {
 }
 
 func TestCollectionReplica_addCollection(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	initTestMeta(t, node, 0, 0)
 	err := node.Stop()
 	assert.NoError(t, err)
 }
 
 func TestCollectionReplica_removeCollection(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	initTestMeta(t, node, 0, 0)
 	assert.Equal(t, node.historical.replica.getCollectionNum(), 1)
 
@@ -53,7 +53,7 @@ func TestCollectionReplica_removeCollection(t *testing.T) {
 }
 
 func TestCollectionReplica_getCollectionByID(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 	targetCollection, err := node.historical.replica.getCollectionByID(collectionID)
@@ -65,7 +65,7 @@ func TestCollectionReplica_getCollectionByID(t *testing.T) {
 }
 
 func TestCollectionReplica_hasCollection(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -80,7 +80,7 @@ func TestCollectionReplica_hasCollection(t *testing.T) {
 
 //----------------------------------------------------------------------------------------------------- partition
 func TestCollectionReplica_getPartitionNum(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -100,7 +100,7 @@ func TestCollectionReplica_getPartitionNum(t *testing.T) {
 }
 
 func TestCollectionReplica_addPartition(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -117,7 +117,7 @@ func TestCollectionReplica_addPartition(t *testing.T) {
 }
 
 func TestCollectionReplica_removePartition(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -137,7 +137,7 @@ func TestCollectionReplica_removePartition(t *testing.T) {
 }
 
 func TestCollectionReplica_getPartitionByTag(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -156,7 +156,7 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 }
 
 func TestCollectionReplica_hasPartition(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -173,7 +173,7 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 
 //----------------------------------------------------------------------------------------------------- segment
 func TestCollectionReplica_addSegment(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -191,7 +191,7 @@ func TestCollectionReplica_addSegment(t *testing.T) {
 }
 
 func TestCollectionReplica_removeSegment(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -212,7 +212,7 @@ func TestCollectionReplica_removeSegment(t *testing.T) {
 }
 
 func TestCollectionReplica_getSegmentByID(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -231,7 +231,7 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 }
 
 func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	collectionMeta := genTestCollectionMeta(collectionID, false)
 	collection := node.historical.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
@@ -279,7 +279,7 @@ func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
 }
 
 func TestCollectionReplica_hasSegment(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -302,7 +302,7 @@ func TestCollectionReplica_hasSegment(t *testing.T) {
 }
 
 func TestCollectionReplica_freeAll(t *testing.T) {
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
@@ -312,7 +312,7 @@ func TestCollectionReplica_freeAll(t *testing.T) {
 
 func TestCollectionReplica_statistic(t *testing.T) {
 	t.Run("test getCollectionIDs", func(t *testing.T) {
-		replica, err := genSimpleReplica()
+		replica, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		ids := replica.getCollectionIDs()
 		assert.Len(t, ids, 1)
@@ -320,7 +320,7 @@ func TestCollectionReplica_statistic(t *testing.T) {
 	})
 
 	t.Run("test getCollectionIDs", func(t *testing.T) {
-		replica, err := genSimpleReplica()
+		replica, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		num := replica.getSegmentNum()
 		assert.Equal(t, 0, num)

@@ -35,9 +35,8 @@ import (
 func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
@@ -95,7 +94,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	node1, err := startQueryNodeServer(baseCtx)
+	node1, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	node1Session := node1.session
 	node1ID := node1.queryNodeID
@@ -110,7 +109,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 		assert.Equal(t, node1ID, secondReq.DstNodeID)
 	})
 
-	node2, err := startQueryNodeServer(baseCtx)
+	node2, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	node2Session := node2.session
 	node2ID := node2.queryNodeID
@@ -132,6 +131,6 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 		assert.Equal(t, node2ID, secondReq.DstNodeID)
 	})
 
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }

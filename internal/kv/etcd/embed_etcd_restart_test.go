@@ -25,7 +25,6 @@ import (
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEtcdRestartLoad(te *testing.T) {
@@ -45,10 +44,8 @@ func TestEtcdRestartLoad(te *testing.T) {
 	param.EtcdCfg.LoadCfgToMemory()
 	te.Run("EtcdKV SaveRestartAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveRestartAndLoad"
-		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
-		require.NoError(te, err)
+		metaKv := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg, t)
 		assert.NotNil(te, metaKv)
-		require.NoError(t, err)
 
 		defer metaKv.Close()
 		defer metaKv.RemoveWithPrefix("")
@@ -66,7 +63,7 @@ func TestEtcdRestartLoad(te *testing.T) {
 		// save some data
 		for i, test := range saveAndLoadTests {
 			if i < 4 {
-				err = metaKv.Save(test.key, test.value)
+				err := metaKv.Save(test.key, test.value)
 				assert.NoError(t, err)
 			}
 		}
@@ -82,7 +79,8 @@ func TestEtcdRestartLoad(te *testing.T) {
 		embed.Close()
 
 		//restart and check test result
-		metaKv, _ = embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
+		metaKv = embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg, t)
+		assert.NotNil(te, metaKv)
 
 		for _, test := range saveAndLoadTests {
 			val, err := metaKv.Load(test.key)

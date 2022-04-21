@@ -29,7 +29,7 @@ func TestHistorical_Search(t *testing.T) {
 
 	t.Run("test search", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		his, err := genSimpleHistorical(ctx, tSafe)
+		his, err := genSimpleHistorical(ctx, tSafe, t)
 		assert.NoError(t, err)
 
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
@@ -41,7 +41,7 @@ func TestHistorical_Search(t *testing.T) {
 
 	t.Run("test no collection - search partitions", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		his, err := genSimpleHistorical(ctx, tSafe)
+		his, err := genSimpleHistorical(ctx, tSafe, t)
 		assert.NoError(t, err)
 
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
@@ -56,7 +56,7 @@ func TestHistorical_Search(t *testing.T) {
 
 	t.Run("test no collection - search all collection", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		his, err := genSimpleHistorical(ctx, tSafe)
+		his, err := genSimpleHistorical(ctx, tSafe, t)
 		assert.NoError(t, err)
 
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
@@ -71,7 +71,7 @@ func TestHistorical_Search(t *testing.T) {
 
 	t.Run("test load partition and partition has been released", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		his, err := genSimpleHistorical(ctx, tSafe)
+		his, err := genSimpleHistorical(ctx, tSafe, t)
 		assert.NoError(t, err)
 
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
@@ -90,7 +90,7 @@ func TestHistorical_Search(t *testing.T) {
 
 	t.Run("test no partition in collection", func(t *testing.T) {
 		tSafe := newTSafeReplica()
-		his, err := genSimpleHistorical(ctx, tSafe)
+		his, err := genSimpleHistorical(ctx, tSafe, t)
 		assert.NoError(t, err)
 
 		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)

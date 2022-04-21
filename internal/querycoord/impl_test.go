@@ -97,10 +97,10 @@ func waitLoadCollectionDone(ctx context.Context, queryCoord *QueryCoord, collect
 func TestGrpcTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -405,20 +405,20 @@ func TestGrpcTask(t *testing.T) {
 	})
 
 	err = node.stop()
-	err = removeNodeSession(node.queryNodeID)
+	err = removeNodeSession(node.queryNodeID, t)
 	assert.Nil(t, err)
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestGrpcTaskEnqueueFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	queryNode, err := startQueryNodeServer(ctx)
+	queryNode, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	taskIDAllocator := queryCoord.scheduler.taskIDAllocator
@@ -530,7 +530,7 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 	})
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
@@ -538,13 +538,13 @@ func TestLoadBalanceTask(t *testing.T) {
 	refreshParams()
 	baseCtx := context.Background()
 
-	queryCoord, err := startQueryCoord(baseCtx)
+	queryCoord, err := startQueryCoord(baseCtx, t)
 	assert.Nil(t, err)
 
-	queryNode1, err := startQueryNodeServer(baseCtx)
+	queryNode1, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 
-	queryNode2, err := startQueryNodeServer(baseCtx)
+	queryNode2, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 
 	time.Sleep(100 * time.Millisecond)
@@ -601,14 +601,14 @@ func TestLoadBalanceTask(t *testing.T) {
 	queryNode1.stop()
 	queryNode2.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestGrpcTaskBeforeHealthy(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	unHealthyCoord, err := startUnHealthyQueryCoord(ctx)
+	unHealthyCoord, err := startUnHealthyQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
 	t.Run("Test LoadPartition", func(t *testing.T) {
@@ -787,7 +787,7 @@ func TestGrpcTaskBeforeHealthy(t *testing.T) {
 	})
 
 	unHealthyCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
@@ -808,10 +808,10 @@ func TestQueryCoord_GetComponentStates(t *testing.T) {
 func Test_RepeatedLoadSameCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -837,17 +837,17 @@ func Test_RepeatedLoadSameCollection(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadCollectionAndLoadPartitions(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -883,19 +883,19 @@ func Test_LoadCollectionAndLoadPartitions(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadCollectionWithReplicas(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
@@ -916,7 +916,7 @@ func TestLoadCollectionWithReplicas(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 
 	// Now it should can load collection with 3 replicas
-	node3, err := startQueryNodeServer(ctx)
+	node3, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node3.queryNodeID)
 
@@ -950,19 +950,19 @@ func TestLoadCollectionWithReplicas(t *testing.T) {
 	node2.stop()
 	node3.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadPartitionsWithReplicas(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
@@ -984,7 +984,7 @@ func Test_LoadPartitionsWithReplicas(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 
 	// Now it should can load collection with 3 replicas
-	node3, err := startQueryNodeServer(ctx)
+	node3, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node3.queryNodeID)
 
@@ -1008,17 +1008,17 @@ func Test_LoadPartitionsWithReplicas(t *testing.T) {
 	node2.stop()
 	node3.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RepeatedLoadSamePartitions(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1045,17 +1045,17 @@ func Test_RepeatedLoadSamePartitions(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RepeatedLoadDifferentPartitions(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1091,17 +1091,17 @@ func Test_RepeatedLoadDifferentPartitions(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadPartitionsAndLoadCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1137,17 +1137,17 @@ func Test_LoadPartitionsAndLoadCollection(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadAndReleaseCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1180,17 +1180,17 @@ func Test_LoadAndReleaseCollection(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadAndReleasePartitions(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1225,17 +1225,17 @@ func Test_LoadAndReleasePartitions(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadCollectionAndReleasePartitions(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1269,17 +1269,17 @@ func Test_LoadCollectionAndReleasePartitions(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadPartitionsAndReleaseCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1312,17 +1312,17 @@ func Test_LoadPartitionsAndReleaseCollection(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RepeatedReleaseCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1360,17 +1360,17 @@ func Test_RepeatedReleaseCollection(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RepeatedReleaseSamePartitions(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1410,17 +1410,17 @@ func Test_RepeatedReleaseSamePartitions(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RepeatedReleaseDifferentPartitions(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -1461,21 +1461,21 @@ func Test_RepeatedReleaseDifferentPartitions(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestGetReplicas(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node3, err := startQueryNodeServer(ctx)
+	node3, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
@@ -1553,14 +1553,14 @@ func TestGetReplicas(t *testing.T) {
 func TestGetShardLeaders(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node3, err := startQueryNodeServer(ctx)
+	node3, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)

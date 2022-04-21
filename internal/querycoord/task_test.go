@@ -298,14 +298,14 @@ func waitTaskFinalState(t task, state taskState) {
 func TestTriggerTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node3, err := startQueryNodeServer(ctx)
+	node3, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
@@ -369,16 +369,16 @@ func TestTriggerTask(t *testing.T) {
 	assert.NoError(t, node2.stop())
 	assert.NoError(t, node3.stop())
 	assert.NoError(t, queryCoord.Stop())
-	assert.NoError(t, removeAllSession())
+	assert.NoError(t, removeAllSession(t))
 }
 
 func Test_LoadCollectionAfterLoadPartition(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
 
@@ -399,17 +399,17 @@ func Test_LoadCollectionAfterLoadPartition(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RepeatLoadCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
 
@@ -431,14 +431,14 @@ func Test_RepeatLoadCollection(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadCollectionAssignTaskFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
@@ -449,17 +449,17 @@ func Test_LoadCollectionAssignTaskFail(t *testing.T) {
 	assert.NotNil(t, err)
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadCollectionExecuteFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	node.loadSegment = returnFailedResult
@@ -473,19 +473,19 @@ func Test_LoadCollectionExecuteFail(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadCollectionNoEnoughNodeFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
@@ -498,13 +498,13 @@ func TestLoadCollectionNoEnoughNodeFail(t *testing.T) {
 	assert.NoError(t, node1.stop())
 	assert.NoError(t, node2.stop())
 	assert.NoError(t, queryCoord.Stop())
-	assert.NoError(t, removeAllSession())
+	assert.NoError(t, removeAllSession(t))
 }
 
 func Test_LoadPartitionAssignTaskFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
 	loadPartitionTask := genLoadPartitionTask(ctx, queryCoord)
@@ -515,17 +515,17 @@ func Test_LoadPartitionAssignTaskFail(t *testing.T) {
 	assert.NotNil(t, err)
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadPartitionExecuteFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	node.loadSegment = returnFailedResult
@@ -539,17 +539,17 @@ func Test_LoadPartitionExecuteFail(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_LoadPartitionExecuteFailAfterLoadCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
@@ -570,17 +570,17 @@ func Test_LoadPartitionExecuteFailAfterLoadCollection(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node, err := startQueryNodeServer(ctx)
+	node, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	node.setRPCInterface(&node.releaseCollection, returnFailedResult)
 
@@ -596,17 +596,17 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 
 	node.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_ReleaseSegmentTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
@@ -616,19 +616,19 @@ func Test_ReleaseSegmentTask(t *testing.T) {
 	waitTaskFinalState(releaseSegmentTask, taskDone)
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RescheduleDmChannel(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
@@ -642,20 +642,19 @@ func Test_RescheduleDmChannel(t *testing.T) {
 	waitTaskFinalState(loadCollectionTask, taskFailed)
 
 	queryCoord.Stop()
-	err = removeAllSession()
-
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RescheduleSegment(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
@@ -670,20 +669,20 @@ func Test_RescheduleSegment(t *testing.T) {
 	waitTaskFinalState(loadCollectionTask, taskFailed)
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RescheduleSegmentEndWithFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	node1.loadSegment = returnFailedResult
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	node2.loadSegment = returnFailedResult
 
@@ -697,20 +696,20 @@ func Test_RescheduleSegmentEndWithFail(t *testing.T) {
 	waitTaskFinalState(loadCollectionTask, taskFailed)
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_RescheduleDmChannelsEndWithFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	node1.watchDmChannels = returnFailedResult
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	node2.watchDmChannels = returnFailedResult
 
@@ -724,17 +723,17 @@ func Test_RescheduleDmChannelsEndWithFail(t *testing.T) {
 	waitTaskFinalState(loadCollectionTask, taskFailed)
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_AssignInternalTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -772,17 +771,17 @@ func Test_AssignInternalTask(t *testing.T) {
 	assert.NotEqual(t, 1, len(internalTasks))
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -790,7 +789,7 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	queryCoord.scheduler.Enqueue(loadCollectionTask)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
 
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
@@ -807,17 +806,17 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	})
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func Test_handoffSegmentFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -858,17 +857,17 @@ func Test_handoffSegmentFail(t *testing.T) {
 	waitTaskFinalState(handoffTask, taskFailed)
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadBalanceSegmentsTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -880,7 +879,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 		waitTaskFinalState(loadCollectionTask, taskExpired)
 	})
 
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
@@ -990,19 +989,19 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 	node1.stop()
 	node2.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadBalanceIndexedSegmentsTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 	rootCoord := queryCoord.rootCoordClient.(*rootCoordMock)
 	rootCoord.enableIndex = true
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -1012,7 +1011,7 @@ func TestLoadBalanceIndexedSegmentsTask(t *testing.T) {
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
 
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
@@ -1037,17 +1036,17 @@ func TestLoadBalanceIndexedSegmentsTask(t *testing.T) {
 	node1.stop()
 	node2.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -1057,13 +1056,13 @@ func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
 
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
 	rootCoord := queryCoord.rootCoordClient.(*rootCoordMock)
 	rootCoord.enableIndex = true
-	removeNodeSession(node1.queryNodeID)
+	removeNodeSession(node1.queryNodeID, t)
 	for {
 		if len(queryCoord.meta.getSegmentInfosByNode(node1.queryNodeID)) == 0 {
 			break
@@ -1072,17 +1071,17 @@ func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 
 	node2.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadBalancePartitionAfterNodeDown(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -1092,11 +1091,11 @@ func TestLoadBalancePartitionAfterNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 	waitTaskFinalState(loadPartitionTask, taskExpired)
 
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
-	removeNodeSession(node1.queryNodeID)
+	removeNodeSession(node1.queryNodeID, t)
 	for {
 		if len(queryCoord.meta.getSegmentInfosByNode(node1.queryNodeID)) == 0 {
 			break
@@ -1105,17 +1104,17 @@ func TestLoadBalancePartitionAfterNodeDown(t *testing.T) {
 
 	node2.stop()
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadBalanceAndReschedulSegmentTaskAfterNodeDown(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
@@ -1125,12 +1124,12 @@ func TestLoadBalanceAndReschedulSegmentTaskAfterNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
 
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	node2.loadSegment = returnFailedResult
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
-	removeNodeSession(node1.queryNodeID)
+	removeNodeSession(node1.queryNodeID, t)
 	for {
 		_, activeTaskValues, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
 		assert.Nil(t, err)
@@ -1139,7 +1138,7 @@ func TestLoadBalanceAndReschedulSegmentTaskAfterNodeDown(t *testing.T) {
 		}
 	}
 
-	node3, err := startQueryNodeServer(ctx)
+	node3, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node3.queryNodeID)
 
@@ -1158,18 +1157,18 @@ func TestLoadBalanceAndReschedulSegmentTaskAfterNodeDown(t *testing.T) {
 		}
 	}
 
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 	defer queryCoord.Stop()
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	defer node1.stop()
@@ -1180,13 +1179,13 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
 
-	node2, err := startQueryNodeServer(ctx)
+	node2, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	defer node2.stop()
 	node2.watchDmChannels = returnFailedResult
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 
-	removeNodeSession(node1.queryNodeID)
+	removeNodeSession(node1.queryNodeID, t)
 	for {
 		_, activeTaskValues, err := queryCoord.scheduler.client.LoadWithPrefix(activeTaskPrefix)
 		assert.Nil(t, err)
@@ -1195,7 +1194,7 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 		}
 	}
 
-	node3, err := startQueryNodeServer(ctx)
+	node3, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	defer node3.stop()
 	waitQueryNodeOnline(queryCoord.cluster, node3.queryNodeID)
@@ -1215,7 +1214,7 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 		}
 	}
 
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
@@ -1302,10 +1301,10 @@ func TestMergeWatchDeltaChannelInfo(t *testing.T) {
 func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
@@ -1328,17 +1327,17 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
 
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
 func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
+	queryCoord, err := startQueryCoord(ctx, t)
 	assert.Nil(t, err)
 
-	node1, err := startQueryNodeServer(ctx)
+	node1, err := startQueryNodeServer(ctx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
@@ -1358,6 +1357,6 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
 
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }

@@ -25,6 +25,7 @@ import (
 	"math"
 	"math/rand"
 	"sync"
+	"testing"
 	"time"
 
 	"go.uber.org/zap"
@@ -111,14 +112,11 @@ func makeNewChannelNames(names []string, suffix string) []string {
 	return ret
 }
 
-func clearEtcd(rootPath string) error {
-	client, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		return err
-	}
+func clearEtcd(t *testing.T, rootPath string) error {
+	client := etcd.GetEtcdTestClient(t)
 	etcdKV := etcdkv.NewEtcdKV(client, rootPath)
 
-	err = etcdKV.RemoveWithPrefix("writer/segment")
+	err := etcdKV.RemoveWithPrefix("writer/segment")
 	if err != nil {
 		return err
 	}

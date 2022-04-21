@@ -36,9 +36,8 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	assert.Nil(t, err)
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
@@ -83,7 +82,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, meta, false, nil, nil, -1)
 	assert.NotNil(t, err)
 
-	node, err := startQueryNodeServer(baseCtx)
+	node, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	nodeSession := node.session
 	nodeID := node.queryNodeID
@@ -96,6 +95,6 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	assert.Equal(t, nodeID, firstReq.NodeID)
 	assert.Equal(t, nodeID, secondReq.NodeID)
 
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }

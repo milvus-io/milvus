@@ -66,8 +66,7 @@ func (tk *testKv) Load(key string) (string, error) {
 
 func TestReplica_Release(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	id := UniqueID(rand.Int31())
@@ -103,8 +102,7 @@ func TestReplica_Release(t *testing.T) {
 
 func TestMetaFunc(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
@@ -233,7 +231,7 @@ func TestMetaFunc(t *testing.T) {
 				NodeIDLoaded: nodeID,
 			})
 		}
-		err = meta.setDmChannelInfos(dmChannelWatchInfos)
+		err := meta.setDmChannelInfos(dmChannelWatchInfos)
 		assert.Nil(t, err)
 	})
 
@@ -297,8 +295,7 @@ func TestMetaFunc(t *testing.T) {
 
 func TestReloadMetaFromKV(t *testing.T) {
 	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	id := UniqueID(rand.Int31())

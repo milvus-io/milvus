@@ -105,6 +105,7 @@ func (csh *channelUnsubscribeHandler) addUnsubscribeChannelInfo(info *querypb.Un
 	for e := csh.channelInfos.Back(); e != nil; e = e.Prev() {
 		if e.Value.(*querypb.UnsubscribeChannelInfo).NodeID == nodeID {
 			hasEnqueue = true
+			break
 		}
 	}
 

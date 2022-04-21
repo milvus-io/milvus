@@ -76,7 +76,7 @@ func genFlowGraphDeleteData() (*deleteData, error) {
 
 func TestFlowGraphInsertNode_insert(t *testing.T) {
 	t.Run("test insert", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -97,7 +97,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 	})
 
 	t.Run("test segment insert error", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -119,7 +119,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 	})
 
 	t.Run("test no target segment", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 		wg := &sync.WaitGroup{}
@@ -128,7 +128,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 	})
 
 	t.Run("test invalid segmentType", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -148,7 +148,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 
 func TestFlowGraphInsertNode_delete(t *testing.T) {
 	t.Run("test insert and delete", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -174,7 +174,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 	})
 
 	t.Run("test only delete", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -194,7 +194,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 	})
 
 	t.Run("test segment delete error", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -215,7 +215,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 	})
 
 	t.Run("test no target segment", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 		wg := &sync.WaitGroup{}
@@ -226,7 +226,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 
 func TestFlowGraphInsertNode_operate(t *testing.T) {
 	t.Run("test operate", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -263,7 +263,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 	})
 
 	t.Run("test invalid partitionID", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -289,7 +289,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 	})
 
 	t.Run("test collection partition not exist", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -315,7 +315,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 	})
 
 	t.Run("test partition not exist", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 
@@ -340,7 +340,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 	})
 
 	t.Run("test invalid input length", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
+		streaming, err := genSimpleReplica(t)
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming)
 

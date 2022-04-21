@@ -181,7 +181,7 @@ func initSearchChannel(ctx context.Context, searchChan string, resultChan string
 	}
 }
 
-func newQueryNodeMock() *QueryNode {
+func newQueryNodeMock(t *testing.T) *QueryNode {
 
 	var ctx context.Context
 
@@ -196,10 +196,7 @@ func newQueryNodeMock() *QueryNode {
 			cancel()
 		}()
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		panic(err)
-	}
+	etcdCli := etcd.GetEtcdTestClient(t)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 	factory := newMessageStreamFactory()
@@ -211,6 +208,7 @@ func newQueryNodeMock() *QueryNode {
 	svr.streaming = newStreaming(ctx, streamingReplica, factory, etcdKV, tsReplica)
 	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, factory)
 	svr.statsService = newStatsService(ctx, svr.historical.replica, factory)
+	var err error
 	svr.vectorStorage, err = factory.NewVectorStorageChunkManager(ctx)
 	if err != nil {
 		panic(err)
@@ -270,7 +268,7 @@ func TestMain(m *testing.M) {
 
 // NOTE: start pulsar and etcd before test
 func TestQueryNode_Start(t *testing.T) {
-	localNode := newQueryNodeMock()
+	localNode := newQueryNodeMock(t)
 	localNode.Start()
 	<-localNode.queryNodeLoopCtx.Done()
 	localNode.Stop()
@@ -280,13 +278,12 @@ func TestQueryNode_register(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	defer etcdcli.Close()
-	node.SetEtcdClient(etcdcli)
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
+	node.SetEtcdClient(etcdCli)
 	err = node.initSession()
 	assert.NoError(t, err)
 
@@ -299,18 +296,17 @@ func TestQueryNode_init(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
-	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	defer etcdcli.Close()
-	node.SetEtcdClient(etcdcli)
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
+	node.SetEtcdClient(etcdCli)
 	err = node.Init()
 	assert.Nil(t, err)
 }
 
-func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context) (*QueryNode, error) {
-	node, err := genSimpleQueryNode(ctx)
+func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context, t *testing.T) (*QueryNode, error) {
+	node, err := genSimpleQueryNode(ctx, t)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +329,7 @@ func TestQueryNode_waitChangeInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+	node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 	assert.NoError(t, err)
 
 	err = node.waitChangeInfo(genSimpleChangeInfo())
@@ -348,7 +344,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test cleanup segments", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.removeSegments(genSimpleChangeInfo())
@@ -358,7 +354,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test cleanup segments no segment", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.historical.replica.removeSegment(defaultSegmentID)
@@ -386,7 +382,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test watchChangeInfo", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 		go node.watchChangeInfo()
@@ -394,7 +390,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		info := genSimpleSegmentInfo()
 		value, err := proto.Marshal(info)
 		assert.NoError(t, err)
-		err = saveChangeInfo("0", string(value))
+		err = saveChangeInfo("0", string(value), t)
 		assert.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
@@ -403,12 +399,12 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test watchChangeInfo key error", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 		go node.watchChangeInfo()
 
-		err = saveChangeInfo("*$&#%^^", "%EUY%&#^$%&@")
+		err = saveChangeInfo("*$&#%^^", "%EUY%&#^$%&@", t)
 		assert.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
@@ -417,12 +413,12 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test watchChangeInfo unmarshal error", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 		go node.watchChangeInfo()
 
-		err = saveChangeInfo("0", "$%^$*&%^#$&*")
+		err = saveChangeInfo("0", "$%^$*&%^#$&*", t)
 		assert.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
@@ -431,7 +427,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test watchChangeInfo adjustByChangeInfo error", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.historical.replica.removeSegment(defaultSegmentID)
@@ -450,7 +446,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 
 		value, err := proto.Marshal(segmentChangeInfos)
 		assert.NoError(t, err)
-		err = saveChangeInfo("0", string(value))
+		err = saveChangeInfo("0", string(value), t)
 		assert.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)

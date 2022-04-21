@@ -55,8 +55,7 @@ import (
 )
 
 const (
-	connEtcdMaxRetryTime = 100000
-	allPartitionID       = 0 // paritionID means no filtering
+	allPartitionID = 0 // paritionID means no filtering
 )
 
 var (
@@ -367,7 +366,7 @@ func (s *Server) initGarbageCollection() error {
 		// 1. bucket not exists
 		// 2. bucket is created by other componnent
 		// 3. datacoord try to create but failed with bucket already exists error
-		err = retry.Do(s.ctx, checkBucketFn, retry.Attempts(2))
+		err = retry.Do(s.ctx, checkBucketFn, retry.Attempts(3))
 		if err != nil {
 			return err
 		}
@@ -419,15 +418,9 @@ func (s *Server) startSegmentManager() {
 func (s *Server) initMeta() error {
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath)
 	s.kvClient = etcdKV
-	reloadEtcdFn := func() error {
-		var err error
-		s.meta, err = newMeta(s.kvClient)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connEtcdMaxRetryTime))
+	var err error
+	s.meta, err = newMeta(s.kvClient)
+	return err
 }
 
 func (s *Server) startServerLoop() {

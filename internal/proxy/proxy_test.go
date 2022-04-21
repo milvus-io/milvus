@@ -90,7 +90,7 @@ func init() {
 	Registry.MustRegister(prometheus.NewGoCollector())
 }
 
-func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
+func runRootCoord(ctx context.Context, localMsg bool, t *testing.T) *grpcrootcoord.Server {
 	var rc *grpcrootcoord.Server
 	var wg sync.WaitGroup
 
@@ -109,6 +109,8 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 			panic(err)
 		}
 		wg.Done()
+		etcd := etcd.GetEtcdTestClient(t)
+		rc.SetEtcdClient(etcd)
 		err = rc.Run()
 		if err != nil {
 			panic(err)
@@ -120,14 +122,13 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 	return rc
 }
 
-func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
+func runQueryCoord(ctx context.Context, localMsg bool, t *testing.T) *grpcquerycoord.Server {
 	var qs *grpcquerycoord.Server
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
 		querycoord.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&querycoord.Params.Log)
 			defer log.Sync()
@@ -140,6 +141,8 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 			panic(err)
 		}
 		wg.Done()
+		etcd := etcd.GetEtcdTestClient(t)
+		qs.SetEtcdClient(etcd)
 		err = qs.Run()
 		if err != nil {
 			panic(err)
@@ -151,7 +154,7 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 	return qs
 }
 
-func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcquerynode.Server {
+func runQueryNode(ctx context.Context, localMsg bool, alias string, t *testing.T) *grpcquerynode.Server {
 	var qn *grpcquerynode.Server
 	var wg sync.WaitGroup
 
@@ -159,7 +162,6 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 	go func() {
 		querynode.Params.QueryNodeCfg.InitAlias(alias)
 		querynode.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&querynode.Params.Log)
 			defer log.Sync()
@@ -172,6 +174,8 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 			panic(err)
 		}
 		wg.Done()
+		etcd := etcd.GetEtcdTestClient(t)
+		qn.SetEtcdClient(etcd)
 		err = qn.Run()
 		if err != nil {
 			panic(err)
@@ -183,14 +187,13 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 	return qn
 }
 
-func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Server {
+func runDataCoord(ctx context.Context, localMsg bool, t *testing.T) *grpcdatacoordclient.Server {
 	var ds *grpcdatacoordclient.Server
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
 		datacoord.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&datacoord.Params.Log)
 			defer log.Sync()
@@ -199,6 +202,8 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 		factory := dependency.NewDefaultFactory(localMsg)
 		ds = grpcdatacoordclient.NewServer(ctx, factory)
 		wg.Done()
+		etcd := etcd.GetEtcdTestClient(t)
+		ds.SetEtcdClient(etcd)
 		err := ds.Run()
 		if err != nil {
 			panic(err)
@@ -210,7 +215,7 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 	return ds
 }
 
-func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode.Server {
+func runDataNode(ctx context.Context, localMsg bool, alias string, t *testing.T) *grpcdatanode.Server {
 	var dn *grpcdatanode.Server
 	var wg sync.WaitGroup
 
@@ -218,7 +223,6 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 	go func() {
 		datanode.Params.DataNodeCfg.InitAlias(alias)
 		datanode.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&datanode.Params.Log)
 			defer log.Sync()
@@ -231,6 +235,8 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 			panic(err)
 		}
 		wg.Done()
+		etcd := etcd.GetEtcdTestClient(t)
+		dn.SetEtcdClient(etcd)
 		err = dn.Run()
 		if err != nil {
 			panic(err)
@@ -242,14 +248,13 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 	return dn
 }
 
-func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
+func runIndexCoord(ctx context.Context, localMsg bool, t *testing.T) *grpcindexcoord.Server {
 	var is *grpcindexcoord.Server
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
 		indexcoord.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&indexcoord.Params.Log)
 			defer log.Sync()
@@ -262,6 +267,8 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 			panic(err)
 		}
 		wg.Done()
+		etcd := etcd.GetEtcdTestClient(t)
+		is.SetEtcdClient(etcd)
 		err = is.Run()
 		if err != nil {
 			panic(err)
@@ -273,7 +280,7 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 	return is
 }
 
-func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexnode.Server {
+func runIndexNode(ctx context.Context, localMsg bool, alias string, t *testing.T) *grpcindexnode.Server {
 	var in *grpcindexnode.Server
 	var wg sync.WaitGroup
 
@@ -281,7 +288,6 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 	go func() {
 		indexnode.Params.IndexNodeCfg.InitAlias(alias)
 		indexnode.Params.Init()
-
 		if !localMsg {
 			logutil.SetupLogger(&indexnode.Params.Log)
 			defer log.Sync()
@@ -294,10 +300,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			panic(err)
 		}
 		wg.Done()
-		etcd, err := etcd.GetEtcdClient(&indexnode.Params.EtcdCfg)
-		if err != nil {
-			panic(err)
-		}
+		etcd := etcd.GetEtcdTestClient(t)
 		in.SetEtcdClient(etcd)
 		err = in.Run()
 		if err != nil {
@@ -411,7 +414,11 @@ func TestProxy(t *testing.T) {
 	factory := dependency.NewDefaultFactory(localMsg)
 	alias := "TestProxy"
 
-	rc := runRootCoord(ctx, localMsg)
+	// start etcd server and client
+	etcdcli := etcd.GetEtcdTestClient(t)
+	defer etcdcli.Close()
+
+	rc := runRootCoord(ctx, localMsg, t)
 	log.Info("running RootCoord ...")
 
 	if rc != nil {
@@ -422,7 +429,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	dc := runDataCoord(ctx, localMsg)
+	dc := runDataCoord(ctx, localMsg, t)
 	log.Info("running DataCoord ...")
 
 	if dc != nil {
@@ -433,7 +440,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	dn := runDataNode(ctx, localMsg, alias)
+	dn := runDataNode(ctx, localMsg, alias, t)
 	log.Info("running DataNode ...")
 
 	if dn != nil {
@@ -444,7 +451,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	qc := runQueryCoord(ctx, localMsg)
+	qc := runQueryCoord(ctx, localMsg, t)
 	log.Info("running QueryCoord ...")
 
 	if qc != nil {
@@ -455,7 +462,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	qn := runQueryNode(ctx, localMsg, alias)
+	qn := runQueryNode(ctx, localMsg, alias, t)
 	log.Info("running query node ...")
 
 	if qn != nil {
@@ -466,7 +473,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	ic := runIndexCoord(ctx, localMsg)
+	ic := runIndexCoord(ctx, localMsg, t)
 	log.Info("running IndexCoord ...")
 
 	if ic != nil {
@@ -477,7 +484,7 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	in := runIndexNode(ctx, localMsg, alias)
+	in := runIndexNode(ctx, localMsg, alias, t)
 	log.Info("running IndexNode ...")
 
 	if in != nil {
@@ -497,9 +504,6 @@ func TestProxy(t *testing.T) {
 	Params.Init()
 	log.Info("Initialize parameter table of Proxy")
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	defer etcdcli.Close()
-	assert.NoError(t, err)
 	proxy.SetEtcdClient(etcdcli)
 
 	testServer := newProxyTestServer(proxy)

@@ -53,7 +53,7 @@ func TestPlan_createSearchPlanByExpr(t *testing.T) {
 	defer cancel()
 
 	tSafe := newTSafeReplica()
-	historical, err := genSimpleHistorical(ctx, tSafe)
+	historical, err := genSimpleHistorical(ctx, tSafe, t)
 	assert.NoError(t, err)
 
 	col, err := historical.replica.getCollectionByID(defaultCollectionID)

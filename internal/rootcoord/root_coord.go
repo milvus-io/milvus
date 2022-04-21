@@ -59,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -1032,36 +1031,29 @@ func (c *Core) Init() error {
 			log.Error("RootCoord init session failed", zap.Error(err))
 			return
 		}
-		connectEtcdFn := func() error {
-			if c.kvBase, initError = c.kvBaseCreate(Params.EtcdCfg.KvRootPath); initError != nil {
-				log.Error("RootCoord failed to new EtcdKV for kvBase", zap.Any("reason", initError))
-				return initError
-			}
-			if c.impTaskKv, initError = c.metaKVCreate(Params.EtcdCfg.KvRootPath); initError != nil {
-				log.Error("RootCoord failed to new EtcdKV for MetaKV", zap.Any("reason", initError))
-				return initError
-			}
-			var metaKV kv.TxnKV
-			metaKV, initError = c.kvBaseCreate(Params.EtcdCfg.MetaRootPath)
-			if initError != nil {
-				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
-				return initError
-			}
-			var ss *suffixSnapshot
-			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
-				log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
-				return initError
-			}
-			if c.MetaTable, initError = NewMetaTable(metaKV, ss); initError != nil {
-				log.Error("RootCoord failed to new MetaTable", zap.Any("reason", initError))
-				return initError
-			}
 
-			return nil
-		}
 		log.Debug("RootCoord, Connecting to Etcd", zap.String("kv root", Params.EtcdCfg.KvRootPath), zap.String("meta root", Params.EtcdCfg.MetaRootPath))
-		err := retry.Do(c.ctx, connectEtcdFn, retry.Attempts(300))
-		if err != nil {
+		if c.kvBase, initError = c.kvBaseCreate(Params.EtcdCfg.KvRootPath); initError != nil {
+			log.Error("RootCoord failed to new EtcdKV for kvBase", zap.Any("reason", initError))
+			return
+		}
+		if c.impTaskKv, initError = c.metaKVCreate(Params.EtcdCfg.KvRootPath); initError != nil {
+			log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
+			return
+		}
+		var metaKV kv.TxnKV
+		metaKV, initError = c.kvBaseCreate(Params.EtcdCfg.MetaRootPath)
+		if initError != nil {
+			log.Error("RootCoord failed to new EtcdKV for MetaKV", zap.Any("reason", initError))
+			return
+		}
+		var ss *suffixSnapshot
+		if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
+			log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
+			return
+		}
+		if c.MetaTable, initError = NewMetaTable(metaKV, ss); initError != nil {
+			log.Error("RootCoord failed to new MetaTable", zap.Any("reason", initError))
 			return
 		}
 
@@ -1303,8 +1295,6 @@ func (c *Core) Stop() error {
 // GetComponentStates get states of components
 func (c *Core) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
 	code := c.stateCode.Load().(internalpb.StateCode)
-	log.Debug("GetComponentStates", zap.String("State Code", internalpb.StateCode_name[int32(code)]))
-
 	nodeID := common.NotRegisteredID
 	if c.session != nil && c.session.Registered() {
 		nodeID = c.session.ServerID

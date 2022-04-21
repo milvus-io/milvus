@@ -50,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -172,18 +171,9 @@ func (i *IndexCoord) Init() error {
 			initErr = err
 			return
 		}
-
-		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
-			metakv, err := NewMetaTable(etcdKV)
-			if err != nil {
-				return err
-			}
-			i.metaTable = metakv
-			return err
-		}
 		log.Debug("IndexCoord try to connect etcd")
-		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
+		etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
+		i.metaTable, err = NewMetaTable(etcdKV)
 		if err != nil {
 			log.Error("IndexCoord try to connect etcd failed", zap.Error(err))
 			initErr = err
@@ -219,7 +209,7 @@ func (i *IndexCoord) Init() error {
 
 		//init idAllocator
 		kvRootPath := Params.EtcdCfg.KvRootPath
-		etcdKV := tsoutil.NewTSOKVBase(i.etcdCli, kvRootPath, "index_gid")
+		etcdKV = tsoutil.NewTSOKVBase(i.etcdCli, kvRootPath, "index_gid")
 
 		i.idAllocator = allocator.NewGlobalIDAllocator("idTimestamp", etcdKV)
 		if err := i.idAllocator.Initialize(); err != nil {
@@ -817,7 +807,6 @@ func (i *IndexCoord) watchMetaLoop() {
 		case <-ctx.Done():
 			return
 		case resp := <-watchChan:
-			log.Debug("IndexCoord watchMetaLoop find meta updated.")
 			for _, event := range resp.Events {
 				eventRevision := event.Kv.Version
 				indexMeta := &indexpb.IndexMeta{}

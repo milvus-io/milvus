@@ -22,17 +22,13 @@ import (
 	"path"
 	"strconv"
 	"sync"
-	"time"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-)
-
-const (
-	// RequestTimeout timeout for request
-	RequestTimeout = 10 * time.Second
 )
 
 type rtPair struct {
@@ -73,11 +69,21 @@ func newMetaSnapshot(cli *clientv3.Client, root, tsKey string, bufSize int) (*me
 }
 
 func (ms *metaSnapshot) loadTs() error {
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 
+	var resp *clientv3.GetResponse
 	key := path.Join(ms.root, ms.tsKey)
-	resp, err := ms.cli.Get(ctx, key)
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = ms.cli.Get(ctx, key)
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(etcdkv.DefaultRetry))
 	if err != nil {
 		return err
 	}
@@ -100,7 +106,18 @@ func (ms *metaSnapshot) loadTs() error {
 		if ms.numTs == len(ms.ts2Rev) {
 			break
 		}
-		resp, err = ms.cli.Get(ctx, key, clientv3.WithRev(revision))
+
+		var resp *clientv3.GetResponse
+		getFunc := func() error {
+			var errGet error
+			resp, errGet = ms.cli.Get(ctx, ms.tsKey, clientv3.WithRev(revision))
+			if errGet != nil {
+				return errGet
+			}
+			return nil
+		}
+
+		err := retry.Do(ctx, getFunc, retry.Attempts(etcdkv.DefaultRetry))
 		if err != nil {
 			return err
 		}
@@ -240,11 +257,21 @@ func (ms *metaSnapshot) getRevOnEtcd(ts typeutil.Timestamp, rev int64) int64 {
 	if rev < 2 {
 		return 0
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 
 	for rev--; rev >= 2; rev-- {
-		resp, err := ms.cli.Get(ctx, path.Join(ms.root, ms.tsKey), clientv3.WithRev(rev))
+		var resp *clientv3.GetResponse
+		getFunc := func() error {
+			var errGet error
+			resp, errGet = ms.cli.Get(ctx, path.Join(ms.root, ms.tsKey), clientv3.WithRev(rev))
+			if errGet != nil {
+				return errGet
+			}
+			return nil
+		}
+
+		err := retry.Do(ctx, getFunc, retry.Attempts(etcdkv.DefaultRetry))
 		if err != nil {
 			log.Debug("get ts from etcd failed", zap.Error(err))
 			return 0
@@ -281,33 +308,50 @@ func (ms *metaSnapshot) getRev(ts typeutil.Timestamp) (int64, error) {
 func (ms *metaSnapshot) Save(key, value string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 
 	strTs := strconv.FormatInt(int64(ts), 10)
-	resp, err := ms.cli.Txn(ctx).If().Then(
-		clientv3.OpPut(path.Join(ms.root, key), value),
-		clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs),
-	).Commit()
+
+	var resp *clientv3.TxnResponse
+	txnFunc := func() error {
+		var errTxn error
+		resp, errTxn = ms.cli.Txn(ctx).If().Then(
+			clientv3.OpPut(path.Join(ms.root, key), value),
+			clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs),
+		).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+	err := retry.Do(ctx, txnFunc, retry.Attempts(etcdkv.DefaultRetry))
 	if err != nil {
 		return err
 	}
 	ms.putTs(resp.Header.Revision, ts)
-
 	return nil
 }
 
 func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
 	ms.lock.RLock()
 	defer ms.lock.RUnlock()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 
 	var resp *clientv3.GetResponse
 	var err error
 	var rev int64
 	if ts == 0 {
-		resp, err = ms.cli.Get(ctx, path.Join(ms.root, key))
+		getFunc := func() error {
+			var errGet error
+			resp, errGet = ms.cli.Get(ctx, path.Join(ms.root, key))
+			if errGet != nil {
+				return errGet
+			}
+			return nil
+		}
+		err := retry.Do(ctx, getFunc, retry.Attempts(etcdkv.DefaultRetry))
 		if err != nil {
 			return "", err
 		}
@@ -316,7 +360,16 @@ func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		resp, err = ms.cli.Get(ctx, path.Join(ms.root, key), clientv3.WithRev(rev))
+
+		getFunc := func() error {
+			var errGet error
+			resp, errGet = ms.cli.Get(ctx, path.Join(ms.root, key), clientv3.WithRev(rev))
+			if errGet != nil {
+				return errGet
+			}
+			return nil
+		}
+		err := retry.Do(ctx, getFunc, retry.Attempts(etcdkv.DefaultRetry))
 		if err != nil {
 			return "", err
 		}
@@ -330,7 +383,7 @@ func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 
 	ops := make([]clientv3.Op, 0, len(kvs)+1)
@@ -340,10 +393,21 @@ func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) 
 
 	strTs := strconv.FormatInt(int64(ts), 10)
 	ops = append(ops, clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs))
-	resp, err := ms.cli.Txn(ctx).If().Then(ops...).Commit()
+
+	var resp *clientv3.TxnResponse
+	txnFunc := func() error {
+		var errTxn error
+		resp, errTxn = ms.cli.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+	err := retry.Do(ctx, txnFunc, retry.Attempts(etcdkv.DefaultRetry))
 	if err != nil {
 		return err
 	}
+
 	ms.putTs(resp.Header.Revision, ts)
 	return nil
 }
@@ -351,14 +415,23 @@ func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) 
 func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	ms.lock.RLock()
 	defer ms.lock.RUnlock()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 
 	var resp *clientv3.GetResponse
 	var err error
 	var rev int64
 	if ts == 0 {
-		resp, err = ms.cli.Get(ctx, path.Join(ms.root, key), clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		getFunc := func() error {
+			var errGet error
+			resp, errGet = ms.cli.Get(ctx, path.Join(ms.root, key), clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+			if errGet != nil {
+				return errGet
+			}
+			return nil
+		}
+		err := retry.Do(ctx, getFunc, retry.Attempts(etcdkv.DefaultRetry))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -367,7 +440,16 @@ func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 		if err != nil {
 			return nil, nil, err
 		}
-		resp, err = ms.cli.Get(ctx, path.Join(ms.root, key), clientv3.WithPrefix(), clientv3.WithRev(rev), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		getFunc := func() error {
+			var errGet error
+			resp, errGet = ms.cli.Get(ctx, path.Join(ms.root, key), clientv3.WithPrefix(), clientv3.WithRev(rev), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+
+			if errGet != nil {
+				return errGet
+			}
+			return nil
+		}
+		err := retry.Do(ctx, getFunc, retry.Attempts(etcdkv.DefaultRetry))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -388,7 +470,7 @@ func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals)+1)
@@ -401,10 +483,21 @@ func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, re
 		ops = append(ops, clientv3.OpDelete(path.Join(ms.root, key), clientv3.WithPrefix()))
 	}
 	ops = append(ops, clientv3.OpPut(path.Join(ms.root, ms.tsKey), strTs))
-	resp, err := ms.cli.Txn(ctx).If().Then(ops...).Commit()
+
+	var resp *clientv3.TxnResponse
+	txnFunc := func() error {
+		var errTxn error
+		resp, errTxn = ms.cli.Txn(ctx).If().Then(ops...).Commit()
+		if errTxn != nil {
+			return errTxn
+		}
+		return nil
+	}
+	err := retry.Do(ctx, txnFunc, retry.Attempts(etcdkv.DefaultRetry))
 	if err != nil {
 		return err
 	}
+
 	ms.putTs(resp.Header.Revision, ts)
 	return nil
 }

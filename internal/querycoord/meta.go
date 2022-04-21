@@ -157,6 +157,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 
 	err := m.reloadFromKV()
 	if err != nil {
+		log.Warn("Querycoord failed to load meta from metakv", zap.Error(err))
 		return nil, err
 	}
 
@@ -164,9 +165,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 }
 
 func (m *MetaReplica) reloadFromKV() error {
-	log.Debug("start reload from kv")
-
-	log.Info("recovery collections...")
+	log.Debug("meta replica start reload from kv")
 	collectionKeys, collectionValues, err := m.client.LoadWithPrefix(collectionMetaPrefix)
 	if err != nil {
 		return err
@@ -286,7 +285,7 @@ func (m *MetaReplica) reloadFromKV() error {
 	}
 
 	//TODO::update partition states
-	log.Debug("reload from kv finished")
+	log.Debug("meta replica reload from kv finished")
 
 	return nil
 }

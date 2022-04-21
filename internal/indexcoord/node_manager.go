@@ -103,27 +103,26 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 
 // PeekClient peeks the client with the least load.
 func (nm *NodeManager) PeekClient(meta Meta) (UniqueID, types.IndexNode) {
-	log.Debug("IndexCoord NodeManager PeekClient")
-
 	dataSize, err := estimateIndexSizeByReq(meta.indexMeta.Req)
 	if err != nil {
 		log.Warn(err.Error())
 		return UniqueID(-1), nil
 	}
-	log.Debug("IndexCoord peek IndexNode client from pq", zap.Uint64("data size", dataSize))
+	log.Debug("IndexCoord peek IndexNode from pq", zap.Uint64("data size", dataSize))
 	nodeID := nm.pq.Peek(dataSize*indexSizeFactor, meta.indexMeta.Req.IndexParams, meta.indexMeta.Req.TypeParams)
 	if nodeID == -1 {
-		log.Error("No IndexNode available", zap.Uint64("data size", dataSize),
+		log.Warn("No IndexNode available", zap.Uint64("data size", dataSize),
 			zap.Uint64("IndexNode must have memory size", dataSize*indexSizeFactor))
+		return nodeID, nil
 	}
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 	client, ok := nm.nodeClients[nodeID]
 	if !ok {
-		log.Error("IndexCoord NodeManager PeekClient", zap.Int64("There is no IndexNode client corresponding to NodeID", nodeID))
+		log.Warn("IndexCoord NodeManager PeekClient failed", zap.Int64("There is no IndexNode client corresponding to NodeID", nodeID))
 		return nodeID, nil
 	}
-	log.Debug("IndexCoord NodeManager PeekClient ", zap.Int64("node", nodeID), zap.Uint64("data size", dataSize))
+	log.Info("IndexCoord NodeManager PeekClient successfully", zap.Int64("node", nodeID), zap.Uint64("data size", dataSize))
 	return nodeID, client
 }
 

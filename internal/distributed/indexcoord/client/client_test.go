@@ -37,17 +37,21 @@ func TestIndexCoordClient(t *testing.T) {
 	ClientParams.InitOnce(typeutil.IndexCoordRole)
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
 	server, err := grpcindexcoord.NewServer(ctx, factory)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	icm := &indexcoord.Mock{}
+	icm.SetEtcdClient(etcdCli)
 	err = server.SetClient(icm)
+	assert.Nil(t, err)
+
+	server.SetEtcdClient(etcdCli)
 	assert.Nil(t, err)
 
 	err = server.Run()
 	assert.Nil(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
-	assert.Nil(t, err)
 	icc, err := NewClient(ctx, indexcoord.Params.EtcdCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 	assert.NotNil(t, icc)

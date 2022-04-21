@@ -32,11 +32,10 @@ func TestIndexCoordMock(t *testing.T) {
 	Params.Init()
 	icm := Mock{}
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
-	icm.SetEtcdClient(etcdCli)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	err = icm.Register()
+	icm.SetEtcdClient(etcdCli)
+	err := icm.Register()
 	assert.Nil(t, err)
 	err = icm.Init()
 	assert.Nil(t, err)

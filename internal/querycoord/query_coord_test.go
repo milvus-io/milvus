@@ -75,9 +75,8 @@ func NewQueryCoordTest(ctx context.Context, factory dependency.Factory) (*QueryC
 	return queryCoord, nil
 }
 
-func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
+func startQueryCoord(ctx context.Context, t *testing.T) (*QueryCoord, error) {
 	factory := dependency.NewDefaultFactory(true)
-
 	coord, err := NewQueryCoordTest(ctx, factory)
 	if err != nil {
 		return nil, err
@@ -96,10 +95,7 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
 	coord.SetIndexCoord(indexCoord)
-	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		return nil, err
-	}
+	etcd := etcd.GetEtcdTestClient(t)
 	coord.SetEtcdClient(etcd)
 	err = coord.Init()
 	if err != nil {
@@ -121,7 +117,7 @@ func createDefaultPartition(ctx context.Context, queryCoord *QueryCoord) error {
 	return err
 }
 
-func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
+func startUnHealthyQueryCoord(ctx context.Context, t *testing.T) (*QueryCoord, error) {
 	factory := dependency.NewDefaultFactory(true)
 
 	coord, err := NewQueryCoordTest(ctx, factory)
@@ -136,10 +132,7 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 	coord.SetRootCoord(rootCoord)
 	coord.SetDataCoord(dataCoord)
-	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		return nil, err
-	}
+	etcd := etcd.GetEtcdTestClient(t)
 	coord.SetEtcdClient(etcd)
 	err = coord.Init()
 	if err != nil {
@@ -155,8 +148,7 @@ func startUnHealthyQueryCoord(ctx context.Context) (*QueryCoord, error) {
 
 func TestWatchNodeLoop(t *testing.T) {
 	baseCtx := context.Background()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	t.Run("Test OfflineNodes", func(t *testing.T) {
 		refreshParams()
 
@@ -183,7 +175,7 @@ func TestWatchNodeLoop(t *testing.T) {
 		err = kv.MultiSave(kvs)
 		assert.Nil(t, err)
 
-		queryCoord, err := startQueryCoord(baseCtx)
+		queryCoord, err := startQueryCoord(baseCtx, t)
 		assert.Nil(t, err)
 
 		for {
@@ -202,16 +194,16 @@ func TestWatchNodeLoop(t *testing.T) {
 		}
 
 		queryCoord.Stop()
-		err = removeAllSession()
+		err = removeAllSession(t)
 		assert.Nil(t, err)
 	})
 
 	t.Run("Test RegisterNewNode", func(t *testing.T) {
 		refreshParams()
-		queryCoord, err := startQueryCoord(baseCtx)
+		queryCoord, err := startQueryCoord(baseCtx, t)
 		assert.Nil(t, err)
 
-		queryNode1, err := startQueryNodeServer(baseCtx)
+		queryNode1, err := startQueryNodeServer(baseCtx, t)
 		assert.Nil(t, err)
 
 		nodeID := queryNode1.queryNodeID
@@ -219,16 +211,16 @@ func TestWatchNodeLoop(t *testing.T) {
 
 		queryCoord.Stop()
 		queryNode1.stop()
-		err = removeAllSession()
+		err = removeAllSession(t)
 		assert.Nil(t, err)
 	})
 
 	t.Run("Test RemoveNode", func(t *testing.T) {
 		refreshParams()
-		queryNode1, err := startQueryNodeServer(baseCtx)
+		queryNode1, err := startQueryNodeServer(baseCtx, t)
 		assert.Nil(t, err)
 
-		queryCoord, err := startQueryCoord(baseCtx)
+		queryCoord, err := startQueryCoord(baseCtx, t)
 		assert.Nil(t, err)
 
 		nodeID := queryNode1.queryNodeID
@@ -237,13 +229,13 @@ func TestWatchNodeLoop(t *testing.T) {
 		assert.Equal(t, 1, len(onlineNodeIDs))
 
 		queryNode1.stop()
-		err = removeNodeSession(nodeID)
+		err = removeNodeSession(nodeID, t)
 		assert.Nil(t, err)
 
 		waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs)
 
 		queryCoord.Stop()
-		err = removeAllSession()
+		err = removeAllSession(t)
 		assert.Nil(t, err)
 	})
 }
@@ -290,12 +282,12 @@ func TestHandoffSegmentLoop(t *testing.T) {
 	refreshParams()
 	baseCtx := context.Background()
 
-	queryCoord, err := startQueryCoord(baseCtx)
+	queryCoord, err := startQueryCoord(baseCtx, t)
 	assert.Nil(t, err)
 	rootCoord := queryCoord.rootCoordClient.(*rootCoordMock)
 	rootCoord.enableIndex = true
 
-	queryNode1, err := startQueryNodeServer(baseCtx)
+	queryNode1, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
 
@@ -554,7 +546,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 	})
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }
 
@@ -563,11 +555,11 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 	Params.QueryCoordCfg.BalanceIntervalSeconds = 10
 	baseCtx := context.Background()
 
-	queryCoord, err := startQueryCoord(baseCtx)
+	queryCoord, err := startQueryCoord(baseCtx, t)
 	assert.Nil(t, err)
 	queryCoord.cluster.(*queryNodeCluster).segmentAllocator = shuffleSegmentsToQueryNode
 
-	queryNode1, err := startQueryNodeServer(baseCtx)
+	queryNode1, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
 
@@ -606,7 +598,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		partitionID++
 	}
 
-	queryNode2, err := startQueryNodeServer(baseCtx)
+	queryNode2, err := startQueryNodeServer(baseCtx, t)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, queryNode2.queryNodeID)
 
@@ -625,6 +617,6 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 	}
 
 	queryCoord.Stop()
-	err = removeAllSession()
+	err = removeAllSession(t)
 	assert.Nil(t, err)
 }

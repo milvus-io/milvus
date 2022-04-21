@@ -42,7 +42,7 @@ func benchmarkQueryCollectionSearch(nq int, b *testing.B) {
 
 	tx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(tx, cancel)
+	queryCollection, err := genSimpleQueryCollection(tx, cancel, b)
 	assert.NoError(b, err)
 
 	// search only one segment
@@ -118,7 +118,7 @@ func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B)
 
 	tx, cancel := context.WithCancel(context.Background())
 
-	queryCollection, err := genSimpleQueryCollection(tx, cancel)
+	queryCollection, err := genSimpleQueryCollection(tx, cancel, b)
 	assert.NoError(b, err)
 
 	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
@@ -129,7 +129,7 @@ func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B)
 	assert.Equal(b, 0, queryCollection.historical.replica.getSegmentNum())
 	assert.Equal(b, 0, queryCollection.streaming.replica.getSegmentNum())
 
-	node, err := genSimpleQueryNode(tx)
+	node, err := genSimpleQueryNode(tx, b)
 	assert.NoError(b, err)
 	node.loader.historicalReplica = queryCollection.historical.replica
 

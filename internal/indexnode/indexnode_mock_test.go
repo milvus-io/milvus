@@ -36,11 +36,10 @@ func TestIndexNodeMock(t *testing.T) {
 	inm := Mock{
 		Build: true,
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	err = inm.Register()
+	inm.SetEtcdClient(etcdCli)
+	err := inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)
@@ -154,11 +153,10 @@ func TestIndexNodeMockFiled(t *testing.T) {
 		Build:   true,
 		Err:     false,
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	inm.SetEtcdClient(etcdCli)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
-	err = inm.Register()
+	inm.SetEtcdClient(etcdCli)
+	err := inm.Register()
 	assert.Nil(t, err)
 	err = inm.Init()
 	assert.Nil(t, err)

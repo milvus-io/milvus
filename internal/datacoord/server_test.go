@@ -1969,11 +1969,6 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 }
 
 func TestOptions(t *testing.T) {
-	kv := getMetaKv(t)
-	defer func() {
-		kv.RemoveWithPrefix("")
-		kv.Close()
-	}()
 
 	t.Run("SetRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -1991,6 +1986,8 @@ func TestOptions(t *testing.T) {
 		assert.NotNil(t, svr.rootCoordClientCreator)
 	})
 	t.Run("SetCluster", func(t *testing.T) {
+		kv := getMetaKv(t)
+		defer kv.Close()
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManager()
@@ -2392,7 +2389,6 @@ func TestImport(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
-		etcd.StopEtcdServer()
 	})
 
 	t.Run("no free node", func(t *testing.T) {
@@ -2413,7 +2409,6 @@ func TestImport(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
-		etcd.StopEtcdServer()
 	})
 
 	t.Run("no datanode available", func(t *testing.T) {
@@ -2428,7 +2423,6 @@ func TestImport(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		etcd.StopEtcdServer()
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -2523,8 +2517,8 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	factory := dependency.NewDefaultFactory(true)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
+
 	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
@@ -2555,8 +2549,9 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 }
 
 func closeTestServer(t *testing.T, svr *Server) {
-	err := svr.Stop()
+	err := svr.CleanMeta()
 	assert.Nil(t, err)
-	err = svr.CleanMeta()
+
+	err = svr.Stop()
 	assert.Nil(t, err)
 }

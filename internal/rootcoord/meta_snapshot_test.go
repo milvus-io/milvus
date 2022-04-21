@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -37,8 +38,7 @@ func TestMetaSnapshot(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	var vtso typeutil.Timestamp
@@ -167,7 +167,7 @@ func TestGetRevOnCache(t *testing.T) {
 }
 
 func TestGetRevOnEtcd(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), etcdkv.RequestTimeout)
 	defer cancel()
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
@@ -177,8 +177,7 @@ func TestGetRevOnEtcd(t *testing.T) {
 	tsKey := "timestamp"
 	key := path.Join(rootPath, tsKey)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	ms := metaSnapshot{
@@ -186,8 +185,9 @@ func TestGetRevOnEtcd(t *testing.T) {
 		root:  rootPath,
 		tsKey: tsKey,
 	}
+
 	resp, err := etcdCli.Put(ctx, key, "100")
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	revList := []int64{}
 	tsList := []typeutil.Timestamp{}
 	revList = append(revList, resp.Header.Revision)
@@ -221,8 +221,7 @@ func TestLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	var vtso typeutil.Timestamp
@@ -269,8 +268,7 @@ func TestMultiSave(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	var vtso typeutil.Timestamp
@@ -333,8 +331,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	var vtso typeutil.Timestamp
@@ -411,8 +408,7 @@ func TestTsBackward(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	kv, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
@@ -438,8 +434,7 @@ func TestFix7150(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	tsKey := "timestamp"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 
 	kv, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)

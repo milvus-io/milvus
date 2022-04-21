@@ -17,17 +17,20 @@
 package etcdkv
 
 import (
+	"testing"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 )
 
 // NewMetaKvFactory returns an object that implements the kv.MetaKv interface using etcd.
 // The UseEmbedEtcd in the param is used to determine whether the etcd service is external or embedded.
-func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.MetaKv, error) {
+func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig, t *testing.T) kv.MetaKv {
 	log.Info("start etcd with rootPath",
 		zap.String("rootpath", rootPath),
 		zap.Bool("isEmbed", etcdCfg.UseEmbedEtcd))
@@ -36,24 +39,17 @@ func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.MetaK
 		var cfg *embed.Config
 		if len(path) > 0 {
 			cfgFromFile, err := embed.ConfigFromFile(path)
-			if err != nil {
-				return nil, err
-			}
+			assert.NoError(t, err)
 			cfg = cfgFromFile
 		} else {
 			cfg = embed.NewConfig()
 		}
 		cfg.Dir = etcdCfg.DataDir
 		metaKv, err := NewEmbededEtcdKV(cfg, rootPath)
-		if err != nil {
-			return nil, err
-		}
-		return metaKv, err
+		assert.NoError(t, err)
+		return metaKv
 	}
-	client, err := etcd.GetEtcdClient(etcdCfg)
-	if err != nil {
-		return nil, err
-	}
+	client := etcd.GetEtcdTestClient(t)
 	metaKv := NewEtcdKV(client, rootPath)
-	return metaKv, err
+	return metaKv
 }

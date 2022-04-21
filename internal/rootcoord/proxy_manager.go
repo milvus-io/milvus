@@ -23,8 +23,10 @@ import (
 	"path"
 	"sync"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -74,7 +76,7 @@ func (p *proxyManager) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *proxyManager) WatchProxy() error {
-	ctx, cancel := context.WithTimeout(p.ctx, RequestTimeout)
+	ctx, cancel := context.WithTimeout(p.ctx, etcdkv.RequestTimeout)
 	defer cancel()
 
 	sessions, rev, err := p.getSessionsOnEtcd(ctx)
@@ -166,12 +168,22 @@ func (p *proxyManager) parseSession(value []byte) (*sessionutil.Session, error) 
 }
 
 func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Session, int64, error) {
-	resp, err := p.etcdCli.Get(
-		ctx,
-		path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
-	)
+	var resp *clientv3.GetResponse
+	getFunc := func() error {
+		var errGet error
+		resp, errGet = p.etcdCli.Get(
+			ctx,
+			path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
+			clientv3.WithPrefix(),
+			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		)
+		if errGet != nil {
+			return errGet
+		}
+		return nil
+	}
+
+	err := retry.Do(ctx, getFunc, retry.Attempts(20))
 	if err != nil {
 		return nil, 0, fmt.Errorf("proxy manager failed to watch proxy with error %w", err)
 	}
@@ -192,30 +204,4 @@ func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 // Stop stops the proxyManager
 func (p *proxyManager) Stop() {
 	p.cancel()
-}
-
-// listProxyInEtcd helper function lists proxy in etcd
-func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sessionutil.Session, error) {
-	ctx2, cancel := context.WithTimeout(ctx, RequestTimeout)
-	defer cancel()
-	resp, err := cli.Get(
-		ctx2,
-		path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list proxy failed, etcd error = %w", err)
-	}
-	sess := make(map[int64]*sessionutil.Session)
-	for _, v := range resp.Kvs {
-		var s sessionutil.Session
-		err := json.Unmarshal(v.Value, &s)
-		if err != nil {
-			log.Debug("unmarshal SvrSession failed", zap.Error(err))
-			continue
-		}
-		sess[s.ServerID] = &s
-	}
-	return sess, nil
 }

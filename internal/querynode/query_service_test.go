@@ -134,7 +134,7 @@ func TestSearch_Search(t *testing.T) {
 	// init queryNode
 	collectionID := UniqueID(0)
 	segmentID := UniqueID(1)
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	initTestMeta(t, node, collectionID, UniqueID(0))
 
 	// start search service
@@ -178,7 +178,7 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	collectionID := UniqueID(0)
 	segmentID1 := UniqueID(1)
 	segmentID2 := UniqueID(2)
-	node := newQueryNodeMock()
+	node := newQueryNodeMock(t)
 	initTestMeta(t, node, collectionID, UniqueID(0))
 
 	// start search service
@@ -224,10 +224,10 @@ func TestQueryService_addQueryCollection(t *testing.T) {
 	defer cancel()
 
 	tSafe := newTSafeReplica()
-	his, err := genSimpleHistorical(ctx, tSafe)
+	his, err := genSimpleHistorical(ctx, tSafe, t)
 	assert.NoError(t, err)
 
-	str, err := genSimpleStreaming(ctx, tSafe)
+	str, err := genSimpleStreaming(ctx, tSafe, t)
 	assert.NoError(t, err)
 
 	fac := genFactory()

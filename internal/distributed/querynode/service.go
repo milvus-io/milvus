@@ -99,18 +99,19 @@ func (s *Server) init() error {
 
 	log.Debug("QueryNode", zap.Int("port", Params.Port))
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		log.Debug("QueryNode connect to etcd failed", zap.Error(err))
-		return err
+	if s.etcdCli == nil {
+		etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+		if err != nil {
+			log.Debug("QueryNode connect to etcd failed", zap.Error(err))
+			return err
+		}
+		s.SetEtcdClient(etcdCli)
 	}
-	s.etcdCli = etcdCli
-	s.SetEtcdClient(etcdCli)
 	log.Debug("QueryNode connect to etcd successfully")
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
-	err = <-s.grpcErrChan
+	err := <-s.grpcErrChan
 	if err != nil {
 		return err
 	}
@@ -233,6 +234,7 @@ func (s *Server) Stop() error {
 
 // SetEtcdClient sets the etcd client for QueryNode component.
 func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
+	s.etcdCli = etcdCli
 	s.querynode.SetEtcdClient(etcdCli)
 }
 

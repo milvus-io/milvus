@@ -28,7 +28,6 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -53,15 +52,6 @@ func newChanName() string {
 
 func newGroupName() string {
 	return fmt.Sprintf("my-group-%v", time.Now().Nanosecond())
-}
-
-func etcdEndpoints() []string {
-	endpoints := os.Getenv("ETCD_ENDPOINTS")
-	if endpoints == "" {
-		endpoints = "localhost:2379"
-	}
-	etcdEndpoints := strings.Split(endpoints, ",")
-	return etcdEndpoints
 }
 
 func TestRocksmq_RegisterConsumer(t *testing.T) {
@@ -314,12 +304,9 @@ func TestRocksmq_Seek(t *testing.T) {
 }
 
 func TestRocksmq_Loop(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -385,12 +372,9 @@ func TestRocksmq_Loop(t *testing.T) {
 }
 
 func TestRocksmq_Goroutines(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -460,12 +444,9 @@ func TestRocksmq_Goroutines(t *testing.T) {
 		Consume: 90000 message / s
 */
 func TestRocksmq_Throughout(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -518,12 +499,9 @@ func TestRocksmq_Throughout(t *testing.T) {
 }
 
 func TestRocksmq_MultiChan(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -570,12 +548,9 @@ func TestRocksmq_MultiChan(t *testing.T) {
 }
 
 func TestRocksmq_CopyData(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -636,12 +611,9 @@ func TestRocksmq_CopyData(t *testing.T) {
 }
 
 func TestRocksmq_SeekToLatest(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -727,12 +699,9 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 }
 
 func TestRocksmq_Reader(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -790,9 +759,7 @@ func TestRocksmq_Reader(t *testing.T) {
 }
 
 func TestReader_CornerCase(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	defer etcdKV.Close()
@@ -849,12 +816,9 @@ func TestReader_CornerCase(t *testing.T) {
 }
 
 func TestRocksmq_GetLatestMsg(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -923,12 +887,9 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 }
 
 func TestRocksmq_Close(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
@@ -963,9 +924,8 @@ func TestRocksmq_Close(t *testing.T) {
 }
 
 func TestRocksmq_SeekWithNoConsumerError(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)

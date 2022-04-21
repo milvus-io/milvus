@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -100,8 +99,8 @@ func TestGrpcService(t *testing.T) {
 	assert.Nil(t, err)
 	svr.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
 	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
@@ -925,8 +924,8 @@ func TestRun(t *testing.T) {
 	rootcoord.Params.Init()
 	rootcoord.Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
 	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
@@ -936,21 +935,4 @@ func TestRun(t *testing.T) {
 	err = svr.Stop()
 	assert.Nil(t, err)
 
-}
-
-func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
-	var etcdCli *clientv3.Client
-	connectEtcdFn := func() error {
-		etcd, err := clientv3.New(clientv3.Config{Endpoints: etcdEndpoints, DialTimeout: 5 * time.Second})
-		if err != nil {
-			return err
-		}
-		etcdCli = etcd
-		return nil
-	}
-	err := retry.Do(context.TODO(), connectEtcdFn, retry.Attempts(300))
-	if err != nil {
-		return nil, err
-	}
-	return etcdCli, nil
 }

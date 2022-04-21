@@ -3,6 +3,8 @@ package errorutil
 import (
 	"fmt"
 	"strings"
+
+	"github.com/lingdor/stackerror"
 )
 
 // ErrorList for print error log
@@ -18,10 +20,18 @@ func (el ErrorList) Error() string {
 		if err == nil {
 			break
 		}
-		if index > limit {
+		if index >= limit {
 			break
 		}
-		builder.WriteString(fmt.Sprintf("attempt #%d:%s\n", index+1, err.Error()))
+
+		if index == 0 {
+			// wrap up first error message for non stack error
+			_, ok := err.(stackerror.StackError)
+			if !ok {
+				err = stackerror.NewParent("first error stack:", err)
+			}
+		}
+		builder.WriteString(fmt.Sprintf("attempt #%d:%s\n", index+1, err))
 	}
 	return builder.String()
 }

@@ -27,16 +27,17 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 )
 
-func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {
+func genSimpleQueryShard(ctx context.Context, t testutil.TB) (*queryShard, error) {
 	tSafe := newTSafeReplica()
-	historical, err := genSimpleHistorical(ctx, tSafe)
+	historical, err := genSimpleHistorical(ctx, tSafe, t)
 	if err != nil {
 		return nil, err
 	}
 
-	streaming, err := genSimpleStreaming(ctx, tSafe)
+	streaming, err := genSimpleStreaming(ctx, tSafe, t)
 	if err != nil {
 		return nil, err
 	}
@@ -83,14 +84,14 @@ func updateQueryShardTSafe(qs *queryShard, timestamp Timestamp) error {
 }
 
 func TestQueryShard_Close(t *testing.T) {
-	qs, err := genSimpleQueryShard(context.Background())
+	qs, err := genSimpleQueryShard(context.Background(), t)
 	assert.NoError(t, err)
 
 	qs.Close()
 }
 
 func TestQueryShard_Search(t *testing.T) {
-	qs, err := genSimpleQueryShard(context.Background())
+	qs, err := genSimpleQueryShard(context.Background(), t)
 	assert.NoError(t, err)
 
 	req, err := genSimpleSearchRequest(IndexFaissIDMap)
@@ -120,7 +121,7 @@ func TestQueryShard_Search(t *testing.T) {
 }
 
 func TestQueryShard_Query(t *testing.T) {
-	qs, err := genSimpleQueryShard(context.Background())
+	qs, err := genSimpleQueryShard(context.Background(), t)
 	assert.NoError(t, err)
 
 	req, err := genSimpleRetrieveRequest()
@@ -151,7 +152,7 @@ func TestQueryShard_Query(t *testing.T) {
 }
 
 func TestQueryShard_waitNewTSafe(t *testing.T) {
-	qs, err := genSimpleQueryShard(context.Background())
+	qs, err := genSimpleQueryShard(context.Background(), t)
 	assert.NoError(t, err)
 
 	timestamp := Timestamp(1000)
@@ -168,7 +169,7 @@ func TestQueryShard_waitNewTSafe(t *testing.T) {
 }
 
 func TestQueryShard_WaitUntilServiceable(t *testing.T) {
-	qs, err := genSimpleQueryShard(context.Background())
+	qs, err := genSimpleQueryShard(context.Background(), t)
 	assert.NoError(t, err)
 
 	err = updateQueryShardTSafe(qs, 1000)

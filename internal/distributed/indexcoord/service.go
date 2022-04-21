@@ -93,13 +93,14 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
 
-	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
-	if err != nil {
-		log.Debug("IndexCoord connect to etcd failed", zap.Error(err))
-		return err
+	if s.etcdCli == nil {
+		etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
+		if err != nil {
+			log.Debug("IndexCoord connect to etcd failed", zap.Error(err))
+			return err
+		}
+		s.SetEtcdClient(etcdCli)
 	}
-	s.etcdCli = etcdCli
-	s.indexcoord.SetEtcdClient(s.etcdCli)
 
 	s.loopWg.Add(1)
 	go s.startGrpcLoop(indexcoord.Params.IndexCoordCfg.Port)
@@ -158,6 +159,11 @@ func (s *Server) Stop() error {
 func (s *Server) SetClient(indexCoordClient types.IndexCoordComponent) error {
 	s.indexcoord = indexCoordClient
 	return nil
+}
+
+func (s *Server) SetEtcdClient(client *clientv3.Client) {
+	s.etcdCli = client
+	s.indexcoord.SetEtcdClient(client)
 }
 
 // GetComponentStates gets the component states of IndexCoord.

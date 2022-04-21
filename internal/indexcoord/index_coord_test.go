@@ -46,16 +46,16 @@ import (
 
 func TestIndexCoord(t *testing.T) {
 	ctx := context.Background()
-	inm0 := &indexnode.Mock{}
+	indexNodeMock0 := &indexnode.Mock{}
 	Params.Init()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	inm0.SetEtcdClient(etcdCli)
-	err = inm0.Init()
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
+	indexNodeMock0.SetEtcdClient(etcdCli)
+	err := indexNodeMock0.Init()
 	assert.Nil(t, err)
-	err = inm0.Register()
+	err = indexNodeMock0.Register()
 	assert.Nil(t, err)
-	err = inm0.Start()
+	err = indexNodeMock0.Start()
 	assert.Nil(t, err)
 	factory := dependency.NewDefaultFactory(true)
 	ic, err := NewIndexCoord(ctx, factory)
@@ -64,7 +64,6 @@ func TestIndexCoord(t *testing.T) {
 	ic.durationInterval = time.Second
 	ic.assignTaskInterval = 200 * time.Millisecond
 	ic.taskLimit = 20
-
 	ic.SetEtcdClient(etcdCli)
 	err = ic.Init()
 	assert.Nil(t, err)
@@ -73,23 +72,22 @@ func TestIndexCoord(t *testing.T) {
 	err = ic.Start()
 	assert.Nil(t, err)
 
-	err = inm0.Stop()
+	err = indexNodeMock0.Stop()
 	assert.Nil(t, err)
 
 	in, err := grpcindexnode.NewServer(ctx, factory)
 	assert.Nil(t, err)
 	assert.NotNil(t, in)
-	inm := &indexnode.Mock{
+	indexNodeMock := &indexnode.Mock{
 		Build:   true,
 		Failure: false,
 	}
-
-	inm.SetEtcdClient(etcdCli)
-	err = in.SetClient(inm)
+	err = in.SetClient(indexNodeMock)
+	in.SetEtcdClient(etcdCli)
 	assert.Nil(t, err)
 
 	err = in.Run()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	state, err := ic.GetComponentStates(ctx)
 	assert.Nil(t, err)
@@ -98,72 +96,125 @@ func TestIndexCoord(t *testing.T) {
 	indexID := int64(rand.Int())
 
 	var indexBuildID UniqueID
-
-	t.Run("Create Index", func(t *testing.T) {
-		req := &indexpb.BuildIndexRequest{
-			IndexID:   indexID,
-			DataPaths: []string{"DataPath-1", "DataPath-2"},
-			NumRows:   0,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: "128",
-				},
+	reqBuildIndex := &indexpb.BuildIndexRequest{
+		IndexID:   indexID,
+		DataPaths: []string{"DataPath-1", "DataPath-2"},
+		NumRows:   0,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
 			},
-			FieldSchema: &schemapb.FieldSchema{
-				DataType: schemapb.DataType_FloatVector,
-			},
-		}
-		resp, err := ic.BuildIndex(ctx, req)
+		},
+		FieldSchema: &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		},
+	}
+	resp, err := ic.BuildIndex(ctx, reqBuildIndex)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	indexBuildID = resp.IndexBuildID
+	resp2, err := ic.BuildIndex(ctx, reqBuildIndex)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, indexBuildID, resp2.IndexBuildID)
+	assert.Equal(t, "already have same index", resp2.Status.Reason)
+
+	reqGetIndex := &indexpb.GetIndexStatesRequest{
+		IndexBuildIDs: []UniqueID{indexBuildID},
+	}
+	for {
+		resp, err := ic.GetIndexStates(ctx, reqGetIndex)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		indexBuildID = resp.IndexBuildID
-		resp2, err := ic.BuildIndex(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, indexBuildID, resp2.IndexBuildID)
-		assert.Equal(t, "already have same index", resp2.Status.Reason)
-	})
-
-	t.Run("Get Index State", func(t *testing.T) {
-		req := &indexpb.GetIndexStatesRequest{
-			IndexBuildIDs: []UniqueID{indexBuildID},
+		if resp.States[0].State == commonpb.IndexState_Finished ||
+			resp.States[0].State == commonpb.IndexState_Failed {
+			break
 		}
-		for {
-			resp, err := ic.GetIndexStates(ctx, req)
-			assert.Nil(t, err)
-			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			if resp.States[0].State == commonpb.IndexState_Finished ||
-				resp.States[0].State == commonpb.IndexState_Failed {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	})
+		time.Sleep(100 * time.Millisecond)
+	}
 
-	t.Run("Get IndexFile Paths", func(t *testing.T) {
-		req := &indexpb.GetIndexFilePathsRequest{
-			IndexBuildIDs: []UniqueID{indexBuildID},
-		}
-		resp, err := ic.GetIndexFilePaths(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, 1, len(resp.FilePaths))
-		assert.Equal(t, 2, len(resp.FilePaths[0].IndexFilePaths))
-		assert.Equal(t, "IndexFilePath-1", resp.FilePaths[0].IndexFilePaths[0])
-		assert.Equal(t, "IndexFilePath-2", resp.FilePaths[0].IndexFilePaths[1])
-	})
+	reqGetIndeFilePath := &indexpb.GetIndexFilePathsRequest{
+		IndexBuildIDs: []UniqueID{indexBuildID},
+	}
+	respGetIndexFilePaths, err := ic.GetIndexFilePaths(ctx, reqGetIndeFilePath)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, 1, len(respGetIndexFilePaths.FilePaths))
+	assert.Equal(t, 2, len(respGetIndexFilePaths.FilePaths[0].IndexFilePaths))
+	assert.Equal(t, "IndexFilePath-1", respGetIndexFilePaths.FilePaths[0].IndexFilePaths[0])
+	assert.Equal(t, "IndexFilePath-2", respGetIndexFilePaths.FilePaths[0].IndexFilePaths[1])
 
-	t.Run("Drop Index", func(t *testing.T) {
-		req := &indexpb.DropIndexRequest{
-			IndexID: indexID,
-		}
-		resp, err := ic.DropIndex(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
+	reqDrop := &indexpb.DropIndexRequest{
+		IndexID: indexID,
+	}
+	respDrop, err := ic.DropIndex(ctx, reqDrop)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, respDrop.ErrorCode)
 
-	t.Run("GetMetrics, system info", func(t *testing.T) {
+	indexMeta := ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
+	for indexMeta != nil {
+		log.Info("RecycleIndexMeta", zap.Any("meta", indexMeta))
+		indexMeta = ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	err = in.Stop()
+	assert.Nil(t, err)
+	err = ic.Stop()
+	assert.Nil(t, err)
+}
+
+func TestIndexCoordMetrics(t *testing.T) {
+	ctx := context.Background()
+	indexNodeMock0 := &indexnode.Mock{}
+	Params.Init()
+	etcdCli := etcd.GetEtcdTestClient(t)
+	defer etcdCli.Close()
+	indexNodeMock0.SetEtcdClient(etcdCli)
+	err := indexNodeMock0.Init()
+	assert.Nil(t, err)
+	err = indexNodeMock0.Register()
+	assert.Nil(t, err)
+	err = indexNodeMock0.Start()
+	assert.Nil(t, err)
+	factory := dependency.NewDefaultFactory(true)
+	ic, err := NewIndexCoord(ctx, factory)
+	assert.Nil(t, err)
+	ic.reqTimeoutInterval = time.Second * 10
+	ic.durationInterval = time.Second
+	ic.assignTaskInterval = 200 * time.Millisecond
+	ic.taskLimit = 20
+	ic.SetEtcdClient(etcdCli)
+	err = ic.Init()
+	assert.Nil(t, err)
+	err = ic.Register()
+	assert.Nil(t, err)
+	err = ic.Start()
+	assert.Nil(t, err)
+
+	err = indexNodeMock0.Stop()
+	assert.Nil(t, err)
+
+	in, err := grpcindexnode.NewServer(ctx, factory)
+	assert.Nil(t, err)
+	assert.NotNil(t, in)
+	indexNodeMock := &indexnode.Mock{
+		Build:   true,
+		Failure: false,
+	}
+	err = in.SetClient(indexNodeMock)
+	in.SetEtcdClient(etcdCli)
+	assert.Nil(t, err)
+
+	err = in.Run()
+	assert.NoError(t, err)
+
+	state, err := ic.GetComponentStates(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, internalpb.StateCode_Healthy, state.State.StateCode)
+
+	t.Run("GetMetrics", func(t *testing.T) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.Nil(t, err)
 		resp, err := ic.GetMetrics(ctx, req)
@@ -171,54 +222,35 @@ func TestIndexCoord(t *testing.T) {
 		log.Info("GetMetrics, system info",
 			zap.String("name", resp.ComponentName),
 			zap.String("resp", resp.Response))
-	})
 
-	t.Run("GetTimeTickChannel", func(t *testing.T) {
-		resp, err := ic.GetTimeTickChannel(ctx)
+		respGetTimeTickChannel, err := ic.GetTimeTickChannel(ctx)
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+		assert.Equal(t, commonpb.ErrorCode_Success, respGetTimeTickChannel.Status.ErrorCode)
 
-	t.Run("GetStatisticsChannel", func(t *testing.T) {
-		resp, err := ic.GetStatisticsChannel(ctx)
+		respGetStatsChannel, err := ic.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
+		assert.Equal(t, commonpb.ErrorCode_Success, respGetStatsChannel.Status.ErrorCode)
 
-	t.Run("GetMetrics when indexcoord is not healthy", func(t *testing.T) {
 		ic.UpdateStateCode(internalpb.StateCode_Abnormal)
-		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		reqSystemMetrics, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.Nil(t, err)
-		resp, err := ic.GetMetrics(ctx, req)
+		respSystemMetrics, err := ic.GetMetrics(ctx, reqSystemMetrics)
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, respSystemMetrics.Status.ErrorCode)
 		ic.UpdateStateCode(internalpb.StateCode_Healthy)
-	})
 
-	t.Run("GetMetrics when request is illegal", func(t *testing.T) {
-		req, err := metricsinfo.ConstructRequestByMetricType("GetIndexNodeMetrics")
+		reqIndexNodeMetrics, err := metricsinfo.ConstructRequestByMetricType("GetIndexNodeMetrics")
 		assert.Nil(t, err)
-		resp, err := ic.GetMetrics(ctx, req)
+		respIndexNodeMetrics, err := ic.GetMetrics(ctx, reqIndexNodeMetrics)
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-	})
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, respIndexNodeMetrics.Status.ErrorCode)
 
-	t.Run("Recycle IndexMeta", func(t *testing.T) {
-		indexMeta := ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
-		for indexMeta != nil {
-			log.Info("RecycleIndexMeta", zap.Any("meta", indexMeta))
-			indexMeta = ic.metaTable.GetIndexMetaByIndexBuildID(indexBuildID)
-			time.Sleep(100 * time.Millisecond)
-		}
-	})
-
-	t.Run("GetMetrics request without metricType", func(t *testing.T) {
-		req := &milvuspb.GetMetricsRequest{
+		reqIndexCoordMetrics := &milvuspb.GetMetricsRequest{
 			Request: "GetIndexCoordMetrics",
 		}
-		resp, err := ic.GetMetrics(ctx, req)
+		respIndexCoordMetrics, err := ic.GetMetrics(ctx, reqIndexCoordMetrics)
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, respIndexCoordMetrics.Status.ErrorCode)
 	})
 
 	err = in.Stop()

@@ -44,7 +44,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("test load segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.historical.replica.removeSegment(defaultSegmentID)
@@ -75,7 +75,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	})
 
 	t.Run("test set segment error due to without partition", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		err = node.historical.replica.removePartition(defaultPartitionID)
@@ -106,7 +106,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	})
 
 	t.Run("test load segment with nil base message", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		loader := node.loader
@@ -124,7 +124,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 	defer cancel()
 
 	runLoadSegmentFieldData := func(dataType schemapb.DataType) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -208,7 +208,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 	defer cancel()
 
 	t.Run("test no collection", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -271,7 +271,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 	//})
 
 	t.Run("test no vec field 2", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -315,7 +315,7 @@ func TestSegmentLoader_checkSegmentSize(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 	loader := node.loader
 	assert.NotNil(t, loader)
@@ -329,7 +329,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 	defer cancel()
 
 	t.Run("test load growing segments", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -348,7 +348,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 	})
 
 	t.Run("test invalid insert data", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -378,7 +378,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("test load growing and sealed segments", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		loader := node.loader
@@ -475,7 +475,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 	}
 
 	// generate segmentLoader
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 	loader := node.loader
 	assert.NotNil(t, loader)
@@ -563,7 +563,7 @@ func testSeekFailWhenConsumingDeltaMsg(ctx context.Context, t *testing.T, positi
 	msgStream.On("GetLatestMsgID", mock.AnythingOfType("string")).Return(mockMsg, nil)
 
 	factory := &mockMsgStreamFactory{mockMqStream: msgStream}
-	node, err := genSimpleQueryNodeWithMQFactory(ctx, factory)
+	node, err := genSimpleQueryNodeWithMQFactory(ctx, factory, t)
 	assert.NoError(t, err)
 	loader := node.loader
 	assert.NotNil(t, loader)
@@ -593,7 +593,7 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 
 	msgStream.On("Chan").Return(msgChan)
 	factory := &mockMsgStreamFactory{mockMqStream: msgStream}
-	node, err := genSimpleQueryNodeWithMQFactory(ctx, factory)
+	node, err := genSimpleQueryNodeWithMQFactory(ctx, factory, t)
 	assert.NoError(t, err)
 
 	loader := node.loader

@@ -24,9 +24,6 @@ import (
 	"math/rand"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -44,8 +41,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 )
 
 // ---------- unittest util functions ----------
@@ -618,11 +618,8 @@ func genSimpleCollectionMeta() *etcdpb.CollectionMeta {
 
 // ---------- unittest util functions ----------
 // functions of third-party
-func genEtcdKV() (*etcdkv.EtcdKV, error) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		return nil, err
-	}
+func genEtcdKV(t testutil.TB) (*etcdkv.EtcdKV, error) {
+	etcdCli := etcd.GetEtcdTestClient(t)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	return etcdKV, nil
 }
@@ -1169,8 +1166,8 @@ func genSealedSegmentWithMsgLength(msgLength int) (*Segment, error) {
 		msgLength)
 }
 
-func genSimpleReplica() (ReplicaInterface, error) {
-	kv, err := genEtcdKV()
+func genSimpleReplica(t testutil.TB) (ReplicaInterface, error) {
+	kv, err := genEtcdKV(t)
 	if err != nil {
 		return nil, err
 	}
@@ -1181,8 +1178,8 @@ func genSimpleReplica() (ReplicaInterface, error) {
 	return r, err
 }
 
-func genSimpleSegmentLoaderWithMqFactory(historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
-	kv, err := genEtcdKV()
+func genSimpleSegmentLoaderWithMqFactory(t testutil.TB, historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
+	kv, err := genEtcdKV(t)
 	if err != nil {
 		return nil, err
 	}
@@ -1190,13 +1187,13 @@ func genSimpleSegmentLoaderWithMqFactory(historicalReplica ReplicaInterface, str
 	return newSegmentLoader(historicalReplica, streamingReplica, kv, cm, factory), nil
 }
 
-func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*historical, error) {
-	replica, err := genSimpleReplica()
+func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface, t testutil.TB) (*historical, error) {
+	replica, err := genSimpleReplica(t)
 	if err != nil {
 		return nil, err
 	}
 	h := newHistorical(ctx, replica, tSafeReplica)
-	r, err := genSimpleReplica()
+	r, err := genSimpleReplica(t)
 	if err != nil {
 		return nil, err
 	}
@@ -1220,18 +1217,18 @@ func genSimpleHistorical(ctx context.Context, tSafeReplica TSafeReplicaInterface
 	return h, nil
 }
 
-func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface) (*streaming, error) {
-	kv, err := genEtcdKV()
+func genSimpleStreaming(ctx context.Context, tSafeReplica TSafeReplicaInterface, t testutil.TB) (*streaming, error) {
+	kv, err := genEtcdKV(t)
 	if err != nil {
 		return nil, err
 	}
 	fac := genFactory()
-	replica, err := genSimpleReplica()
+	replica, err := genSimpleReplica(t)
 	if err != nil {
 		return nil, err
 	}
 	s := newStreaming(ctx, replica, fac, kv, tSafeReplica)
-	r, err := genSimpleReplica()
+	r, err := genSimpleReplica(t)
 	if err != nil {
 		return nil, err
 	}
@@ -1674,16 +1671,6 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 	return nil
 }
 
-func initConsumer(ctx context.Context, queryResultChannel Channel) (msgstream.MsgStream, error) {
-	stream, err := genQueryMsgStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-	stream.AsConsumer([]string{queryResultChannel}, defaultSubName)
-	stream.Start()
-	return stream, nil
-}
-
 func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	changeInfo := &querypb.SegmentChangeInfo{
 		OnlineNodeID: Params.QueryNodeCfg.QueryNodeID,
@@ -1702,9 +1689,9 @@ func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	}
 }
 
-func saveChangeInfo(key string, value string) error {
+func saveChangeInfo(key string, value string, t testutil.TB) error {
 	log.Debug(".. [query node unittest] Saving change info")
-	kv, err := genEtcdKV()
+	kv, err := genEtcdKV(t)
 	if err != nil {
 		return err
 	}
@@ -1713,26 +1700,22 @@ func saveChangeInfo(key string, value string) error {
 	return kv.Save(key, value)
 }
 
-func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory) (*QueryNode, error) {
+func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory, t testutil.TB) (*QueryNode, error) {
 	node := NewQueryNode(ctx, fac)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		return nil, err
-	}
-	node.etcdCli = etcdCli
+	node.etcdCli = etcd.GetEtcdTestClient(t)
 	node.initSession()
 
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
 	node.etcdKV = etcdKV
 
 	node.tSafeReplica = newTSafeReplica()
 
-	streaming, err := genSimpleStreaming(ctx, node.tSafeReplica)
+	streaming, err := genSimpleStreaming(ctx, node.tSafeReplica, t)
 	if err != nil {
 		return nil, err
 	}
 
-	historical, err := genSimpleHistorical(ctx, node.tSafeReplica)
+	historical, err := genSimpleHistorical(ctx, node.tSafeReplica, t)
 	if err != nil {
 		return nil, err
 	}
@@ -1741,7 +1724,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.streaming = streaming
 	node.historical = historical
 
-	loader, err := genSimpleSegmentLoaderWithMqFactory(historical.replica, streaming.replica, fac)
+	loader, err := genSimpleSegmentLoaderWithMqFactory(t, historical.replica, streaming.replica, fac)
 	if err != nil {
 		return nil, err
 	}
@@ -1777,9 +1760,9 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 }
 
 // node
-func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
+func genSimpleQueryNode(ctx context.Context, t testutil.TB) (*QueryNode, error) {
 	fac := genFactory()
-	return genSimpleQueryNodeWithMQFactory(ctx, fac)
+	return genSimpleQueryNodeWithMQFactory(ctx, fac, t)
 }
 
 func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, fieldValue interface{}, dim int64) *schemapb.FieldData {

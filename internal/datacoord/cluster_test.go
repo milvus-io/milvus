@@ -28,28 +28,20 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"stathat.com/c/consistent"
 )
 
 func getMetaKv(t *testing.T) kv.MetaKv {
 	Params.Init()
 	rootPath := "/etcd/test/root/" + t.Name()
-	metakv, err := etcdkv.NewMetaKvFactory(rootPath, &Params.EtcdCfg)
-	require.NoError(t, err)
-
+	metakv := etcdkv.NewMetaKvFactory(rootPath, &Params.EtcdCfg, t)
 	return metakv
 }
 
 func TestClusterCreate(t *testing.T) {
-	kv := getMetaKv(t)
-	defer func() {
-		kv.RemoveWithPrefix("")
-		kv.Close()
-	}()
-
 	t.Run("startup normally", func(t *testing.T) {
-
+		kv := getMetaKv(t)
+		defer kv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
@@ -72,6 +64,7 @@ func TestClusterCreate(t *testing.T) {
 	})
 
 	t.Run("startup with existed channel data", func(t *testing.T) {
+		kv := getMetaKv(t)
 		defer kv.RemoveWithPrefix("")
 
 		ctx, cancel := context.WithCancel(context.TODO())
@@ -103,6 +96,7 @@ func TestClusterCreate(t *testing.T) {
 	})
 
 	t.Run("remove all nodes and restart with other nodes", func(t *testing.T) {
+		kv := getMetaKv(t)
 		defer kv.RemoveWithPrefix("")
 
 		ctx, cancel := context.WithCancel(context.TODO())
@@ -153,6 +147,7 @@ func TestClusterCreate(t *testing.T) {
 	})
 
 	t.Run("loadKv Fails", func(t *testing.T) {
+		kv := getMetaKv(t)
 		defer kv.RemoveWithPrefix("")
 
 		fkv := &loadPrefixFailKV{MetaKv: kv}
