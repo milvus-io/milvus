@@ -3985,6 +3985,11 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		return resp, nil
 	}
 
+	req.Base = &commonpb.MsgBase{
+		MsgType:  commonpb.MsgType_GetReplicas,
+		SourceID: Params.ProxyCfg.ProxyID,
+	}
+
 	resp, err := node.queryCoord.GetReplicas(ctx, req)
 	log.Info("received get replicas response", zap.Any("resp", resp), zap.Error(err))
 	return resp, err
