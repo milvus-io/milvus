@@ -442,7 +442,7 @@ func Test_Parse(t *testing.T) {
 	}
 	checkFunc(data8, "field_binary_vector", flushFunc)
 
-	// double vector
+	// double vector(element can be float32 or float64)
 	data9 := [][4]float32{{1.1, 2.1, 3.1, 4.1}, {5.2, 6.2, 7.2, 8.2}}
 	flushFunc = func(field storage.FieldData) error {
 		assert.NotNil(t, field)
@@ -458,6 +458,22 @@ func Test_Parse(t *testing.T) {
 		return nil
 	}
 	checkFunc(data9, "field_float_vector", flushFunc)
+
+	data10 := [][4]float64{{1.1, 2.1, 3.1, 4.1}, {5.2, 6.2, 7.2, 8.2}}
+	flushFunc = func(field storage.FieldData) error {
+		assert.NotNil(t, field)
+		assert.Equal(t, len(data10), field.RowNum())
+
+		for i := 0; i < len(data10); i++ {
+			row := field.GetRow(i).([]float32)
+			for k := 0; k < len(row); k++ {
+				assert.Equal(t, float32(data10[i][k]), row[k])
+			}
+		}
+
+		return nil
+	}
+	checkFunc(data10, "field_float_vector", flushFunc)
 }
 
 func Test_Parse_perf(t *testing.T) {

@@ -103,7 +103,7 @@ func (p *NumpyParser) validate(adapter *NumpyAdapter, fieldName string) error {
 	// 1. field data type should be consist to numpy data type
 	// 2. vector field dimension should be consist to numpy shape
 	if schemapb.DataType_FloatVector == schema.DataType {
-		if elementType != schemapb.DataType_Float {
+		if elementType != schemapb.DataType_Float && elementType != schemapb.DataType_Double {
 			return errors.New("illegal data type " + adapter.GetType() + " for field " + schema.GetName())
 		}
 
@@ -247,9 +247,30 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 			Dim:     p.columnDesc.dimension,
 		}
 	case schemapb.DataType_FloatVector:
-		data, err := adapter.ReadFloat32(p.columnDesc.elementCount)
+		// for float vector, we support float32 and float64 numpy file because python float value is 64 bit
+		// for float64 numpy file, the performance is worse than float32 numpy file
+		// we don't check overflow here
+		elementType, err := convertNumpyType(adapter.GetType())
 		if err != nil {
 			return err
+		}
+
+		var data []float32
+		if elementType == schemapb.DataType_Float {
+			data, err = adapter.ReadFloat32(p.columnDesc.elementCount)
+			if err != nil {
+				return err
+			}
+		} else if elementType == schemapb.DataType_Double {
+			data = make([]float32, 0, p.columnDesc.elementCount)
+			data64, err := adapter.ReadFloat64(p.columnDesc.elementCount)
+			if err != nil {
+				return err
+			}
+
+			for _, f64 := range data64 {
+				data = append(data, float32(f64))
+			}
 		}
 
 		p.columnData = &storage.FloatVectorFieldData{

@@ -328,6 +328,7 @@ func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.I
 		v.State.StateCode = ir.GetState()
 		v.State.Segments = ir.GetSegments()
 		v.State.RowCount = ir.GetRowCount()
+		v.State.RowIds = ir.AutoIds
 		for _, kv := range ir.GetInfos() {
 			if kv.GetKey() == FailedReason {
 				v.State.ErrorMessage = kv.GetValue()

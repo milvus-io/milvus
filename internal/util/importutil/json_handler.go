@@ -395,6 +395,7 @@ type JSONRowConsumer struct {
 	segmentsData     []map[storage.FieldID]storage.FieldData // in-memory segments data
 	segmentSize      int64                                   // maximum size of a segment(unit:byte)
 	primaryKey       storage.FieldID                         // name of primary key
+	autoIDRange      []int64                                 // auto-generated id range, for example: [1, 10, 20, 25] means id from 1 to 10 and 20 to 25
 
 	callFlushFunc ImportFlushFunc // call back function to flush segment
 }
@@ -482,6 +483,7 @@ func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *al
 		segmentSize:      segmentSize,
 		rowCounter:       0,
 		primaryKey:       -1,
+		autoIDRange:      make([]int64, 0),
 		callFlushFunc:    flushFunc,
 	}
 
@@ -515,6 +517,10 @@ func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *al
 	}
 
 	return v
+}
+
+func (v *JSONRowConsumer) IDRange() []int64 {
+	return v.autoIDRange
 }
 
 func (v *JSONRowConsumer) flush(force bool) error {
@@ -580,6 +586,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 		if rowIDEnd-rowIDBegin != int64(len(rows)) {
 			return errors.New("JSON row consumer: failed to allocate ID for " + strconv.Itoa(len(rows)) + " rows")
 		}
+		v.autoIDRange = append(v.autoIDRange, rowIDBegin, rowIDEnd)
 	}
 
 	// consume rows
