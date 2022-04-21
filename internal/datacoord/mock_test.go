@@ -393,7 +393,7 @@ func (m *mockRootCoordService) UpdateChannelTimeTick(ctx context.Context, req *i
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockRootCoordService) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (m *mockRootCoordService) ReleaseDQLCache(ctx context.Context, req *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 func (m *mockRootCoordService) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {

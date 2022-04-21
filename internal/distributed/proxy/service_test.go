@@ -159,7 +159,7 @@ func (m *MockRootCoord) ShowSegments(ctx context.Context, req *milvuspb.ShowSegm
 	return nil, nil
 }
 
-func (m *MockRootCoord) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (m *MockRootCoord) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 
@@ -449,7 +449,7 @@ func (m *MockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *
 	return nil, nil
 }
 
-func (m *MockProxy) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (m *MockProxy) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 
@@ -677,8 +677,8 @@ func Test_NewServer(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("ReleaseDQLMessageStream", func(t *testing.T) {
-		_, err := server.ReleaseDQLMessageStream(ctx, nil)
+	t.Run("ReleaseDQLCache", func(t *testing.T) {
+		_, err := server.ReleaseDQLCache(ctx, nil)
 		assert.Nil(t, err)
 	})
 

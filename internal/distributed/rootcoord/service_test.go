@@ -281,9 +281,9 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
-	t.Run("release DQL msg stream", func(t *testing.T) {
-		req := &proxypb.ReleaseDQLMessageStreamRequest{}
-		assert.Panics(t, func() { svr.ReleaseDQLMessageStream(ctx, req) })
+	t.Run("release DQL cache", func(t *testing.T) {
+		req := &proxypb.ReleaseDQLCacheRequest{}
+		assert.Panics(t, func() { svr.ReleaseDQLCache(ctx, req) })
 	})
 
 	t.Run("get metrics", func(t *testing.T) {

@@ -123,7 +123,7 @@ func (m *RootCoordClient) UpdateChannelTimeTick(ctx context.Context, in *interna
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *RootCoordClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *RootCoordClient) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
 

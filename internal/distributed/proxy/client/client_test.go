@@ -66,7 +66,7 @@ func Test_NewClient(t *testing.T) {
 		r3, err := client.InvalidateCollectionMetaCache(ctx, nil)
 		retCheck(retNotNil, r3, err)
 
-		r4, err := client.ReleaseDQLMessageStream(ctx, nil)
+		r4, err := client.ReleaseDQLCache(ctx, nil)
 		retCheck(retNotNil, r4, err)
 
 		r5, err := client.SendSearchResult(ctx, nil)

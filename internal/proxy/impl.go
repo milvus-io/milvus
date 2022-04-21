@@ -117,8 +117,8 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	}, nil
 }
 
-// ReleaseDQLMessageStream release the query message stream of specific collection.
-func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+// ReleaseDQLCache release the query message stream of specific collection.
+func (node *Proxy) ReleaseDQLCache(ctx context.Context, request *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	ctx = logutil.WithModule(ctx, moduleName)
 	logutil.Logger(ctx).Debug("received request to release DQL message strem",
 		zap.Any("role", typeutil.ProxyRole),
@@ -130,6 +130,7 @@ func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb
 	}
 
 	_ = node.chMgr.removeDQLStream(request.CollectionID)
+	globalMetaCache.RemoveCollectionLoadCache(request.CollectionID)
 
 	logutil.Logger(ctx).Debug("complete to release DQL message stream",
 		zap.Any("role", typeutil.ProxyRole),

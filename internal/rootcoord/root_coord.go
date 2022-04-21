@@ -1872,12 +1872,12 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 	return succStatus(), nil
 }
 
-// ReleaseDQLMessageStream release DQL msgstream
-func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+// ReleaseDQLCache release DQL msgstream
+func (c *Core) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
-	return c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
+	return c.proxyClientManager.ReleaseDQLCache(ctx, in)
 }
 
 // SegmentFlushCompleted check whether segment flush has completed

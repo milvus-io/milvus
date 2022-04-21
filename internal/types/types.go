@@ -550,7 +550,7 @@ type RootCoord interface {
 	// error is always nil
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 
-	// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
+	// ReleaseDQLCache notifies RootCoord to release and close the search message stream of specific collection.
 	//
 	// ctx is the request to control request deadline and cancellation.
 	// request contains the request params, which are database id(not used) and collection id.
@@ -560,7 +560,7 @@ type RootCoord interface {
 	// error is always nil
 	//
 	// RootCoord just forwards this request to Proxy client
-	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
+	ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error)
 
 	// SegmentFlushCompleted notifies RootCoord that specified segment has been flushed
 	//
@@ -635,18 +635,18 @@ type Proxy interface {
 	// error is returned only when some communication issue occurs.
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 
-	// ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
+	// ReleaseDQLCache notifies Proxy to release and close the search message stream of specific collection.
 	//
-	// ReleaseDQLMessageStream should be called when the specific collection was released.
+	// ReleaseDQLCache should be called when the specific collection was released.
 	//
 	// ctx is the request to control request deadline and cancellation.
 	// request contains the request params, which are database id(not used now) and collection id.
 	//
-	// ReleaseDQLMessageStream should always succeed even though the specific collection doesn't exist in Proxy.
+	// ReleaseDQLCache should always succeed even though the specific collection doesn't exist in Proxy.
 	// So the code of response `Status` should be always `Success`.
 	//
 	// error is returned only when some communication issue occurs.
-	ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error)
+	ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error)
 
 	SendSearchResult(ctx context.Context, req *internalpb.SearchResults) (*commonpb.Status, error)
 	SendRetrieveResult(ctx context.Context, req *internalpb.RetrieveResults) (*commonpb.Status, error)

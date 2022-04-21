@@ -419,9 +419,9 @@ func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 	return s.rootCoord.ShowSegments(ctx, in)
 }
 
-// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
-func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	return s.rootCoord.ReleaseDQLMessageStream(ctx, in)
+// ReleaseDQLCache notifies RootCoord to release and close the search message stream of specific collection.
+func (s *Server) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
+	return s.rootCoord.ReleaseDQLCache(ctx, in)
 }
 
 // SegmentFlushCompleted notifies RootCoord that specified segment has been flushed.

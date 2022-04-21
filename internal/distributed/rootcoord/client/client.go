@@ -392,13 +392,13 @@ func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 	return ret.(*milvuspb.ShowSegmentsResponse), err
 }
 
-// ReleaseDQLMessageStream release DQL msgstream
-func (c *Client) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+// ReleaseDQLCache release DQL msgstream
+func (c *Client) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(rootcoordpb.RootCoordClient).ReleaseDQLMessageStream(ctx, in)
+		return client.(rootcoordpb.RootCoordClient).ReleaseDQLCache(ctx, in)
 	})
 	if err != nil || ret == nil {
 		return nil, err

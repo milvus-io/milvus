@@ -218,9 +218,9 @@ func (rc *rootCoordMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPa
 	}, nil
 }
 
-func (rc *rootCoordMock) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (rc *rootCoordMock) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	if rc.returnGrpcError {
-		return nil, errors.New("release DQLMessage stream failed")
+		return nil, errors.New("release DQL cache failed")
 	}
 
 	if rc.returnError {

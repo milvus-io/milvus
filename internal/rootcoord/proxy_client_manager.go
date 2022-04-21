@@ -137,12 +137,12 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 	}
 }
 
-func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (p *proxyClientManager) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	if len(p.proxyClient) == 0 {
-		log.Debug("proxy client is empty,ReleaseDQLMessageStream will not send to any client")
+		log.Debug("proxy client is empty,ReleaseDQLCache will not send to any client")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -151,13 +151,13 @@ func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *pr
 		sta, err := func() (retSta *commonpb.Status, retErr error) {
 			defer func() {
 				if err := recover(); err != nil {
-					log.Debug("call proxy node ReleaseDQLMessageStream panic", zap.Int64("proxy node id", k), zap.Any("error", err))
+					log.Debug("call proxy node ReleaseDQLCache panic", zap.Int64("proxy node id", k), zap.Any("error", err))
 					retSta.ErrorCode = commonpb.ErrorCode_UnexpectedError
-					retSta.Reason = fmt.Sprintf("call proxy node ReleaseDQLMessageStream panic, proxy node id =%d, error = %v", k, err)
+					retSta.Reason = fmt.Sprintf("call proxy node ReleaseDQLCache panic, proxy node id =%d, error = %v", k, err)
 					retErr = nil
 				}
 			}()
-			retSta, retErr = f.ReleaseDQLMessageStream(ctx, in)
+			retSta, retErr = f.ReleaseDQLCache(ctx, in)
 			return
 		}()
 		if err != nil {

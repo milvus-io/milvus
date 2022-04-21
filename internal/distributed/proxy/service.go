@@ -428,9 +428,9 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *pro
 	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
 }
 
-// ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
-func (s *Server) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	return s.proxy.ReleaseDQLMessageStream(ctx, request)
+// ReleaseDQLCache notifies Proxy to release and close the search message stream of specific collection.
+func (s *Server) ReleaseDQLCache(ctx context.Context, request *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
+	return s.proxy.ReleaseDQLCache(ctx, request)
 }
 
 // CreateCollection notifies Proxy to create a collection

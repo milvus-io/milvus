@@ -1171,8 +1171,11 @@ func TestDropCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
@@ -1256,8 +1259,11 @@ func TestHasCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestHasCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1338,8 +1344,11 @@ func TestDescribeCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1397,8 +1406,11 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1458,8 +1470,11 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -2066,10 +2081,13 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 
 	ctx := context.Background()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -2127,9 +2145,6 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	assert.NoError(t, err)
 
-	qc := NewQueryCoordMock()
-	qc.Start()
-	defer qc.Stop()
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_LoadCollection,
@@ -2684,10 +2699,13 @@ func TestSearchTask_Channels(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 
 	ctx := context.Background()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
@@ -2776,7 +2794,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	ctx := context.Background()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
@@ -3205,10 +3223,13 @@ func TestQueryTask_all(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 
 	ctx := context.Background()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -3263,9 +3284,6 @@ func TestQueryTask_all(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	assert.NoError(t, err)
 
-	qc := NewQueryCoordMock()
-	qc.Start()
-	defer qc.Stop()
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_LoadCollection,
@@ -3516,10 +3534,13 @@ func TestTask_all(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 
 	ctx := context.Background()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)

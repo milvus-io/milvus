@@ -128,13 +128,13 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 	return ret.(*commonpb.Status), err
 }
 
-// ReleaseDQLMessageStream release dql message stream by request
-func (c *Client) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+// ReleaseDQLCache release dql message stream by request
+func (c *Client) ReleaseDQLCache(ctx context.Context, req *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).ReleaseDQLMessageStream(ctx, req)
+		return client.(proxypb.ProxyClient).ReleaseDQLCache(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

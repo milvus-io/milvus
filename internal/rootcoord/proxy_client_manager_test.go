@@ -111,7 +111,7 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 	pcm.InvalidateCollectionMetaCache(ctx, nil)
 }
 
-func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
+func TestProxyClientManager_ReleaseDQLCache(t *testing.T) {
 	Params.Init()
 	ctx := context.Background()
 
@@ -129,7 +129,7 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 		afterConnect: func() { ch <- struct{}{} },
 	}
 
-	pcm.ReleaseDQLMessageStream(ctx, nil)
+	pcm.ReleaseDQLCache(ctx, nil)
 
 	core.SetNewProxyClient(
 		func(se *sessionutil.Session) (types.Proxy, error) {
@@ -145,5 +145,5 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 	pcm.AddProxyClient(session)
 	<-ch
 
-	assert.Panics(t, func() { pcm.ReleaseDQLMessageStream(ctx, nil) })
+	assert.Panics(t, func() { pcm.ReleaseDQLCache(ctx, nil) })
 }

@@ -47,7 +47,7 @@ func (m *ProxyClient) GetDdChannel(ctx context.Context, in *internalpb.GetDdChan
 	return &milvuspb.StringResponse{}, m.Err
 }
 
-func (m *ProxyClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *ProxyClient) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
 

@@ -575,9 +575,9 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 	if rct.NodeID <= 0 {
 		ctx2, cancel2 := context.WithTimeout(rct.ctx, timeoutForRPC)
 		defer cancel2()
-		err := rct.broker.releaseDQLMessageStream(ctx2, collectionID)
+		err := rct.broker.releaseDQLCache(ctx2, collectionID)
 		if err != nil {
-			log.Error("releaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
+			log.Error("releaseCollectionTask: release collection end, releaseDQLCache occur error", zap.Int64("collectionID", rct.CollectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
 			rct.setResultInfo(err)
 			return err
 		}

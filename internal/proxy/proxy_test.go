@@ -1604,7 +1604,7 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		// release dql message stream
-		resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
+		resp, err = proxy.ReleaseDQLCache(ctx, &proxypb.ReleaseDQLCacheRequest{
 			Base:         nil,
 			DbID:         0,
 			CollectionID: collectionID,
@@ -1883,8 +1883,8 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		// release dql stream
-		resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
+		// release dql cache
+		resp, err = proxy.ReleaseDQLCache(ctx, &proxypb.ReleaseDQLCacheRequest{
 			Base:         nil,
 			DbID:         0,
 			CollectionID: collectionID,
@@ -1935,9 +1935,9 @@ func TestProxy(t *testing.T) {
 	proxy.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	wg.Add(1)
-	t.Run("ReleaseDQLMessageStream fail, unhealthy", func(t *testing.T) {
+	t.Run("ReleaseDQLCache fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
-		resp, err := proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{})
+		resp, err := proxy.ReleaseDQLCache(ctx, &proxypb.ReleaseDQLCacheRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})

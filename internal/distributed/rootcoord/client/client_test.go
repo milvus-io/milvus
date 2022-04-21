@@ -119,7 +119,7 @@ func Test_NewClient(t *testing.T) {
 		r20, err := client.ShowSegments(ctx, nil)
 		retCheck(retNotNil, r20, err)
 
-		r21, err := client.ReleaseDQLMessageStream(ctx, nil)
+		r21, err := client.ReleaseDQLCache(ctx, nil)
 		retCheck(retNotNil, r21, err)
 
 		r22, err := client.SegmentFlushCompleted(ctx, nil)

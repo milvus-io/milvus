@@ -1062,6 +1062,7 @@ func (dct *dropCollectionTask) Execute(ctx context.Context) error {
 
 	_ = dct.chMgr.removeDMLStream(collID)
 	_ = dct.chMgr.removeDQLStream(collID)
+	globalMetaCache.RemoveCollectionLoadCache(collID)
 
 	return nil
 }
@@ -1247,35 +1248,9 @@ func (st *searchTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection was already loaded into query node
-	showResp, err := st.qc.ShowCollections(st.ctx, &querypb.ShowCollectionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowCollections,
-			MsgID:     st.Base.MsgID,
-			Timestamp: st.Base.Timestamp,
-			SourceID:  Params.ProxyCfg.ProxyID,
-		},
-		DbID: 0, // TODO(dragondriver)
-	})
+	err = globalMetaCache.IsCollectionLoaded(ctx, st.Base.MsgID, collectionName)
 	if err != nil {
 		return err
-	}
-	if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(showResp.Status.Reason)
-	}
-	log.Debug("QueryCoord show collections",
-		zap.Any("collID", collID),
-		zap.Any("collections", showResp.CollectionIDs),
-	)
-	collectionLoaded := false
-
-	for _, collectionID := range showResp.CollectionIDs {
-		if collectionID == collID {
-			collectionLoaded = true
-			break
-		}
-	}
-	if !collectionLoaded {
-		return fmt.Errorf("collection %v was not loaded into memory", collectionName)
 	}
 
 	validateDur := preTr.RecordSpan()
@@ -4246,6 +4221,7 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	rct.result, err = rct.queryCoord.ReleaseCollection(ctx, request)
 
 	_ = rct.chMgr.removeDQLStream(collID)
+	globalMetaCache.RemoveCollectionLoadCache(request.CollectionID)
 
 	return err
 }

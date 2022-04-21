@@ -24,19 +24,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-
-	"github.com/milvus-io/milvus/internal/metrics"
-
-	"github.com/milvus-io/milvus/internal/common"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -54,6 +52,10 @@ type Cache interface {
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
+	// IsCollectionLoaded checks if collection has been loaded
+	IsCollectionLoaded(ctx context.Context, msgID UniqueID, collectionName string) error
+	// RemoveCollectionLoadCache sets the loaded cache to false
+	RemoveCollectionLoadCache(collectionID UniqueID)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
 }
@@ -64,6 +66,7 @@ type collectionInfo struct {
 	partInfo            map[string]*partitionInfo
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
+	isLoaded            bool
 }
 
 type partitionInfo struct {
@@ -77,7 +80,8 @@ var _ Cache = (*MetaCache)(nil)
 
 // MetaCache implements Cache, provides collection meta cache based on internal RootCoord
 type MetaCache struct {
-	client types.RootCoord
+	rootCoord  types.RootCoord
+	queryCoord types.QueryCoord
 
 	collInfo map[string]*collectionInfo
 	mu       sync.RWMutex
@@ -87,9 +91,9 @@ type MetaCache struct {
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
-func InitMetaCache(client types.RootCoord) error {
+func InitMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord) error {
 	var err error
-	globalMetaCache, err = NewMetaCache(client)
+	globalMetaCache, err = NewMetaCache(rootCoord, queryCoord)
 	if err != nil {
 		return err
 	}
@@ -97,10 +101,11 @@ func InitMetaCache(client types.RootCoord) error {
 }
 
 // NewMetaCache creates a MetaCache with provided RootCoord
-func NewMetaCache(client types.RootCoord) (*MetaCache, error) {
+func NewMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord) (*MetaCache, error) {
 	return &MetaCache{
-		client:   client,
-		collInfo: map[string]*collectionInfo{},
+		rootCoord:  rootCoord,
+		queryCoord: queryCoord,
+		collInfo:   map[string]*collectionInfo{},
 	}, nil
 }
 
@@ -184,6 +189,78 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	defer m.mu.RUnlock()
 
 	return collInfo.schema, nil
+}
+
+// IsCollectionLoaded checks if collection has been loaded
+func (m *MetaCache) IsCollectionLoaded(ctx context.Context, msgID UniqueID, collectionName string) error {
+	m.mu.RLock()
+	collInfo, ok := m.collInfo[collectionName]
+	m.mu.RUnlock()
+	if !ok {
+		coll, err := m.describeCollection(ctx, collectionName)
+		if err != nil {
+			return err
+		}
+		m.mu.Lock()
+		m.updateCollection(coll, collectionName)
+		collInfo = m.collInfo[collectionName]
+		m.mu.Unlock()
+	}
+
+	if !collInfo.isLoaded {
+		// check if collection was loaded
+		showResp, err := m.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_ShowCollections,
+				MsgID:    msgID,
+				SourceID: Params.ProxyCfg.ProxyID,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(showResp.Status.Reason)
+		}
+		log.Debug("QueryCoord show collections",
+			zap.Int64("collID", collInfo.collID),
+			zap.Int64s("collections", showResp.CollectionIDs),
+		)
+		collectionLoaded := false
+		for _, collectionID := range showResp.CollectionIDs {
+			if collectionID == collInfo.collID {
+				collectionLoaded = true
+				break
+			}
+		}
+		if !collectionLoaded {
+			return fmt.Errorf("collection %v was not loaded into memory", collectionName)
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.collInfo[collectionName].isLoaded = true
+		return nil
+	}
+	return nil
+}
+
+// RemoveCollectionLoadCache sets the loaded cache to false
+func (m *MetaCache) RemoveCollectionLoadCache(collectionID UniqueID) {
+	collNames := make([]string, 0)
+	m.mu.RLock()
+	for name, info := range m.collInfo {
+		if collectionID == info.collID {
+			collNames = append(collNames, name)
+		}
+	}
+	m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, name := range collNames {
+		if _, ok := m.collInfo[name]; ok {
+			m.collInfo[name].isLoaded = false
+		}
+	}
 }
 
 func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, collectionName string) {
@@ -306,7 +383,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 		},
 		CollectionName: collectionName,
 	}
-	coll, err := m.client.DescribeCollection(ctx, req)
+	coll, err := m.rootCoord.DescribeCollection(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +420,7 @@ func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (
 		CollectionName: collectionName,
 	}
 
-	partitions, err := m.client.ShowPartitions(ctx, req)
+	partitions, err := m.rootCoord.ShowPartitions(ctx, req)
 	if err != nil {
 		return nil, err
 	}

@@ -41,7 +41,7 @@ func (m *mockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *
 	return nil, nil
 }
 
-func (m *mockProxy) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (m *mockProxy) ReleaseDQLCache(ctx context.Context, in *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

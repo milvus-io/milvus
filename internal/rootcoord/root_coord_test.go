@@ -84,7 +84,7 @@ func (p *proxyMock) GetCollArray() []string {
 	return ret
 }
 
-func (p *proxyMock) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (p *proxyMock) ReleaseDQLCache(ctx context.Context, request *proxypb.ReleaseDQLCacheRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -1328,14 +1328,14 @@ func TestRootCoord(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 
-		req := &proxypb.ReleaseDQLMessageStreamRequest{
+		req := &proxypb.ReleaseDQLCacheRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_RemoveQueryChannels,
 				SourceID: core.session.ServerID,
 			},
 			CollectionID: collMeta.ID,
 		}
-		status, err := core.ReleaseDQLMessageStream(core.ctx, req)
+		status, err := core.ReleaseDQLCache(core.ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
