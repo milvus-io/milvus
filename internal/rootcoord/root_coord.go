@@ -29,11 +29,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/crypto"
-
-	"github.com/milvus-io/milvus/internal/util/dependency"
-
 	"github.com/golang/protobuf/proto"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -57,6 +52,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/crypto"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -1122,19 +1120,29 @@ func (c *Core) Init() error {
 			c.impTaskKv,
 			c.CallImportService,
 		)
+
 		// init data
-		encryptedRootPassword, _ := crypto.PasswordEncrypt(util.DefaultRootPassword)
-		initError = c.MetaTable.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		initError = c.initData()
 		if initError != nil {
 			return
 		}
-		log.Debug("RootCoord init user root done")
 	})
 	if initError != nil {
 		log.Debug("RootCoord init error", zap.Error(initError))
 	}
 	log.Debug("RootCoord init done")
 	return initError
+}
+
+func (c *Core) initData() error {
+	credInfo, _ := c.MetaTable.getCredential(util.UserRoot)
+	if credInfo == nil {
+		log.Debug("RootCoord init user root")
+		encryptedRootPassword, _ := crypto.PasswordEncrypt(util.DefaultRootPassword)
+		err := c.MetaTable.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
+		return err
+	}
+	return nil
 }
 
 func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {

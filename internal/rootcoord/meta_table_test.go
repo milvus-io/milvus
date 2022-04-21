@@ -1140,7 +1140,9 @@ func TestMetaTable(t *testing.T) {
 	wg.Add(1)
 	t.Run("add credential failed", func(t *testing.T) {
 		defer wg.Done()
-
+		mockTxnKV.save = func(key, value string) error {
+			return fmt.Errorf("save error")
+		}
 		err = mt.AddCredential(&internalpb.CredentialInfo{Username: "x", EncryptedPassword: "a\xc5z"})
 		assert.NotNil(t, err)
 	})

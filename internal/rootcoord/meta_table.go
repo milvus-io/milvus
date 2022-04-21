@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"path"
 	"strconv"
@@ -1360,7 +1361,7 @@ func (mt *MetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
 		return fmt.Errorf("username is empty")
 	}
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, credInfo.Username)
-	v, err := proto.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credInfo.EncryptedPassword})
+	v, err := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credInfo.EncryptedPassword})
 	if err != nil {
 		log.Error("MetaTable marshal credential info fail", zap.String("key", k), zap.Error(err))
 		return fmt.Errorf("metaTable marshal credential info fail key:%s, err:%w", k, err)
@@ -1386,7 +1387,7 @@ func (mt *MetaTable) getCredential(username string) (*internalpb.CredentialInfo,
 	}
 
 	credentialInfo := internalpb.CredentialInfo{}
-	err = proto.Unmarshal([]byte(v), &credentialInfo)
+	err = json.Unmarshal([]byte(v), &credentialInfo)
 	if err != nil {
 		return nil, fmt.Errorf("get credential unmarshal err:%w", err)
 	}
