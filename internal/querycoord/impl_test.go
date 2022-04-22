@@ -1494,6 +1494,7 @@ func TestGetReplicas(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	waitLoadCollectionDone(ctx, queryCoord, defaultCollectionID)
+	time.Sleep(200 * time.Millisecond)
 
 	getReplicasReq := &milvuspb.GetReplicasRequest{
 		Base:         &commonpb.MsgBase{},
@@ -1517,17 +1518,33 @@ func TestGetReplicas(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.Equal(t, 3, len(resp.Replicas))
-	for i := range resp.Replicas {
-		assert.Equal(t, 1, len(resp.Replicas[i].NodeIds))
-		for j := range resp.Replicas[i].ShardReplicas {
+	sawNodes := make(map[UniqueID]struct{})
+	for i, replica := range resp.Replicas {
+		addNodes := make(map[UniqueID]struct{})
+		assert.Equal(t, 1, len(replica.NodeIds))
+		assert.Greater(t, len(replica.NodeIds), 0)
+		assert.Greater(t, len(replica.ShardReplicas), 0)
+		for _, shard := range replica.ShardReplicas {
 			assert.Equal(t,
-				resp.Replicas[i].NodeIds[0],
-				resp.Replicas[i].ShardReplicas[j].LeaderID)
+				replica.NodeIds[0],
+				shard.LeaderID)
+			assert.Greater(t, len(shard.NodeIds), 0)
+
+			for _, nodeID := range shard.NodeIds {
+				_, ok := sawNodes[nodeID]
+				assert.False(t, ok)
+
+				addNodes[nodeID] = struct{}{}
+			}
+		}
+
+		for nodeID := range addNodes {
+			sawNodes[nodeID] = struct{}{}
 		}
 
 		for j := 0; j < i; j++ {
 			assert.NotEqual(t,
-				resp.Replicas[i].NodeIds[0],
+				replica.NodeIds[0],
 				resp.Replicas[j].NodeIds[0])
 		}
 	}
