@@ -3103,3 +3103,24 @@ func TestProxy_GetImportState(t *testing.T) {
 		assert.Nil(t, err)
 	})
 }
+
+func TestProxy_ListImportTasks(t *testing.T) {
+	req := &milvuspb.ListImportTasksRequest{}
+	rootCoord := &RootCoordMock{}
+	rootCoord.state.Store(internalpb.StateCode_Healthy)
+	t.Run("test list import tasks", func(t *testing.T) {
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.stateCode.Store(internalpb.StateCode_Healthy)
+
+		resp, err := proxy.ListImportTasks(context.TODO(), req)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Nil(t, err)
+	})
+	t.Run("test list import tasks with unhealthy", func(t *testing.T) {
+		proxy := &Proxy{rootCoord: rootCoord}
+		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
+		resp, err := proxy.ListImportTasks(context.TODO(), req)
+		assert.EqualValues(t, unhealthyStatus(), resp.Status)
+		assert.Nil(t, err)
+	})
+}

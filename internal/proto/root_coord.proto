@@ -111,6 +111,7 @@ service RootCoord {
     // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
     rpc Import(milvus.ImportRequest) returns (milvus.ImportResponse) {}
     rpc GetImportState(milvus.GetImportStateRequest) returns (milvus.GetImportStateResponse) {}
+    rpc ListImportTasks(milvus.ListImportTasksRequest) returns (milvus.ListImportTasksResponse) {}
     rpc ReportImport(ImportResult) returns (common.Status) {}
 
     // https://wiki.lfaidata.foundation/display/MIL/MEP+27+--+Support+Basic+Authentication

@@ -210,6 +210,10 @@ func (m *MockRootCoord) GetImportState(ctx context.Context, req *milvuspb.GetImp
 	return nil, nil
 }
 
+func (m *MockRootCoord) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -733,6 +737,10 @@ func (m *MockProxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*m
 }
 
 func (m *MockProxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
 	return nil, nil
 }
 

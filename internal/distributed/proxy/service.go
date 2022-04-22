@@ -669,6 +669,10 @@ func (s *Server) GetImportState(ctx context.Context, req *milvuspb.GetImportStat
 	return s.proxy.GetImportState(ctx, req)
 }
 
+func (s *Server) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	return s.proxy.ListImportTasks(ctx, req)
+}
+
 func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	return s.proxy.GetReplicas(ctx, req)
 }

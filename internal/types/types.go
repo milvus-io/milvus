@@ -620,6 +620,16 @@ type RootCoord interface {
 	// error is always nil
 	GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)
 
+	// List id array of all import tasks
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params
+	//
+	// The `Status` in response struct `ListImportTasksResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Tasks` in `ListImportTasksResponse` return the id array of all import tasks.
+	// error is always nil
+	ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)
+
 	// ReportImport reports import task state to rootCoord
 	//
 	// ctx is the context to control request deadline and cancellation
@@ -1127,6 +1137,16 @@ type ProxyComponent interface {
 	// the `state` in `GetImportStateResponse` return the state of the import task.
 	// error is always nil
 	GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)
+
+	// List id array of all import tasks
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params
+	//
+	// The `Status` in response struct `ListImportTasksResponse` indicates if this operation is processed successfully or fail cause;
+	// the `Tasks` in `ListImportTasksResponse` return the id array of all import tasks.
+	// error is always nil
+	ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)
 
 	GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error)
 

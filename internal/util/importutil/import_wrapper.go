@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -122,6 +123,8 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 			if fileType == JSONFileExt {
 				err := func() error {
+					tr := timerecord.NewTimeRecorder("json parser: " + filePath)
+
 					// for minio storage, chunkManager will download file into local memory
 					// for local storage, chunkManager open the file directly
 					file, err := p.chunkManager.Reader(filePath)
@@ -129,6 +132,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 						return err
 					}
 					defer file.Close()
+					tr.Record("downloaded")
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded
@@ -148,7 +152,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					validator := NewJSONRowValidator(p.collectionSchema, consumer)
 					err = parser.ParseRows(reader, validator)
 					if err != nil {
-						log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
 						return err
 					}
 
@@ -161,6 +164,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					p.importResult.State = commonpb.ImportState_ImportParsed
 					p.reportFunc(p.importResult)
 
+					tr.Record("parsed")
 					return nil
 				}()
 
@@ -185,6 +189,8 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 			}
 
 			p.printFieldsDataInfo(fields, "import wrapper: combine field data", nil)
+			tr := timerecord.NewTimeRecorder("combine field data")
+			defer tr.Elapse("finished")
 
 			fieldNames := make([]storage.FieldID, 0)
 			for k, v := range fields {
@@ -221,14 +227,16 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 			if fileType == JSONFileExt {
 				err := func() error {
+					tr := timerecord.NewTimeRecorder("json parser: " + filePath)
+
 					// for minio storage, chunkManager will download file into local memory
 					// for local storage, chunkManager open the file directly
 					file, err := p.chunkManager.Reader(filePath)
 					if err != nil {
-						log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
 						return err
 					}
 					defer file.Close()
+					tr.Record("downloaded")
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded
@@ -245,7 +253,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 					err = parser.ParseColumns(reader, validator)
 					if err != nil {
-						log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
 						return err
 					}
 
@@ -253,6 +260,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					p.importResult.State = commonpb.ImportState_ImportParsed
 					p.reportFunc(p.importResult)
 
+					tr.Record("parsed")
 					return nil
 				}()
 
@@ -261,45 +269,56 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					return err
 				}
 			} else if fileType == NumpyFileExt {
-				// for minio storage, chunkManager will download file into local memory
-				// for local storage, chunkManager open the file directly
-				file, err := p.chunkManager.Reader(filePath)
-				if err != nil {
-					log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
-					return err
-				}
-				defer file.Close()
+				err := func() error {
+					tr := timerecord.NewTimeRecorder("json parser: " + filePath)
 
-				// report file process state
-				p.importResult.State = commonpb.ImportState_ImportDownloaded
-				p.reportFunc(p.importResult)
-
-				var id storage.FieldID
-				for _, field := range p.collectionSchema.Fields {
-					if field.GetName() == fileName {
-						id = field.GetFieldID()
+					// for minio storage, chunkManager will download file into local memory
+					// for local storage, chunkManager open the file directly
+					file, err := p.chunkManager.Reader(filePath)
+					if err != nil {
+						return err
 					}
-				}
+					defer file.Close()
+					tr.Record("downloaded")
 
-				// the numpy parser return a storage.FieldData, here construct a map[string]storage.FieldData to combine
-				flushFunc := func(field storage.FieldData) error {
-					fields := make(map[storage.FieldID]storage.FieldData)
-					fields[id] = field
-					combineFunc(fields)
+					// report file process state
+					p.importResult.State = commonpb.ImportState_ImportDownloaded
+					p.reportFunc(p.importResult)
+
+					var id storage.FieldID
+					for _, field := range p.collectionSchema.Fields {
+						if field.GetName() == fileName {
+							id = field.GetFieldID()
+						}
+					}
+
+					// the numpy parser return a storage.FieldData, here construct a map[string]storage.FieldData to combine
+					flushFunc := func(field storage.FieldData) error {
+						fields := make(map[storage.FieldID]storage.FieldData)
+						fields[id] = field
+						combineFunc(fields)
+						return nil
+					}
+
+					// for numpy file, we say the file name(without extension) is the filed name
+					parser := NewNumpyParser(p.ctx, p.collectionSchema, flushFunc)
+					err = parser.Parse(file, fileName, onlyValidate)
+					if err != nil {
+						return err
+					}
+
+					// report file process state
+					p.importResult.State = commonpb.ImportState_ImportParsed
+					p.reportFunc(p.importResult)
+
+					tr.Record("parsed")
 					return nil
-				}
+				}()
 
-				// for numpy file, we say the file name(without extension) is the filed name
-				parser := NewNumpyParser(p.ctx, p.collectionSchema, flushFunc)
-				err = parser.Parse(file, fileName, onlyValidate)
 				if err != nil {
 					log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
 					return err
 				}
-
-				// report file process state
-				p.importResult.State = commonpb.ImportState_ImportParsed
-				p.reportFunc(p.importResult)
 			}
 		}
 
@@ -396,6 +415,9 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	if len(fieldsData) == 0 {
 		return errors.New("import error: fields data is empty")
 	}
+
+	tr := timerecord.NewTimeRecorder("split field data")
+	defer tr.Elapse("finished")
 
 	var primaryKey *schemapb.FieldSchema
 	for i := 0; i < len(p.collectionSchema.Fields); i++ {

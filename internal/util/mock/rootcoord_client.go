@@ -147,6 +147,10 @@ func (m *RootCoordClient) GetImportState(ctx context.Context, req *milvuspb.GetI
 	return &milvuspb.GetImportStateResponse{}, m.Err
 }
 
+func (m *RootCoordClient) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest, opts ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error) {
+	return &milvuspb.ListImportTasksResponse{}, m.Err
+}
+
 func (m *RootCoordClient) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
