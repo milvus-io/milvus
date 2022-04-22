@@ -132,7 +132,6 @@ func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID in
 				}
 			}
 			for _, e := range evt.Events {
-				log.Debug("segment evt", zap.Any("evt", evt))
 				switch e.Type {
 				case mvccpb.PUT:
 					sd.handlePutEvent(e, collectionID, replicaID, vchannel)
