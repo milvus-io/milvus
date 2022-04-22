@@ -263,6 +263,7 @@ enum MsgType : int {
   SealedSegmentsChangeInfo = 512,
   WatchDeltaChannels = 513,
   GetShardLeaders = 514,
+  GetReplicas = 515,
   SegmentInfo = 600,
   SystemInfo = 601,
   GetRecoveryInfo = 602,

@@ -150,6 +150,7 @@ enum MsgType {
     SealedSegmentsChangeInfo = 512;
     WatchDeltaChannels = 513;
     GetShardLeaders = 514;
+    GetReplicas = 515;
 
     /* DATA SERVICE */
     SegmentInfo = 600;

@@ -1268,6 +1268,20 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	wg.Add(1)
+	t.Run("get replicas", func(t *testing.T) {
+		defer wg.Done()
+
+		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		assert.NoError(t, err)
+
+		resp, err := proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{
+			CollectionID: collectionID,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(resp.Replicas))
+	})
+
 	// nprobe := 10
 	// topk := 10
 	// roundDecimal := 6
