@@ -193,9 +193,6 @@ func (sd *etcdShardSegmentDetector) handleDelEvent(e *clientv3.Event, collection
 func (sd *etcdShardSegmentDetector) parseSegmentInfo(bs []byte) (*querypb.SegmentInfo, error) {
 	info := &querypb.SegmentInfo{}
 	err := proto.Unmarshal(bs, info)
-	if err == nil {
-		log.Debug("segment info", zap.Any("segmentInfo", info))
-	}
 	return info, err
 }
 
