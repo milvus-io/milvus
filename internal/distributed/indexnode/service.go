@@ -130,7 +130,7 @@ func (s *Server) init() error {
 	indexnode.Params.IndexNodeCfg.IP = Params.IP
 	indexnode.Params.IndexNodeCfg.Address = Params.GetAddress()
 
-	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", indexnode.Params.IndexNodeCfg.NodeID))
+	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", indexnode.Params.IndexNodeCfg.GetNodeID()))
 	s.closer = closer
 
 	defer func() {

@@ -107,9 +107,11 @@ type Meta interface {
 
 // MetaReplica records the current load information on all querynodes
 type MetaReplica struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	client      kv.MetaKv // client of a reliable kv service, i.e. etcd client
+	ctx    context.Context
+	cancel context.CancelFunc
+	client kv.MetaKv // client of a reliable kv service, i.e. etcd client
+	//DDL lock
+	clientMutex sync.Mutex
 	factory     dependency.Factory
 	idAllocator func() (UniqueID, error)
 
@@ -141,7 +143,6 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 	m := &MetaReplica{
 		ctx:         childCtx,
 		cancel:      cancel,
-		client:      kv,
 		factory:     factory,
 		idAllocator: idAllocator,
 
@@ -154,6 +155,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 		segmentsInfo: newSegmentsInfo(kv),
 		replicas:     NewReplicaInfos(),
 	}
+	m.setKvClient(kv)
 
 	err := m.reloadFromKV()
 	if err != nil {
@@ -167,7 +169,7 @@ func (m *MetaReplica) reloadFromKV() error {
 	log.Debug("start reload from kv")
 
 	log.Info("recovery collections...")
-	collectionKeys, collectionValues, err := m.client.LoadWithPrefix(collectionMetaPrefix)
+	collectionKeys, collectionValues, err := m.getKvClient().LoadWithPrefix(collectionMetaPrefix)
 	if err != nil {
 		return err
 	}
@@ -192,7 +194,7 @@ func (m *MetaReplica) reloadFromKV() error {
 		return err
 	}
 
-	deltaChannelKeys, deltaChannelValues, err := m.client.LoadWithPrefix(deltaChannelMetaPrefix)
+	deltaChannelKeys, deltaChannelValues, err := m.getKvClient().LoadWithPrefix(deltaChannelMetaPrefix)
 	if err != nil {
 		return nil
 	}
@@ -210,7 +212,7 @@ func (m *MetaReplica) reloadFromKV() error {
 		m.deltaChannelInfos[collectionID] = append(m.deltaChannelInfos[collectionID], deltaChannelInfo)
 	}
 
-	dmChannelKeys, dmChannelValues, err := m.client.LoadWithPrefix(dmChannelMetaPrefix)
+	dmChannelKeys, dmChannelValues, err := m.getKvClient().LoadWithPrefix(dmChannelMetaPrefix)
 	if err != nil {
 		return err
 	}
@@ -272,7 +274,7 @@ func (m *MetaReplica) reloadFromKV() error {
 		}
 	}
 
-	replicaKeys, replicaValues, err := m.client.LoadWithPrefix(ReplicaMetaPrefix)
+	replicaKeys, replicaValues, err := m.getKvClient().LoadWithPrefix(ReplicaMetaPrefix)
 	if err != nil {
 		return err
 	}
@@ -339,7 +341,15 @@ func reloadShardLeaderAddress(meta Meta, cluster Cluster) error {
 }
 
 func (m *MetaReplica) setKvClient(kv kv.MetaKv) {
+	m.clientMutex.Lock()
+	defer m.clientMutex.Unlock()
 	m.client = kv
+}
+
+func (m *MetaReplica) getKvClient() kv.MetaKv {
+	m.clientMutex.Lock()
+	defer m.clientMutex.Unlock()
+	return m.client
 }
 
 func (m *MetaReplica) showCollections() []*querypb.CollectionInfo {
@@ -424,7 +434,7 @@ func (m *MetaReplica) addCollection(collectionID UniqueID, loadType querypb.Load
 			ReplicaIds:      make([]int64, 0),
 			ReplicaNumber:   0,
 		}
-		err := saveGlobalCollectionInfo(collectionID, newCollection, m.client)
+		err := saveGlobalCollectionInfo(collectionID, newCollection, m.getKvClient())
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
@@ -475,7 +485,7 @@ func (m *MetaReplica) addPartitions(collectionID UniqueID, partitionIDs []Unique
 		collectionInfo.ReleasedPartitionIDs = newReleasedPartitionIDs
 
 		log.Debug("add a  partition to MetaReplica", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", collectionInfo.PartitionIDs))
-		err := saveGlobalCollectionInfo(collectionID, collectionInfo, m.client)
+		err := saveGlobalCollectionInfo(collectionID, collectionInfo, m.getKvClient())
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", collectionInfo.PartitionIDs), zap.Any("error", err.Error()))
 			return err
@@ -494,7 +504,7 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 		return nil
 	}
 
-	err = removeCollectionMeta(collectionID, collection.ReplicaIds, m.client)
+	err = removeCollectionMeta(collectionID, collection.ReplicaIds, m.getKvClient())
 	if err != nil {
 		log.Warn("remove collectionInfo from etcd failed", zap.Int64("collectionID", collectionID), zap.Any("error", err.Error()))
 		return err
@@ -555,7 +565,7 @@ func (m *MetaReplica) releasePartitions(collectionID UniqueID, releasedPartition
 	collectionInfo.PartitionStates = newPartitionStates
 	collectionInfo.ReleasedPartitionIDs = newReleasedPartitionIDs
 
-	err := saveGlobalCollectionInfo(collectionID, collectionInfo, m.client)
+	err := saveGlobalCollectionInfo(collectionID, collectionInfo, m.getKvClient())
 	if err != nil {
 		log.Error("releasePartition: remove partition infos error", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", releasedPartitionIDs), zap.Any("error", err.Error()))
 		return err
@@ -679,7 +689,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		saveKvs[changeInfoKey] = string(changeInfoBytes)
 	}
 
-	err := m.client.MultiSave(saveKvs)
+	err := m.getKvClient().MultiSave(saveKvs)
 	if err != nil {
 		panic(err)
 	}
@@ -760,7 +770,7 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 	changeInfoKey := fmt.Sprintf("%s/%d", util.ChangeInfoMetaPrefix, segmentChangeInfos.Base.MsgID)
 	saveKvs[changeInfoKey] = string(changeInfoBytes)
 
-	err = m.client.MultiSave(saveKvs)
+	err = m.getKvClient().MultiSave(saveKvs)
 	if err != nil {
 		panic(err)
 	}
@@ -914,7 +924,7 @@ func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos []*querypb.DmChannel
 	m.dmChannelMu.Lock()
 	defer m.dmChannelMu.Unlock()
 
-	err := saveDmChannelWatchInfos(dmChannelWatchInfos, m.client)
+	err := saveDmChannelWatchInfos(dmChannelWatchInfos, m.getKvClient())
 	if err != nil {
 		log.Error("save dmChannelWatchInfo error", zap.Any("error", err.Error()))
 		return err
@@ -972,7 +982,7 @@ func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.Vch
 		return nil
 	}
 
-	err := saveDeltaChannelInfo(collectionID, infos, m.client)
+	err := saveDeltaChannelInfo(collectionID, infos, m.getKvClient())
 	if err != nil {
 		log.Error("save delta channel info error", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return err
@@ -1028,7 +1038,7 @@ func (m *MetaReplica) setLoadType(collectionID UniqueID, loadType querypb.LoadTy
 	if _, ok := m.collectionInfos[collectionID]; ok {
 		info := proto.Clone(m.collectionInfos[collectionID]).(*querypb.CollectionInfo)
 		info.LoadType = loadType
-		err := saveGlobalCollectionInfo(collectionID, info, m.client)
+		err := saveGlobalCollectionInfo(collectionID, info, m.getKvClient())
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
@@ -1060,7 +1070,7 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 			}
 			partitionState.InMemoryPercentage = percentage
 		}
-		err := saveGlobalCollectionInfo(collectionID, info, m.client)
+		err := saveGlobalCollectionInfo(collectionID, info, m.getKvClient())
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
@@ -1085,7 +1095,7 @@ func (m *MetaReplica) setLoadPercentage(collectionID UniqueID, partitionID Uniqu
 		}
 
 		info.InMemoryPercentage /= int64(len(info.PartitionIDs))
-		err := saveGlobalCollectionInfo(collectionID, info, m.client)
+		err := saveGlobalCollectionInfo(collectionID, info, m.getKvClient())
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
 			return err
@@ -1189,7 +1199,7 @@ func (m *MetaReplica) addReplica(replica *milvuspb.ReplicaInfo) error {
 	collectionInfo.ReplicaIds = append(collectionInfo.ReplicaIds, replica.ReplicaID)
 	collectionInfo.ReplicaNumber++
 
-	err = saveGlobalCollectionInfo(collectionInfo.CollectionID, collectionInfo, m.client)
+	err = saveGlobalCollectionInfo(collectionInfo.CollectionID, collectionInfo, m.getKvClient())
 	if err != nil {
 		return err
 	}
@@ -1198,7 +1208,7 @@ func (m *MetaReplica) addReplica(replica *milvuspb.ReplicaInfo) error {
 	m.collectionInfos[collectionInfo.CollectionID] = collectionInfo
 	m.collectionMu.Unlock()
 
-	err = saveReplicaInfo(replica, m.client)
+	err = saveReplicaInfo(replica, m.getKvClient())
 	if err != nil {
 		return err
 	}
@@ -1208,7 +1218,7 @@ func (m *MetaReplica) addReplica(replica *milvuspb.ReplicaInfo) error {
 }
 
 func (m *MetaReplica) setReplicaInfo(info *milvuspb.ReplicaInfo) error {
-	err := saveReplicaInfo(info, m.client)
+	err := saveReplicaInfo(info, m.getKvClient())
 	if err != nil {
 		return err
 	}

@@ -91,7 +91,7 @@ func TestQueryTask_all(t *testing.T) {
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadCollection,
-			SourceID: Params.ProxyCfg.ProxyID,
+			SourceID: Params.ProxyCfg.GetNodeID(),
 		},
 		CollectionID: collectionID,
 	})
@@ -104,7 +104,7 @@ func TestQueryTask_all(t *testing.T) {
 		RetrieveRequest: &internalpb.RetrieveRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyCfg.ProxyID,
+				SourceID: Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionID:   collectionID,
 			OutputFieldsId: make([]int64, len(fieldName2Types)),
@@ -118,7 +118,7 @@ func TestQueryTask_all(t *testing.T) {
 		request: &milvuspb.QueryRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyCfg.ProxyID,
+				SourceID: Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionName: collectionName,
 			Expr:           expr,

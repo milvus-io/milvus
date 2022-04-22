@@ -91,7 +91,7 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -201,7 +201,7 @@ func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.Remov
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -226,7 +226,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID), zap.Int64("replicaID", in.GetReplicaID()))
+	log.Debug("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Int64("replicaID", in.GetReplicaID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -238,7 +238,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
+		log.Debug("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -251,7 +251,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -276,7 +276,7 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 		log.Error(err.Error())
 		return status, nil
 	}
-	log.Debug("watchDeltaChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
+	log.Debug("watchDeltaChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -288,7 +288,7 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("watchDeltaChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
+		log.Debug("watchDeltaChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -301,7 +301,7 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -330,7 +330,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 	for _, info := range in.Infos {
 		segmentIDs = append(segmentIDs, info.SegmentID)
 	}
-	log.Debug("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
+	log.Debug("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -342,7 +342,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 			log.Error(err.Error())
 			return status, nil
 		}
-		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID))
+		log.Debug("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -355,7 +355,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -401,7 +401,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -447,7 +447,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -480,7 +480,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmentInfoRequest) (*queryPb.GetSegmentInfoResponse, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.QueryNodeID)
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		res := &queryPb.GetSegmentInfoResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -560,7 +560,7 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		return &internalpb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID),
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
 			},
 		}, nil
 	}
@@ -619,7 +619,7 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		return &internalpb.RetrieveResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID),
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
 			},
 		}, nil
 	}
@@ -676,14 +676,14 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
+			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID)))
+			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.QueryNodeID),
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
 			},
 			Response: "",
 		}, nil
@@ -692,7 +692,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
+			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -709,7 +709,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
 			log.Warn("QueryNode.GetMetrics failed",
-				zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
+				zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 				zap.String("req", req.Request),
 				zap.String("metric_type", metricType),
 				zap.Error(err))
@@ -719,7 +719,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 
 	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.QueryNodeCfg.QueryNodeID),
+		zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

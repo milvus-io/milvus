@@ -147,9 +147,9 @@ func (node *QueryNode) initSession() error {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodeCfg.QueryNodePort, 10), false, true)
-	Params.QueryNodeCfg.QueryNodeID = node.session.ServerID
-	Params.SetLogger(Params.QueryNodeCfg.QueryNodeID)
-	log.Debug("QueryNode", zap.Int64("nodeID", Params.QueryNodeCfg.QueryNodeID), zap.String("node address", node.session.Address))
+	Params.QueryNodeCfg.SetNodeID(node.session.ServerID)
+	Params.SetLogger(Params.QueryNodeCfg.GetNodeID())
+	log.Debug("QueryNode", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.String("node address", node.session.Address))
 	return nil
 }
 
@@ -342,7 +342,7 @@ func (node *QueryNode) Init() error {
 		// 	qsOptWithSessionManager(node.sessionManager))
 
 		log.Debug("query node init successfully",
-			zap.Any("queryNodeID", Params.QueryNodeCfg.QueryNodeID),
+			zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
 			zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
 			zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
 		)
@@ -378,7 +378,7 @@ func (node *QueryNode) Start() error {
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 	log.Debug("query node start successfully",
-		zap.Any("queryNodeID", Params.QueryNodeCfg.QueryNodeID),
+		zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
 		zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
 		zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
 	)
@@ -544,7 +544,7 @@ func (node *QueryNode) removeSegments(segmentChangeInfos *querypb.SealedSegments
 		// For offline segments:
 		for _, segmentInfo := range info.OfflineSegments {
 			// load balance or compaction, remove old sealed segments.
-			if info.OfflineNodeID == Params.QueryNodeCfg.QueryNodeID {
+			if info.OfflineNodeID == Params.QueryNodeCfg.GetNodeID() {
 				err := node.historical.replica.removeSegment(segmentInfo.SegmentID)
 				if err != nil {
 					return err

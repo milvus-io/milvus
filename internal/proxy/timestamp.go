@@ -61,7 +61,7 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 	resp, err := ta.tso.AllocTimestamp(ctx, req)
 	defer func() {
 		cancel()
-		metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
 	if err != nil {

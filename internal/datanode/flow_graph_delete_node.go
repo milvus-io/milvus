@@ -155,7 +155,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 
 		// store
 		delDataBuf.updateSize(int64(rows))
-		metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(metrics.DeleteLabel, fmt.Sprint(Params.DataNodeCfg.NodeID)).Add(float64(rows))
+		metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(metrics.DeleteLabel, fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Add(float64(rows))
 		delDataBuf.updateTimeRange(tr)
 		dn.delBuf.Store(segID, delDataBuf)
 	}

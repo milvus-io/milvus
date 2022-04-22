@@ -59,7 +59,7 @@ func (s *Server) getSystemInfoMetrics(
 	coordTopology := metricsinfo.DataCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.GetNodeID()),
 			// TODO(dragondriver): fill ConnectedComponents if necessary
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
@@ -70,7 +70,7 @@ func (s *Server) getSystemInfoMetrics(
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 		Response:      "",
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.GetNodeID()),
 	}
 	var err error
 	resp.Response, err = metricsinfo.MarshalTopology(coordTopology)
@@ -87,7 +87,7 @@ func (s *Server) getSystemInfoMetrics(
 func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 	ret := metricsinfo.DataCoordInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.NodeID),
+			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.GetNodeID()),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           s.session.Address,
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),

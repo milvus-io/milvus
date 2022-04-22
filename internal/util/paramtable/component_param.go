@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -403,7 +404,7 @@ type proxyConfig struct {
 
 	Alias string
 
-	ProxyID                  UniqueID
+	NodeID                   atomic.Value
 	TimeTickInterval         time.Duration
 	MsgStreamTimeTickBufSize int64
 	MaxNameLength            int64
@@ -429,7 +430,7 @@ type proxyConfig struct {
 
 func (p *proxyConfig) init(base *BaseTable) {
 	p.Base = base
-
+	p.NodeID.Store(UniqueID(0))
 	p.initTimeTickInterval()
 
 	p.initMsgStreamTimeTickBufSize()
@@ -543,16 +544,26 @@ func (p *proxyConfig) initGinLogging() {
 	p.GinLogging = p.Base.ParseBool("proxy.ginLogging", true)
 }
 
+func (p *proxyConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *proxyConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- querycoord ---
 type queryCoordConfig struct {
 	Base *BaseTable
 
-	NodeID uint64
-
-	Address      string
-	Port         int
-	QueryCoordID UniqueID
+	Address string
+	Port    int
+	NodeID  atomic.Value
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -569,7 +580,7 @@ type queryCoordConfig struct {
 
 func (p *queryCoordConfig) init(base *BaseTable) {
 	p.Base = base
-
+	p.NodeID.Store(UniqueID(0))
 	//---- Handoff ---
 	p.initAutoHandoff()
 
@@ -627,6 +638,18 @@ func (p *queryCoordConfig) initMemoryUsageMaxDifferencePercentage() {
 	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
 }
 
+func (p *queryCoordConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *queryCoordConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
@@ -635,7 +658,7 @@ type queryNodeConfig struct {
 	Alias         string
 	QueryNodeIP   string
 	QueryNodePort int64
-	QueryNodeID   UniqueID
+	NodeID        atomic.Value
 	// TODO: remove cacheSize
 	CacheSize int64 // deprecated
 
@@ -678,7 +701,7 @@ type queryNodeConfig struct {
 
 func (p *queryNodeConfig) init(base *BaseTable) {
 	p.Base = base
-
+	p.NodeID.Store(UniqueID(0))
 	p.initCacheSize()
 	p.initGracefulTime()
 
@@ -779,6 +802,7 @@ func (p *queryNodeConfig) initCacheMemoryLimit() {
 	}
 	p.CacheMemoryLimit = cacheMemoryLimit
 }
+
 func (p *queryNodeConfig) initCacheEnabled() {
 	var err error
 	cacheEnabled := p.Base.LoadWithDefault("queryNode.cache.enabled", "true")
@@ -788,12 +812,24 @@ func (p *queryNodeConfig) initCacheEnabled() {
 	}
 }
 
+func (p *queryNodeConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *queryNodeConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- datacoord ---
 type dataCoordConfig struct {
 	Base *BaseTable
 
-	NodeID int64
+	NodeID atomic.Value
 
 	IP      string
 	Port    int
@@ -825,7 +861,6 @@ type dataCoordConfig struct {
 
 func (p *dataCoordConfig) init(base *BaseTable) {
 	p.Base = base
-
 	p.initChannelWatchPrefix()
 
 	p.initSegmentMaxSize()
@@ -895,14 +930,26 @@ func (p *dataCoordConfig) initCompactionEntityExpiration() {
 	}(p.CompactionEntityExpiration, p.RetentionDuration)
 }
 
+func (p *dataCoordConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *dataCoordConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- datanode ---
 type dataNodeConfig struct {
 	Base *BaseTable
 
-	// ID of the current DataNode
-	NodeID UniqueID
-
+	// ID of the current node
+	//NodeID atomic.Value
+	NodeID atomic.Value
 	// IP of the current DataNode
 	IP string
 
@@ -925,7 +972,7 @@ type dataNodeConfig struct {
 
 func (p *dataNodeConfig) init(base *BaseTable) {
 	p.Base = base
-
+	p.NodeID.Store(UniqueID(0))
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
@@ -982,6 +1029,18 @@ func (p *dataNodeConfig) initChannelWatchPath() {
 	p.ChannelWatchSubPath = "channelwatch"
 }
 
+func (p *dataNodeConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *dataNodeConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- indexcoord ---
 type indexCoordConfig struct {
@@ -1020,8 +1079,9 @@ type indexNodeConfig struct {
 	Address string
 	Port    int
 
-	NodeID int64
-	Alias  string
+	NodeID atomic.Value
+
+	Alias string
 
 	IndexStorageRootPath string
 
@@ -1031,7 +1091,7 @@ type indexNodeConfig struct {
 
 func (p *indexNodeConfig) init(base *BaseTable) {
 	p.Base = base
-
+	p.NodeID.Store(UniqueID(0))
 	p.initIndexStorageRootPath()
 }
 
@@ -1046,4 +1106,16 @@ func (p *indexNodeConfig) initIndexStorageRootPath() {
 		panic(err)
 	}
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
+}
+
+func (p *indexNodeConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *indexNodeConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
 }

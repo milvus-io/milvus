@@ -143,8 +143,8 @@ func (node *Proxy) initSession() error {
 		return errors.New("new session failed, maybe etcd cannot be connected")
 	}
 	node.session.Init(typeutil.ProxyRole, Params.ProxyCfg.NetworkAddress, false, true)
-	Params.ProxyCfg.ProxyID = node.session.ServerID
-	Params.SetLogger(Params.ProxyCfg.ProxyID)
+	Params.ProxyCfg.SetNodeID(node.session.ServerID)
+	Params.SetLogger(node.session.ServerID)
 	return nil
 }
 
@@ -184,39 +184,39 @@ func (node *Proxy) Init() error {
 	node.factory.Init(&Params)
 	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
 
-	log.Debug("create id allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.ProxyID)
+	log.Debug("create id allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create id allocator",
 			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 		return err
 	}
 	node.idAllocator = idAllocator
-	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
+	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 
-	log.Debug("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
-	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.ProxyID)
+	log.Debug("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create timestamp allocator",
 			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 		return err
 	}
 	node.tsoAllocator = tsoAllocator
-	log.Debug("create timestamp allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
+	log.Debug("create timestamp allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 
-	log.Debug("create segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
+	log.Debug("create segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 	segAssigner, err := newSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
 	if err != nil {
 		log.Warn("failed to create segment id assigner",
 			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 		return err
 	}
 	node.segAssigner = segAssigner
-	node.segAssigner.PeerID = Params.ProxyCfg.ProxyID
-	log.Debug("create segment id assigner done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.ProxyID))
+	node.segAssigner.PeerID = Params.ProxyCfg.GetNodeID()
+	log.Debug("create segment id assigner done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 
 	log.Debug("create channels manager", zap.String("role", typeutil.ProxyRole))
 	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
@@ -283,7 +283,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 
 				maxTs := ts
 				for channel, ts := range stats {
-					metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), channel).Set(float64(ts))
+					metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), channel).Set(float64(ts))
 					channels = append(channels, channel)
 					tss = append(tss, ts)
 					if ts > maxTs {
@@ -303,7 +303,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					DefaultTimestamp: maxTs,
 				}
 
-				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "DefaultTimestamp").Set(float64(maxTs))
+				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "DefaultTimestamp").Set(float64(maxTs))
 
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {

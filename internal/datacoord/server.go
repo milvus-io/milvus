@@ -241,8 +241,8 @@ func (s *Server) initSession() error {
 		return errors.New("failed to initialize session")
 	}
 	s.session.Init(typeutil.DataCoordRole, Params.DataCoordCfg.Address, true, true)
-	Params.DataCoordCfg.NodeID = s.session.ServerID
-	Params.SetLogger(Params.DataCoordCfg.NodeID)
+	Params.DataCoordCfg.SetNodeID(s.session.ServerID)
+	Params.SetLogger(Params.DataCoordCfg.GetNodeID())
 	return nil
 }
 
@@ -814,7 +814,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_DescribeCollection,
-			SourceID: Params.DataCoordCfg.NodeID,
+			SourceID: Params.DataCoordCfg.GetNodeID(),
 		},
 		DbName:       "",
 		CollectionID: collectionID,
@@ -827,7 +827,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 			MsgType:   commonpb.MsgType_ShowPartitions,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.DataCoordCfg.NodeID,
+			SourceID:  Params.DataCoordCfg.GetNodeID(),
 		},
 		DbName:         "",
 		CollectionName: resp.Schema.Name,

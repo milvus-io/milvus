@@ -76,7 +76,7 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 		log.Debug("add DML flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
-		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
 	}
 
 	return results, nil
@@ -116,7 +116,7 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 		log.Debug("add delta flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
-		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
 	}
 
 	return results, nil
@@ -189,7 +189,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDMLChannels(channels []Chann
 		if _, ok := dsService.dmlChannel2FlowGraph[channel]; ok {
 			// close flow graph
 			dsService.dmlChannel2FlowGraph[channel].close()
-			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Dec()
+			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
 		}
 		delete(dsService.dmlChannel2FlowGraph, channel)
 	}
@@ -204,7 +204,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDeltaChannels(channels []Cha
 		if _, ok := dsService.deltaChannel2FlowGraph[channel]; ok {
 			// close flow graph
 			dsService.deltaChannel2FlowGraph[channel].close()
-			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Dec()
+			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
 		}
 		delete(dsService.deltaChannel2FlowGraph, channel)
 	}

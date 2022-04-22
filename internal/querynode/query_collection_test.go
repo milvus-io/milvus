@@ -91,9 +91,9 @@ func genSimpleSegmentInfo() *querypb.SegmentInfo {
 
 func genSimpleSealedSegmentsChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	changeInfo := &querypb.SegmentChangeInfo{
-		OnlineNodeID:    Params.QueryNodeCfg.QueryNodeID,
+		OnlineNodeID:    Params.QueryNodeCfg.GetNodeID(),
 		OnlineSegments:  []*querypb.SegmentInfo{},
-		OfflineNodeID:   Params.QueryNodeCfg.QueryNodeID,
+		OfflineNodeID:   Params.QueryNodeCfg.GetNodeID(),
 		OfflineSegments: []*querypb.SegmentInfo{},
 	}
 	return &querypb.SealedSegmentsChangeInfo{

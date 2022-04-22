@@ -46,7 +46,7 @@ func getSystemInfoMetrics(
 
 	identifierMap := make(map[string]int)
 
-	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.ProxyID)
+	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.GetNodeID())
 	identifierMap[proxyRoleName] = int(node.session.ServerID)
 
 	proxyTopologyNode := metricsinfo.SystemTopologyNode{
@@ -424,7 +424,7 @@ func getSystemInfoMetrics(
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.ProxyID),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.GetNodeID()),
 		}, nil
 	}
 
@@ -434,6 +434,6 @@ func getSystemInfoMetrics(
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.ProxyID),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.GetNodeID()),
 	}, nil
 }
