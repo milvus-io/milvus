@@ -1118,8 +1118,10 @@ func (c *Core) Init() error {
 		c.importManager = newImportManager(
 			c.ctx,
 			c.impTaskKv,
+			c.IDAllocator,
 			c.CallImportService,
 		)
+		c.importManager.init(c.ctx)
 
 		// init data
 		initError = c.initData()
