@@ -850,7 +850,8 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
 
-	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, Params.DataNodeCfg.FlushInsertBufferSize, idAllocator, node.chunkManager,
+	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
+	importWrapper := importutil.NewImportWrapper(ctx, schema, 2, segmentSize, idAllocator, node.chunkManager,
 		importFlushReqFunc(node, req, importResult, schema, ts), importResult, reportFunc)
 	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
 	if err != nil {
