@@ -172,14 +172,13 @@ pipeline {
                                                 def release_name=sh(returnStdout: true, script: './get_release_name.sh')
                                                 def clusterEnabled = "false"
                                                 def mqMode='pulsar'
-                                                int e2e_timeout_seconds = 6 * 60 * 60
+                                                int e2e_timeout_seconds = 2 * 60 * 60
                                                 if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                     clusterEnabled = "true"
-                                                    e2e_timeout_seconds = 10 * 60 * 60
+                                    
                                                 } else if("${MILVUS_SERVER_TYPE}" == "distributed-kafka" ) {
                                                     clusterEnabled = "true"
                                                     mqMode='kafka'
-                                                    e2e_timeout_seconds = 10 * 60 * 60
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                     sh """ 
