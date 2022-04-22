@@ -274,7 +274,7 @@ func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt segmentEvent)
 // removeSegment removes segment from cluster
 // should only applied in hand-off or load balance procedure
 func (sc *ShardCluster) removeSegment(evt segmentEvent) {
-	log.Debug("ShardCluster remove segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
+	log.Debug("remove segment in shard cluster", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.String("virtual channel", sc.vchannelName), zap.Int32("state", int32(evt.state)))
 
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
@@ -574,7 +574,10 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 	segAllocs := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
 	defer sc.finishUsage(segAllocs)
 
-	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)))
+	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)),
+		zap.Int64("collectionID", sc.collectionID),
+		zap.Int64s("partitions", req.GetReq().GetPartitionIDs()),
+		zap.Any("vchannelName", sc.vchannelName))
 	for nodeID, segmentIDs := range segAllocs {
 		log.Debug("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
 	}
