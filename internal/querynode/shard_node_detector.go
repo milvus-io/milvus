@@ -163,7 +163,6 @@ func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID,
 		return
 	}
 	if info.CollectionID != collectionID || info.ReplicaID != replicaID {
-		log.Warn("here")
 		return
 	}
 	if e.PrevKv != nil {
