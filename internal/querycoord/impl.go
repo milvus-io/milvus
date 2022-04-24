@@ -1072,9 +1072,10 @@ func (qc *QueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicas
 
 		for _, replica := range replicas {
 			for _, shard := range replica.ShardReplicas {
+				shard.NodeIds = append(shard.NodeIds, shard.LeaderID)
 				nodes := shardNodes[shard.DmChannelName]
 				for _, nodeID := range replica.NodeIds {
-					if _, ok := nodes[nodeID]; ok {
+					if _, ok := nodes[nodeID]; ok && nodeID != shard.LeaderID {
 						shard.NodeIds = append(shard.NodeIds, nodeID)
 					}
 				}
