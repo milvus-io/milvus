@@ -1477,9 +1477,12 @@ func TestGetReplicas(t *testing.T) {
 	assert.Nil(t, err)
 	node3, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
+	node4, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
 	waitQueryNodeOnline(queryCoord.cluster, node3.queryNodeID)
+	waitQueryNodeOnline(queryCoord.cluster, node4.queryNodeID)
 
 	// First, load collection with replicas
 	loadCollectionReq := &querypb.LoadCollectionRequest{
@@ -1505,7 +1508,6 @@ func TestGetReplicas(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.Equal(t, 3, len(resp.Replicas))
 	for i := range resp.Replicas {
-		assert.Equal(t, 1, len(resp.Replicas[i].NodeIds))
 		for j := 0; j < i; j++ {
 			assert.NotEqual(t,
 				resp.Replicas[i].NodeIds[0],
@@ -1521,12 +1523,11 @@ func TestGetReplicas(t *testing.T) {
 	sawNodes := make(map[UniqueID]struct{})
 	for i, replica := range resp.Replicas {
 		addNodes := make(map[UniqueID]struct{})
-		assert.Equal(t, 1, len(replica.NodeIds))
 		assert.Greater(t, len(replica.NodeIds), 0)
 		assert.Greater(t, len(replica.ShardReplicas), 0)
 		for _, shard := range replica.ShardReplicas {
 			assert.Equal(t,
-				replica.NodeIds[0],
+				shard.NodeIds[0],
 				shard.LeaderID)
 			assert.Greater(t, len(shard.NodeIds), 0)
 
@@ -1564,6 +1565,7 @@ func TestGetReplicas(t *testing.T) {
 	node1.stop()
 	node2.stop()
 	node3.stop()
+	node4.stop()
 	queryCoord.Stop()
 }
 
