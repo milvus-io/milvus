@@ -22,6 +22,10 @@ import "context"
 type ProducerOptions struct {
 	// The topic that this Producer will publish
 	Topic string
+
+	// Enable compression
+	// For Pulsar, this enables ZSTD compression with default compression level
+	EnableCompression bool
 }
 
 // ProducerMessage contains the messages of a producer

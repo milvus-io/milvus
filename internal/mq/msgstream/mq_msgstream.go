@@ -104,7 +104,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 			break
 		}
 		fn := func() error {
-			pp, err := ms.client.CreateProducer(mqwrapper.ProducerOptions{Topic: channel})
+			pp, err := ms.client.CreateProducer(mqwrapper.ProducerOptions{Topic: channel, EnableCompression: true})
 			if err != nil {
 				return err
 			}

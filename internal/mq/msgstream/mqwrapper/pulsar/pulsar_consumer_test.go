@@ -17,6 +17,7 @@
 package pulsar
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -41,6 +42,7 @@ func TestPulsarConsumer_Subscription(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)
+	defer consumer.Close()
 
 	str := consumer.Subscription()
 	assert.NotNil(t, str)
@@ -55,6 +57,54 @@ func Test_PatchEarliestMessageID(t *testing.T) {
 	patchEarliestMessageID(&mid)
 
 	assert.Equal(t, "-1:-1:0", fmt.Sprintf("%v", mid))
+}
+
+func TestComsumeCompressedMessage(t *testing.T) {
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	defer pc.Close()
+
+	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       "TestTopics",
+		SubscriptionName:            "SubName",
+		Type:                        pulsar.Exclusive,
+		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
+		MessageChannel:              receiveChannel,
+	})
+	assert.NoError(t, err)
+	defer consumer.Close()
+
+	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: "TestTopics"})
+	assert.NoError(t, err)
+	compressProducer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: "TestTopics", EnableCompression: true})
+	assert.NoError(t, err)
+
+	msg := []byte("test message")
+	compressedMsg := []byte("test compressed message")
+	_, err = producer.Send(context.Background(), &mqwrapper.ProducerMessage{
+		Payload:    msg,
+		Properties: map[string]string{},
+	})
+	assert.NoError(t, err)
+	recvMsg, err := consumer.Receive(context.Background())
+	assert.NoError(t, err)
+	consumer.Ack(recvMsg)
+	assert.Equal(t, msg, recvMsg.Payload())
+
+	_, err = compressProducer.Send(context.Background(), &mqwrapper.ProducerMessage{
+		Payload:    compressedMsg,
+		Properties: map[string]string{},
+	})
+	assert.NoError(t, err)
+	recvMsg, err = consumer.Receive(context.Background())
+	assert.NoError(t, err)
+	consumer.Ack(recvMsg)
+	assert.Equal(t, compressedMsg, recvMsg.Payload())
+
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
 }
 
 func TestPulsarConsumer_Close(t *testing.T) {
