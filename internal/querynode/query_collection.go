@@ -439,16 +439,23 @@ func (q *queryCollection) publishResultLoop() {
 					switch msg.Type() {
 					case commonpb.MsgType_Search:
 						var el errorutil.ErrorList
+						var wg sync.WaitGroup
 						for _, ret := range msg.SearchRet.results {
-							publishErr := q.publishSearchResult(ret, ret.Base.SourceID)
-							if publishErr != nil {
-								el = append(el, publishErr)
-							}
-							publishResultDuration := msg.Msg.GetTimeRecorder().Record(fmt.Sprintf("publish search result, msgID = %d", msg.Msg.ID()))
-							log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "PublishSearchResult"),
-								zap.Int64(log.BenchmarkCollectionID, msg.Msg.GetCollectionID()),
-								zap.Int64(log.BenchmarkMsgID, msg.Msg.ID()), zap.Int64(log.BenchmarkDuration, publishResultDuration.Microseconds()))
+							wg.Add(1)
+							ret := ret
+							go func() {
+								defer wg.Done()
+								publishErr := q.publishSearchResult(ret, ret.Base.SourceID)
+								if publishErr != nil {
+									el = append(el, publishErr)
+								}
+								publishResultDuration := msg.Msg.GetTimeRecorder().Record(fmt.Sprintf("publish search result, msgID = %d", msg.Msg.ID()))
+								log.Debug(log.BenchmarkRoot, zap.String(log.BenchmarkRole, typeutil.QueryNodeRole), zap.String(log.BenchmarkStep, "PublishSearchResult"),
+									zap.Int64(log.BenchmarkCollectionID, msg.Msg.GetCollectionID()),
+									zap.Int64(log.BenchmarkMsgID, msg.Msg.ID()), zap.Int64(log.BenchmarkDuration, publishResultDuration.Microseconds()))
+							}()
 						}
+						wg.Wait()
 						msg.SearchRet.Close()
 						if el != nil {
 							log.Warn("publishSearchResult failed", zap.Error(el))
