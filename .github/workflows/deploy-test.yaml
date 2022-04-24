@@ -84,15 +84,17 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
+          source ../utils.sh
           if [ ${{ matrix.task }} == "reinstall" ]; then
             wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${{ matrix.mode }}/docker-compose.yml -O docker-compose.yml;
-            MILVUS_IMAGE="${{ env.NEW_IMAGE_REPO }}:${{ env.NEW_IMAGE_TAG }}" docker-compose up -d;
+            replace_image_tag ${{ env.NEW_IMAGE_REPO }} ${{ env.NEW_IMAGE_TAG }};
 
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
             wget https://github.com/milvus-io/milvus/releases/download/${{ env.PREVIOUS_RELEASE_VERSION }}/milvus-${{ matrix.mode }}-docker-compose.yml -O docker-compose.yml;
-            MILVUS_IMAGE="${{ env.OLD_IMAGE_REPO }}:${{ env.OLD_IMAGE_TAG }}" docker-compose up -d;
+            replace_image_tag ${{ env.OLD_IMAGE_REPO }} ${{ env.OLD_IMAGE_TAG }};
           fi
+          docker-compose up -d
           bash ../check_healthy.sh
           docker-compose ps -a
           sleep 10s
@@ -112,12 +114,14 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
+          source ../utils.sh
           if [ ${{ matrix.task }} == "reinstall" ]; then
             docker-compose restart
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
             wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${{ matrix.mode }}/docker-compose.yml -O docker-compose.yml;
-            MILVUS_IMAGE="${{ env.NEW_IMAGE_REPO }}:${{ env.NEW_IMAGE_TAG }}" docker-compose up -d;
+            replace_image_tag ${{ env.NEW_IMAGE_REPO }} ${{ env.NEW_IMAGE_TAG }};
+            docker-compose up -d;
           fi
           bash ../check_healthy.sh
           docker-compose ps -a
