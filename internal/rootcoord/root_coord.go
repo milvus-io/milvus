@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -156,6 +157,9 @@ type Core struct {
 
 	//assign import task to data service
 	CallImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
+
+	// Seals segments in collection cID, so they can get flushed later.
+	CallFlushOnCollection func(ctx context.Context, cID int64, segIDs []int64) error
 
 	//Proxy manager
 	proxyManager *proxyManager
@@ -728,6 +732,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}
 		return nil
 	}
+
 	c.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		resp := &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
@@ -748,6 +753,26 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}
 
 		return resp
+	}
+
+	c.CallFlushOnCollection = func(ctx context.Context, cID int64, segIDs []int64) error {
+		resp, err := s.Flush(ctx, &datapb.FlushRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Flush,
+				SourceID: c.session.ServerID,
+			},
+			DbID:         0,
+			SegmentIDs:   segIDs,
+			CollectionID: cID,
+		})
+		if err != nil {
+			return errors.New("failed to call flush to data coordinator: " + err.Error())
+		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(resp.Status.Reason)
+		}
+		log.Info("flush on collection succeed", zap.Int64("collection ID", cID))
+		return nil
 	}
 
 	return nil
@@ -2335,9 +2360,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 	}()
 
 	// TODO: Resurrect index check when ready.
-	// Start a loop to check segments' index states periodically.
-	// c.wg.Add(1)
-	// go c.checkCompleteIndexLoop(ctx, ti, colName, ir.Segments)
+	c.CallFlushOnCollection(ctx, ti.GetCollectionId(), ir.GetSegments())
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

@@ -72,8 +72,9 @@ type Manager interface {
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
-	// SealAllSegments seals all segments of collection with collectionID and return sealed segments
-	SealAllSegments(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
+	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
+	// If segIDs is not empty, also seals segments in segIDs.
+	SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error)
 	// GetFlushableSegments returns flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// ExpireAllocations notifies segment status to expire old allocations
@@ -360,17 +361,21 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 }
 
-// SealAllSegments seals all segmetns of collection with collectionID and return sealed segments
-func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
+// SealAllSegments seals all segments of collection with collectionID and return sealed segments
+func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var ret []UniqueID
-	for _, id := range s.segments {
+	segCandidates := s.segments
+	if len(segIDs) != 0 {
+		segCandidates = segIDs
+	}
+	for _, id := range segCandidates {
 		info := s.meta.GetSegment(id)
 		if info == nil {
-			log.Warn("Failed to get seg info from meta", zap.Int64("id", id))
+			log.Warn("failed to get seg info from meta", zap.Int64("segment ID", id))
 			continue
 		}
 		if info.CollectionID != collectionID {

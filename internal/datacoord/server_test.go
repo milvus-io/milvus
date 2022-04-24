@@ -749,7 +749,7 @@ func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID)
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
+func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
 	panic("not implemented") // TODO: Implement
 }
 

@@ -306,10 +306,10 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		select {
 		case fmsg := <-ibNode.flushChan:
 
-			log.Info(". Receiving flush message",
+			log.Info("receiving flush message",
 				zap.Int64("segmentID", fmsg.segmentID),
 				zap.Int64("collectionID", fmsg.collectionID),
-				zap.String("vchannel name", ibNode.channelName),
+				zap.String("v-channel name", ibNode.channelName),
 			)
 			// merging auto&manual flush segment same segment id
 			dup := false

@@ -69,6 +69,7 @@ service DataNode {
 message FlushRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
+  repeated int64 segmentIDs = 3;
   int64 collectionID = 4;
 }
 

@@ -539,7 +539,9 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		return nil
 	}
 
-	log.Info("flush segments", zap.Int64s("segmentIDs", flushableIDs), zap.Int("markSegments count", len(staleSegments)))
+	log.Info("start flushing segments",
+		zap.Int64s("segment IDs", flushableIDs),
+		zap.Int("# of stale/mark segments", len(staleSegments)))
 
 	s.setLastFlushTime(flushableSegments)
 	s.setLastFlushTime(staleSegments)

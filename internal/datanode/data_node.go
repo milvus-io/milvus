@@ -562,8 +562,9 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	log.Info("Receive FlushSegments req",
-		zap.Int64("collectionID", req.GetCollectionID()), zap.Int("num", len(req.SegmentIDs)),
-		zap.Int64s("segments", req.SegmentIDs),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("segments", req.GetSegmentIDs()),
+		zap.Int64s("stale segments", req.GetMarkSegmentIDs()),
 	)
 
 	processSegments := func(segmentIDs []UniqueID, flushed bool) bool {
@@ -571,9 +572,10 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		for _, id := range segmentIDs {
 			if node.segmentCache.checkIfCached(id) {
 				// Segment in flushing, ignore
-				log.Info("Segment flushing, ignore the flush request until flush is done.",
+				log.Info("segment flushing, ignore the flush request until flush is done.",
 					zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
-
+				status.Reason = "segment is flushing, nothing is done"
+				noErr = false
 				continue
 			}
 
@@ -581,8 +583,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 			flushCh, err := node.flowgraphManager.getFlushCh(id)
 			if err != nil {
-				status.Reason = "DataNode abnormal, restarting"
-				log.Error("DataNode abnormal, no flushCh for a vchannel", zap.Error(err))
+				status.Reason = "no flush channel found for v-channel"
+				log.Error("no flush channel found for v-channel", zap.Error(err))
 				noErr = false
 				continue
 			}
@@ -595,9 +597,11 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 				flushed:      flushed,
 			}
 		}
-		log.Info("Flowgraph flushSegment tasks triggered", zap.Bool("flushed", flushed),
-			zap.Int64("collectionID", req.GetCollectionID()), zap.Int64s("segments", segmentIDs))
-
+		log.Info("flow graph flushSegment tasks triggered",
+			zap.Bool("flushed", flushed),
+			zap.Int64("collection ID", req.GetCollectionID()),
+			zap.Int64s("segments", segmentIDs),
+			zap.Int64s("mark segments", req.GetMarkSegmentIDs()))
 		return noErr
 	}
 
@@ -874,13 +878,15 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 	return func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
 		if shardNum >= len(req.GetImportTask().GetChannelNames()) {
 			log.Error("import task returns invalid shard number",
-				zap.Int("# of shards", shardNum),
+				zap.Int("shard num", shardNum),
 				zap.Int("# of channels", len(req.GetImportTask().GetChannelNames())),
 				zap.Any("channel names", req.GetImportTask().GetChannelNames()),
 			)
 			return fmt.Errorf("syncSegmentID Failed: invalid shard number %d", shardNum)
 		}
-		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardNum", shardNum))
+		log.Info("import task flush segment",
+			zap.Any("channel names", req.ImportTask.ChannelNames),
+			zap.Int("shard num", shardNum))
 		segReqs := []*datapb.SegmentIDRequest{
 			{
 				ChannelName:  req.ImportTask.ChannelNames[shardNum],
@@ -905,6 +911,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		}
 		segmentID := resp.SegIDAssignments[0].SegID
 
+		// TODO: this code block is long and tedious, maybe split it into separate functions.
 		var rowNum int
 		for _, field := range fields {
 			rowNum = field.RowNum()
@@ -1024,6 +1031,38 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
 
+		ds, ok := node.flowgraphManager.getFlowgraphService(segReqs[0].GetChannelName())
+		if !ok {
+			log.Warn("channel not found in current dataNode",
+				zap.String("channel name", segReqs[0].GetChannelName()),
+				zap.Int64("node ID", node.NodeID))
+			return errors.New("channel " + segReqs[0].GetChannelName() + " not found in current dataNode")
+		}
+
+		// Update flow graph replica segment info.
+		// TODO: Duplicate code. Add wrapper function.
+		if !ds.replica.hasSegment(segmentID, true) {
+			err = ds.replica.addNewSegment(segmentID,
+				req.GetImportTask().GetCollectionId(),
+				req.GetImportTask().GetPartitionId(),
+				segReqs[0].GetChannelName(),
+				&internalpb.MsgPosition{
+					ChannelName: segReqs[0].GetChannelName(),
+				},
+				&internalpb.MsgPosition{
+					ChannelName: segReqs[0].GetChannelName(),
+				})
+			if err != nil {
+				log.Error("failed to add segment",
+					zap.Int64("segment ID", segmentID),
+					zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
+					zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
+					zap.String("channel mame", segReqs[0].GetChannelName()),
+					zap.Error(err))
+			}
+		}
+		ds.replica.updateStatistics(segmentID, int64(rowNum))
+
 		req := &datapb.SaveBinlogPathsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   0, //TODO msg type
@@ -1036,7 +1075,6 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			Field2BinlogPaths:   fieldInsert,
 			Field2StatslogPaths: fieldStats,
 			Importing:           true,
-			Flushed:             true,
 		}
 
 		err = retry.Do(context.Background(), func() error {

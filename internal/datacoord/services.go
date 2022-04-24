@@ -84,7 +84,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	sealedSegments, err := s.segmentManager.SealAllSegments(ctx, req.CollectionID)
+	sealedSegments, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
 	if err != nil {
 		resp.Status.Reason = fmt.Sprintf("failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
@@ -343,7 +343,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.segmentManager.DropSegment(ctx, segment.GetID())
 	}
 
-	// set segment to SegmentState_Flushing and save binlogs and checkpoints
+	// Set segment to SegmentState_Flushing. Also save binlogs and checkpoints.
 	err := s.meta.UpdateFlushSegmentsInfo(
 		req.GetSegmentID(),
 		req.GetFlushed(),
@@ -362,7 +362,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 
-	log.Info("flush segment with meta", zap.Int64("id", req.SegmentID),
+	log.Info("flush segment with meta", zap.Int64("segment id", req.SegmentID),
 		zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.GetFlushed() {
@@ -378,8 +378,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(),
 					segment.GetPartitionID(), segmentID, segment.GetInsertChannel(), tt)
 				if err != nil {
-					log.Warn("failed to trigger single compaction", zap.Int64("segmentID", segmentID))
+					log.Warn("failed to trigger single compaction", zap.Int64("segment ID", segmentID))
+				} else {
+					log.Info("compaction triggered for segment", zap.Int64("segment ID", segmentID))
 				}
+			} else {
+				log.Warn("failed to get time travel reverse time")
 			}
 		}
 	}
