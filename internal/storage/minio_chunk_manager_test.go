@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.
 func newMinIOChunkManager(ctx context.Context, bucketName string) (*MinioChunkManager, error) {
 	endPoint, _ := Params.Load("_MinioAddress")
 	accessKeyID, _ := Params.Load("minio.accessKeyID")
