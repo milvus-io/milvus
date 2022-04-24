@@ -366,7 +366,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 
 		segmentChangeInfos := genSimpleChangeInfo()
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
-		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.QueryNodeID
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.GetNodeID()
 
 		/*
 			qc, err := node.queryService.getQueryCollection(defaultCollectionID)
@@ -439,7 +439,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 
 		segmentChangeInfos := genSimpleChangeInfo()
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
-		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.QueryNodeID
+		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.GetNodeID()
 
 		/*
 			qc, err := node.queryService.getQueryCollection(defaultCollectionID)

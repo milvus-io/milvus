@@ -212,7 +212,7 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 	colReplica.collections[collectionID] = newCollection
 	log.Debug("Successfully add collection ", zap.Int64("collectionID", collectionID))
 
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(colReplica.collections)))
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.collections)))
 	return newCollection
 }
 
@@ -241,8 +241,8 @@ func (colReplica *collectionReplica) removeCollectionPrivate(collectionID Unique
 	deleteCollection(collection)
 	delete(colReplica.collections, collectionID)
 
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(colReplica.collections)))
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Sub(float64(len(collection.partitionIDs)))
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.collections)))
+	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(collection.partitionIDs)))
 	return nil
 }
 
@@ -417,7 +417,7 @@ func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, 
 		colReplica.partitions[partitionID] = newPartition
 	}
 
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(colReplica.partitions)))
+	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.partitions)))
 	return nil
 }
 
@@ -451,7 +451,7 @@ func (colReplica *collectionReplica) removePartitionPrivate(partitionID UniqueID
 	collection.removePartitionID(partitionID)
 	delete(colReplica.partitions, partitionID)
 
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(len(colReplica.partitions)))
+	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.partitions)))
 	return nil
 }
 
@@ -559,7 +559,7 @@ func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, parti
 	partition.addSegmentID(segmentID)
 	colReplica.segments[segmentID] = segment
 
-	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
 	return nil
 }
 
@@ -597,7 +597,7 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 	delete(colReplica.segments, segmentID)
 	deleteSegment(segment)
 
-	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Dec()
+	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
 	return nil
 }
 
@@ -750,7 +750,7 @@ func (colReplica *collectionReplica) getSegmentInfo(segment *Segment) *querypb.S
 		SegmentID:    segment.ID(),
 		CollectionID: segment.collectionID,
 		PartitionID:  segment.partitionID,
-		NodeID:       Params.QueryNodeCfg.QueryNodeID,
+		NodeID:       Params.QueryNodeCfg.GetNodeID(),
 		MemSize:      segment.getMemSize(),
 		NumRows:      segment.getRowCount(),
 		IndexName:    indexName,

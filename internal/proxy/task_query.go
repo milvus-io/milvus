@@ -61,7 +61,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.Base.MsgType = commonpb.MsgType_Retrieve
-	t.Base.SourceID = Params.ProxyCfg.ProxyID
+	t.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
@@ -385,7 +385,7 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     t.Base.MsgID,
 				Timestamp: t.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.ProxyID,
+				SourceID:  Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionID: collectionID,
 			PartitionIDs: searchPartitionIDs,
@@ -418,7 +418,7 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     t.Base.MsgID,
 			Timestamp: t.Base.Timestamp,
-			SourceID:  Params.ProxyCfg.ProxyID,
+			SourceID:  Params.ProxyCfg.GetNodeID(),
 		},
 	})
 	if err != nil {
@@ -449,7 +449,7 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     t.Base.MsgID,
 				Timestamp: t.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.ProxyID,
+				SourceID:  Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionID: collectionID,
 		})

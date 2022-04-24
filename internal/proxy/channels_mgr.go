@@ -400,7 +400,7 @@ func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 
 	mgr.updateCollection(collectionID, id)
 	for _, pc := range pchans {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), pc).Inc()
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Inc()
 	}
 	return nil
 }
@@ -435,7 +435,7 @@ func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) error {
 	mgr.deleteVChansByVIDs(ids)
 	mgr.deleteStreamByVIDs(ids)
 	for _, pc := range channels {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), pc).Dec()
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Dec()
 	}
 	return nil
 }
@@ -486,7 +486,7 @@ func (mgr *channelsMgrImpl) getVChannels(collectionID UniqueID) ([]vChan, error)
 }
 
 func (mgr *channelsMgrImpl) createDQLStream(collectionID UniqueID) error {
-	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "query").Inc()
+	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "query").Inc()
 	return mgr.dqlChannelsMgr.createMsgStream(collectionID)
 }
 
@@ -495,7 +495,7 @@ func (mgr *channelsMgrImpl) getDQLStream(collectionID UniqueID) (msgstream.MsgSt
 }
 
 func (mgr *channelsMgrImpl) removeDQLStream(collectionID UniqueID) error {
-	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), "query").Dec()
+	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "query").Dec()
 	return mgr.dqlChannelsMgr.removeStream(collectionID)
 }
 

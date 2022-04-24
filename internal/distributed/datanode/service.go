@@ -297,7 +297,6 @@ func (s *Server) init() error {
 		}
 	}
 
-	s.datanode.SetNodeID(dn.Params.DataNodeCfg.NodeID)
 	s.datanode.UpdateStateCode(internalpb.StateCode_Initializing)
 
 	if err := s.datanode.Init(); err != nil {

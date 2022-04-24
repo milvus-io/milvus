@@ -53,7 +53,7 @@ func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp,
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.DataCoordCfg.NodeID,
+			SourceID:  Params.DataCoordCfg.GetNodeID(),
 		},
 		Count: 1,
 	})
@@ -70,7 +70,7 @@ func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) 
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.DataCoordCfg.NodeID,
+			SourceID:  Params.DataCoordCfg.GetNodeID(),
 		},
 		Count: 1,
 	})

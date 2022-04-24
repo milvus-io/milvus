@@ -129,7 +129,7 @@ func (qc *QueryCoord) initSession() error {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	qc.session.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, true)
-	Params.QueryCoordCfg.NodeID = uint64(qc.session.ServerID)
+	Params.QueryCoordCfg.SetNodeID(qc.session.ServerID)
 	Params.SetLogger(qc.session.ServerID)
 	return nil
 }

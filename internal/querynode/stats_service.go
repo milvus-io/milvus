@@ -85,7 +85,7 @@ func (sService *statsService) publicStatistic(fieldStats []*internalpb.FieldStat
 	queryNodeStats := internalpb.QueryNodeStats{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_QueryNodeStats,
-			SourceID: Params.QueryNodeCfg.QueryNodeID,
+			SourceID: Params.QueryNodeCfg.GetNodeID(),
 		},
 		SegStats:   segStats,
 		FieldStats: fieldStats,

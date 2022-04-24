@@ -237,9 +237,9 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test dataNodeConfig", func(t *testing.T) {
 		Params := CParams.DataNodeCfg
 
-		Params.NodeID = 2
+		Params.SetNodeID(2)
 
-		id := Params.NodeID
+		id := Params.GetNodeID()
 		t.Logf("NodeID: %d", id)
 
 		alias := Params.Alias
@@ -293,7 +293,7 @@ func TestComponentParam(t *testing.T) {
 
 		t.Logf("Port: %v", Params.Port)
 
-		t.Logf("NodeID: %v", Params.NodeID)
+		t.Logf("NodeID: %v", Params.GetNodeID())
 
 		t.Logf("Alias: %v", Params.Alias)
 

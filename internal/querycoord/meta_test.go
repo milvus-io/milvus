@@ -117,13 +117,12 @@ func TestMetaFunc(t *testing.T) {
 		NodeID:       nodeID,
 	}
 	meta := &MetaReplica{
-		client:            kv,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		segmentsInfo:      segmentsInfo,
 	}
-
+	meta.setKvClient(kv)
 	dmChannels := []string{"testDm1", "testDm2"}
 
 	t.Run("Test ShowPartitionFail", func(t *testing.T) {
@@ -307,7 +306,6 @@ func TestReloadMetaFromKV(t *testing.T) {
 		return newID, nil
 	}
 	meta := &MetaReplica{
-		client:            kv,
 		idAllocator:       idAllocator,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
@@ -316,6 +314,7 @@ func TestReloadMetaFromKV(t *testing.T) {
 		segmentsInfo:      newSegmentsInfo(kv),
 		replicas:          NewReplicaInfos(),
 	}
+	meta.setKvClient(kv)
 
 	kvs := make(map[string]string)
 	collectionInfo := &querypb.CollectionInfo{
@@ -407,12 +406,12 @@ func TestCreateQueryChannel(t *testing.T) {
 	}
 
 	m := &MetaReplica{
-		client:            kv,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		segmentsInfo:      segmentsInfo,
 	}
+	m.setKvClient(kv)
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
 			info := m.createQueryChannel(test.inID)

@@ -139,7 +139,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	qc := r.node.queryShardService.getQueryChannel(collectionID)
 	log.Debug("add query channel for collection", zap.Int64("collectionID", collectionID))
 
-	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
+	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
 
 	err := qc.AsConsumer(r.req.QueryChannel, consumeSubName, r.req.SeekPosition)
 	if err != nil {
@@ -299,7 +299,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 		}
 	}()
 
-	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
+	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
 
 	// group channels by to seeking or consuming
 	channel2SeekPosition := make(map[string]*internalpb.MsgPosition)
@@ -528,7 +528,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		log.Warn("watchDeltaChannel, add flowGraph for deltaChannel failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels), zap.Error(err))
 		return err
 	}
-	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.QueryNodeID)
+	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
 	// channels as consumer
 	for channel, fg := range channel2FlowGraph {
 		// use pChannel to consume

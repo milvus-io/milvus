@@ -29,7 +29,7 @@ func (qc *queryChannel) AsConsumer(channelName string, subName string, position 
 	var err error
 	qc.asConsumeOnce.Do(func() {
 		qc.queryMsgStream.AsConsumer([]string{channelName}, subName)
-		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Inc()
+		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
 		if position == nil || len(position.MsgID) == 0 {
 			log.Debug("QueryNode AsConsumer", zap.String("channel", channelName), zap.String("sub name", subName))
 		} else {

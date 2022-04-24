@@ -393,7 +393,7 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	// 		Base: &commonpb.MsgBase{
 	// 			MsgType:  commonpb.MsgType_Insert,
 	// 			MsgID:    0,
-	// 			SourceID: Params.ProxyCfg.ProxyID,
+	// 			SourceID: Params.ProxyCfg.GetNodeID(),
 	// 		},
 	// 	},
 	// }
@@ -1127,7 +1127,7 @@ func TestDropCollectionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.ProxyID, task.GetBase().GetSourceID())
+	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
 	// missing collectionID in globalMetaCache
 	err = task.Execute(ctx)
 	assert.NotNil(t, err)
@@ -1204,7 +1204,7 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.ProxyID, task.GetBase().GetSourceID())
+	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
 	// missing collectionID in globalMetaCache
 	err = task.Execute(ctx)
 	assert.Nil(t, err)
@@ -1265,7 +1265,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.ProxyID, task.GetBase().GetSourceID())
+	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
 	// missing collectionID in globalMetaCache
 	err := task.Execute(ctx)
 	assert.Nil(t, err)
@@ -1447,7 +1447,7 @@ func TestCreatePartitionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.ProxyID, task.GetBase().GetSourceID())
+	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1494,7 +1494,7 @@ func TestDropPartitionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.ProxyID, task.GetBase().GetSourceID())
+	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1541,7 +1541,7 @@ func TestHasPartitionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.ProxyID, task.GetBase().GetSourceID())
+	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1589,7 +1589,7 @@ func TestShowPartitionsTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.ProxyID, task.GetBase().GetSourceID())
+	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1673,7 +1673,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     0,
 				Timestamp: 0,
-				SourceID:  Params.ProxyCfg.ProxyID,
+				SourceID:  Params.ProxyCfg.GetNodeID(),
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -1703,7 +1703,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, Params.ProxyCfg.ProxyID)
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, Params.ProxyCfg.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -1725,7 +1725,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
-						SourceID: Params.ProxyCfg.ProxyID,
+						SourceID: Params.ProxyCfg.GetNodeID(),
 					},
 					DbName:         dbName,
 					CollectionName: collectionName,
@@ -1782,7 +1782,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
 						Timestamp: 0,
-						SourceID:  Params.ProxyCfg.ProxyID,
+						SourceID:  Params.ProxyCfg.GetNodeID(),
 					},
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
@@ -1893,7 +1893,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     0,
 				Timestamp: 0,
-				SourceID:  Params.ProxyCfg.ProxyID,
+				SourceID:  Params.ProxyCfg.GetNodeID(),
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -1923,7 +1923,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, Params.ProxyCfg.ProxyID)
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, Params.ProxyCfg.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -1945,7 +1945,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
-						SourceID: Params.ProxyCfg.ProxyID,
+						SourceID: Params.ProxyCfg.GetNodeID(),
 					},
 					DbName:         dbName,
 					CollectionName: collectionName,
@@ -2002,7 +2002,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
 						Timestamp: 0,
-						SourceID:  Params.ProxyCfg.ProxyID,
+						SourceID:  Params.ProxyCfg.GetNodeID(),
 					},
 					CollectionName: collectionName,
 					PartitionName:  partitionName,

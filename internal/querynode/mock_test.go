@@ -1686,11 +1686,11 @@ func initConsumer(ctx context.Context, queryResultChannel Channel) (msgstream.Ms
 
 func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	changeInfo := &querypb.SegmentChangeInfo{
-		OnlineNodeID: Params.QueryNodeCfg.QueryNodeID,
+		OnlineNodeID: Params.QueryNodeCfg.GetNodeID(),
 		OnlineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
 		},
-		OfflineNodeID: Params.QueryNodeCfg.QueryNodeID + 1,
+		OfflineNodeID: Params.QueryNodeCfg.GetNodeID() + 1,
 		OfflineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
 		},

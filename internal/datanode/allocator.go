@@ -54,7 +54,7 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 			MsgType:   commonpb.MsgType_RequestID,
 			MsgID:     1, // GOOSE TODO
 			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.DataNodeCfg.NodeID,
+			SourceID:  Params.DataNodeCfg.GetNodeID(),
 		},
 		Count: 1,
 	})
@@ -76,7 +76,7 @@ func (alloc *allocator) allocIDBatch(count uint32) (UniqueID, uint32, error) {
 	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_RequestID,
-			SourceID: Params.DataNodeCfg.NodeID,
+			SourceID: Params.DataNodeCfg.GetNodeID(),
 		},
 		Count: count,
 	})

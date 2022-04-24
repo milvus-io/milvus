@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -111,9 +110,6 @@ type DataNodeComponent interface {
 	// Return nil in status:
 	//     The dataCoord is not nil.
 	SetDataCoord(dataCoord DataCoord) error
-
-	// SetNodeID set node id for DataNode
-	SetNodeID(typeutil.UniqueID)
 }
 
 // DataCoord is the interface `datacoord` package implements

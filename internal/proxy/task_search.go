@@ -65,7 +65,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	defer sp.Finish()
 	t.Base.MsgType = commonpb.MsgType_Search
-	t.Base.SourceID = Params.ProxyCfg.ProxyID
+	t.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
 	collectionName := t.request.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
@@ -338,7 +338,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	log.Debug("proxy search post execute stage 2", zap.Any("len(validSearchResults)", len(validSearchResults)))
 	if len(validSearchResults) <= 0 {
 		log.Warn("search result is empty", zap.Any("requestID", t.Base.MsgID), zap.String("requestType", "search"))
@@ -365,7 +365,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.ProxyID, 10), metrics.SuccessLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SuccessLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	t.result.CollectionName = t.collectionName
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.CollectionName)
@@ -428,7 +428,7 @@ func (t *searchTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []U
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     t.Base.MsgID,
 				Timestamp: t.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.ProxyID,
+				SourceID:  Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionID: collectionID,
 			PartitionIDs: searchPartitionIDs,
@@ -461,7 +461,7 @@ func (t *searchTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []U
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     t.Base.MsgID,
 			Timestamp: t.Base.Timestamp,
-			SourceID:  Params.ProxyCfg.ProxyID,
+			SourceID:  Params.ProxyCfg.GetNodeID(),
 		},
 	})
 	if err != nil {
@@ -492,7 +492,7 @@ func (t *searchTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []U
 				MsgType:   commonpb.MsgType_ShowCollections,
 				MsgID:     t.Base.MsgID,
 				Timestamp: t.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.ProxyID,
+				SourceID:  Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionID: collectionID,
 		})
@@ -737,7 +737,7 @@ func (t *searchTask) SetTs(ts Timestamp) {
 func (t *searchTask) OnEnqueue() error {
 	t.Base = &commonpb.MsgBase{}
 	t.Base.MsgType = commonpb.MsgType_Search
-	t.Base.SourceID = Params.ProxyCfg.ProxyID
+	t.Base.SourceID = Params.ProxyCfg.GetNodeID()
 	return nil
 }
 
