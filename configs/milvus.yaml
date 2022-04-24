@@ -27,11 +27,14 @@ etcd:
     #  - "stderr" as os.Stderr,
     #  - "stdout" as os.Stdout,
     #  - file path to append server logs to.
+    # please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log
     path: stdout
     level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   use:
+    # please adjust in embedded Milvus: true
     embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
 
+# please adjust in embedded Milvus: /tmp/milvus/data/
 localStorage:
   path: /var/lib/milvus/data/
 
@@ -61,6 +64,7 @@ pulsar:
 #  brokerList: localhost1:9092,localhost2:9092,localhost3:9092
 
 rocksmq:
+  # please adjust in embedded Milvus: /tmp/milvus/rdb_data
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
   rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
   retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes, The retention time of the message in rocksmq.
@@ -124,6 +128,7 @@ proxy:
   maxTaskNum: 1024 # max task number of proxy task queue
   bufFlagExpireTime: 3600 # second, the time to expire bufFlag from cache in collectResultLoop
   bufFlagCleanupInterval: 600 # second, the interval to clean bufFlag cache in collectResultLoop
+  # please adjust in embedded Milvus: false
   ginLogging: true # Whether to produce gin logs.
 
 
@@ -243,6 +248,7 @@ dataNode:
 log:
   level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   file:
+    # please adjust in embedded Milvus: /tmp/milvus/logs
     rootPath: "" # default to stdout, stderr
     maxSize: 300 # MB
     maxAge: 10 # Maximum time for log retention in day.
@@ -285,6 +291,7 @@ common:
   simdType: auto
   indexSliceSize: 4 # MB
 
+  # please adjust in embedded Milvus: local
   storageType: minio
 
   security:
