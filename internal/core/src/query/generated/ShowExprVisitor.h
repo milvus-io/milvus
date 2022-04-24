@@ -32,6 +32,9 @@ class ShowExprVisitor : public ExprVisitor {
     visit(UnaryRangeExpr& expr) override;
 
     void
+    visit(BinaryArithOpEvalRangeExpr& expr) override;
+
+    void
     visit(BinaryRangeExpr& expr) override;
 
     void
@@ -39,6 +42,7 @@ class ShowExprVisitor : public ExprVisitor {
 
  public:
     Json
+
     call_child(Expr& expr) {
         assert(!json_opt_.has_value());
         expr.accept(*this);

@@ -168,6 +168,22 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 insert_cols(data);
                 break;
             }
+            case engine::DataType::INT16: {
+                vector<int16_t> data(N);
+                for (auto& x : data) {
+                    x = er() % (2 * N);
+                }
+                insert_cols(data);
+                break;
+            }
+            case engine::DataType::INT8: {
+                vector<int8_t> data(N);
+                for (auto& x : data) {
+                    x = er() % (2 * N);
+                }
+                insert_cols(data);
+                break;
+            }
             case engine::DataType::FLOAT: {
                 vector<float> data(N);
                 for (auto& x : data) {

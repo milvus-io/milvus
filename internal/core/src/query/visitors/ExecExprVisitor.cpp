@@ -50,6 +50,10 @@ class ExecExprVisitor : ExprVisitor {
 
     template <typename T>
     auto
+    ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+
+    template <typename T>
+    auto
     ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> BitsetType;
 
     template <typename T>
@@ -174,6 +178,31 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc index_
     return final_result;
 }
 
+template <typename T, typename ElementFunc>
+auto
+ExecExprVisitor::ExecDataRangeVisitorImpl(FieldOffset field_offset, ElementFunc element_func) -> BitsetType {
+    auto& schema = segment_.get_schema();
+    auto& field_meta = schema[field_offset];
+    auto size_per_chunk = segment_.size_per_chunk();
+    auto num_chunk = upper_div(row_count_, size_per_chunk);
+    std::deque<BitsetType> results;
+
+    for (auto chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
+        auto this_size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
+        BitsetType result(this_size);
+        auto chunk = segment_.chunk_data<T>(field_offset, chunk_id);
+        const T* data = chunk.data();
+        for (int index = 0; index < this_size; ++index) {
+            result[index] = element_func(data[index]);
+        }
+        AssertInfo(result.size() == this_size, "[ExecExprVisitor]Chunk result size not equal to expected size");
+        results.emplace_back(std::move(result));
+    }
+    auto final_result = Assemble(results);
+    AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Final result size not equal to row count");
+    return final_result;
+}
+
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
@@ -217,6 +246,84 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
         }
         default: {
             PanicInfo("unsupported range node");
+        }
+    }
+}
+#pragma clang diagnostic pop
+
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "Simplify"
+template <typename T>
+auto
+ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
+    auto& expr = static_cast<BinaryArithOpEvalRangeExprImpl<T>&>(expr_raw);
+    using Index = scalar::ScalarIndex<T>;
+    auto arith_op = expr.arith_op_;
+    auto right_operand = expr.right_operand_;
+    auto op = expr.op_type_;
+    auto val = expr.value_;
+
+    switch (op) {
+        case OpType::Equal: {
+            switch (arith_op) {
+                case ArithOpType::Add: {
+                    auto elem_func = [val, right_operand](T x) { return ((x + right_operand) == val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Sub: {
+                    auto elem_func = [val, right_operand](T x) { return ((x - right_operand) == val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Mul: {
+                    auto elem_func = [val, right_operand](T x) { return ((x * right_operand) == val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Div: {
+                    auto elem_func = [val, right_operand](T x) { return ((x / right_operand) == val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Mod: {
+                    auto elem_func = [val, right_operand](T x) {
+                        return (static_cast<T>(fmod(x, right_operand)) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                default: {
+                    PanicInfo("unsupported arithmetic operation");
+                }
+            }
+        }
+        case OpType::NotEqual: {
+            switch (arith_op) {
+                case ArithOpType::Add: {
+                    auto elem_func = [val, right_operand](T x) { return ((x + right_operand) != val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Sub: {
+                    auto elem_func = [val, right_operand](T x) { return ((x - right_operand) != val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Mul: {
+                    auto elem_func = [val, right_operand](T x) { return ((x * right_operand) != val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Div: {
+                    auto elem_func = [val, right_operand](T x) { return ((x / right_operand) != val); };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                case ArithOpType::Mod: {
+                    auto elem_func = [val, right_operand](T x) {
+                        return (static_cast<T>(fmod(x, right_operand)) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                }
+                default: {
+                    PanicInfo("unsupported arithmetic operation");
+                }
+            }
+        }
+        default: {
+            PanicInfo("unsupported range node with arithmetic operation");
         }
     }
 }
@@ -288,6 +395,44 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
         }
         case DataType::DOUBLE: {
             res = ExecUnaryRangeVisitorDispatcher<double>(expr);
+            break;
+        }
+        default:
+            PanicInfo("unsupported");
+    }
+    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    bitset_opt_ = std::move(res);
+}
+
+void
+ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
+    auto& field_meta = segment_.get_schema()[expr.field_offset_];
+    AssertInfo(expr.data_type_ == field_meta.get_data_type(),
+               "[ExecExprVisitor]DataType of expr isn't field_meta data type");
+    BitsetType res;
+    switch (expr.data_type_) {
+        case DataType::INT8: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<int8_t>(expr);
+            break;
+        }
+        case DataType::INT16: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<int16_t>(expr);
+            break;
+        }
+        case DataType::INT32: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<int32_t>(expr);
+            break;
+        }
+        case DataType::INT64: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<int64_t>(expr);
+            break;
+        }
+        case DataType::FLOAT: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<float>(expr);
+            break;
+        }
+        case DataType::DOUBLE: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<double>(expr);
             break;
         }
         default:

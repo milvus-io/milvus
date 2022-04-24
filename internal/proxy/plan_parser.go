@@ -72,8 +72,17 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 		floatNodeRight, rightFloat := node.Right.(*ant_ast.FloatNode)
 		integerNodeRight, rightInteger := node.Right.(*ant_ast.IntegerNode)
 
+		// Check IdentifierNodes
+		identifierNodeLeft, leftIdentifier := node.Left.(*ant_ast.IdentifierNode)
+		identifierNodeRight, rightIdentifier := node.Right.(*ant_ast.IdentifierNode)
+
 		switch node.Operator {
 		case "+":
+			funcName, err := getFuncNameByNodeOp(node.Operator)
+			if err != nil {
+				optimizer.err = err
+				return
+			}
 			if leftFloat && rightFloat {
 				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value + floatNodeRight.Value})
 			} else if leftFloat && rightInteger {
@@ -82,11 +91,24 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) + floatNodeRight.Value})
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value + integerNodeRight.Value})
+			} else if leftIdentifier && rightFloat {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, floatNodeRight}})
+			} else if leftIdentifier && rightInteger {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, integerNodeRight}})
+			} else if leftFloat && rightIdentifier {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeRight, floatNodeLeft}})
+			} else if leftInteger && rightIdentifier {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeRight, integerNodeLeft}})
 			} else {
 				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "-":
+			funcName, err := getFuncNameByNodeOp(node.Operator)
+			if err != nil {
+				optimizer.err = err
+				return
+			}
 			if leftFloat && rightFloat {
 				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value - floatNodeRight.Value})
 			} else if leftFloat && rightInteger {
@@ -95,11 +117,26 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) - floatNodeRight.Value})
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value - integerNodeRight.Value})
+			} else if leftIdentifier && rightFloat {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, floatNodeRight}})
+			} else if leftIdentifier && rightInteger {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, integerNodeRight}})
+			} else if leftFloat && rightIdentifier {
+				optimizer.err = fmt.Errorf("field as right operand is not yet supported for (%s) operator", node.Operator)
+				return
+			} else if leftInteger && rightIdentifier {
+				optimizer.err = fmt.Errorf("field as right operand is not yet supported for (%s) operator", node.Operator)
+				return
 			} else {
 				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "*":
+			funcName, err := getFuncNameByNodeOp(node.Operator)
+			if err != nil {
+				optimizer.err = err
+				return
+			}
 			if leftFloat && rightFloat {
 				patch(&ant_ast.FloatNode{Value: floatNodeLeft.Value * floatNodeRight.Value})
 			} else if leftFloat && rightInteger {
@@ -108,11 +145,24 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 				patch(&ant_ast.FloatNode{Value: float64(integerNodeLeft.Value) * floatNodeRight.Value})
 			} else if leftInteger && rightInteger {
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value * integerNodeRight.Value})
+			} else if leftIdentifier && rightFloat {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, floatNodeRight}})
+			} else if leftIdentifier && rightInteger {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, integerNodeRight}})
+			} else if leftFloat && rightIdentifier {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeRight, floatNodeLeft}})
+			} else if leftInteger && rightIdentifier {
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeRight, integerNodeLeft}})
 			} else {
 				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "/":
+			funcName, err := getFuncNameByNodeOp(node.Operator)
+			if err != nil {
+				optimizer.err = err
+				return
+			}
 			if leftFloat && rightFloat {
 				if floatNodeRight.Value == 0 {
 					optimizer.err = fmt.Errorf("divide by zero")
@@ -137,17 +187,49 @@ func (optimizer *optimizer) Exit(node *ant_ast.Node) {
 					return
 				}
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value / integerNodeRight.Value})
+			} else if leftIdentifier && rightFloat {
+				if floatNodeRight.Value == 0 {
+					optimizer.err = fmt.Errorf("divide by zero")
+					return
+				}
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, floatNodeRight}})
+			} else if leftIdentifier && rightInteger {
+				if integerNodeRight.Value == 0 {
+					optimizer.err = fmt.Errorf("divide by zero")
+					return
+				}
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, integerNodeRight}})
+			} else if leftFloat && rightIdentifier {
+				optimizer.err = fmt.Errorf("field as right operand is not yet supported for (%s) operator", node.Operator)
+				return
+			} else if leftInteger && rightIdentifier {
+				optimizer.err = fmt.Errorf("field as right operand is not yet supported for (%s) operator", node.Operator)
+				return
 			} else {
 				optimizer.err = fmt.Errorf("invalid data type")
 				return
 			}
 		case "%":
+			funcName, err := getFuncNameByNodeOp(node.Operator)
+			if err != nil {
+				optimizer.err = err
+				return
+			}
 			if leftInteger && rightInteger {
 				if integerNodeRight.Value == 0 {
 					optimizer.err = fmt.Errorf("modulo by zero")
 					return
 				}
 				patch(&ant_ast.IntegerNode{Value: integerNodeLeft.Value % integerNodeRight.Value})
+			} else if leftIdentifier && rightInteger {
+				if integerNodeRight.Value == 0 {
+					optimizer.err = fmt.Errorf("modulo by zero")
+					return
+				}
+				patch(&ant_ast.FunctionNode{Name: funcName, Arguments: []ant_ast.Node{identifierNodeLeft, integerNodeRight}})
+			} else if leftInteger && rightIdentifier {
+				optimizer.err = fmt.Errorf("field as right operand is not yet supported for (%s) operator", node.Operator)
+				return
 			} else {
 				optimizer.err = fmt.Errorf("invalid data type")
 				return
@@ -254,6 +336,46 @@ func getLogicalOpType(opStr string) planpb.BinaryExpr_BinaryOp {
 	}
 }
 
+func getArithOpType(funcName string) (planpb.ArithOpType, error) {
+	var op planpb.ArithOpType
+
+	switch funcName {
+	case "add":
+		op = planpb.ArithOpType_Add
+	case "sub":
+		op = planpb.ArithOpType_Sub
+	case "mul":
+		op = planpb.ArithOpType_Mul
+	case "div":
+		op = planpb.ArithOpType_Div
+	case "mod":
+		op = planpb.ArithOpType_Mod
+	default:
+		return op, fmt.Errorf("unsupported or invalid arith op type: %s", funcName)
+	}
+	return op, nil
+}
+
+func getFuncNameByNodeOp(nodeOp string) (string, error) {
+	var funcName string
+
+	switch nodeOp {
+	case "+":
+		funcName = "add"
+	case "-":
+		funcName = "sub"
+	case "*":
+		funcName = "mul"
+	case "/":
+		funcName = "div"
+	case "%":
+		funcName = "mod"
+	default:
+		return funcName, fmt.Errorf("no defined funcName assigned to nodeOp: %s", nodeOp)
+	}
+	return funcName, nil
+}
+
 func parseBoolNode(nodeRaw *ant_ast.Node) *ant_ast.BoolNode {
 	switch node := (*nodeRaw).(type) {
 	case *ant_ast.IdentifierNode:
@@ -352,8 +474,52 @@ func (pc *parserContext) createCmpExpr(left, right ant_ast.Node, operator string
 	return expr, nil
 }
 
+func (pc *parserContext) createBinaryArithOpEvalExpr(left *ant_ast.FunctionNode, right *ant_ast.Node, operator string) (*planpb.Expr, error) {
+	switch operator {
+	case "==", "!=":
+		binArithOp, err := pc.handleFunction(left)
+		if err != nil {
+			return nil, fmt.Errorf("createBinaryArithOpEvalExpr: %v", err)
+		}
+		op := getCompareOpType(operator, false)
+		val, err := pc.handleLeafValue(right, binArithOp.ColumnInfo.DataType)
+		if err != nil {
+			return nil, err
+		}
+
+		expr := &planpb.Expr{
+			Expr: &planpb.Expr_BinaryArithOpEvalRangeExpr{
+				BinaryArithOpEvalRangeExpr: &planpb.BinaryArithOpEvalRangeExpr{
+					ColumnInfo:   binArithOp.ColumnInfo,
+					ArithOp:      binArithOp.ArithOp,
+					RightOperand: binArithOp.RightOperand,
+					Op:           op,
+					Value:        val,
+				},
+			},
+		}
+		return expr, nil
+	}
+	return nil, fmt.Errorf("operator(%s) not yet supported for function nodes", operator)
+}
+
 func (pc *parserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	return pc.createCmpExpr(node.Left, node.Right, node.Operator)
+}
+
+func (pc *parserContext) handleBinaryArithCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+	leftNode, funcNodeLeft := node.Left.(*ant_ast.FunctionNode)
+	_, funcNodeRight := node.Right.(*ant_ast.FunctionNode)
+
+	if funcNodeRight {
+		return nil, fmt.Errorf("right node as a function is not supported yet")
+	} else if !funcNodeLeft {
+		// Both left and right are not function nodes, pass to createCmpExpr
+		return pc.createCmpExpr(node.Left, node.Right, node.Operator)
+	} else {
+		// Only the left node is a function node
+		return pc.createBinaryArithOpEvalExpr(leftNode, &node.Right, node.Operator)
+	}
 }
 
 func (pc *parserContext) handleLogicalExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
@@ -517,6 +683,12 @@ func (pc *parserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 }
 
 func (pc *parserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
+	_, arithExpr := node.Left.(*ant_ast.FunctionNode)
+
+	if arithExpr {
+		return pc.handleBinaryArithCmpExpr(node)
+	}
+
 	switch node.Operator {
 	case "<", "<=", ">", ">=":
 		return pc.handleMultiCmpExpr(node)
@@ -595,6 +767,37 @@ func (pc *parserContext) handleLeafValue(nodeRaw *ant_ast.Node, dataType schemap
 	}
 
 	return gv, nil
+}
+
+func (pc *parserContext) handleFunction(node *ant_ast.FunctionNode) (*planpb.BinaryArithOp, error) {
+	funcArithOp, err := getArithOpType(node.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	idNode, ok := node.Arguments[0].(*ant_ast.IdentifierNode)
+	if !ok {
+		return nil, fmt.Errorf("left operand of the function must be an identifier")
+	}
+
+	field, err := pc.handleIdentifier(idNode)
+	if err != nil {
+		return nil, err
+	}
+
+	valueNode := node.Arguments[1]
+	val, err := pc.handleLeafValue(&valueNode, field.DataType)
+	if err != nil {
+		return nil, err
+	}
+
+	arithOp := &planpb.BinaryArithOp{
+		ColumnInfo:   createColumnInfo(field),
+		ArithOp:      funcArithOp,
+		RightOperand: val,
+	}
+
+	return arithOp, nil
 }
 
 func (pc *parserContext) handleIdentifier(node *ant_ast.IdentifierNode) (*schemapb.FieldSchema, error) {
