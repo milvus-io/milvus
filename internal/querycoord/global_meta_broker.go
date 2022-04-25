@@ -68,7 +68,7 @@ func (broker *globalMetaBroker) releaseDQLMessageStream(ctx context.Context, col
 		log.Error("releaseDQLMessageStream occur error", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return err
 	}
-	log.Debug("releaseDQLMessageStream successfully", zap.Int64("collectionID", collectionID))
+	log.Info("releaseDQLMessageStream successfully", zap.Int64("collectionID", collectionID))
 
 	return nil
 }
@@ -93,7 +93,7 @@ func (broker *globalMetaBroker) showPartitionIDs(ctx context.Context, collection
 		log.Error("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
-	log.Debug("show partition successfully", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", showPartitionResponse.PartitionIDs))
+	log.Info("show partition successfully", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", showPartitionResponse.PartitionIDs))
 
 	return showPartitionResponse.PartitionIDs, nil
 }
@@ -119,7 +119,7 @@ func (broker *globalMetaBroker) getRecoveryInfo(ctx context.Context, collectionI
 		log.Error("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 		return nil, nil, err
 	}
-	log.Debug("get recovery info successfully",
+	log.Info("get recovery info successfully",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int("num channels", len(recoveryInfo.Channels)),
@@ -156,14 +156,14 @@ func (broker *globalMetaBroker) getIndexBuildID(ctx context.Context, collectionI
 	}
 
 	if !response.EnableIndex {
-		log.Debug("describe segment from rootCoord successfully",
+		log.Info("describe segment from rootCoord successfully",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("segmentID", segmentID),
 			zap.Bool("enableIndex", false))
 		return false, 0, nil
 	}
 
-	log.Debug("describe segment from rootCoord successfully",
+	log.Info("describe segment from rootCoord successfully",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("segmentID", segmentID),
 		zap.Bool("enableIndex", true),
@@ -190,7 +190,7 @@ func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, buildID i
 		log.Error(err.Error())
 		return nil, err
 	}
-	log.Debug("get index info from indexCoord successfully", zap.Int64("buildID", buildID))
+	log.Info("get index info from indexCoord successfully", zap.Int64("buildID", buildID))
 
 	return pathResponse.FilePaths, nil
 }
@@ -266,7 +266,7 @@ func (broker *globalMetaBroker) parseIndexInfo(ctx context.Context, segmentID Un
 		return err
 	}
 
-	log.Debug("set index info  success", zap.Int64("segmentID", segmentID), zap.Int64("fieldID", indexInfo.FieldID), zap.Int64("buildID", buildID))
+	log.Info("set index info  success", zap.Int64("segmentID", segmentID), zap.Int64("fieldID", indexInfo.FieldID), zap.Int64("buildID", buildID))
 
 	return nil
 }
@@ -317,7 +317,7 @@ func (broker *globalMetaBroker) describeSegments(ctx context.Context, collection
 		return nil, err
 	}
 
-	log.Debug("describe segments successfully",
+	log.Info("describe segments successfully",
 		zap.Int64("collection", collectionID),
 		zap.Int64s("segments", segmentIDs))
 
