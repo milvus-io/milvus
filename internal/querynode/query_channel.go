@@ -20,8 +20,21 @@ type queryChannel struct {
 
 	streaming      *streaming
 	queryMsgStream msgstream.MsgStream
+	shardCluster   *ShardClusterService
 	asConsumeOnce  sync.Once
 	closeOnce      sync.Once
+}
+
+// NewQueryChannel create a query channel with provided shardCluster, query msgstream and collection id
+func NewQueryChannel(collectionID int64, scs *ShardClusterService, qms msgstream.MsgStream, streaming *streaming) *queryChannel {
+	return &queryChannel{
+		closeCh:      make(chan struct{}),
+		collectionID: collectionID,
+
+		streaming:      streaming,
+		queryMsgStream: qms,
+		shardCluster:   scs,
+	}
 }
 
 // AsConsumer do AsConsumer for query msgstream and seek if position is not nil
@@ -101,7 +114,9 @@ func (qc *queryChannel) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeIn
 			}
 		}
 
-		// should handle segment change in shardCluster
+		// process change in shard cluster
+		qc.shardCluster.HandoffSegments(qc.collectionID, info)
+
 		// for OnlineSegments:
 		for _, segment := range info.OnlineSegments {
 			/*
@@ -124,12 +139,6 @@ func (qc *queryChannel) adjustByChangeInfo(msg *msgstream.SealedSegmentsChangeIn
 				},
 			})
 		}
-		/*
-			// for OfflineSegments:
-			for _, segment := range info.OfflineSegments {
-				// 1. update global sealed segments
-				q.globalSegmentManager.removeGlobalSealedSegmentInfo(segment.SegmentID)
-			}*/
 
 		log.Info("Successfully changed global sealed segment info ",
 			zap.Int64("collection ", qc.collectionID),

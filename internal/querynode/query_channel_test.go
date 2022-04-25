@@ -97,13 +97,7 @@ func TestQueryChannel_AsConsumer(t *testing.T) {
 		mqs := &mockQueryMsgStream{}
 		mqs.On("Close").Return()
 
-		qc := &queryChannel{
-			closeCh:      make(chan struct{}),
-			collectionID: defaultCollectionID,
-
-			streaming:      nil,
-			queryMsgStream: mqs,
-		}
+		qc := NewQueryChannel(defaultCollectionID, nil, mqs, nil)
 
 		mqs.On("AsConsumer", []string{defaultDMLChannel}, defaultSubName).Return()
 
@@ -122,13 +116,7 @@ func TestQueryChannel_AsConsumer(t *testing.T) {
 		mqs := &mockQueryMsgStream{}
 		mqs.On("Close").Return()
 
-		qc := &queryChannel{
-			closeCh:      make(chan struct{}),
-			collectionID: defaultCollectionID,
-
-			streaming:      nil,
-			queryMsgStream: mqs,
-		}
+		qc := NewQueryChannel(defaultCollectionID, nil, mqs, nil)
 
 		mqs.On("AsConsumer", []string{defaultDMLChannel}, defaultSubName).Return()
 
@@ -146,13 +134,8 @@ func TestQueryChannel_AsConsumer(t *testing.T) {
 		mqs := &mockQueryMsgStream{}
 		mqs.On("Close").Return()
 
-		qc := &queryChannel{
-			closeCh:      make(chan struct{}),
-			collectionID: defaultCollectionID,
+		qc := NewQueryChannel(defaultCollectionID, nil, mqs, nil)
 
-			streaming:      nil,
-			queryMsgStream: mqs,
-		}
 		msgID := make([]byte, 8)
 		rand.Read(msgID)
 		pos := &internalpb.MsgPosition{MsgID: msgID}

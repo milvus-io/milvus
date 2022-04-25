@@ -138,12 +138,7 @@ func (q *queryShardService) getQueryChannel(collectionID int64) *queryChannel {
 	qc, ok := q.queryChannels[collectionID]
 	if !ok {
 		queryStream, _ := q.factory.NewQueryMsgStream(q.ctx)
-		qc = &queryChannel{
-			closeCh:        make(chan struct{}),
-			collectionID:   collectionID,
-			queryMsgStream: queryStream,
-			streaming:      q.streaming,
-		}
+		qc = NewQueryChannel(collectionID, q.shardClusterService, queryStream, q.streaming)
 		q.queryChannels[collectionID] = qc
 	}
 
