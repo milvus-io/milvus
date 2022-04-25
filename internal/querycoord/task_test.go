@@ -1163,6 +1163,7 @@ func TestLoadBalanceAndReschedulSegmentTaskAfterNodeDown(t *testing.T) {
 }
 
 func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
+	defer removeAllSession()
 	refreshParams()
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
@@ -1214,9 +1215,6 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 			break
 		}
 	}
-
-	err = removeAllSession()
-	assert.Nil(t, err)
 }
 
 func TestMergeWatchDeltaChannelInfo(t *testing.T) {
