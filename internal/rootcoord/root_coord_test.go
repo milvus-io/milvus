@@ -200,6 +200,15 @@ func (d *dataMock) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*
 	}, nil
 }
 
+func (d *dataMock) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
+	return &datapb.FlushResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
+}
+
 type queryMock struct {
 	types.QueryCoord
 	collID []typeutil.UniqueID

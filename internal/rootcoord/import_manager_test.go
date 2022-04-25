@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -306,4 +307,31 @@ func TestImportManager_TaskState(t *testing.T) {
 	resp = mgr.getTaskState(1)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.Equal(t, commonpb.ImportState_ImportPending, resp.State)
+}
+
+func TestImportManager_AllocFail(t *testing.T) {
+	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		return 0, 0, errors.New("injected failure")
+	}
+	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	colID := int64(100)
+	mockKv := &kv.MockMetaKV{}
+	mockKv.InMemKv = make(map[string]string)
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+	}
+
+	rowReq := &milvuspb.ImportRequest{
+		CollectionName: "c1",
+		PartitionName:  "p1",
+		RowBased:       true,
+		Files:          []string{"f1", "f2", "f3"},
+	}
+
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn)
+	mgr.importJob(context.TODO(), rowReq, colID, 0)
 }

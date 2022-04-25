@@ -236,7 +236,7 @@ func TestDataNode(t *testing.T) {
 		// dup call
 		status, err := node1.FlushSegments(node1.ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 
 		// failure call
 		req = &datapb.FlushSegmentsRequest{
@@ -346,6 +346,62 @@ func TestDataNode(t *testing.T) {
 				CollectionId: 100,
 				PartitionId:  100,
 				ChannelNames: []string{"ch1", "ch2"},
+				Files:        []string{filePath},
+				RowBased:     true,
+			},
+		}
+		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
+		assert.Equal(t, "", stat.GetReason())
+	})
+
+	t.Run("Test Import w/ bad flow graph", func(t *testing.T) {
+		node.rootCoord = &RootCoordFactory{
+			collectionID: 100,
+			pkType:       schemapb.DataType_Int64,
+		}
+
+		chName1 := "fake-by-dev-rootcoord-dml-testimport-1"
+		chName2 := "fake-by-dev-rootcoord-dml-testimport-2"
+		err := node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			CollectionID:      100,
+			ChannelName:       chName1,
+			UnflushedSegments: []*datapb.SegmentInfo{},
+			FlushedSegments:   []*datapb.SegmentInfo{},
+		})
+		require.Nil(t, err)
+		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			CollectionID:      999, // wrong collection ID.
+			ChannelName:       chName2,
+			UnflushedSegments: []*datapb.SegmentInfo{},
+			FlushedSegments:   []*datapb.SegmentInfo{},
+		})
+		require.Nil(t, err)
+
+		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
+		assert.True(t, ok)
+		_, ok = node.flowgraphManager.getFlowgraphService(chName2)
+		assert.True(t, ok)
+
+		content := []byte(`{
+		"rows":[
+			{"bool_field": true, "int8_field": 10, "int16_field": 101, "int32_field": 1001, "int64_field": 10001, "float32_field": 3.14, "float64_field": 1.56, "varChar_field": "hello world", "binary_vector_field": [254, 0, 254, 0], "float_vector_field": [1.1, 1.2]},
+			{"bool_field": false, "int8_field": 11, "int16_field": 102, "int32_field": 1002, "int64_field": 10002, "float32_field": 3.15, "float64_field": 2.56, "varChar_field": "hello world", "binary_vector_field": [253, 0, 253, 0], "float_vector_field": [2.1, 2.2]},
+			{"bool_field": true, "int8_field": 12, "int16_field": 103, "int32_field": 1003, "int64_field": 10003, "float32_field": 3.16, "float64_field": 3.56, "varChar_field": "hello world", "binary_vector_field": [252, 0, 252, 0], "float_vector_field": [3.1, 3.2]},
+			{"bool_field": false, "int8_field": 13, "int16_field": 104, "int32_field": 1004, "int64_field": 10004, "float32_field": 3.17, "float64_field": 4.56, "varChar_field": "hello world", "binary_vector_field": [251, 0, 251, 0], "float_vector_field": [4.1, 4.2]},
+			{"bool_field": true, "int8_field": 14, "int16_field": 105, "int32_field": 1005, "int64_field": 10005, "float32_field": 3.18, "float64_field": 5.56, "varChar_field": "hello world", "binary_vector_field": [250, 0, 250, 0], "float_vector_field": [5.1, 5.2]}
+		]
+		}`)
+
+		filePath := "import/rows_1.json"
+		err = node.chunkManager.Write(filePath, content)
+		assert.NoError(t, err)
+		req := &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				PartitionId:  100,
+				ChannelNames: []string{chName1, chName2},
 				Files:        []string{filePath},
 				RowBased:     true,
 			},

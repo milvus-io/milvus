@@ -79,7 +79,7 @@ func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
 	return c.channelManager.Watch(&channel{Name: ch, CollectionID: collectionID})
 }
 
-// Flush sends flush requests to corresponding datanodes according to channels that segments belong to
+// Flush sends flush requests to corresponding dataNodes according to channels where segments are assigned to.
 func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, markSegments []*datapb.SegmentInfo) {
 	channels := c.channelManager.GetChannels()
 	nodeSegments := make(map[int64][]int64)
@@ -131,7 +131,10 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 			SegmentIDs:     segments,
 			MarkSegmentIDs: marks,
 		}
-		log.Info("Plan to flush", zap.Int64("node_id", nodeID), zap.Int64s("segments", segments), zap.Int64s("marks", marks))
+		log.Info("calling dataNode to flush",
+			zap.Int64("dataNode ID", nodeID),
+			zap.Int64s("segments", segments),
+			zap.Int64s("marks", marks))
 		c.sessionManager.Flush(ctx, nodeID, req)
 	}
 }
