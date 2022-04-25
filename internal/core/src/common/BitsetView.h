@@ -18,7 +18,7 @@
 
 #include <deque>
 #include <boost_ext/dynamic_bitset_ext.hpp>
-
+#include "exceptions/EasyAssert.h"
 #include "common/Types.h"
 #include "knowhere/utils/BitsetView.h"
 
@@ -50,8 +50,9 @@ class BitsetView : public faiss::BitsetView {
         if (empty()) {
             return BitsetView();
         }
-        assert((offset & 0x7) == 0);
-        assert((offset + size) <= this->size());
+
+        AssertInfo((offset & 0x7) == 0, "offset is not divisible by 8");
+        AssertInfo((offset + size) <= this->size(), "offset + size cross the border.");
         return BitsetView(data() + (offset >> 3), size);
     }
 };
