@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -106,4 +107,21 @@ func (s *ShardClusterService) releaseCollection(collectionID int64) {
 		}
 		return true
 	})
+}
+
+// HandoffSegments dispatch segmentChangeInfo to related shardClusters
+func (s *ShardClusterService) HandoffSegments(collectionID int64, info *querypb.SegmentChangeInfo) {
+	var wg sync.WaitGroup
+	s.clusters.Range(func(k, v interface{}) bool {
+		cs := v.(*ShardCluster)
+		if cs.collectionID == collectionID {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cs.HandoffSegments(info)
+			}()
+		}
+		return true
+	})
+	wg.Wait()
 }
