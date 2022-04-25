@@ -2208,13 +2208,58 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 	// then the queryCoord will panic, and the nodeInfo should not be removed immediately
 	// after queryCoord recovery, the balanceTask will redo
 	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown && lbt.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+		offlineNodes := make(map[UniqueID]struct{}, len(lbt.SourceNodeIDs))
+		for _, nodeID := range lbt.SourceNodeIDs {
+			offlineNodes[nodeID] = struct{}{}
+		}
+		replicas := make(map[UniqueID]*milvuspb.ReplicaInfo)
+
 		for _, id := range lbt.SourceNodeIDs {
 			err := lbt.cluster.removeNodeInfo(id)
 			if err != nil {
 				//TODO:: clear node info after removeNodeInfo failed
-				log.Error("loadBalanceTask: occur error when removing node info from cluster", zap.Int64("nodeID", id))
+				log.Warn("loadBalanceTask: occur error when removing node info from cluster",
+					zap.Int64("nodeID", id),
+					zap.Error(err))
+				continue
 			}
+
+			replica, err := lbt.getReplica(id, lbt.CollectionID)
+			if err != nil {
+				log.Warn("failed to get replica for removing offline querynode from it",
+					zap.Int64("querynodeID", id),
+					zap.Int64("collectionID", lbt.CollectionID),
+					zap.Error(err))
+				continue
+			}
+			replicas[replica.ReplicaID] = replica
 		}
+
+		log.Debug("removing offline nodes from replicas...",
+			zap.Int("len(replicas)", len(replicas)))
+		wg := sync.WaitGroup{}
+		for _, replica := range replicas {
+			wg.Add(1)
+			go func(replica *milvuspb.ReplicaInfo) {
+				defer wg.Done()
+
+				onlineNodes := make([]UniqueID, 0, len(replica.NodeIds))
+				for _, nodeID := range replica.NodeIds {
+					if _, ok := offlineNodes[nodeID]; !ok {
+						onlineNodes = append(onlineNodes, nodeID)
+					}
+				}
+				replica.NodeIds = onlineNodes
+
+				err := lbt.meta.setReplicaInfo(replica)
+				if err != nil {
+					log.Warn("failed to remove offline nodes from replica info",
+						zap.Int64("replicaID", replica.ReplicaID),
+						zap.Error(err))
+				}
+			}(replica)
+		}
+		wg.Wait()
 	}
 
 	log.Debug("loadBalanceTask postExecute done",
