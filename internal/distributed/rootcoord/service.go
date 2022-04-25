@@ -449,6 +449,11 @@ func (s *Server) GetImportState(ctx context.Context, in *milvuspb.GetImportState
 	return s.rootCoord.GetImportState(ctx, in)
 }
 
+// Returns id array of all import tasks
+func (s *Server) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	return s.rootCoord.ListImportTasks(ctx, in)
+}
+
 // Report impot task state to datacoord
 func (s *Server) ReportImport(ctx context.Context, in *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	return s.rootCoord.ReportImport(ctx, in)

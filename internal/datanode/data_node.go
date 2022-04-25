@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -878,9 +879,11 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			)
 			return fmt.Errorf("syncSegmentID Failed: invalid shard number %d", shardNum)
 		}
-		log.Info("import task flush segment",
-			zap.Any("channel names", req.ImportTask.ChannelNames),
-			zap.Int("shard num", shardNum))
+
+		tr := timerecord.NewTimeRecorder("import callback function")
+		defer tr.Elapse("finished")
+
+		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardNum", shardNum))
 		segReqs := []*datapb.SegmentIDRequest{
 			{
 				ChannelName:  req.ImportTask.ChannelNames[shardNum],

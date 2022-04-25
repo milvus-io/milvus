@@ -972,6 +972,26 @@ func (coord *RootCoordMock) GetImportState(ctx context.Context, req *milvuspb.Ge
 	}, nil
 }
 
+func (coord *RootCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &milvuspb.ListImportTasksResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+			Tasks: make([]int64, 0),
+		}, nil
+	}
+	return &milvuspb.ListImportTasksResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Tasks: make([]int64, 3),
+	}, nil
+}
+
 func (coord *RootCoordMock) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	code := coord.state.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {

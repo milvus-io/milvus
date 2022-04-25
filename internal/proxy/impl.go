@@ -3976,6 +3976,34 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	return resp, err
 }
 
+// GetImportState checks import task state from datanode
+func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+	log.Info("received get import state request", zap.Int64("taskID", req.GetTask()))
+	resp := &milvuspb.GetImportStateResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	resp, err := node.rootCoord.GetImportState(ctx, req)
+	log.Info("received get import state response", zap.Int64("taskID", req.GetTask()), zap.Any("resp", resp), zap.Error(err))
+	return resp, err
+}
+
+// ListImportTasks get id array of all import tasks from rootcoord
+func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	log.Info("received list import tasks request")
+	resp := &milvuspb.ListImportTasksResponse{}
+	if !node.checkHealthy() {
+		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+
+	resp, err := node.rootCoord.ListImportTasks(ctx, req)
+	log.Info("received list import tasks response")
+	return resp, err
+}
+
 // GetReplicas gets replica info
 func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	log.Info("received get replicas request")
@@ -3992,20 +4020,6 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 	resp, err := node.queryCoord.GetReplicas(ctx, req)
 	log.Info("received get replicas response", zap.Any("resp", resp), zap.Error(err))
-	return resp, err
-}
-
-// GetImportState checks import task state from datanode
-func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	log.Info("received get import state request", zap.Int64("taskID", req.GetTask()))
-	resp := &milvuspb.GetImportStateResponse{}
-	if !node.checkHealthy() {
-		resp.Status = unhealthyStatus()
-		return resp, nil
-	}
-
-	resp, err := node.rootCoord.GetImportState(ctx, req)
-	log.Info("received get import state response", zap.Int64("taskID", req.GetTask()), zap.Any("resp", resp), zap.Error(err))
 	return resp, err
 }
 

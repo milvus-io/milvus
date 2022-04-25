@@ -66,6 +66,7 @@ service MilvusService {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
   rpc Import(ImportRequest) returns (ImportResponse) {}
   rpc GetImportState(GetImportStateRequest) returns (GetImportStateResponse) {}
+  rpc ListImportTasks(ListImportTasksRequest) returns (ListImportTasksResponse) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+27+--+Support+Basic+Authentication
   rpc CreateCredential(CreateCredentialRequest) returns (common.Status) {}
@@ -830,6 +831,14 @@ message GetImportStateResponse {
   int64 row_count = 3;                     // if the task is finished, this value is how many rows are imported. if the task is not finished, this value is how many rows are parsed. return 0 if failed.
   repeated int64 id_list = 4;              // auto generated ids if the primary key is autoid
   repeated common.KeyValuePair infos = 5;  // more informations about the task, progress percent, file path, failed reason, etc.
+}
+
+message ListImportTasksRequest {
+}
+
+message ListImportTasksResponse {
+  common.Status status = 1;
+  repeated int64 tasks = 2;  // id list of all import tasks
 }
 
 message GetReplicasRequest {

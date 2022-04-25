@@ -2308,6 +2308,23 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 	return c.importManager.getTaskState(req.GetTask()), nil
 }
 
+// ListImportTasks returns id array of all import tasks.
+func (c *Core) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.ListImportTasksResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+
+	resp := &milvuspb.ListImportTasksResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Tasks: c.importManager.listAllTasks(),
+	}
+	return resp, nil
+}
+
 // ReportImport reports import task state to RootCoord.
 func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	log.Info("receive import state report",

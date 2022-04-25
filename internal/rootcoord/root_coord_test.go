@@ -1384,6 +1384,15 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("list import stasks", func(t *testing.T) {
+		defer wg.Done()
+		req := &milvuspb.ListImportTasksRequest{}
+		rsp, err := core.ListImportTasks(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("report import task timeout", func(t *testing.T) {
 		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
@@ -2629,6 +2638,10 @@ func TestRootCoord_Base(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp11.ErrorCode)
+
+		rsp12, err := core.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, rsp12.Status.ErrorCode)
 	})
 
 	wg.Add(1)

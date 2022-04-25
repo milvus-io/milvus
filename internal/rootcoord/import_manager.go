@@ -542,6 +542,28 @@ func (m *importManager) expireOldTasks() {
 	}()
 }
 
+func (m *importManager) listAllTasks() []int64 {
+	tasks := make([]int64, 0)
+
+	func() {
+		m.pendingLock.Lock()
+		defer m.pendingLock.Unlock()
+		for _, t := range m.pendingTasks {
+			tasks = append(tasks, t.GetId())
+		}
+	}()
+
+	func() {
+		m.workingLock.Lock()
+		defer m.workingLock.Unlock()
+		for _, v := range m.workingTasks {
+			tasks = append(tasks, v.GetId())
+		}
+	}()
+
+	return tasks
+}
+
 // BuildImportTaskKey constructs and returns an Etcd key with given task ID.
 func BuildImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s%s%d", Params.RootCoordCfg.ImportTaskSubPath, delimiter, taskID)

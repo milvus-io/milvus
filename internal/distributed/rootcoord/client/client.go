@@ -517,6 +517,20 @@ func (c *Client) GetImportState(ctx context.Context, req *milvuspb.GetImportStat
 	return ret.(*milvuspb.GetImportStateResponse), err
 }
 
+// List id array of all import tasks
+func (c *Client) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(rootcoordpb.RootCoordClient).ListImportTasks(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.ListImportTasksResponse), err
+}
+
 // Report impot task state to rootcoord
 func (c *Client) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

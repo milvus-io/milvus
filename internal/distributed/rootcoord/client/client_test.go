@@ -310,6 +310,9 @@ func Test_NewClient(t *testing.T) {
 	r34Timeout, err := client.ListCredUsers(shortCtx, nil)
 	retCheck(r34Timeout, err)
 
+	r35Timeout, err := client.ListImportTasks(shortCtx, nil)
+	retCheck(r35Timeout, err)
+
 	// clean up
 	err = client.Stop()
 	assert.Nil(t, err)
