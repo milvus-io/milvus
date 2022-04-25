@@ -45,6 +45,7 @@ type MinioChunkManager struct {
 var _ ChunkManager = (*MinioChunkManager)(nil)
 
 // NewMinioChunkManager create a new local manager object.
+// Deprecated: Do not call this directly! Use factory.NewVectorStorageChunkManager instead.
 func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManager, error) {
 	c := newDefaultConfig()
 	for _, opt := range opts {
@@ -53,6 +54,7 @@ func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManag
 
 	return newMinioChunkManagerWithConfig(ctx, c)
 }
+
 func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
 	minIOClient, err := minio.New(c.address, &minio.Options{
 		Creds:  credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, ""),

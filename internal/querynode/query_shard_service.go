@@ -55,14 +55,7 @@ func newQueryShardService(ctx context.Context, historical *historical, streaming
 	enabled, _ := Params.Load("localStorage.enabled")
 	localCacheEnabled, _ := strconv.ParseBool(enabled)
 	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(path))
-	remoteChunkManager, _ := storage.NewMinioChunkManager(
-		ctx,
-		storage.Address(Params.MinioCfg.Address),
-		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-		storage.UseSSL(Params.MinioCfg.UseSSL),
-		storage.BucketName(Params.MinioCfg.BucketName),
-		storage.CreateBucket(true))
+	remoteChunkManager, _ := factory.NewVectorStorageChunkManager(ctx)
 
 	qss := &queryShardService{
 		ctx:                 queryShardServiceCtx,
