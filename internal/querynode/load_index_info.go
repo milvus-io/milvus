@@ -32,12 +32,8 @@ import (
 	"path/filepath"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -112,7 +108,6 @@ func (li *LoadIndexInfo) appendIndexData(bytesIndex [][]byte, indexKeys []string
 		indexPtr := unsafe.Pointer(&byteIndex[0])
 		indexLen := C.int64_t(len(byteIndex))
 		binarySetKey := filepath.Base(indexKeys[i])
-		log.Debug("", zap.String("index key", binarySetKey))
 		indexKey := C.CString(binarySetKey)
 		status = C.AppendIndexBinary(cBinarySet, indexPtr, indexLen, indexKey)
 		C.free(unsafe.Pointer(indexKey))

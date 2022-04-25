@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -50,7 +51,11 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Warn("type assertion failed for MsgStreamMsg")
+		if in[0] == nil {
+			log.Debug("type assertion failed for MsgStreamMsg because it's nil")
+		} else {
+			log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		}
 		return []Msg{}
 	}
 

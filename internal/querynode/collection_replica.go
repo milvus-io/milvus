@@ -181,10 +181,10 @@ func (colReplica *collectionReplica) printReplica() {
 	colReplica.mu.Lock()
 	defer colReplica.mu.Unlock()
 
-	log.Debug("collections in collectionReplica", zap.Any("info", colReplica.collections))
-	log.Debug("partitions in collectionReplica", zap.Any("info", colReplica.partitions))
-	log.Debug("segments in collectionReplica", zap.Any("info", colReplica.segments))
-	log.Debug("excludedSegments in collectionReplica", zap.Any("info", colReplica.excludedSegments))
+	log.Info("collections in collectionReplica", zap.Any("info", colReplica.collections))
+	log.Info("partitions in collectionReplica", zap.Any("info", colReplica.partitions))
+	log.Info("segments in collectionReplica", zap.Any("info", colReplica.segments))
+	log.Info("excludedSegments in collectionReplica", zap.Any("info", colReplica.excludedSegments))
 }
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -210,8 +210,6 @@ func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema
 
 	var newCollection = newCollection(collectionID, schema)
 	colReplica.collections[collectionID] = newCollection
-	log.Debug("Successfully add collection ", zap.Int64("collectionID", collectionID))
-
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.collections)))
 	return newCollection
 }

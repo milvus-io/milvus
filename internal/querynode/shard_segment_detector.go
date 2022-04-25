@@ -71,13 +71,13 @@ func (sd *etcdShardSegmentDetector) getCtx() context.Context {
 }
 
 func (sd *etcdShardSegmentDetector) watchSegments(collectionID int64, replicaID int64, vchannelName string) ([]segmentEvent, <-chan segmentEvent) {
-	log.Debug("segmentDetector start watch", zap.Int64("collectionID", collectionID),
+	log.Info("segmentDetector start watch", zap.Int64("collectionID", collectionID),
 		zap.Int64("replicaID", replicaID),
 		zap.String("vchannelName", vchannelName),
 		zap.String("rootPath", sd.path))
 	resp, err := sd.client.Get(context.Background(), sd.path, clientv3.WithPrefix())
 	if err != nil {
-		log.Warn("Etcd SegmentDetector get replica info failed", zap.Error(err))
+		log.Error("Etcd SegmentDetector get replica info failed", zap.Error(err))
 		panic(err)
 	}
 
@@ -112,7 +112,6 @@ func (sd *etcdShardSegmentDetector) watchSegments(collectionID int64, replicaID 
 
 func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID int64, replicaID int64, vchannel string) {
 	defer sd.wg.Done()
-	log.Debug("etcdSegmentDetector start watch")
 	for {
 		select {
 		case <-sd.closeCh:

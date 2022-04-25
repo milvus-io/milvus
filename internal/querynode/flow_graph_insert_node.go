@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -69,8 +70,6 @@ func (iNode *insertNode) Name() string {
 
 // Operate handles input messages, to execute insert operations
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	//log.Debug("Do insertNode operation")
-
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in insertNode", zap.Int("input length", len(in)))
 		return []Msg{}
@@ -78,7 +77,11 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
-		log.Warn("type assertion failed for insertMsg")
+		if in[0] == nil {
+			log.Debug("type assertion failed for insertMsg because it's nil")
+		} else {
+			log.Warn("type assertion failed for insertMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		}
 		return []Msg{}
 	}
 
@@ -111,13 +114,13 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// if loadType is loadCollection, check if partition exists, if not, create partition
 		col, err := iNode.streamingReplica.getCollectionByID(insertMsg.CollectionID)
 		if err != nil {
-			log.Error(err.Error())
+			log.Warn("failed to get collection", zap.Error(err))
 			continue
 		}
 		if col.getLoadType() == loadTypeCollection {
 			err = iNode.streamingReplica.addPartition(insertMsg.CollectionID, insertMsg.PartitionID)
 			if err != nil {
-				log.Error(err.Error())
+				log.Warn("failed to add partition", zap.Error(err))
 				continue
 			}
 		}
@@ -126,14 +129,14 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if !iNode.streamingReplica.hasSegment(insertMsg.SegmentID) {
 			err := iNode.streamingReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, segmentTypeGrowing, true)
 			if err != nil {
-				log.Warn(err.Error())
+				log.Warn("failed to add segment", zap.Error(err))
 				continue
 			}
 		}
 
 		insertRecord, err := storage.TransferInsertMsgToInsertRecord(col.schema, insertMsg)
 		if err != nil {
-			log.Error("failed to transfer msgStream.insertMsg to segcorepb.InsertRecord", zap.Error(err))
+			log.Warn("failed to transfer msgStream.insertMsg to segcorepb.InsertRecord", zap.Error(err))
 			return []Msg{}
 		}
 
@@ -146,7 +149,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 		pks, err := getPrimaryKeys(insertMsg, iNode.streamingReplica)
 		if err != nil {
-			log.Warn(err.Error())
+			log.Warn("failed to get primary keys", zap.Error(err))
 			continue
 		}
 		iData.insertPKs[insertMsg.SegmentID] = append(iData.insertPKs[insertMsg.SegmentID], pks...)
@@ -298,13 +301,11 @@ func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segm
 			retTss = append(retTss, timestamps[index])
 		}
 	}
-	log.Debug("In filterSegmentsByPKs", zap.Any("pk len", len(retPks)), zap.Any("segment", segment.segmentID))
 	return retPks, retTss, nil
 }
 
 // insert would execute insert operations for specific growing segment
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {
-	log.Debug("QueryNode::iNode::insert", zap.Any("SegmentID", segmentID))
 	var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
 		log.Warn("cannot find segment:", zap.Int64("segmentID", segmentID))
@@ -341,10 +342,9 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 // delete would execute delete operations for specific growing segment
 func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
 	targetSegment, err := iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn(err.Error())
 		return
 	}
 
@@ -416,7 +416,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == "dim" {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						log.Error("strconv wrong on get dim", zap.Error(err))
+						log.Warn("strconv wrong on get dim", zap.Error(err))
 						break
 					}
 					offset += dim * 4
@@ -428,7 +428,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == "dim" {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						log.Error("strconv wrong on get dim", zap.Error(err))
+						log.Warn("strconv wrong on get dim", zap.Error(err))
 						return nil, err
 					}
 					offset += dim / 8

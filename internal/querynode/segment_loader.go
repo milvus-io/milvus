@@ -24,10 +24,6 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
-	"time"
-
-	"github.com/panjf2000/ants/v2"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -45,9 +41,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/panjf2000/ants/v2"
+	"go.uber.org/zap"
 )
-
-const timeoutForEachRead = 10 * time.Second
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
@@ -113,9 +109,9 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 		return err
 	}
 
-	log.Debug("segmentLoader start loading...",
-		zap.Int64("collectionID", req.CollectionID),
-		zap.Int("numOfSegments", len(req.Infos)),
+	log.Info("segmentLoader start loading...",
+		zap.Any("collectionID", req.CollectionID),
+		zap.Any("numOfSegments", len(req.Infos)),
 		zap.Any("loadType", segmentType),
 	)
 	// check memory limit
@@ -230,7 +226,7 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 	collectionID := loadInfo.CollectionID
 	partitionID := loadInfo.PartitionID
 	segmentID := loadInfo.SegmentID
-	log.Debug("start loading segment data into memory",
+	log.Info("start loading segment data into memory",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID))
@@ -283,7 +279,7 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 	if pkFieldID == common.InvalidFieldID {
 		log.Warn("segment primary key field doesn't exist when load segment")
 	} else {
-		log.Debug("loading bloom filter...")
+		log.Debug("loading bloom filter...", zap.Int64("segmentID", segmentID))
 		pkStatsBinlogs := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkFieldID)
 		err = loader.loadSegmentBloomFilter(segment, pkStatsBinlogs)
 		if err != nil {
@@ -291,7 +287,7 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 		}
 	}
 
-	log.Debug("loading delta...")
+	log.Debug("loading delta...", zap.Int64("segmentID", segmentID))
 	err = loader.loadDeltaLogs(segment, loadInfo.Deltalogs)
 	return err
 }
@@ -476,7 +472,7 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 		return errors.New(fmt.Sprintln("illegal insert data when load segment, collectionID = ", segment.collectionID))
 	}
 
-	log.Debug("start load growing segments...",
+	log.Info("start load growing segments...",
 		zap.Any("collectionID", segment.collectionID),
 		zap.Any("segmentID", segment.ID()),
 		zap.Any("numRows", len(ids)),
@@ -516,7 +512,7 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 	if err != nil {
 		return err
 	}
-	log.Debug("Do insert done in segment loader", zap.Int("len", numOfRecords), zap.Int64("segmentID", segment.ID()), zap.Int64("collectionID", segment.collectionID))
+	log.Info("Do insert done fro growing segment ", zap.Int("len", numOfRecords), zap.Int64("segmentID", segment.ID()), zap.Int64("collectionID", segment.collectionID))
 
 	return nil
 }
@@ -608,7 +604,7 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 }
 
 func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
-	log.Debug("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
+	log.Info("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
 	stream, err := loader.factory.NewMsgStream(ctx)
 	if err != nil {
 		return err
@@ -629,7 +625,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	if lastMsgID.AtEarliestPosition() {
-		log.Debug("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+		log.Info("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
 		return nil
 	}
 
@@ -646,7 +642,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		deleteOffset:     make(map[UniqueID]int64),
 	}
 
-	log.Debug("start read delta msg from seek position to last position",
+	log.Info("start read delta msg from seek position to last position",
 		zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
 	hasMore := true
 	for hasMore {
@@ -692,12 +688,12 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		}
 	}
 
-	log.Debug("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
+	log.Info("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
 		zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Debug(err.Error())
+			log.Warn(err.Error())
 			continue
 		}
 		offset := segment.segmentPreDelete(len(pks))
@@ -710,7 +706,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		go deletePk(loader.historicalReplica, delData, segmentID, &wg)
 	}
 	wg.Wait()
-	log.Debug("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
+	log.Info("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
 }
 

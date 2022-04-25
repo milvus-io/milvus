@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"reflect"
 	"sync"
 
 	"github.com/opentracing/opentracing-go"
@@ -55,7 +56,11 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	dMsg, ok := in[0].(*deleteMsg)
 	if !ok {
-		log.Warn("type assertion failed for deleteMsg")
+		if in[0] == nil {
+			log.Debug("type assertion failed for deleteMsg because it's nil")
+		} else {
+			log.Warn("type assertion failed for deleteMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		}
 		return []Msg{}
 	}
 
@@ -79,17 +84,18 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. filter segment by bloom filter
 	for i, delMsg := range dMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
-		log.Debug("Process delete request in QueryNode", zap.String("traceID", traceID))
+		log.Debug("delete in historical replica",
+			zap.Any("collectionID", delMsg.CollectionID),
+			zap.Any("collectionName", delMsg.CollectionName),
+			zap.Int64("numPKs", delMsg.NumRows),
+			zap.Int("numTS", len(delMsg.Timestamps)),
+			zap.Any("timestampBegin", delMsg.BeginTs()),
+			zap.Any("timestampEnd", delMsg.EndTs()),
+			zap.Any("segmentNum", dNode.replica.getSegmentNum()),
+			zap.Any("traceID", traceID),
+		)
 
 		if dNode.replica.getSegmentNum() != 0 {
-			log.Debug("delete in historical replica",
-				zap.Any("collectionID", delMsg.CollectionID),
-				zap.Any("collectionName", delMsg.CollectionName),
-				zap.Int64("numPKs", delMsg.NumRows),
-				zap.Int("numTS", len(delMsg.Timestamps)),
-				zap.Any("timestampBegin", delMsg.BeginTs()),
-				zap.Any("timestampEnd", delMsg.EndTs()),
-			)
 			processDeleteMessages(dNode.replica, delMsg, delData)
 		}
 	}
@@ -98,7 +104,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := dNode.replica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Debug(err.Error())
+			log.Debug("failed to get segment", zap.Int64("segmentId", segmentID), zap.Error(err))
 			continue
 		}
 		offset := segment.segmentPreDelete(len(pks))
@@ -126,7 +132,6 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 // delete will do delete operation at segment which id is segmentID
 func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Debug("QueryNode::dNode::delete", zap.Any("SegmentID", segmentID))
 	targetSegment, err := dNode.replica.getSegmentByID(segmentID)
 	if err != nil {
 		log.Error(err.Error())

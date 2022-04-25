@@ -149,7 +149,7 @@ func (node *QueryNode) initSession() error {
 	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodeCfg.QueryNodePort, 10), false, true)
 	Params.QueryNodeCfg.SetNodeID(node.session.ServerID)
 	Params.SetLogger(Params.QueryNodeCfg.GetNodeID())
-	log.Debug("QueryNode", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.String("node address", node.session.Address))
+	log.Info("QueryNode init session", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.String("node address", node.session.Address))
 	return nil
 }
 
@@ -213,7 +213,7 @@ func (node *QueryNode) initServiceDiscovery() error {
 		log.Warn("QueryNode failed to init service discovery", zap.Error(err))
 		return err
 	}
-	log.Debug("QueryNode success to get Proxy sessions", zap.Any("sessions", sessions))
+	log.Info("QueryNode success to get Proxy sessions", zap.Any("sessions", sessions))
 
 	nodes := make([]*NodeInfo, 0, len(sessions))
 	for _, session := range sessions {
@@ -235,7 +235,7 @@ func (node *QueryNode) watchService(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Debug("watch service shutdown")
+			log.Info("watch service shutdown")
 			return
 		case event, ok := <-node.eventCh:
 			if !ok {
@@ -250,17 +250,12 @@ func (node *QueryNode) watchService(ctx context.Context) {
 				}
 				return
 			}
-			if err := node.handleSessionEvent(ctx, event); err != nil {
-				log.Warn("handleSessionEvent", zap.Error(err))
-			}
+			node.handleSessionEvent(ctx, event)
 		}
 	}
 }
 
-func (node *QueryNode) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) error {
-	if event == nil {
-		return nil
-	}
+func (node *QueryNode) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) {
 	info := &NodeInfo{
 		NodeID:  event.Session.ServerID,
 		Address: event.Session.Address,
@@ -274,7 +269,6 @@ func (node *QueryNode) handleSessionEvent(ctx context.Context, event *sessionuti
 		log.Warn("receive unknown service event type",
 			zap.Any("type", event.EventType))
 	}
-	return nil
 }
 
 // Init function init historical and streaming module to manage segments
@@ -282,7 +276,7 @@ func (node *QueryNode) Init() error {
 	var initError error = nil
 	node.initOnce.Do(func() {
 		//ctx := context.Background()
-		log.Debug("QueryNode session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath))
+		log.Info("QueryNode session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath))
 		err := node.initSession()
 		if err != nil {
 			log.Error("QueryNode init session failed", zap.Error(err))
@@ -307,7 +301,7 @@ func (node *QueryNode) Init() error {
 		}
 
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
-		log.Debug("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
+		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 		node.tSafeReplica = newTSafeReplica()
 
 		streamingReplica := newCollectionReplica(node.etcdKV)
@@ -349,7 +343,7 @@ func (node *QueryNode) Init() error {
 		// 	node.factory,
 		// 	qsOptWithSessionManager(node.sessionManager))
 
-		log.Debug("query node init successfully",
+		log.Info("query node init successfully",
 			zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
 			zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
 			zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
@@ -385,7 +379,7 @@ func (node *QueryNode) Start() error {
 	Params.QueryNodeCfg.UpdatedTime = time.Now()
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("query node start successfully",
+	log.Info("query node start successfully",
 		zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
 		zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
 		zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
@@ -395,6 +389,7 @@ func (node *QueryNode) Start() error {
 
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
+	log.Warn("Query node stop..")
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	node.queryNodeLoopCancel()
 
@@ -435,12 +430,12 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 }
 
 func (node *QueryNode) watchChangeInfo() {
-	log.Debug("query node watchChangeInfo start")
+	log.Info("query node watchChangeInfo start")
 	watchChan := node.etcdKV.WatchWithPrefix(util.ChangeInfoMetaPrefix)
 	for {
 		select {
 		case <-node.queryNodeLoopCtx.Done():
-			log.Debug("query node watchChangeInfo close")
+			log.Info("query node watchChangeInfo close")
 			return
 		case resp := <-watchChan:
 			for _, event := range resp.Events {
@@ -451,7 +446,7 @@ func (node *QueryNode) watchChangeInfo() {
 						log.Warn("Parse SealedSegmentsChangeInfo id failed", zap.Any("error", err.Error()))
 						continue
 					}
-					log.Debug("get SealedSegmentsChangeInfo from etcd",
+					log.Info("get SealedSegmentsChangeInfo from etcd",
 						zap.Any("infoID", infoID),
 					)
 					info := &querypb.SealedSegmentsChangeInfo{}
@@ -525,7 +520,7 @@ func (node *QueryNode) removeSegments(segmentChangeInfos *querypb.SealedSegments
 				if err != nil {
 					return err
 				}
-				log.Debug("remove growing segment in removeSegments",
+				log.Info("remove growing segment in removeSegments",
 					zap.Any("collectionID", segmentInfo.CollectionID),
 					zap.Any("segmentID", segmentInfo.SegmentID),
 					zap.Any("infoID", segmentChangeInfos.Base.GetMsgID()),
@@ -541,7 +536,7 @@ func (node *QueryNode) removeSegments(segmentChangeInfos *querypb.SealedSegments
 				if err != nil {
 					return err
 				}
-				log.Debug("remove sealed segment", zap.Any("collectionID", segmentInfo.CollectionID),
+				log.Info("remove sealed segment", zap.Any("collectionID", segmentInfo.CollectionID),
 					zap.Any("segmentID", segmentInfo.SegmentID),
 					zap.Any("infoID", segmentChangeInfos.Base.GetMsgID()),
 				)

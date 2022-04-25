@@ -129,6 +129,7 @@ func (s *streaming) search(searchReqs []*searchRequest, collID UniqueID, partIDs
 			return searchResults, searchSegmentIDs, searchPartIDs, nil
 		}
 		if err != nil {
+			log.Error(err.Error())
 			return searchResults, searchSegmentIDs, searchPartIDs, err
 		}
 		log.Debug("no partition specified, search all partitions",

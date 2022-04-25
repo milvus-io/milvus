@@ -73,7 +73,7 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 
 	for channel, fg := range results {
 		dsService.dmlChannel2FlowGraph[channel] = fg
-		log.Debug("add DML flow graph",
+		log.Info("add DML flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
 		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
@@ -113,7 +113,7 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 
 	for channel, fg := range results {
 		dsService.deltaChannel2FlowGraph[channel] = fg
-		log.Debug("add delta flow graph",
+		log.Info("add delta flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
 		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
@@ -156,7 +156,7 @@ func (dsService *dataSyncService) startFlowGraphByDMLChannel(collectionID Unique
 	if _, ok := dsService.dmlChannel2FlowGraph[channel]; !ok {
 		return fmt.Errorf("DML flow graph doesn't existed, collectionID = %d", collectionID)
 	}
-	log.Debug("start DML flow graph",
+	log.Info("start DML flow graph",
 		zap.Any("collectionID", collectionID),
 		zap.Any("channel", channel),
 	)
@@ -172,7 +172,7 @@ func (dsService *dataSyncService) startFlowGraphForDeltaChannel(collectionID Uni
 	if _, ok := dsService.deltaChannel2FlowGraph[channel]; !ok {
 		return fmt.Errorf("delta flow graph doesn't existed, collectionID = %d", collectionID)
 	}
-	log.Debug("start delta flow graph",
+	log.Info("start delta flow graph",
 		zap.Any("collectionID", collectionID),
 		zap.Any("channel", channel),
 	)
