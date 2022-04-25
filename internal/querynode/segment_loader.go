@@ -322,7 +322,7 @@ func (loader *segmentLoader) loadSealedFields(segment *Segment, fields []*datapb
 		futures = append(futures, future)
 	}
 
-	return concurrency.AwaitAll(futures)
+	return concurrency.AwaitAll(futures...)
 }
 
 func (loader *segmentLoader) loadGrowingFields(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
@@ -444,7 +444,7 @@ func (loader *segmentLoader) loadFieldIndexData(segment *Segment, indexInfo *que
 		}
 	}
 
-	err := concurrency.AwaitAll(futures)
+	err := concurrency.AwaitAll(futures...)
 	if err != nil {
 		return err
 	}
