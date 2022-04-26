@@ -159,7 +159,47 @@ func (h *historical) search(searchReqs []*searchRequest, collID UniqueID, partID
 	return searchResults, searchSegmentIDs, searchPartIDs, err
 }
 
-// getSearchPartIDs fetchs the partition ids to search from the request ids
+// validateSegmentIDs checks segments if their collection/partition(s) have been released
+func (h *historical) validateSegmentIDs(segmentIDs []UniqueID, collectionID UniqueID, partitionIDs []UniqueID) (err error) {
+	// validate partitionIDs
+	validatedPartitionIDs, err := h.getTargetPartIDs(collectionID, partitionIDs)
+	if err != nil {
+		return
+	}
+	log.Debug("search validated partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", validatedPartitionIDs))
+
+	col, err := h.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return
+	}
+
+	// return if no partitions are loaded currently
+	if len(validatedPartitionIDs) == 0 {
+		switch col.getLoadType() {
+		case loadTypeCollection:
+			err = fmt.Errorf("partitions have been released, collectionID = %d, target paritition= %v", collectionID, partitionIDs)
+		case loadTypePartition:
+			err = fmt.Errorf("collection has been released, collectionID = %d, target paritition= %v", collectionID, partitionIDs)
+		default:
+			err = fmt.Errorf("got unknown loadType %d", col.getLoadType())
+		}
+		return
+	}
+
+	for _, segmentID := range segmentIDs {
+		var segment *Segment
+		if segment, err = h.replica.getSegmentByID(segmentID); err != nil {
+			return
+		}
+		if !inList(validatedPartitionIDs, segment.partitionID) {
+			err = fmt.Errorf("segment %d belongs to partition %d, which is not in %v", segmentID, segment.partitionID, validatedPartitionIDs)
+			return
+		}
+	}
+	return
+}
+
+// getSearchPartIDs fetches the partition ids to search from the request ids
 func (h *historical) getTargetPartIDs(collID UniqueID, partIDs []UniqueID) ([]UniqueID, error) {
 	// no partition id specified, get all partition ids in collection
 	if len(partIDs) == 0 {
