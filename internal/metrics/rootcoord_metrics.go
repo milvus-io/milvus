@@ -297,8 +297,8 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "num_of_partitions",
-			Help:      "The number of partitions per collection",
-		}, []string{collectionIDLabelName})
+			Help:      "The number of partitions",
+		}, []string{})
 
 	// RootCoordNumOfSegments counts the number of segments per collections.
 	RootCoordNumOfSegments = prometheus.NewGaugeVec(
@@ -306,8 +306,8 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "num_of_segments",
-			Help:      "The number of segments per collection",
-		}, []string{collectionIDLabelName})
+			Help:      "The number of segments",
+		}, []string{})
 
 	// RootCoordNumOfIndexedSegments counts the number of indexed segments per collection.
 	RootCoordNumOfIndexedSegments = prometheus.NewGaugeVec(
@@ -315,8 +315,8 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "num_of_indexed_segments",
-			Help:      "The number of indexed segments per collection",
-		}, []string{collectionIDLabelName})
+			Help:      "The number of indexed segments",
+		}, []string{})
 
 	// RootCoordNumOfDMLChannel counts the number of DML channels.
 	RootCoordNumOfDMLChannel = prometheus.NewGauge(
@@ -384,8 +384,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	// for collection
 	registry.MustRegister(RootCoordNumOfCollections)
 	registry.MustRegister(RootCoordNumOfPartitions)
-	registry.MustRegister(RootCoordNumOfSegments)
-	registry.MustRegister(RootCoordNumOfIndexedSegments)
+	//	registry.MustRegister(RootCoordNumOfSegments)
+	//	registry.MustRegister(RootCoordNumOfIndexedSegments)
 
 	registry.MustRegister(RootCoordNumOfDMLChannel)
 	registry.MustRegister(RootCoordNumOfMsgStream)

@@ -77,14 +77,6 @@ type DdOperation struct {
 	Type string `json:"type"`
 }
 
-const (
-	// MetricRequestsTotal used to count the num of total requests
-	MetricRequestsTotal = "total"
-
-	// MetricRequestsSuccess used to count the num of successful requests
-	MetricRequestsSuccess = "success"
-)
-
 func metricProxy(v int64) string {
 	return fmt.Sprintf("client_%d", v)
 }
@@ -467,7 +459,6 @@ func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[t
 		}
 	}
 
-	metrics.RootCoordNumOfSegments.WithLabelValues(strconv.FormatInt(collID, 10)).Set(float64(len(segID2PartID)))
 	return segID2PartID, nil
 }
 
@@ -1534,7 +1525,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 
 // ShowCollections list all collection names
 func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	metrics.RootCoordShowCollectionsCounter.WithLabelValues(MetricRequestsTotal).Inc()
+	metrics.RootCoordShowCollectionsCounter.WithLabelValues(metrics.TotalLabel).Inc()
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.ShowCollectionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
@@ -1564,7 +1555,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 		zap.String("dbname", in.DbName), zap.Int("num of collections", len(t.Rsp.CollectionNames)),
 		zap.Int64("msgID", in.Base.MsgID))
 
-	metrics.RootCoordShowCollectionsCounter.WithLabelValues(MetricRequestsSuccess).Inc()
+	metrics.RootCoordShowCollectionsCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	t.Rsp.Status = succStatus()
 	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.Rsp, nil
@@ -1600,7 +1591,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 
 	metrics.RootCoordCreatePartitionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfPartitions.WithLabelValues(in.CollectionName).Inc()
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 	return succStatus(), nil
 }
 
@@ -1634,7 +1625,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 
 	metrics.RootCoordDropPartitionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLWriteTypeLatency.WithLabelValues("DropPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfPartitions.WithLabelValues(in.CollectionName).Dec()
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 	return succStatus(), nil
 }
 
