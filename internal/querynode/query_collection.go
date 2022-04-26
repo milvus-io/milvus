@@ -1001,12 +1001,17 @@ func (q *queryCollection) search(qMsg queryMsg) (*pubSearchResults, error) {
 	// historical search
 	trHis := timerecord.NewTimeRecorder("hisRecorder")
 	log.Debug("historical search start", zap.Int64("msgID", searchMsg.ID()))
-	hisSearchResults, sealedSegmentSearched, sealedPartitionSearched, err := q.historical.search(searchReq, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
-	if err != nil {
-		return nil, err
+	var hisSearchResults []*SearchResult
+	var sealedSegmentSearched []UniqueID
+	var sealedPartitionSearched []UniqueID
+	if q.historical.replica.getSegmentNum() != 0 {
+		hisSearchResults, sealedSegmentSearched, sealedPartitionSearched, err = q.historical.search(searchReq, collection.id, searchMsg.PartitionIDs, plan, travelTimestamp)
+		if err != nil {
+			return nil, err
+		}
+		searchResults = append(searchResults, hisSearchResults...)
 	}
 	metrics.QueryNodeSearchHistorical.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.QueryNodeID)).Set(float64(trHis.ElapseSpan().Microseconds()))
-	searchResults = append(searchResults, hisSearchResults...)
 
 	log.Debug("historical search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.Int64s("searched partitionIDs", sealedPartitionSearched), zap.Int64s("searched segmentIDs", sealedSegmentSearched))
 	hisSearchDur := tr.Record(fmt.Sprintf("historical search done, msgID = %d", searchMsg.ID())).Microseconds()
@@ -1015,14 +1020,17 @@ func (q *queryCollection) search(qMsg queryMsg) (*pubSearchResults, error) {
 			zap.Int64(log.BenchmarkCollectionID, collectionID),
 			zap.Int64(log.BenchmarkMsgID, msgID), zap.Int64(log.BenchmarkDuration, hisSearchDur))
 	}
+	// streaming search
 	log.Debug("streaming search start", zap.Int64("msgID", searchMsg.ID()))
-	for _, channel := range collection.getVChannels() {
-		strSearchResults, growingSegmentSearched, growingPartitionSearched, err := q.streaming.search(searchReq, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
-		if err != nil {
-			return nil, err
+	if q.streaming.replica.getSegmentNum() != 0 {
+		for _, channel := range collection.getVChannels() {
+			strSearchResults, growingSegmentSearched, growingPartitionSearched, err := q.streaming.search(searchReq, collection.id, searchMsg.PartitionIDs, channel, plan, travelTimestamp)
+			if err != nil {
+				return nil, err
+			}
+			searchResults = append(searchResults, strSearchResults...)
+			log.Debug("streaming search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.String("searched dmChannel", channel), zap.Int64s("searched partitionIDs", growingPartitionSearched), zap.Int64s("searched segmentIDs", growingSegmentSearched))
 		}
-		searchResults = append(searchResults, strSearchResults...)
-		log.Debug("streaming search", zap.Int64("msgID", searchMsg.ID()), zap.Int64("collectionID", collectionID), zap.String("searched dmChannel", channel), zap.Int64s("searched partitionIDs", growingPartitionSearched), zap.Int64s("searched segmentIDs", growingSegmentSearched))
 	}
 	streamingSearchDuration := tr.Record(fmt.Sprintf("streaming search done, msgID = %d", searchMsg.ID())).Microseconds()
 	for _, msgID := range searchMsg.ReqIDs {
