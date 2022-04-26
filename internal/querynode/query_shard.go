@@ -283,6 +283,7 @@ func (q *queryShard) setServiceableTime(t Timestamp, tp tsType) {
 
 func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	collectionID := req.Req.CollectionID
+	partitionIDs := req.Req.PartitionIDs
 	segmentIDs := req.SegmentIDs
 	timestamp := req.Req.TravelTimestamp
 
@@ -302,7 +303,6 @@ func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*i
 	}
 
 	// deserialize query plan
-
 	var plan *SearchPlan
 	if req.Req.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := req.Req.SerializedExprPlan
@@ -341,14 +341,14 @@ func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*i
 
 	if len(segmentIDs) == 0 {
 		// segmentIDs not specified, searching as shard leader
-		return q.searchLeader(ctx, req, searchRequests, collectionID, schemaHelper, plan, topK, queryNum, timestamp)
+		return q.searchLeader(ctx, req, searchRequests, collectionID, partitionIDs, schemaHelper, plan, topK, queryNum, timestamp)
 	}
 
 	// segmentIDs specified search as shard follower
-	return q.searchFollower(ctx, req, searchRequests, collectionID, schemaHelper, plan, topK, queryNum, timestamp)
+	return q.searchFollower(ctx, req, searchRequests, collectionID, partitionIDs, schemaHelper, plan, topK, queryNum, timestamp)
 }
 
-func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchRequest, searchRequests []*searchRequest, collectionID UniqueID,
+func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchRequest, searchRequests []*searchRequest, collectionID UniqueID, partitionIDs []UniqueID,
 	schemaHelper *typeutil.SchemaHelper, plan *SearchPlan, topK int64, queryNum int64, timestamp Timestamp) (*internalpb.SearchResults, error) {
 	q.streaming.replica.queryRLock()
 	defer q.streaming.replica.queryRUnlock()
@@ -391,7 +391,7 @@ func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchReques
 		q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDML)
 		// shard leader queries its own streaming data
 		// TODO add context
-		sResults, _, _, sErr := q.streaming.search(searchRequests, collectionID, req.Req.PartitionIDs, req.DmlChannel, plan, timestamp)
+		sResults, _, _, sErr := q.streaming.search(searchRequests, collectionID, partitionIDs, req.DmlChannel, plan, timestamp)
 		mut.Lock()
 		defer mut.Unlock()
 		if sErr != nil {
@@ -493,7 +493,7 @@ func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchReques
 	return searchResults, nil
 }
 
-func (q *queryShard) searchFollower(ctx context.Context, req *querypb.SearchRequest, searchRequests []*searchRequest, collectionID UniqueID,
+func (q *queryShard) searchFollower(ctx context.Context, req *querypb.SearchRequest, searchRequests []*searchRequest, collectionID UniqueID, partitionIDs []UniqueID,
 	schemaHelper *typeutil.SchemaHelper, plan *SearchPlan, topK int64, queryNum int64, timestamp Timestamp) (*internalpb.SearchResults, error) {
 	q.historical.replica.queryRLock()
 	defer q.historical.replica.queryRUnlock()
@@ -501,7 +501,14 @@ func (q *queryShard) searchFollower(ctx context.Context, req *querypb.SearchRequ
 	// hold request until guarantee timestamp >= service timestamp
 	guaranteeTs := req.GetReq().GetGuaranteeTimestamp()
 	q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDelta)
-	// search each segments by segment IDs in request
+
+	// validate segmentIDs in request
+	err := q.historical.validateSegmentIDs(segmentIDs, collectionID, partitionIDs)
+	if err != nil {
+		log.Warn("segmentIDs in search request fails validation", zap.Int64s("segmentIDs", segmentIDs))
+		return nil, err
+	}
+
 	historicalResults, _, err := q.historical.searchSegments(segmentIDs, searchRequests, plan, timestamp)
 	if err != nil {
 		return nil, err

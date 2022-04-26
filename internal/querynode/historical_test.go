@@ -105,3 +105,108 @@ func TestHistorical_Search(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestHistorical_validateSegmentIDs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	t.Run("test normal validate", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID}, defaultCollectionID, []UniqueID{defaultPartitionID})
+		assert.NoError(t, err)
+	})
+
+	t.Run("test normal validate2", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID}, defaultCollectionID, []UniqueID{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("test validate non-existent collection", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID}, defaultCollectionID+1, []UniqueID{defaultPartitionID})
+		assert.Error(t, err)
+	})
+
+	t.Run("test validate non-existent partition", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID}, defaultCollectionID, []UniqueID{defaultPartitionID + 1})
+		assert.Error(t, err)
+	})
+
+	t.Run("test validate non-existent segment", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID + 1}, defaultCollectionID, []UniqueID{defaultPartitionID})
+		assert.Error(t, err)
+	})
+
+	t.Run("test validate segment not in given partition", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		err = his.replica.addPartition(defaultCollectionID, defaultPartitionID+1)
+		assert.NoError(t, err)
+		schema := genSimpleSegCoreSchema()
+		schema2 := genSimpleInsertDataSchema()
+		seg, err := genSealedSegment(schema,
+			schema2,
+			defaultCollectionID,
+			defaultPartitionID+1,
+			defaultSegmentID+1,
+			defaultDMLChannel,
+			defaultMsgLength)
+		assert.NoError(t, err)
+		err = his.replica.setSegment(seg)
+		assert.NoError(t, err)
+		// Scenario: search for a segment (segmentID = defaultSegmentID + 1, partitionID = defaultPartitionID+1)
+		// that does not belong to defaultPartition
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID + 1}, defaultCollectionID, []UniqueID{defaultPartitionID})
+		assert.Error(t, err)
+	})
+
+	t.Run("test validate after partition release", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		err = his.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID}, defaultCollectionID, []UniqueID{})
+		assert.Error(t, err)
+	})
+
+	t.Run("test validate after partition release2", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		col, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypePartition)
+		err = his.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID}, defaultCollectionID, []UniqueID{})
+		assert.Error(t, err)
+	})
+
+	t.Run("test validate after partition release3", func(t *testing.T) {
+		tSafe := newTSafeReplica()
+		his, err := genSimpleHistorical(ctx, tSafe)
+		assert.NoError(t, err)
+		col, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypeCollection)
+		err = his.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+		err = his.validateSegmentIDs([]UniqueID{defaultSegmentID}, defaultCollectionID, []UniqueID{})
+		assert.Error(t, err)
+	})
+}
