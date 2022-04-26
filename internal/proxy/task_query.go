@@ -271,7 +271,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		return executeQuery(WithoutCache)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("fail to search on all shard leaders, err=%s", err.Error())
 	}
 
 	log.Info("Query Execute done.",

@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	qnClient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 
@@ -75,7 +74,11 @@ func roundRobinPolicy(ctx context.Context, getQueryNodePolicy getQueryNodePolicy
 	}
 
 	if current == replicaNum && err != nil {
-		return fmt.Errorf("no shard leaders available for channel: %s, leaders: %v, err: %s", leaders.GetChannelName(), leaders.GetNodeIds(), err.Error())
+		log.Warn("no shard leaders available for channel",
+			zap.String("channel name", leaders.GetChannelName()),
+			zap.Int64s("leaders", leaders.GetNodeIds()), zap.Error(err))
+		// needs to return the error from query
+		return err
 	}
 	return nil
 }

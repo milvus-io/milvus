@@ -295,7 +295,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return executeSearch(WithoutCache)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("fail to search on all shard leaders, err=%s", err.Error())
 	}
 
 	log.Info("Search Execute done.",
