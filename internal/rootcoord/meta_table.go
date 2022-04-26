@@ -491,13 +491,14 @@ func (mt *MetaTable) GetCollectionByName(collectionName string, ts typeutil.Time
 	}
 	_, vals, err := mt.snapshot.LoadWithPrefix(CollectionMetaPrefix, ts)
 	if err != nil {
+		log.Warn("failed to load table from meta snapshot", zap.Error(err))
 		return nil, err
 	}
 	for _, val := range vals {
 		collMeta := pb.CollectionInfo{}
 		err = proto.Unmarshal([]byte(val), &collMeta)
 		if err != nil {
-			log.Debug("unmarshal collection info failed", zap.Error(err))
+			log.Warn("unmarshal collection info failed", zap.Error(err))
 			continue
 		}
 		if collMeta.Schema.Name == collectionName {

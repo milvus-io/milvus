@@ -60,7 +60,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 		flowGraph:    flowgraph.NewTimeTickedFlowGraph(ctx1),
 	}
 
-	dmStreamNode, err := q.newDmInputNode(ctx1, factory)
+	dmStreamNode, err := q.newDmInputNode(ctx1, factory, collectionID, channel)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 		flowGraph:    flowgraph.NewTimeTickedFlowGraph(ctx1),
 	}
 
-	dmStreamNode, err := q.newDmInputNode(ctx1, factory)
+	dmStreamNode, err := q.newDmInputNode(ctx1, factory, collectionID, channel)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 }
 
 // newDmInputNode returns a new inputNode
-func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory) (*flowgraph.InputNode, error) {
+func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory, collectionID UniqueID, channel Channel) (*flowgraph.InputNode, error) {
 	insertStream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
 		return nil, err
@@ -193,8 +193,8 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
-
-	node := flowgraph.NewInputNode(insertStream, "dmlInputNode", maxQueueLength, maxParallelism)
+	name := fmt.Sprintf("dmInputNode-query-%d-%s", collectionID, channel)
+	node := flowgraph.NewInputNode(insertStream, name, maxQueueLength, maxParallelism)
 	return node, nil
 }
 

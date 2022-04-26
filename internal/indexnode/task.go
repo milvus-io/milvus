@@ -499,7 +499,7 @@ func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) 
 	it.savePaths = make([]string, blobCnt)
 	saveIndexFile := func(idx int) error {
 		blob := blobs[idx]
-		log.Info("xxxxxxxxxxxxxxxxxxxxxxxxxx")
+
 		savePath := getSavePathByKey(blob.Key)
 		saveIndexFileFn := func() error {
 			v, err := it.etcdKV.Load(it.req.MetaPath)
@@ -507,14 +507,12 @@ func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) 
 				log.Warn("IndexNode load meta failed", zap.Any("path", it.req.MetaPath), zap.Error(err))
 				return err
 			}
-			log.Info("ggggggggggggggggggggggg")
 			indexMeta := indexpb.IndexMeta{}
 			err = proto.Unmarshal([]byte(v), &indexMeta)
 			if err != nil {
 				log.Warn("IndexNode Unmarshal indexMeta error ", zap.Error(err))
 				return err
 			}
-			log.Info("hhhhhhhhhhhhhhhhhhhhhh")
 			//log.Debug("IndexNode Unmarshal indexMeta success ", zap.Any("meta", indexMeta))
 			if indexMeta.Version > it.req.Version {
 				log.Warn("IndexNode try saveIndexFile failed req.Version is low", zap.Any("req.Version", it.req.Version),
