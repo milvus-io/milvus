@@ -75,7 +75,7 @@ func newChannelUnsubscribeHandler(ctx context.Context, kv *etcdkv.EtcdKV, factor
 
 // reloadFromKV reload unsolved channels to unsubscribe
 func (csh *channelUnsubscribeHandler) reloadFromKV() error {
-	log.Debug("start reload unsubscribe channelInfo from kv")
+	log.Info("start reload unsubscribe channelInfo from kv")
 	_, channelInfoValues, err := csh.kvClient.LoadWithPrefix(unsubscribeChannelInfoPrefix)
 	if err != nil {
 		return err
@@ -116,7 +116,7 @@ func (csh *channelUnsubscribeHandler) addUnsubscribeChannelInfo(info *querypb.Un
 		}
 		csh.channelInfos.PushBack(info)
 		csh.downNodeChan <- info.NodeID
-		log.Debug("add unsubscribeChannelInfo to handler", zap.Int64("nodeID", info.NodeID))
+		log.Info("add unsubscribeChannelInfo to handler", zap.Int64("nodeID", info.NodeID))
 	}
 }
 
@@ -126,7 +126,7 @@ func (csh *channelUnsubscribeHandler) handleChannelUnsubscribeLoop() {
 	for {
 		select {
 		case <-csh.ctx.Done():
-			log.Debug("channelUnsubscribeHandler ctx done, handleChannelUnsubscribeLoop end")
+			log.Info("channelUnsubscribeHandler ctx done, handleChannelUnsubscribeLoop end")
 			return
 		case <-csh.downNodeChan:
 			channelInfo := csh.channelInfos.Front().Value.(*querypb.UnsubscribeChannelInfo)
@@ -136,7 +136,7 @@ func (csh *channelUnsubscribeHandler) handleChannelUnsubscribeLoop() {
 				subName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, nodeID)
 				err := unsubscribeChannels(csh.ctx, csh.factory, subName, collectionChannels.Channels)
 				if err != nil {
-					log.Debug("unsubscribe channels failed", zap.Int64("nodeID", nodeID))
+					log.Error("unsubscribe channels failed", zap.Int64("nodeID", nodeID))
 					panic(err)
 				}
 			}
@@ -147,7 +147,7 @@ func (csh *channelUnsubscribeHandler) handleChannelUnsubscribeLoop() {
 				log.Error("remove unsubscribe channelInfo from etcd failed", zap.Int64("nodeID", nodeID))
 				panic(err)
 			}
-			log.Debug("unsubscribe channels success", zap.Int64("nodeID", nodeID))
+			log.Info("unsubscribe channels success", zap.Int64("nodeID", nodeID))
 		}
 	}
 }

@@ -136,7 +136,7 @@ func (qc *QueryCoord) initSession() error {
 
 // Init function initializes the queryCoord's meta, cluster, etcdKV and task scheduler
 func (qc *QueryCoord) Init() error {
-	log.Debug("query coordinator start init, session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath), zap.String("address", Params.QueryCoordCfg.Address))
+	log.Info("query coordinator start init, session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath), zap.String("address", Params.QueryCoordCfg.Address))
 	var initError error
 	qc.initOnce.Do(func() {
 		err := qc.initSession()
@@ -145,7 +145,6 @@ func (qc *QueryCoord) Init() error {
 			initError = err
 			return
 		}
-		log.Debug("queryCoord try to connect etcd")
 		etcdKV := etcdkv.NewEtcdKV(qc.etcdCli, Params.EtcdCfg.MetaRootPath)
 		qc.kvClient = etcdKV
 		log.Debug("query coordinator try to connect etcd success")
@@ -155,7 +154,7 @@ func (qc *QueryCoord) Init() error {
 		idAllocator := allocator.NewGlobalIDAllocator("idTimestamp", idAllocatorKV)
 		initError = idAllocator.Initialize()
 		if initError != nil {
-			log.Debug("query coordinator idAllocator initialize failed", zap.Error(initError))
+			log.Error("query coordinator idAllocator initialize failed", zap.Error(initError))
 			return
 		}
 		qc.idAllocator = func() (UniqueID, error) {
@@ -220,20 +219,20 @@ func (qc *QueryCoord) Init() error {
 
 		qc.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	})
-	log.Debug("QueryCoord init success")
+	log.Info("QueryCoord init success")
 	return initError
 }
 
 // Start function starts the goroutines to watch the meta and node updates
 func (qc *QueryCoord) Start() error {
 	qc.scheduler.Start()
-	log.Debug("start scheduler ...")
+	log.Info("start scheduler ...")
 
 	qc.indexChecker.start()
-	log.Debug("start index checker ...")
+	log.Info("start index checker ...")
 
 	qc.handler.start()
-	log.Debug("start channel unsubscribe loop ...")
+	log.Info("start channel unsubscribe loop ...")
 
 	Params.QueryCoordCfg.CreatedTime = time.Now()
 	Params.QueryCoordCfg.UpdatedTime = time.Now()
@@ -260,17 +259,17 @@ func (qc *QueryCoord) Stop() error {
 
 	if qc.scheduler != nil {
 		qc.scheduler.Close()
-		log.Debug("close scheduler ...")
+		log.Info("close scheduler ...")
 	}
 
 	if qc.indexChecker != nil {
 		qc.indexChecker.close()
-		log.Debug("close index checker ...")
+		log.Info("close index checker ...")
 	}
 
 	if qc.handler != nil {
 		qc.handler.close()
-		log.Debug("close channel unsubscribe loop ...")
+		log.Info("close channel unsubscribe loop ...")
 	}
 
 	if qc.loopCancel != nil {
@@ -278,6 +277,7 @@ func (qc *QueryCoord) Stop() error {
 		log.Info("cancel the loop of QueryCoord")
 	}
 
+	log.Warn("Query Coord stopped successfully...")
 	qc.loopWg.Wait()
 	qc.session.Revoke(time.Second)
 	return nil
@@ -342,7 +342,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 	ctx, cancel := context.WithCancel(qc.loopCtx)
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("QueryCoord start watch node loop")
+	log.Info("QueryCoord start watch node loop")
 
 	unallocatedNodes := qc.getUnallocatedNodes()
 	for _, n := range unallocatedNodes {
@@ -372,7 +372,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 		}
 		//TODO::deal enqueue error
 		qc.scheduler.Enqueue(loadBalanceTask)
-		log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
+		log.Info("start a loadBalance task", zap.Any("task", loadBalanceTask))
 	}
 
 	// TODO silverxia add Rewatch logic
@@ -464,7 +464,7 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
-				log.Debug("start add a QueryNode to cluster", zap.Any("nodeID", serverID))
+				log.Info("start add a QueryNode to cluster", zap.Any("nodeID", serverID))
 				err := qc.cluster.registerNode(ctx, event.Session, serverID, disConnect)
 				if err != nil {
 					log.Error("QueryCoord failed to register a QueryNode", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
@@ -476,7 +476,7 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
-				log.Debug("get a del event after QueryNode down", zap.Int64("nodeID", serverID))
+				log.Info("get a del event after QueryNode down", zap.Int64("nodeID", serverID))
 				nodeExist := qc.cluster.hasNode(serverID)
 				if !nodeExist {
 					log.Error("QueryNode not exist", zap.Int64("nodeID", serverID))
@@ -504,7 +504,7 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 				//TODO:: deal enqueue error
 				qc.scheduler.Enqueue(loadBalanceTask)
-				log.Debug("start a loadBalance task", zap.Any("task", loadBalanceTask))
+				log.Info("start a loadBalance task", zap.Any("task", loadBalanceTask))
 			}
 		}
 	}
@@ -515,7 +515,7 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("QueryCoord start watch segment loop")
+	log.Info("QueryCoord start watch segment loop")
 
 	watchChan := qc.kvClient.WatchWithRevision(handoffSegmentPrefix, qc.indexChecker.revision+1)
 
@@ -536,9 +536,9 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 					validHandoffReq, _ := qc.indexChecker.verifyHandoffReqValid(segmentInfo)
 					if Params.QueryCoordCfg.AutoHandoff && validHandoffReq {
 						qc.indexChecker.enqueueHandoffReq(segmentInfo)
-						log.Debug("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
+						log.Info("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
 					} else {
-						log.Debug("watchHandoffSegmentLoop: collection/partition has not been loaded or autoHandoff equal to false, remove req from etcd", zap.Any("segmentInfo", segmentInfo))
+						log.Info("watchHandoffSegmentLoop: collection/partition has not been loaded or autoHandoff equal to false, remove req from etcd", zap.Any("segmentInfo", segmentInfo))
 						buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
 						err = qc.kvClient.Remove(buildQuerySegmentPath)
 						if err != nil {
@@ -558,7 +558,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 	ctx, cancel := context.WithCancel(qc.loopCtx)
 	defer cancel()
 	defer qc.loopWg.Done()
-	log.Debug("QueryCoord start load balance segment loop")
+	log.Info("QueryCoord start load balance segment loop")
 
 	timer := time.NewTicker(time.Duration(Params.QueryCoordCfg.BalanceIntervalSeconds) * time.Second)
 
@@ -625,7 +625,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 							nodeID2SegmentInfos[nodeID] = leastSegmentInfos
 						}
 					}
-					log.Debug("loadBalanceSegmentLoop: memory usage rate of all online QueryNode", zap.Any("mem rate", nodeID2MemUsageRate))
+					log.Info("loadBalanceSegmentLoop: memory usage rate of all online QueryNode", zap.Any("mem rate", nodeID2MemUsageRate))
 					if len(availableNodeIDs) <= 1 {
 						log.Warn("loadBalanceSegmentLoop: there are too few available query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs), zap.Int64s("availableNodeIDs", availableNodeIDs))
 						continue
@@ -695,7 +695,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 			}
 			for _, t := range loadBalanceTasks {
 				qc.scheduler.Enqueue(t)
-				log.Debug("loadBalanceSegmentLoop: enqueue a loadBalance task", zap.Any("task", t))
+				log.Info("loadBalanceSegmentLoop: enqueue a loadBalance task", zap.Any("task", t))
 				err := t.waitToFinish()
 				if err != nil {
 					// if failed, wait for next balance loop
@@ -703,10 +703,10 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					// it also may be other abnormal errors
 					log.Error("loadBalanceSegmentLoop: balance task execute failed", zap.Any("task", t))
 				} else {
-					log.Debug("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
+					log.Info("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
 				}
 			}
-			log.Debug("loadBalanceSegmentLoop: load balance Done in this loop", zap.Any("tasks", loadBalanceTasks))
+			log.Info("loadBalanceSegmentLoop: load balance Done in this loop", zap.Any("tasks", loadBalanceTasks))
 		}
 	}
 }

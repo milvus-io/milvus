@@ -146,10 +146,10 @@ func (c *queryNodeCluster) reloadFromKV() error {
 		onlineSessionMap[nodeID] = session
 	}
 	for nodeID, session := range onlineSessionMap {
-		log.Debug("reloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
+		log.Info("reloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
 		err := c.registerNode(c.ctx, session, nodeID, disConnect)
 		if err != nil {
-			log.Error("QueryNode failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Warn("QueryNode failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
 		toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
@@ -159,25 +159,25 @@ func (c *queryNodeCluster) reloadFromKV() error {
 	// load node information before power off from etcd
 	oldStringNodeIDs, oldNodeSessions, err := c.client.LoadWithPrefix(queryNodeInfoPrefix)
 	if err != nil {
-		log.Error("reloadFromKV: get previous node info from etcd error", zap.Error(err))
+		log.Warn("reloadFromKV: get previous node info from etcd error", zap.Error(err))
 		return err
 	}
 	for index := range oldStringNodeIDs {
 		nodeID, err := strconv.ParseInt(filepath.Base(oldStringNodeIDs[index]), 10, 64)
 		if err != nil {
-			log.Error("watchNodeLoop: parse nodeID error", zap.Error(err))
+			log.Warn("watchNodeLoop: parse nodeID error", zap.Error(err))
 			return err
 		}
 		if _, ok := onlineSessionMap[nodeID]; !ok {
 			session := &sessionutil.Session{}
 			err = json.Unmarshal([]byte(oldNodeSessions[index]), session)
 			if err != nil {
-				log.Error("watchNodeLoop: unmarshal session error", zap.Error(err))
+				log.Warn("watchNodeLoop: unmarshal session error", zap.Error(err))
 				return err
 			}
 			err = c.registerNode(context.Background(), session, nodeID, offline)
 			if err != nil {
-				log.Debug("reloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+				log.Warn("reloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 				return err
 			}
 			toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
@@ -214,7 +214,7 @@ func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *q
 	if targetNode != nil {
 		err := targetNode.loadSegments(ctx, in)
 		if err != nil {
-			log.Debug("loadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Warn("loadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
 
@@ -238,7 +238,7 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in
 
 		err := targetNode.releaseSegments(ctx, in)
 		if err != nil {
-			log.Debug("releaseSegments: queryNode release segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Warn("releaseSegments: queryNode release segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
 
@@ -259,7 +259,6 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 	if targetNode != nil {
 		err := targetNode.watchDmChannels(ctx, in)
 		if err != nil {
-			log.Debug("watchDmChannels: queryNode watch dm channel error", zap.String("error", err.Error()))
 			return err
 		}
 		dmChannelWatchInfo := make([]*querypb.DmChannelWatchInfo, len(in.Infos))
@@ -274,7 +273,7 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 
 		err = c.clusterMeta.setDmChannelInfos(dmChannelWatchInfo)
 		if err != nil {
-			log.Debug("watchDmChannels: update dmChannelWatchInfos to meta failed", zap.String("error", err.Error()))
+			// TODO DML channel maybe leaked, need to release dml if no related segment
 			return err
 		}
 
@@ -294,7 +293,6 @@ func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64,
 	if targetNode != nil {
 		err := targetNode.watchDeltaChannels(ctx, in)
 		if err != nil {
-			log.Debug("watchDeltaChannels: queryNode watch delta channel error", zap.String("error", err.Error()))
 			return err
 		}
 
@@ -334,7 +332,6 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 		}
 		msgPosition, err := c.clusterMeta.sendSealedSegmentChangeInfos(in.CollectionID, in.QueryChannel, emptyChangeInfo)
 		if err != nil {
-			log.Error("addQueryChannel: get latest messageID of query channel error", zap.String("queryChannel", in.QueryChannel), zap.Error(err))
 			return err
 		}
 
@@ -342,7 +339,6 @@ func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in
 		in.SeekPosition = msgPosition
 		err = targetNode.addQueryChannel(ctx, in)
 		if err != nil {
-			log.Error("addQueryChannel: queryNode add query channel error", zap.String("queryChannel", in.QueryChannel), zap.Error(err))
 			return err
 		}
 		return nil
@@ -361,7 +357,7 @@ func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64,
 	if targetNode != nil {
 		err := targetNode.removeQueryChannel(ctx, in)
 		if err != nil {
-			log.Debug("removeQueryChannel: queryNode remove query channel error", zap.String("error", err.Error()))
+			log.Warn("removeQueryChannel: queryNode remove query channel error", zap.String("error", err.Error()))
 			return err
 		}
 
@@ -382,7 +378,6 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 	if targetNode != nil {
 		err := targetNode.releaseCollection(ctx, in)
 		if err != nil {
-			log.Debug("releaseCollection: queryNode release collection error", zap.String("error", err.Error()))
 			return err
 		}
 
@@ -403,7 +398,6 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 	if targetNode != nil {
 		err := targetNode.releasePartitions(ctx, in)
 		if err != nil {
-			log.Debug("releasePartitions: queryNode release partitions error", zap.String("error", err.Error()))
 			return err
 		}
 
@@ -561,7 +555,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 	if _, ok := c.nodes[id]; !ok {
 		sessionJSON, err := json.Marshal(session)
 		if err != nil {
-			log.Debug("registerNode: marshal session error", zap.Int64("nodeID", id), zap.Any("address", session))
+			log.Warn("registerNode: marshal session error", zap.Int64("nodeID", id), zap.Any("address", session))
 			return err
 		}
 		key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, id)
@@ -571,7 +565,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		}
 		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
 		if err != nil {
-			log.Debug("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
+			log.Warn("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
 		c.setNodeState(id, node, state)
@@ -580,7 +574,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 		}
 		c.nodes[id] = node
 		metrics.QueryCoordNumQueryNodes.WithLabelValues().Inc()
-		log.Debug("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
+		log.Info("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
 	return fmt.Errorf("registerNode: QueryNode %d alredy exists in cluster", id)
@@ -613,7 +607,7 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 
 	delete(c.nodes, nodeID)
 	metrics.QueryCoordNumQueryNodes.WithLabelValues().Dec()
-	log.Debug("removeNodeInfo: delete nodeInfo in cluster MetaReplica", zap.Int64("nodeID", nodeID))
+	log.Info("removeNodeInfo: delete nodeInfo in cluster MetaReplica", zap.Int64("nodeID", nodeID))
 
 	return nil
 }
@@ -625,7 +619,7 @@ func (c *queryNodeCluster) stopNode(nodeID int64) {
 	if node, ok := c.nodes[nodeID]; ok {
 		node.stop()
 		c.setNodeState(nodeID, node, offline)
-		log.Debug("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
+		log.Info("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
 	}
 }
 

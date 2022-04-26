@@ -166,8 +166,6 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 }
 
 func (m *MetaReplica) reloadFromKV() error {
-	log.Debug("start reload from kv")
-
 	log.Info("recovery collections...")
 	collectionKeys, collectionValues, err := m.getKvClient().LoadWithPrefix(collectionMetaPrefix)
 	if err != nil {
@@ -288,7 +286,7 @@ func (m *MetaReplica) reloadFromKV() error {
 	}
 
 	//TODO::update partition states
-	log.Debug("reload from kv finished")
+	log.Info("reload from kv finished")
 
 	return nil
 }
@@ -484,7 +482,7 @@ func (m *MetaReplica) addPartitions(collectionID UniqueID, partitionIDs []Unique
 		collectionInfo.PartitionStates = newPartitionStates
 		collectionInfo.ReleasedPartitionIDs = newReleasedPartitionIDs
 
-		log.Debug("add a  partition to MetaReplica", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", collectionInfo.PartitionIDs))
+		log.Info("add a partition to MetaReplica", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", collectionInfo.PartitionIDs))
 		err := saveGlobalCollectionInfo(collectionID, collectionInfo, m.getKvClient())
 		if err != nil {
 			log.Error("save collectionInfo error", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", collectionInfo.PartitionIDs), zap.Any("error", err.Error()))
@@ -824,7 +822,7 @@ func (m *MetaReplica) sendSealedSegmentChangeInfos(collectionID UniqueID, queryC
 		return nil, fmt.Errorf("sendSealedSegmentChangeInfos: length of the positions in stream is not correct, collectionID = %d, query channel = %s, len = %d", collectionID, queryChannel, len(messageIDs))
 	}
 
-	log.Debug("updateGlobalSealedSegmentInfos: send sealed segment change info to queryChannel", zap.Any("msgPack", msgPack))
+	log.Info("updateGlobalSealedSegmentInfos: send sealed segment change info to queryChannel", zap.Any("msgPack", msgPack))
 	return &internalpb.MsgPosition{
 		ChannelName: queryChannel,
 		MsgID:       messageIDs[0].Serialize(),
@@ -926,7 +924,6 @@ func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos []*querypb.DmChannel
 
 	err := saveDmChannelWatchInfos(dmChannelWatchInfos, m.getKvClient())
 	if err != nil {
-		log.Error("save dmChannelWatchInfo error", zap.Any("error", err.Error()))
 		return err
 	}
 	for _, channelInfo := range dmChannelWatchInfos {
@@ -943,7 +940,7 @@ func (m *MetaReplica) createQueryChannel(collectionID UniqueID) *querypb.QueryCh
 	allocatedQueryChannel := fmt.Sprintf("%s-0", Params.CommonCfg.QueryCoordSearch)
 	allocatedQueryResultChannel := fmt.Sprintf("%s-0", Params.CommonCfg.QueryCoordSearchResult)
 
-	log.Debug("query coordinator is creating query channel",
+	log.Info("query coordinator is creating query channel",
 		zap.String("query channel name", allocatedQueryChannel),
 		zap.String("query result channel name", allocatedQueryResultChannel))
 
@@ -987,7 +984,7 @@ func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.Vch
 		log.Error("save delta channel info error", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return err
 	}
-	log.Debug("save delta channel infos to meta", zap.Any("collectionID", collectionID))
+	log.Info("save delta channel infos to meta", zap.Any("collectionID", collectionID))
 	m.deltaChannelInfos[collectionID] = infos
 	return nil
 }
@@ -1025,7 +1022,7 @@ func (m *MetaReplica) getQueryStreamByID(collectionID UniqueID, queryChannel str
 
 		queryStream.AsProducer([]string{queryChannel})
 		m.queryStreams[collectionID] = queryStream
-		log.Debug("getQueryStreamByID: create query msgStream for collection", zap.Int64("collectionID", collectionID))
+		log.Info("getQueryStreamByID: create query msgStream for collection", zap.Int64("collectionID", collectionID))
 	}
 
 	return queryStream, nil

@@ -74,7 +74,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 		}
 
 		if len(availableNodeIDs) > 0 {
-			log.Debug("shuffleSegmentsToQueryNode: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
+			log.Info("shuffleSegmentsToQueryNode: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
 			for _, req := range reqs {
 				sort.Slice(availableNodeIDs, func(i, j int) bool {
 					return nodeID2NumSegment[availableNodeIDs[i]] < nodeID2NumSegment[availableNodeIDs[j]]
@@ -109,7 +109,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 		dataSizePerReq[offset] = reqSize
 	}
 
-	log.Debug("shuffleSegmentsToQueryNodeV2: get the segment size of loadReqs end", zap.Int64s("segment size of reqs", dataSizePerReq))
+	log.Info("shuffleSegmentsToQueryNodeV2: get the segment size of loadReqs end", zap.Int64s("segment size of reqs", dataSizePerReq))
 	for {
 		// online nodes map and totalMem, usedMem, memUsage of every node
 		totalMem := make(map[int64]uint64)
@@ -151,7 +151,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			queryNodeInfo := nodeInfo.(*queryNode)
 			// avoid allocate segment to node which memUsageRate is high
 			if queryNodeInfo.memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
-				log.Debug("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode", zap.Int64("nodeID", nodeID), zap.Float64("current rate", queryNodeInfo.memUsageRate))
+				log.Info("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode", zap.Int64("nodeID", nodeID), zap.Float64("current rate", queryNodeInfo.memUsageRate))
 				continue
 			}
 
@@ -160,7 +160,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			availableNodeIDs = append(availableNodeIDs, nodeID)
 		}
 		if len(availableNodeIDs) > 0 {
-			log.Debug("shuffleSegmentsToQueryNodeV2: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
+			log.Info("shuffleSegmentsToQueryNodeV2: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
 			memoryInsufficient := false
 			for offset, sizeOfReq := range dataSizePerReq {
 				// sort nodes by memUsageRate, low to high
@@ -190,7 +190,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 
 			// shuffle segment success
 			if !memoryInsufficient {
-				log.Debug("shuffleSegmentsToQueryNodeV2: shuffle segment to query node success")
+				log.Info("shuffleSegmentsToQueryNodeV2: shuffle segment to query node success")
 				return nil
 			}
 
