@@ -63,6 +63,9 @@ function install_mac_deps() {
   brew update && brew upgrade && brew cleanup
 
   if [[ $(arch) == 'arm64' ]]; then
+    brew install openssl
+    brew install librdkafka
+    brew install pkg-config
     sudo mkdir /usr/local/include
     sudo mkdir /usr/local/opt
     sudo ln -s "$(brew --prefix llvm)" "/usr/local/opt/llvm"

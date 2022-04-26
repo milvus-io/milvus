@@ -36,16 +36,14 @@ KnowhereInitImpl() {
         el::Configurations el_conf;
         el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
 #if defined(EMBEDDED_MILVUS)
-        el::Configurations defaultConf;
-        defaultConf.setToDefault();
         // Disable all logs for embedded milvus.
-        defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
-        defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
-        defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
-        defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
-        defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
-        defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
-        el::Loggers::reconfigureLogger("default", defaultConf);
+        el_conf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
+        el_conf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
+        el_conf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
+        el_conf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
+        el_conf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
+        el_conf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
+        el::Loggers::reconfigureLogger("default", el_conf);
 #endif
     };
 

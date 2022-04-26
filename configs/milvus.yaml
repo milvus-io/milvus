@@ -33,6 +33,10 @@ etcd:
   use:
     # please adjust in embedded Milvus: true
     embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
+  data:
+    # Embedded Etcd only.
+    # please adjust in embedded Milvus: /tmp/milvus/etcdData/
+    dir: default.etcd
 
 # please adjust in embedded Milvus: /tmp/milvus/data/
 localStorage:
