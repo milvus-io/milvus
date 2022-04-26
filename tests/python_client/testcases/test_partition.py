@@ -6,6 +6,7 @@ from base.partition_wrapper import ApiPartitionWrapper
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
+from utils.util_log import test_log as log
 from common.common_type import CaseLabel, CheckTasks
 from common.code_mapping import PartitionErrorMessage
 
@@ -289,6 +290,98 @@ class TestPartitionParams(TestcaseBase):
         partition_w1.release()
         partition_w2.load()
 
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_non_number_replicas(self, request):
+        if request.param == 1:
+            pytest.skip("1 is valid replica number")
+        if request.param is None:
+            pytest.skip("None is valid replica number")
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_partition_replica_non_number(self, get_non_number_replicas):
+        """
+        target: test load partition with non-number replicas
+        method: load with non-number replicas
+        expected: raise exceptions
+        """
+        # create, insert
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w = self.init_partition_wrap(collection_w)
+        partition_w.insert(cf.gen_default_list_data(nb=100))
+
+        # load with non-number replicas
+        error = {ct.err_code: 0, ct.err_msg: f"but expected one of: int, long"}
+        partition_w.load(replica_number=get_non_number_replicas, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("replicas", [0, -1, None])
+    def test_load_replica_invalid_number(self, replicas):
+        """
+        target: test load partition with invalid replica number
+        method: load with invalid replica number
+        expected: raise exception
+        """
+        # create, insert
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w = self.init_partition_wrap(collection_w)
+        partition_w.insert(cf.gen_default_list_data())
+        assert partition_w.num_entities == ct.default_nb
+
+        partition_w.load(replica_number=replicas)
+        p_replicas = partition_w.get_replicas()[0]
+        assert len(p_replicas.groups) == 1
+        query_res, _ = partition_w.query(expr=f"{ct.default_int64_field_name} in [0]")
+        assert len(query_res) == 1
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_replica_greater_than_querynodes(self):
+        """
+        target: test load with replicas that greater than querynodes
+        method: load with 2 replicas (only 1 querynode)
+        expected: Verify load successfully and 1 available replica
+        """
+        # create, insert
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w = self.init_partition_wrap(collection_w)
+        partition_w.insert(cf.gen_default_list_data())
+        assert partition_w.num_entities == ct.default_nb
+
+        # load with 2 replicas
+        error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
+        partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16641")
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_replica_change(self):
+        """
+        target: test load replica change
+        method: 1.load with replica 1
+                2.load with a new replica number
+                3.release partition
+                4.load with a new replica
+        expected: The second time successfully loaded with a new replica number
+        """
+        # create, insert
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        partition_w = self.init_partition_wrap(collection_w)
+        partition_w.insert(cf.gen_default_list_data())
+        assert partition_w.num_entities == ct.default_nb
+
+        partition_w.load(replica_number=1)
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
+        partition_w.load(replica_number=2)
+
+        partition_w.release()
+        partition_w.load(replica_number=2)
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
+        # replica_info = partition_w.get_replicas()
+
+        # verify replicas
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release(self):

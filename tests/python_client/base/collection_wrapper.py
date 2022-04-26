@@ -85,12 +85,11 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def load(self, partition_names=None, check_task=None, check_items=None, **kwargs):
-        timeout = kwargs.get("timeout", TIMEOUT)
-        kwargs.update({"timeout": timeout})
+    def load(self, partition_names=None, replica_number=1, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.load, partition_names], **kwargs)
+        res, check = api_request([self.collection.load, partition_names, replica_number, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        partition_names=partition_names, **kwargs).run()
         return res, check_result
@@ -311,3 +310,10 @@ class ApiCollectionWrapper:
         res = self.collection.wait_for_compaction_completed(timeout, **kwargs)
         # log.debug(res)
         return res
+
+    def get_replicas(self, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.get_replicas, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result

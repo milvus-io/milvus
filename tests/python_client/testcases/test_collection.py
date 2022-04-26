@@ -7,6 +7,7 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
 from utils.util_pymilvus import *
+from utils.util_log import test_log as log
 
 prefix = "collection"
 exp_name = "name"
@@ -2161,6 +2162,254 @@ class TestLoadCollection(TestcaseBase):
         patition_w.load()
         collection_w.release()
 
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_non_number_replicas(self, request):
+        if request.param == 1:
+            pytest.skip("1 is valid replica number")
+        if request.param is None:
+            pytest.skip("None is valid replica number")
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_replica_non_number(self, get_non_number_replicas):
+        """
+        target: test load collection with non-number replicas
+        method: load with non-number replicas
+        expected: raise exceptions
+        """
+        # create, insert
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        # load with non-number replicas
+        error = {ct.err_code: 0, ct.err_msg: f"but expected one of: int, long"}
+        collection_w.load(replica_number=get_non_number_replicas, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("replicas", [-1, 0, None])
+    def test_load_replica_invalid_number(self, replicas):
+        """
+        target: test load partition with invalid replica number
+        method: load with invalid replica number
+        expected: raise exception
+        """
+        # create, insert
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        collection_w.load(replica_number=replicas)
+        replicas = collection_w.get_replicas()[0]
+        groups = replicas.groups
+        assert len(groups) == 1
+        assert len(groups[0].shards) == 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_load_replica_greater_than_querynodes(self):
+        """
+        target: test load with replicas that greater than querynodes
+        method: load with 2 replicas (only 1 querynode)
+        expected: Raise exception
+        """
+        # create, insert
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
+        collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16562")
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_replica_change(self):
+        """
+        target: test load replica change
+        method: 1.load with replica 1
+                2.load with a new replica number
+                3.release collection
+                4.load with a new replica
+        expected: The second time successfully loaded with a new replica number
+        """
+        # create, insert
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        collection_w.load(replica_number=1)
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
+        collection_w.load(replica_number=2)
+        collection_w.get_replicas()
+
+        collection_w.release()
+        collection_w.load(replica_number=2)
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
+        # replica_info = collection_w.get_replicas()
+
+        # verify replicas
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_replica_multi(self):
+        """
+        target: test load with multiple replicas
+        method: 1.create collection with one shards
+                2.insert multiple segments
+                3.load with multiple replicas
+                4.query and search
+        expected: Query and search successfully
+        """
+        # create, insert
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=1)
+        tmp_nb = 1000
+        replica_number = 5
+        for i in range(replica_number):
+            df = cf.gen_default_dataframe_data(nb=tmp_nb, start=i * tmp_nb)
+            insert_res, _ = collection_w.insert(df)
+            assert collection_w.num_entities == (i + 1) * tmp_nb
+
+        collection_w.load(replica_number=replica_number)
+        replicas = collection_w.get_replicas()[0]
+        assert len(replicas.groups) == replica_number
+
+        query_res, _ = collection_w.query(expr=f"{ct.default_int64_field_name} in [0, {tmp_nb}]")
+        assert len(query_res) == 2
+        search_res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
+        assert len(search_res[0]) == ct.default_limit
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_replica_partitions(self):
+        """
+        target: test load replica with partitions
+        method: 1.Create collection and one partition
+                2.Insert data into collection and partition
+                3.Load multi replicas with partition
+                4.Query
+        expected: Verify query result
+        """
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        df_1 = cf.gen_default_dataframe_data(nb=default_nb)
+        df_2 = cf.gen_default_dataframe_data(nb=default_nb, start=default_nb)
+
+        collection_w.insert(df_1)
+        partition_w = self.init_partition_wrap(collection_w, ct.default_tag)
+        partition_w.insert(df_2)
+        assert collection_w.num_entities == ct.default_nb * 2
+
+        collection_w.load([partition_w.name], replica_number=2)
+        # default tag query 0 empty
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", partition_names=[ct.default_tag],
+                           check_tasks=CheckTasks.check_query_empty)
+        # default query 0 empty
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [3000]",
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': df_2.iloc[:1, :1].to_dict('records')})
+
+        error = {ct.err_code: 1, ct.err_msg: f"not loaded into memory"}
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]",
+                           partition_names=[ct.default_partition_name, ct.default_tag],
+                           check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_replica_non_shard_leader(self):
+        """
+        target: test replica groups which one of QN is not shard leader
+        method: 1.deploy cluster with 5 QNs
+                2.create collection with 2 shards
+                3.insert and flush
+                4.load with 2 replica number
+                5.insert growng data
+                6.search and query
+        expected: Verify search and query results
+        """
+        # create and insert entities
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=2)
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        # load with multi replica and insert growing data
+        collection_w.load(replica_number=2)
+        df_growing = cf.gen_default_dataframe_data(100, start=ct.default_nb)
+        collection_w.insert(df_growing)
+
+        replicas = collection_w.get_replicas()[0]
+        # verify there are 2 groups (2 replicas)
+        assert len(replicas.groups) == 2
+        log.debug(replicas)
+        for group in replicas.groups:
+            # verify each group have 3 shards
+            assert len(group.shards) == 2
+            shard_leaders = []
+            # verify one group has 3 querynodes, and one of the querynode isn't shard leader
+            if len(group.group_nodes) == 3:
+                for shard in group.shards:
+                    shard_leaders.append(shard.shard_leader)
+                assert len(shard_leaders) == 2
+
+        # Verify repeated segment loaded TODO
+        # https://github.com/milvus-io/milvus/issues/16598
+        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)
+
+        # verify search successfully
+        res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
+        assert len(res[0]) == ct.default_limit
+
+        # verify query sealed and growing data successfully
+        exp_res = [{'int64': 0}, {'int64': 3000}]
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0, {ct.default_nb}]",
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': exp_res})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_replica_multiple_shard_leader(self):
+        """
+        target: test replica groups which one of QN is shard leader of multiple shards
+        method: 1.deploy cluster with 5 QNs
+                2.create collection with 3 shards
+                3.insert and flush
+                4.load with 2 replica number
+                5.insert growng data
+                6.search and query
+        expected: Verify search and query results
+        """
+        # craete and insert
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), shards_num=3)
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+        # load with multi replicas and insert growing data
+        collection_w.load(replica_number=2)
+        df_growing = cf.gen_default_dataframe_data(100, start=ct.default_nb)
+        collection_w.insert(df_growing)
+
+        # verify replica infos
+        replicas, _ = collection_w.get_replicas()
+        log.debug(replicas)
+        assert len(replicas.groups) == 2
+        for group in replicas.groups:
+            # verify each group have 3 shards
+            assert len(group.shards) == 3
+            # verify one group has 2 querynodes, and one of the querynode subscripe 2 dml channel
+            shard_leaders = []
+            if len(group.group_nodes) == 2:
+                for shard in group.shards:
+                    shard_leaders.append(shard.shard_leader)
+                assert len(shard_leaders) == 3 and len(set(shard_leaders)) == 2
+
+        # Verify search successfully
+        res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
+        assert len(res[0]) == ct.default_limit
+
+        # Verify query sealed and growing entities successfully
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0, {ct.default_nb}]",
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': [{'int64': 0}, {'int64': 3000}]})
+
 
 class TestReleaseAdvanced(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
@@ -2225,7 +2474,7 @@ class TestReleaseAdvanced(TestcaseBase):
         limit = 10
         collection_w.search(vectors, default_search_field,
                             default_search_params, limit, default_search_exp,
-                            [par_name],  _async=True)
+                            [par_name], _async=True)
         collection_w.release()
         error = {ct.err_code: 1, ct.err_msg: 'collection %s was not loaded into memory' % collection_w.name}
         collection_w.search(vectors, default_search_field,
@@ -2441,4 +2690,3 @@ class TestLoadPartition(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "HasPartition failed: can\'t find collection: %s" % name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
-

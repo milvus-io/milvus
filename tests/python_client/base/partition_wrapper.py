@@ -49,12 +49,11 @@ class ApiPartitionWrapper:
                                        check_task, check_items, succ, **kwargs).run()
         return res, check_result
 
-    def load(self, check_task=None, check_items=None, **kwargs):
-        timeout = kwargs.get("timeout", TIMEOUT)
-        kwargs.update({"timeout": timeout})
+    def load(self, replica_number=1, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
-        res, succ = api_request([self.partition.load], **kwargs)
+        res, succ = api_request([self.partition.load, replica_number, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
                                        check_items, is_succ=succ,
                                        **kwargs).run()
@@ -96,6 +95,16 @@ class ApiPartitionWrapper:
                                        output_fields=output_fields, **kwargs).run()
         return res, check_result
 
+    def query(self, expr, output_fields=None, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.partition.query, expr, output_fields, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check,
+                                       expression=expr, output_fields=output_fields,
+                                       timeout=timeout, **kwargs).run()
+        return res, check_result
+
     def delete(self, expr, check_task=None, check_items=None, **kwargs):
         timeout = kwargs.get("timeout", TIMEOUT)
         kwargs.update({"timeout": timeout})
@@ -105,4 +114,11 @@ class ApiPartitionWrapper:
         check_result = ResponseChecker(res, func_name, check_task,
                                        check_items, is_succ=succ, expr=expr,
                                        **kwargs).run()
+        return res, check_result
+
+    def get_replicas(self, timeout=None, check_task=None, check_items=None, **kwargs):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.partition.get_replicas, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
