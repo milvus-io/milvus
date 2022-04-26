@@ -243,6 +243,41 @@ func (sc *ShardCluster) updateSegment(evt segmentEvent) {
 	sc.transferSegment(old, evt)
 }
 
+// SyncSegments synchronize segment distribution in batch
+func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo, state segmentState) {
+	// notify handoff wait online if any
+	defer func() {
+		sc.segmentCond.L.Lock()
+		sc.segmentCond.Broadcast()
+		sc.segmentCond.L.Unlock()
+	}()
+	sc.mut.Lock()
+	defer sc.mut.Unlock()
+
+	for _, line := range distribution {
+		for _, segmentID := range line.GetSegmentIds() {
+			old, ok := sc.segments[segmentID]
+			if !ok { // newly add
+				sc.segments[segmentID] = &shardSegmentInfo{
+					nodeID:      line.GetNodeId(),
+					partitionID: line.GetPartitionId(),
+					segmentID:   segmentID,
+					state:       state,
+				}
+				continue
+			}
+
+			sc.transferSegment(old, segmentEvent{
+				eventType:   segmentAdd,
+				nodeID:      line.GetNodeId(),
+				partitionID: line.GetPartitionId(),
+				segmentID:   segmentID,
+				state:       state,
+			})
+		}
+	}
+}
+
 // transferSegment apply segment state transition.
 func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt segmentEvent) {
 	switch old.state {

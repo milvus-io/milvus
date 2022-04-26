@@ -1173,6 +1173,7 @@ type QueryNode interface {
 
 	Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
+	SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error)
 
 	// GetMetrics gets the metrics about QueryNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)

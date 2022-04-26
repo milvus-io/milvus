@@ -626,6 +626,108 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 	})
 }
 
+func TestShardCluster_SyncSegments(t *testing.T) {
+	collectionID := int64(1)
+	vchannelName := "dml_1_1_v0"
+	replicaID := int64(0)
+
+	t.Run("sync new segments", func(t *testing.T) {
+		segmentEvents := []segmentEvent{}
+
+		evtCh := make(chan segmentEvent, 10)
+		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+			&mockNodeDetector{}, &mockSegmentDetector{
+				initSegments: segmentEvents,
+				evtCh:        evtCh,
+			}, buildMockQueryNode)
+		defer sc.Close()
+
+		sc.SyncSegments([]*querypb.ReplicaSegmentsInfo{
+			{
+				NodeId:     1,
+				SegmentIds: []int64{1},
+			},
+			{
+				NodeId:     2,
+				SegmentIds: []int64{2},
+			},
+			{
+				NodeId:     3,
+				SegmentIds: []int64{3},
+			},
+		}, segmentStateLoaded)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(1)
+			return has && seg.nodeID == 1 && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(2)
+			return has && seg.nodeID == 2 && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(3)
+			return has && seg.nodeID == 3 && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+
+	})
+
+	t.Run("sync existing segments", func(t *testing.T) {
+		segmentEvents := []segmentEvent{
+			{
+				segmentID: 1,
+				nodeID:    1,
+				state:     segmentStateOffline,
+			},
+			{
+				segmentID: 2,
+				nodeID:    2,
+				state:     segmentStateOffline,
+			},
+			{
+				segmentID: 3,
+				nodeID:    3,
+				state:     segmentStateOffline,
+			},
+		}
+
+		evtCh := make(chan segmentEvent, 10)
+		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+			&mockNodeDetector{}, &mockSegmentDetector{
+				initSegments: segmentEvents,
+				evtCh:        evtCh,
+			}, buildMockQueryNode)
+		defer sc.Close()
+
+		sc.SyncSegments([]*querypb.ReplicaSegmentsInfo{
+			{
+				NodeId:     1,
+				SegmentIds: []int64{1},
+			},
+			{
+				NodeId:     2,
+				SegmentIds: []int64{2},
+			},
+			{
+				NodeId:     3,
+				SegmentIds: []int64{3},
+			},
+		}, segmentStateLoaded)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(1)
+			return has && seg.nodeID == 1 && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(2)
+			return has && seg.nodeID == 2 && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(3)
+			return has && seg.nodeID == 3 && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+	})
+
+}
+
 func TestShardCluster_Search(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"

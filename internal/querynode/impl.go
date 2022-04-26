@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -669,6 +670,31 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 	log.Debug("Query Shard Done", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 
 	return results, nil
+}
+
+// SyncReplicaSegments syncs replica node & segments states
+func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
+	if !node.isHealthy() {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+		}, nil
+	}
+
+	log.Debug("Received SyncReplicaSegments request", zap.String("vchannelName", req.GetVchannelName()))
+
+	err := node.ShardClusterService.SyncReplicaSegments(req.GetVchannelName(), req.GetReplicaSegments())
+	if err != nil {
+		log.Warn("failed to sync replica semgents,", zap.String("vchannel", req.GetVchannelName()), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug("SyncReplicaSegments Done", zap.String("vchannel", req.GetVchannelName()))
+
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...

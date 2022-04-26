@@ -50,6 +50,7 @@ service QueryNode {
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
   rpc ReleaseSegments(ReleaseSegmentsRequest) returns (common.Status) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+  rpc SyncReplicaSegments(SyncReplicaSegmentsRequest) returns (common.Status) {}
 
   rpc Search(SearchRequest) returns (internal.SearchResults) {}
   rpc Query(QueryRequest) returns (internal.RetrieveResults) {}
@@ -270,6 +271,18 @@ message QueryRequest {
   internal.RetrieveRequest req = 1;
   string dml_channel = 2;
   repeated int64 segmentIDs = 3;
+}
+
+message SyncReplicaSegmentsRequest {
+  common.MsgBase base = 1;
+  string vchannel_name = 2;
+  repeated ReplicaSegmentsInfo replica_segments = 3;
+}
+
+message ReplicaSegmentsInfo {
+  int64 node_id = 1;
+  int64 partition_id = 2;
+  repeated int64 segment_ids = 3;
 }
 
 //----------------request auto triggered by QueryCoord-----------------
