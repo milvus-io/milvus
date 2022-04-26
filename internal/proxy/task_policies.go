@@ -52,7 +52,9 @@ func roundRobinPolicy(ctx context.Context, getQueryNodePolicy getQueryNodePolicy
 	for err != nil && current < replicaNum {
 		currentID := leaders.GetNodeIds()[current]
 		if err != errBegin {
-			log.Warn("retry with another QueryNode", zap.String("leader", leaders.GetChannelName()), zap.Int64("nodeID", currentID))
+			log.Warn("retry with another QueryNode",
+				zap.Int("retries numbers", current),
+				zap.String("leader", leaders.GetChannelName()), zap.Int64("nodeID", currentID))
 		}
 
 		qn, err = getQueryNodePolicy(ctx, leaders.GetNodeAddrs()[current])
