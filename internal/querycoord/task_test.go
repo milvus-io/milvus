@@ -925,7 +925,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("Test LoadBalanceByNode", func(t *testing.T) {
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+		baseTask := newBaseTask(ctx, querypb.TriggerCondition_NodeDown)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask: baseTask,
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -934,6 +934,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 				},
 				SourceNodeIDs: []int64{node1.queryNodeID},
 				CollectionID:  defaultCollectionID,
+				BalanceReason: querypb.TriggerCondition_NodeDown,
 			},
 			broker:  queryCoord.broker,
 			cluster: queryCoord.cluster,
@@ -942,6 +943,7 @@ func TestLoadBalanceSegmentsTask(t *testing.T) {
 		err = queryCoord.scheduler.Enqueue(loadBalanceTask)
 		assert.Nil(t, err)
 		waitTaskFinalState(loadBalanceTask, taskExpired)
+		assert.Equal(t, commonpb.ErrorCode_Success, loadBalanceTask.result.ErrorCode)
 	})
 
 	t.Run("Test LoadBalanceWithEmptySourceNode", func(t *testing.T) {
