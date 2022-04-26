@@ -3,7 +3,7 @@ filters:
     reviewers:
       - czs007
       - jeffoverflow
-      - scsven
+      - wxyucs
       - shengjun1985
       - sunby
       - xiaofan-luan
@@ -24,7 +24,7 @@ filters:
   # markdown files should be reviewed by authors
   "*\\.md$":
     required_reviewers:
-      - scsven
+      - wxyucs
       - XuanYang-cn
       - xiaofan-luan
     approvers:
