@@ -486,7 +486,6 @@ func (mgr *channelsMgrImpl) getVChannels(collectionID UniqueID) ([]vChan, error)
 }
 
 func (mgr *channelsMgrImpl) createDQLStream(collectionID UniqueID) error {
-	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "query").Inc()
 	return mgr.dqlChannelsMgr.createMsgStream(collectionID)
 }
 
@@ -495,7 +494,6 @@ func (mgr *channelsMgrImpl) getDQLStream(collectionID UniqueID) (msgstream.MsgSt
 }
 
 func (mgr *channelsMgrImpl) removeDQLStream(collectionID UniqueID) error {
-	metrics.ProxyMsgStreamObjectsForSearch.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "query").Dec()
 	return mgr.dqlChannelsMgr.removeStream(collectionID)
 }
 

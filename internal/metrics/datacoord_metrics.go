@@ -37,18 +37,18 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "num_datanodes",
-			Help:      "Number of data nodes managed by DataCoord",
+			Name:      "datanode_num",
+			Help:      "number of data nodes",
 		}, []string{})
 
 	DataCoordNumSegments = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "num_segments",
+			Name:      "segment_num",
 			Help:      "number of segments",
 		}, []string{
-			segmentTypeLabelName,
+			segmentStateLabelName,
 		})
 
 	//DataCoordCollectionNum records the num of collections managed by DataCoord.
@@ -56,25 +56,25 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "num_collections",
-			Help:      "Number of collections",
+			Name:      "collection_num",
+			Help:      "number of collections",
 		}, []string{})
 
 	DataCoordNumStoredRows = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "num_stored_rows",
+			Name:      "stored_rows_num",
 			Help:      "number of stored rows",
 		}, []string{})
 
-	DataCoordSyncUTC = prometheus.NewGaugeVec(
+	DataCoordSyncEpoch = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "sync_utc_time",
-			Help:      "sync timestamp",
-		}, []string{})
+			Name:      "sync_epoch_time",
+			Help:      "synchronized unix epoch per physical channel",
+		}, []string{channelNameLabelName})
 
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
@@ -129,5 +129,5 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumSegments)
 	registry.MustRegister(DataCoordNumCollections)
 	registry.MustRegister(DataCoordNumStoredRows)
-	registry.MustRegister(DataCoordSyncUTC)
+	registry.MustRegister(DataCoordSyncEpoch)
 }

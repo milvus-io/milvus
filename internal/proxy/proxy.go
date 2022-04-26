@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -283,7 +284,8 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 
 				maxTs := ts
 				for channel, ts := range stats {
-					metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), channel).Set(float64(ts))
+					physicalTs, _ := tsoutil.ParseHybridTs(ts)
+					metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), channel).Set(float64(physicalTs))
 					channels = append(channels, channel)
 					tss = append(tss, ts)
 					if ts > maxTs {
@@ -302,9 +304,8 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					Timestamps:       tss,
 					DefaultTimestamp: maxTs,
 				}
-
-				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "DefaultTimestamp").Set(float64(maxTs))
-
+				maxPhysicalTs, _ := tsoutil.ParseHybridTs(maxTs)
+				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "default").Set(float64(maxPhysicalTs))
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))

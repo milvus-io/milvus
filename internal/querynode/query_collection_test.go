@@ -17,9 +17,7 @@
 package querynode
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"math"
 	"math/rand"
 	"sync"
@@ -43,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func genSimpleQueryCollection(ctx context.Context, cancel context.CancelFunc) (*queryCollection, error) {
@@ -322,153 +319,6 @@ func TestQueryCollection_consumeQuery(t *testing.T) {
 		assert.NoError(t, err)
 		msg.TimeoutTimestamp = tsoutil.GetCurrentTime() - Timestamp(time.Second<<18)
 		runConsumeQuery(msg)
-	})
-}
-
-func TestQueryCollection_TranslateHits(t *testing.T) {
-	fieldID := FieldID(0)
-	fieldIDs := []FieldID{fieldID}
-
-	genRawHits := func(dataType schemapb.DataType) [][]byte {
-		// ids
-		ids := make([]int64, 0)
-		for i := 0; i < defaultMsgLength; i++ {
-			ids = append(ids, int64(i))
-		}
-
-		// raw data
-		rawData := make([][]byte, 0)
-		switch dataType {
-		case schemapb.DataType_Bool:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, true)
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int8:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int8(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int16:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int16(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int32:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int32(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Int64:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, int64(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Float:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, float32(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		case schemapb.DataType_Double:
-			var buf bytes.Buffer
-			for i := 0; i < defaultMsgLength; i++ {
-				err := binary.Write(&buf, common.Endian, float64(i))
-				assert.NoError(t, err)
-			}
-			rawData = append(rawData, buf.Bytes())
-		}
-		hit := &milvuspb.Hits{
-			IDs:     ids,
-			RowData: rawData,
-		}
-		hits := []*milvuspb.Hits{hit}
-		rawHits := make([][]byte, 0)
-		for _, h := range hits {
-			rawHit, err := proto.Marshal(h)
-			assert.NoError(t, err)
-			rawHits = append(rawHits, rawHit)
-		}
-		return rawHits
-	}
-
-	genSchema := func(dataType schemapb.DataType) *typeutil.SchemaHelper {
-		schema := &schemapb.CollectionSchema{
-			Name:   defaultCollectionName,
-			AutoID: true,
-			Fields: []*schemapb.FieldSchema{
-				genConstantField(constFieldParam{
-					id:       fieldID,
-					dataType: dataType,
-				}),
-			},
-		}
-		schemaHelper, err := typeutil.CreateSchemaHelper(schema)
-		assert.NoError(t, err)
-		return schemaHelper
-	}
-
-	t.Run("test bool field", func(t *testing.T) {
-		dataType := schemapb.DataType_Bool
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int8 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int8
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int16 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int16
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int32 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int32
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test int64 field", func(t *testing.T) {
-		dataType := schemapb.DataType_Int64
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test float field", func(t *testing.T) {
-		dataType := schemapb.DataType_Float
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test double field", func(t *testing.T) {
-		dataType := schemapb.DataType_Double
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.NoError(t, err)
-	})
-
-	t.Run("test field with error type", func(t *testing.T) {
-		dataType := schemapb.DataType_FloatVector
-		_, err := translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.Error(t, err)
-
-		dataType = schemapb.DataType_BinaryVector
-		_, err = translateHits(genSchema(dataType), fieldIDs, genRawHits(dataType))
-		assert.Error(t, err)
 	})
 }
 

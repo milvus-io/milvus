@@ -26,25 +26,25 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
-			Name:      "index_task_counter",
-			Help:      "The number of tasks that index node received",
+			Name:      "index_task_count",
+			Help:      "number of tasks that index node received",
 		}, []string{nodeIDLabelName, statusLabelName})
 
-	IndexNodeLoadBinlogLatency = prometheus.NewHistogramVec(
+	IndexNodeLoadFieldLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
-			Name:      "load_segment_latency",
-			Help:      "The latency of loading the segment",
+			Name:      "load_field_latency",
+			Help:      "latency of loading the field data",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
 
-	IndexNodeDecodeBinlogLatency = prometheus.NewHistogramVec(
+	IndexNodeDecodeFieldLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
-			Name:      "decode_binlog_latency",
-			Help:      "The latency of decode the binlog",
+			Name:      "decode_field_latency",
+			Help:      "latency of decode field data",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
 
@@ -52,8 +52,8 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
-			Name:      "knowhere_build_index_latency",
-			Help:      "The latency of knowhere building the index",
+			Name:      "build_index_latency",
+			Help:      "latency of building the index by knowhere",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
 
@@ -61,8 +61,8 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
-			Name:      "encode_index_file_latency",
-			Help:      "The latency of encoding the index file",
+			Name:      "encode_index_latency",
+			Help:      "latency of encoding the index file",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
 
@@ -70,8 +70,8 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexNodeRole,
-			Name:      "save_index_file_latency",
-			Help:      "The latency of saving the index file",
+			Name:      "save_index_latency",
+			Help:      "latency of saving the index file",
 			Buckets:   buckets,
 		}, []string{nodeIDLabelName})
 )
@@ -79,8 +79,8 @@ var (
 //RegisterIndexNode registers IndexNode metrics
 func RegisterIndexNode(registry *prometheus.Registry) {
 	registry.MustRegister(IndexNodeBuildIndexTaskCounter)
-	registry.MustRegister(IndexNodeLoadBinlogLatency)
-	registry.MustRegister(IndexNodeDecodeBinlogLatency)
+	registry.MustRegister(IndexNodeLoadFieldLatency)
+	registry.MustRegister(IndexNodeDecodeFieldLatency)
 	registry.MustRegister(IndexNodeKnowhereBuildIndexLatency)
 	registry.MustRegister(IndexNodeEncodeIndexFileLatency)
 	registry.MustRegister(IndexNodeSaveIndexFileLatency)

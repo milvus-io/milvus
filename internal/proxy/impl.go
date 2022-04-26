@@ -2176,6 +2176,11 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	method := "Insert"
 	tr := timerecord.NewTimeRecorder(method)
 
+	defer func() {
+		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.TotalLabel).Inc()
+	}()
+
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -2236,7 +2241,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
 		log.Debug("Failed to enqueue insert task: " + err.Error())
-		metrics.ProxyInsertCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.AbandonLabel).Inc()
+		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.AbandonLabel).Inc()
 		return constructFailedResponse(err), nil
 	}
 
@@ -2253,9 +2259,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	if err := it.WaitToFinish(); err != nil {
 		log.Debug("Failed to execute insert task in task scheduler: "+err.Error(), zap.String("traceID", traceID))
-		metrics.ProxyInsertCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-			metrics.TotalLabel).Inc()
-		metrics.ProxyInsertCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 		return constructFailedResponse(err), nil
 	}
@@ -2276,10 +2280,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	// InsertCnt always equals to the number of entities in the request
 	it.result.InsertCnt = int64(request.NumRows)
 
-	metrics.ProxyInsertCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	metrics.ProxyInsertVectors.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(it.result.InsertCnt))
-	metrics.ProxyInsertLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return it.result, nil
 }
 
@@ -2300,6 +2304,8 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	method := "Delete"
 	tr := timerecord.NewTimeRecorder(method)
 
+	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+		metrics.TotalLabel).Inc()
 	dt := &deleteTask{
 		ctx:        ctx,
 		Condition:  NewTaskCondition(ctx),
@@ -2369,10 +2375,8 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	}
 
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
-		metrics.TotalLabel).Inc()
-	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
-	metrics.ProxyDMLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dt.result, nil
 }
 
@@ -2385,6 +2389,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	}
 	method := "Search"
 	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+		metrics.TotalLabel).Inc()
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
 	defer sp.Finish()
@@ -2439,8 +2445,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			zap.Uint64("travel_timestamp", travelTs),
 			zap.Uint64("guarantee_timestamp", guaranteeTs))
 
-		metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-			metrics.SearchLabel, metrics.AbandonLabel).Inc()
+		metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.AbandonLabel).Inc()
 
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
@@ -2482,11 +2488,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			zap.Any("search_params", request.SearchParams),
 			zap.Uint64("travel_timestamp", travelTs),
 			zap.Uint64("guarantee_timestamp", guaranteeTs))
-		metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-			metrics.SearchLabel, metrics.TotalLabel).Inc()
 
-		metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-			metrics.SearchLabel, metrics.FailLabel).Inc()
+		metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
 
 		return &milvuspb.SearchResults{
 			Status: &commonpb.Status{
@@ -2511,16 +2515,13 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Uint64("travel_timestamp", travelTs),
 		zap.Uint64("guarantee_timestamp", guaranteeTs))
 
-	metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-		metrics.SearchLabel, metrics.TotalLabel).Inc()
-	metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-		metrics.SearchLabel, metrics.SuccessLabel).Inc()
-	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-		metrics.SearchLabel).Set(float64(qt.result.GetResults().GetNumQueries()))
+	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+		metrics.SuccessLabel).Inc()
+
+	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(qt.result.GetResults().GetNumQueries()))
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySearchLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
 		metrics.SearchLabel).Observe(float64(searchDur))
-	metrics.ProxySearchLatencyPerNQ.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(searchDur) / float64(qt.result.GetResults().GetNumQueries()))
 	return qt.result, nil
 }
 
@@ -2649,6 +2650,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	method := "Query"
 
+	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+		metrics.TotalLabel).Inc()
+
 	log.Debug(
 		rpcReceived(method),
 		zap.String("traceID", traceID),
@@ -2667,8 +2671,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames))
 
-		metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-			metrics.QueryLabel, metrics.FailLabel).Inc()
+		metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
+
 		return &milvuspb.QueryResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -2701,10 +2706,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			zap.String("collection", request.CollectionName),
 			zap.Any("partitions", request.PartitionNames))
 
-		metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-			metrics.QueryLabel, metrics.TotalLabel).Inc()
-		metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-			metrics.QueryLabel, metrics.FailLabel).Inc()
+		metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
 
 		return &milvuspb.QueryResults{
 			Status: &commonpb.Status{
@@ -2725,13 +2728,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
 
-	metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-		metrics.QueryLabel, metrics.TotalLabel).Inc()
-	metrics.ProxySearchCount.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-		metrics.QueryLabel, metrics.SuccessLabel).Inc()
-	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
-		metrics.QueryLabel).Set(float64(len(qt.result.FieldsData)))
-	metrics.ProxySendMessageLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+		metrics.SuccessLabel).Inc()
+
+	metrics.ProxySearchLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.QueryResults{
 		Status:     qt.result.Status,

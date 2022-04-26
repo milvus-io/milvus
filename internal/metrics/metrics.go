@@ -70,8 +70,10 @@ const (
 	channelNameLabelName     = "channel_name"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
-	segmentTypeLabelName     = "segment_type"
+	segmentStateLabelName    = "segment_state"
 	usernameLabelName        = "username"
+	cacheNameLabelName       = "cache_name"
+	cacheStateLabelName      = "cache_state"
 )
 
 var (

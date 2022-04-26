@@ -378,16 +378,14 @@ func (it *IndexBuildTask) loadFieldData(ctx context.Context) (storage.FieldID, s
 	loadVectorDuration := it.tr.RecordSpan()
 	log.Debug("IndexNode load data success", zap.Int64("buildId", it.req.IndexBuildID))
 	it.tr.Record("load field data done")
+	metrics.IndexNodeLoadFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(loadVectorDuration))
 
 	var insertCodec storage.InsertCodec
 	collectionID, partitionID, segmentID, insertData, err2 := insertCodec.DeserializeAll(blobs)
 	if err2 != nil {
 		return storage.InvalidUniqueID, nil, err2
 	}
-
-	// TODO: @xiaocai2333 metrics.IndexNodeLoadBinlogLatency should be added above, put here to get segmentID.
-	metrics.IndexNodeLoadBinlogLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(loadVectorDuration))
-	metrics.IndexNodeDecodeBinlogLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan()))
+	metrics.IndexNodeDecodeFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan()))
 
 	if len(insertData.Data) != 1 {
 		return storage.InvalidUniqueID, nil, errors.New("we expect only one field in deserialized insert data")

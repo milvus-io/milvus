@@ -481,7 +481,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	defer sp.Finish()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
-	defer tr.Elapse("done")
+	defer tr.Elapse("insert execute done")
 
 	collectionName := it.CollectionName
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
@@ -539,16 +539,14 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	}
 	log.Debug("assign segmentID for insert data success", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.String("collection name", it.CollectionName))
 	tr.Record("assign segment id")
-
-	tr.Record("sendInsertMsg")
 	err = stream.Produce(msgPack)
 	if err != nil {
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
-	sendMsgDur := tr.Record("send insert request to message stream")
-	metrics.ProxySendInsertReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(sendMsgDur.Milliseconds()))
+	sendMsgDur := tr.Record("send insert request to dml channel")
+	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
 
 	log.Debug("Proxy Insert Execute done", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName))
 
@@ -3193,6 +3191,8 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(dt.ctx, "Proxy-Delete-Execute")
 	defer sp.Finish()
 
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
+
 	collID := dt.DeleteRequest.CollectionID
 	stream, err := dt.chMgr.getDMLStream(collID)
 	if err != nil {
@@ -3220,6 +3220,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	}
 	dt.HashValues = typeutil.HashPK2Channels(dt.result.IDs, channelNames)
 
+	tr.Record("get vchannels")
 	// repack delete msg by dmChannel
 	result := make(map[uint32]msgstream.TsMsg)
 	collectionName := dt.CollectionName
@@ -3270,12 +3271,16 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 
+	tr.Record("pack messages")
 	err = stream.Produce(msgPack)
 	if err != nil {
 		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		dt.result.Status.Reason = err.Error()
 		return err
 	}
+	sendMsgDur := tr.Record("send delete request to dml channels")
+	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.DeleteLabel).Observe(float64(sendMsgDur.Milliseconds()))
+
 	return nil
 }
 

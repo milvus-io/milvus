@@ -367,8 +367,9 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 		return err
 	}
 
+	physicalTs, _ := tsoutil.ParseHybridTs(ts)
 	for _, chanName := range chanNames {
-		metrics.RootCoordInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(tsoutil.Mod24H(ts)))
+		metrics.RootCoordInsertChannelTimeTick.WithLabelValues(chanName).Set(float64(physicalTs))
 	}
 	return nil
 }
