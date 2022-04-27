@@ -340,11 +340,23 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 
 	}
 	if allDone {
-		err := lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_LoadCollection)
+		err := syncReplicaSegments(lct.ctx, lct.cluster, childTasks)
+		if err != nil {
+			log.Error("loadCollectionTask: failed to sync replica segments to shard leader",
+				zap.Int64("taskID", lct.getTaskID()),
+				zap.Int64("collectionID", collectionID),
+				zap.Error(err))
+			lct.setResultInfo(err)
+			return
+		}
+
+		err = lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_LoadCollection)
 		if err != nil {
 			log.Error("loadCollectionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID))
 			lct.setResultInfo(err)
+			return
 		}
+
 		lct.once.Do(func() {
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lct.elapseSpan().Milliseconds()))
@@ -781,11 +793,22 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 		}
 	}
 	if allDone {
+		err := syncReplicaSegments(lpt.ctx, lpt.cluster, childTasks)
+		if err != nil {
+			log.Error("loadPartitionTask: failed to sync replica segments to shard leader",
+				zap.Int64("taskID", lpt.getTaskID()),
+				zap.Int64("collectionID", collectionID),
+				zap.Error(err))
+			lpt.setResultInfo(err)
+			return
+		}
+
 		for _, id := range partitionIDs {
 			err := lpt.meta.setLoadPercentage(collectionID, id, 100, querypb.LoadType_LoadPartition)
 			if err != nil {
 				log.Error("loadPartitionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", id))
 				lpt.setResultInfo(err)
+				return
 			}
 		}
 		lpt.once.Do(func() {
@@ -2198,6 +2221,13 @@ func (lbt *loadBalanceTask) getReplica(nodeID, collectionID int64) (*milvuspb.Re
 }
 
 func (lbt *loadBalanceTask) postExecute(context.Context) error {
+	err := syncReplicaSegments(lbt.ctx, lbt.cluster, lbt.getChildTask())
+	if err != nil {
+		log.Error("loadBalanceTask: failed to sync replica segments to shard leaders",
+			zap.Int64("taskID", lbt.getTaskID()),
+			zap.Error(err))
+	}
+
 	if lbt.getResultInfo().ErrorCode != commonpb.ErrorCode_Success {
 		lbt.clearChildTasks()
 	}

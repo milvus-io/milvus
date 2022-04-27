@@ -64,6 +64,7 @@ type Cluster interface {
 	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
 	getSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
 	getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error)
+	syncReplicaSegments(ctx context.Context, leaderID UniqueID, in *querypb.SyncReplicaSegmentsRequest) error
 
 	registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error
 	getNodeInfoByID(nodeID int64) (Node, error)
@@ -492,6 +493,17 @@ func (c *queryNodeCluster) getSegmentInfoByNode(ctx context.Context, nodeID int6
 		return nil, err
 	}
 	return res.GetInfos(), nil
+}
+
+func (c *queryNodeCluster) syncReplicaSegments(ctx context.Context, leaderID UniqueID, in *querypb.SyncReplicaSegmentsRequest) error {
+	c.RLock()
+	leader, ok := c.nodes[leaderID]
+	c.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("syncReplicaSegments: can't find leader query node, leaderID = %d", leaderID)
+	}
+	return leader.syncReplicaSegments(ctx, in)
 }
 
 type queryNodeGetMetricsResponse struct {

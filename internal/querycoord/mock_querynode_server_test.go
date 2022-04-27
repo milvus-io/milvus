@@ -271,6 +271,12 @@ func (qs *queryNodeServerMock) GetSegmentInfo(ctx context.Context, req *querypb.
 	return res, err
 }
 
+func (qs *queryNodeServerMock) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 func (qs *queryNodeServerMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	response, err := qs.getMetrics()
 	if err != nil {
