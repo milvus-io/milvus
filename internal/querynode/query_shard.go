@@ -466,9 +466,7 @@ func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchReques
 		log.Debug("reduceSearchResultData",
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK),
-			zap.String("ids", sData.Ids.String()),
-			zap.Any("len(FieldsData)", len(sData.FieldsData)))
+			zap.Int64("topk", sData.TopK))
 	}
 
 	reducedResultData, err := reduceSearchResultData(searchResultData, queryNum, plan.getTopK(), plan.getMetricType())
@@ -486,8 +484,7 @@ func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchReques
 			zap.String("shard", q.channel))
 	} else {
 		log.Debug("shard leader send non-nil results to proxy",
-			zap.String("shard", q.channel),
-			zap.String("ids", reducedResultData.Ids.String()))
+			zap.String("shard", q.channel))
 		// printSearchResultData(reducedResultData, q.channel)
 	}
 	return searchResults, nil
