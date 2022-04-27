@@ -138,6 +138,17 @@ func TestQueryShard_Query(t *testing.T) {
 		assert.ElementsMatch(t, resp.Ids.GetIntId().Data, []int64{1, 2, 3})
 	})
 
+	t.Run("query follower with wrong segment", func(t *testing.T) {
+		request := &querypb.QueryRequest{
+			Req:        req,
+			DmlChannel: "",
+			SegmentIDs: []int64{defaultSegmentID + 1},
+		}
+
+		_, err := qs.query(context.Background(), request)
+		assert.Error(t, err)
+	})
+
 	t.Run("query leader", func(t *testing.T) {
 		request := &querypb.QueryRequest{
 			Req:        req,

@@ -844,7 +844,13 @@ func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*int
 	// hold request until guarantee timestamp >= service timestamp
 	guaranteeTs := req.GetReq().GetGuaranteeTimestamp()
 	q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDelta)
-	// shard follower considers solely historical segments
+
+	// validate segmentIDs in request
+	err = q.historical.validateSegmentIDs(segmentIDs, collectionID, partitionIDs)
+	if err != nil {
+		log.Warn("segmentIDs in query request fails validation", zap.Int64s("segmentIDs", segmentIDs))
+		return nil, err
+	}
 	retrieveResults, err := q.historical.retrieveBySegmentIDs(collectionID, segmentIDs, q.vectorChunkManager, plan)
 	if err != nil {
 		return nil, err
