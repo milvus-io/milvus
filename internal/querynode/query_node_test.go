@@ -251,11 +251,8 @@ func TestQueryNode_Start(t *testing.T) {
 }
 
 func TestQueryNode_register(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
+	node := newQueryNodeMock()
+	assert.NotNil(t, node)
 
 	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
