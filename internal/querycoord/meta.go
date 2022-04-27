@@ -1343,3 +1343,22 @@ func removeCollectionMeta(collectionID UniqueID, replicas []UniqueID, kv kv.Meta
 
 	return kv.MultiRemoveWithPrefix(prefixes)
 }
+
+func getShardNodes(collectionID UniqueID, meta Meta) map[string]map[UniqueID]struct{} {
+	shardNodes := make(map[string]map[UniqueID]struct{})
+	segments := meta.showSegmentInfos(collectionID, nil)
+	for _, segment := range segments {
+		nodes, ok := shardNodes[segment.DmChannel]
+		if !ok {
+			nodes = make(map[UniqueID]struct{})
+		}
+
+		for _, nodeID := range segment.NodeIds {
+			nodes[nodeID] = struct{}{}
+		}
+
+		shardNodes[segment.DmChannel] = nodes
+	}
+
+	return shardNodes
+}

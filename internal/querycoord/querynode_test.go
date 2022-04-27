@@ -69,8 +69,8 @@ func waitAllQueryNodeOffline(cluster Cluster, nodeIDs []int64) bool {
 	for {
 		allOffline := true
 		for _, nodeID := range nodeIDs {
-			nodeExist := cluster.hasNode(nodeID)
-			if nodeExist {
+			isOnline, err := cluster.isOnline(nodeID)
+			if err == nil && isOnline {
 				allOffline = false
 				break
 			}
