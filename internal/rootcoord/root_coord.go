@@ -1476,7 +1476,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 		}, nil
 	}
 	log.Debug("HasCollection success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID))
+		zap.String("collection name", in.CollectionName), zap.Int64("msgID", in.Base.MsgID), zap.Bool("hasCollection", t.HasCollection))
 
 	metrics.RootCoordHasCollectionCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReadTypeLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
