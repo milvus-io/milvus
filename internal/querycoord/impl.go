@@ -1055,20 +1055,7 @@ func (qc *QueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicas
 	}
 
 	if req.WithShardNodes {
-		shardNodes := make(map[string]map[UniqueID]struct{})
-		segments := qc.meta.showSegmentInfos(req.CollectionID, nil)
-		for _, segment := range segments {
-			nodes, ok := shardNodes[segment.DmChannel]
-			if !ok {
-				nodes = make(map[UniqueID]struct{})
-			}
-
-			for _, nodeID := range segment.NodeIds {
-				nodes[nodeID] = struct{}{}
-			}
-
-			shardNodes[segment.DmChannel] = nodes
-		}
+		shardNodes := getShardNodes(req.CollectionID, qc.meta)
 
 		for _, replica := range replicas {
 			for _, shard := range replica.ShardReplicas {
@@ -1131,6 +1118,7 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 	}
 
 	shards := make(map[string]*querypb.ShardLeadersList)
+	shardNodes := getShardNodes(req.CollectionID, qc.meta)
 	for _, replica := range replicas {
 		for _, shard := range replica.ShardReplicas {
 			list, ok := shards[shard.DmChannelName]
@@ -1142,9 +1130,32 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 				}
 			}
 
-			list.NodeIds = append(list.NodeIds, shard.LeaderID)
-			list.NodeAddrs = append(list.NodeAddrs, shard.LeaderAddr)
-			shards[shard.DmChannelName] = list
+			isShardAvailable, err := qc.cluster.isOnline(shard.LeaderID)
+			if err != nil || !isShardAvailable {
+				log.Warn("shard leader is unavailable",
+					zap.Int64("collectionID", replica.CollectionID),
+					zap.Int64("replicaID", replica.ReplicaID),
+					zap.String("DmChannel", shard.DmChannelName),
+					zap.Int64("shardLeaderID", shard.LeaderID),
+					zap.Error(err))
+				continue
+			}
+
+			nodes := shardNodes[shard.DmChannelName]
+			for _, nodeID := range replica.NodeIds {
+				if _, ok := nodes[nodeID]; ok {
+					if ok, err := qc.cluster.isOnline(nodeID); err != nil || !ok {
+						isShardAvailable = false
+						break
+					}
+				}
+			}
+
+			if isShardAvailable {
+				list.NodeIds = append(list.NodeIds, shard.LeaderID)
+				list.NodeAddrs = append(list.NodeAddrs, shard.LeaderAddr)
+				shards[shard.DmChannelName] = list
+			}
 		}
 	}
 
