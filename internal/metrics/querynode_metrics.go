@@ -27,8 +27,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_collections",
-			Help:      "Number of collections in QueryNode.",
+			Name:      "collection_num",
+			Help:      "number of collections loaded",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -37,8 +37,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_partitions",
-			Help:      "Number of partitions per collection in QueryNode.",
+			Name:      "partition_num",
+			Help:      "number of partitions loaded",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -47,8 +47,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_segments",
-			Help:      "Number of segments per collection in QueryNode.",
+			Name:      "segment_num",
+			Help:      "number of segments loaded",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -57,8 +57,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_dml_channels",
-			Help:      "Number of dmlChannels per collection in QueryNode.",
+			Name:      "dml_vchannel_num",
+			Help:      "number of dmlChannels watched",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -67,8 +67,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_delta_channels",
-			Help:      "Number of deltaChannels per collection in QueryNode.",
+			Name:      "delta_vchannel_num",
+			Help:      "number of deltaChannels watched",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -77,8 +77,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_consumers",
-			Help:      "Number of consumers per collection in QueryNode.",
+			Name:      "consumer_num",
+			Help:      "number of consumers",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -87,8 +87,8 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "sq_count",
-			Help:      "Search and query requests statistic in QueryNode.",
+			Name:      "sq_req_count",
+			Help:      "count of search / query request",
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
@@ -99,8 +99,8 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "sq_latency",
-			Help:      "Search and query requests latency in QueryNode.",
+			Name:      "sq_req_latency",
+			Help:      "latency of Search or query requests",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
@@ -111,8 +111,8 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "sq_latency_in_queue",
-			Help:      "The search and query latency in queue(unsolved buffer) in QueryNode.",
+			Name:      "sq_queue_lantency",
+			Help:      "latency of search or query in queue",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
@@ -123,77 +123,68 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "sq_latency_per_segment",
-			Help:      "The search and query on segments(sealed/growing segments).",
+			Name:      "sq_segment_latency",
+			Help:      "latency of search or query per segment",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
-			segmentTypeLabelName,
+			segmentStateLabelName,
 		})
 
 	QueryNodeSQSegmentLatencyInCore = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "sq_latency_in_core",
-			Help:      "The search and query latency in core.",
+			Name:      "sq_core_latency",
+			Help:      "latency of search or query latency in segcore",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
 		})
 
-	QueryNodeTranslateHitsLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "translate_hits_latency",
-			Help:      "The search and query latency in translate hits.",
-			Buckets:   buckets,
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	QueryNodeReduceLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "reduce_latency",
-			Help:      "The search and query latency in reduce(local reduce) in QueryNode.",
+			Name:      "sq_reduce_latency",
+			Help:      "latency of reduce search or query result",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
-			segmentTypeLabelName,
+			queryTypeLabelName,
 		})
 
 	QueryNodeLoadSegmentLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "load_latency_per_segment",
-			Help:      "The load latency per segment in QueryNode.",
+			Name:      "load_segment_latency",
+			Help:      "latency of load per segment",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,
 		})
 
+	/* Todo reimplement in query_shard.go
 	QueryNodeServiceTime = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "service_time",
+			Name:      "sync_utc_time",
 			Help:      "ServiceTimes of collections in QueryNode.",
 		}, []string{
 			nodeIDLabelName,
 		})
+	*/
 
 	QueryNodeNumFlowGraphs = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "num_flow_graphs",
-			Help:      "Number of flow graphs in QueryNode.",
+			Name:      "flowgraph_num",
+			Help:      "number of flowgraphs",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -212,9 +203,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQLatencyInQueue)
 	registry.MustRegister(QueryNodeSQSegmentLatency)
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
-	registry.MustRegister(QueryNodeTranslateHitsLatency)
 	registry.MustRegister(QueryNodeReduceLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
-	registry.MustRegister(QueryNodeServiceTime)
+	//	registry.MustRegister(QueryNodeServiceTime)
 	registry.MustRegister(QueryNodeNumFlowGraphs)
 }

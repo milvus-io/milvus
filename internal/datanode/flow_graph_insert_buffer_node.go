@@ -247,6 +247,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		segmentID UniqueID
 		flushed   bool
 		dropped   bool
+		auto      bool
 	}
 
 	var (
@@ -296,9 +297,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 					segmentID: segToFlush,
 					flushed:   false,
 					dropped:   false,
+					auto:      true,
 				})
 
-				metrics.DataNodeAutoFlushSegmentCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
 			}
 		}
 
@@ -343,13 +344,22 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		err := ibNode.flushManager.flushBufferData(task.buffer, task.segmentID, task.flushed, task.dropped, endPositions[0])
 		if err != nil {
 			log.Warn("failed to invoke flushBufferData", zap.Error(err))
-			metrics.DataNodeFlushSegmentCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
+			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
+			if task.auto {
+				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
+			}
 		} else {
 			segmentsToFlush = append(segmentsToFlush, task.segmentID)
 			ibNode.insertBuffer.Delete(task.segmentID)
-			metrics.DataNodeFlushSegmentCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.SuccessLabel).Inc()
+			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.SuccessLabel).Inc()
+			if task.auto {
+				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
+			}
 		}
-		metrics.DataNodeFlushSegmentCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
+		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
+		if task.auto {
+			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
+		}
 	}
 
 	if err := ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, seg2Upload); err != nil {
@@ -521,7 +531,6 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 				continue
 			}
 			stats = append(stats, stat)
-			metrics.DataNodeSegmentRowsCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Add(float64(stat.NumRows))
 		}
 		msgPack := msgstream.MsgPack{}
 		timeTickMsg := msgstream.DataNodeTtMsg{

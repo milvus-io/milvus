@@ -23,13 +23,10 @@ import (
 	"math"
 	"sync"
 	"time"
-	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -37,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -333,8 +329,8 @@ func (q *queryCollection) setServiceableTime(t Timestamp) {
 		return
 	}
 	q.serviceableTime = t
-	ps, _ := tsoutil.ParseHybridTs(t)
-	metrics.QueryNodeServiceTime.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(ps))
+	//	ps, _ := tsoutil.ParseHybridTs(t)
+	//	metrics.QueryNodeServiceTime.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(ps))
 }
 
 func (q *queryCollection) checkTimeout(msg queryMsg) bool {
@@ -702,286 +698,6 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 			log.Debug("doUnsolvedMsg: do query done", zap.Int("num of query msg", len(unSolvedMsg)))
 		}
 	}
-}
-
-func translateHits(schema *typeutil.SchemaHelper, fieldIDs []int64, rawHits [][]byte) (*schemapb.SearchResultData, error) {
-	tr := timerecord.NewTimeRecorder("translateHitsDuration")
-	log.Debug("translateHits:", zap.Any("lenOfFieldIDs", len(fieldIDs)), zap.Any("lenOfRawHits", len(rawHits)))
-	if len(rawHits) == 0 {
-		return nil, fmt.Errorf("empty results")
-	}
-
-	var hits []*milvuspb.Hits
-	for _, rawHit := range rawHits {
-		var hit milvuspb.Hits
-		err := proto.Unmarshal(rawHit, &hit)
-		if err != nil {
-			return nil, err
-		}
-		hits = append(hits, &hit)
-	}
-
-	blobOffset := 0
-	// skip id
-	numQueries := len(rawHits)
-	pbHits := &milvuspb.Hits{}
-	err := proto.Unmarshal(rawHits[0], pbHits)
-	if err != nil {
-		return nil, err
-	}
-	topK := len(pbHits.IDs)
-
-	blobOffset += 8
-	var ids []int64
-	var scores []float32
-	for _, hit := range hits {
-		ids = append(ids, hit.IDs...)
-		scores = append(scores, hit.Scores...)
-	}
-
-	finalResult := &schemapb.SearchResultData{
-		Ids: &schemapb.IDs{
-			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{
-					Data: ids,
-				},
-			},
-		},
-		Scores:     scores,
-		TopK:       int64(topK),
-		NumQueries: int64(numQueries),
-	}
-
-	for _, fieldID := range fieldIDs {
-		fieldMeta, err := schema.GetFieldFromID(fieldID)
-		if err != nil {
-			return nil, err
-		}
-		switch fieldMeta.DataType {
-		case schemapb.DataType_Bool:
-			blobLen := 1
-			var colData []bool
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := dataBlob[0]
-					colData = append(colData, data != 0)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_BoolData{
-							BoolData: &schemapb.BoolArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_Int8:
-			blobLen := 1
-			var colData []int32
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int32(dataBlob[0])
-					colData = append(colData, data)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_IntData{
-							IntData: &schemapb.IntArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_Int16:
-			blobLen := 2
-			var colData []int32
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int32(int16(common.Endian.Uint16(dataBlob)))
-					colData = append(colData, data)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_IntData{
-							IntData: &schemapb.IntArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_Int32:
-			blobLen := 4
-			var colData []int32
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int32(common.Endian.Uint32(dataBlob))
-					colData = append(colData, data)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_IntData{
-							IntData: &schemapb.IntArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_Int64:
-			blobLen := 8
-			var colData []int64
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := int64(common.Endian.Uint64(dataBlob))
-					colData = append(colData, data)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_Float:
-			blobLen := 4
-			var colData []float32
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := math.Float32frombits(common.Endian.Uint32(dataBlob))
-					colData = append(colData, data)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_FloatData{
-							FloatData: &schemapb.FloatArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_Double:
-			blobLen := 8
-			var colData []float64
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					data := math.Float64frombits(common.Endian.Uint64(dataBlob))
-					colData = append(colData, data)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_DoubleData{
-							DoubleData: &schemapb.DoubleArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_FloatVector:
-			dim, err := schema.GetVectorDimFromID(fieldID)
-			if err != nil {
-				return nil, err
-			}
-			blobLen := dim * 4
-			var colData []float32
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					//ref https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
-					/* #nosec G103 */
-					ptr := unsafe.Pointer(&dataBlob[0])
-					farray := (*[1 << 28]float32)(ptr)
-					colData = append(colData, farray[:dim:dim]...)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{
-						Dim: int64(dim),
-						Data: &schemapb.VectorField_FloatVector{
-							FloatVector: &schemapb.FloatArray{
-								Data: colData,
-							},
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		case schemapb.DataType_BinaryVector:
-			dim, err := schema.GetVectorDimFromID(fieldID)
-			if err != nil {
-				return nil, err
-			}
-			blobLen := dim / 8
-			var colData []byte
-			for _, hit := range hits {
-				for _, row := range hit.RowData {
-					dataBlob := row[blobOffset : blobOffset+blobLen]
-					colData = append(colData, dataBlob...)
-				}
-			}
-			newCol := &schemapb.FieldData{
-				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{
-						Dim: int64(dim),
-						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: colData,
-						},
-					},
-				},
-			}
-			finalResult.FieldsData = append(finalResult.FieldsData, newCol)
-			blobOffset += blobLen
-		default:
-			return nil, fmt.Errorf("unsupported data type %s", schemapb.DataType_name[int32(fieldMeta.DataType)])
-		}
-	}
-
-	metrics.QueryNodeTranslateHitsLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return finalResult, nil
 }
 
 // TODO:: cache map[dsl]plan

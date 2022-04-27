@@ -412,7 +412,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		data:         kvs,
 	}, field2Insert, field2Stats, flushed, dropped, pos)
 
-	metrics.DataNodeFlushSegmentLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return nil
 }
 

@@ -27,8 +27,8 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexCoordRole,
-			Name:      "index_req_counter",
-			Help:      "The number of requests to build index",
+			Name:      "indexreq_count",
+			Help:      "number of building index requests ",
 		}, []string{statusLabelName})
 
 	// IndexCoordIndexTaskCounter records the number of index tasks of each type.
@@ -36,8 +36,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexCoordRole,
-			Name:      "index_task_counter",
-			Help:      "The number of index tasks of each type",
+			Name:      "indextask_count",
+			Help:      "number of index tasks of each type",
 		}, []string{indexTaskStatusLabelName})
 
 	// IndexCoordIndexNodeNum records the number of IndexNodes managed by IndexCoord.
@@ -45,8 +45,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.IndexCoordRole,
-			Name:      "index_node_num",
-			Help:      "The number of IndexNodes managed by IndexCoord",
+			Name:      "indexnode_num",
+			Help:      "number of IndexNodes managed by IndexCoord",
 		}, []string{})
 )
 

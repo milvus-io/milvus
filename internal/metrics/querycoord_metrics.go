@@ -27,24 +27,24 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "num_collections",
-			Help:      "Number of collections in QueryCoord.",
+			Name:      "collection_num",
+			Help:      "number of collections",
 		}, []string{})
 
 	QueryCoordNumEntities = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "num_entities",
-			Help:      "Number of entities in collection.",
+			Name:      "entitiy_num",
+			Help:      "number of entities",
 		}, []string{})
 
 	QueryCoordLoadCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "load_count",
-			Help:      "Load request statistic in QueryCoord.",
+			Name:      "load_req_count",
+			Help:      "count of load request",
 		}, []string{
 			statusLabelName,
 		})
@@ -53,8 +53,8 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "release_count",
-			Help:      "Release request statistic in QueryCoord.",
+			Name:      "release_req_count",
+			Help:      "count of release request",
 		}, []string{
 			statusLabelName,
 		})
@@ -64,7 +64,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "load_latency",
-			Help:      "Load request latency in QueryCoord",
+			Help:      "latency of load request",
 			Buckets:   buckets,
 		}, []string{})
 
@@ -73,7 +73,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "release_latency",
-			Help:      "Release request latency in QueryCoord",
+			Help:      "latency of release request",
 			Buckets:   []float64{0, 5, 10, 20, 40, 100, 200, 400, 1000, 10000},
 		}, []string{})
 
@@ -81,16 +81,16 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "num_child_tasks",
-			Help:      "Number of child tasks in QueryCoord.",
+			Name:      "child_task_num",
+			Help:      "number of child tasks in QueryCoord's queue",
 		}, []string{})
 
 	QueryCoordNumParentTasks = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "num_parent_tasks",
-			Help:      "Number of parent tasks in QueryCoord.",
+			Name:      "parent_task_num",
+			Help:      "number of parent tasks in QueryCoord's queue",
 		}, []string{})
 
 	QueryCoordChildTaskLatency = prometheus.NewHistogramVec(
@@ -98,7 +98,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "child_task_latency",
-			Help:      "Child tasks latency in QueryCoord.",
+			Help:      "latency of child tasks",
 			Buckets:   buckets,
 		}, []string{})
 
@@ -106,8 +106,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "num_querynodes",
-			Help:      "Number of QueryNodes in QueryCoord.",
+			Name:      "querynode_num",
+			Help:      "number of QueryNodes managered by QueryCoord",
 		}, []string{})
 )
 
