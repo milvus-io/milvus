@@ -335,3 +335,70 @@ func TestImportManager_AllocFail(t *testing.T) {
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn)
 	mgr.importJob(context.TODO(), rowReq, colID, 0)
 }
+
+func TestImportManager_ListAllTasks(t *testing.T) {
+	var countLock sync.RWMutex
+	var globalCount = typeutil.UniqueID(0)
+
+	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		countLock.Lock()
+		defer countLock.Unlock()
+		globalCount++
+		return globalCount, 0, nil
+	}
+
+	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	colID := int64(100)
+	mockKv := &kv.MockMetaKV{}
+	mockKv.InMemKv = make(map[string]string)
+
+	// reject some tasks so there are 3 tasks left in pending list
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}
+	}
+
+	rowReq := &milvuspb.ImportRequest{
+		CollectionName: "c1",
+		PartitionName:  "p1",
+		RowBased:       true,
+		Files:          []string{"f1", "f2", "f3"},
+	}
+
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn)
+	mgr.importJob(context.TODO(), rowReq, colID, 0)
+
+	tasks := mgr.listAllTasks()
+	assert.Equal(t, len(rowReq.Files), len(tasks))
+
+	resp := mgr.getTaskState(1)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ImportState_ImportPending, resp.State)
+	assert.Equal(t, int64(1), resp.Id)
+
+	// accept tasks to working list
+	mgr.callImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+	}
+
+	mgr.importJob(context.TODO(), rowReq, colID, 0)
+	tasks = mgr.listAllTasks()
+	assert.Equal(t, len(rowReq.Files)*2, len(tasks))
+
+	// the id of tasks must be 1,2,3,4,5,6(sequence not guaranteed)
+	ids := make(map[int64]struct{})
+	for i := 0; i < len(tasks); i++ {
+		ids[int64(i)+1] = struct{}{}
+	}
+	for i := 0; i < len(tasks); i++ {
+		delete(ids, tasks[i].Id)
+	}
+	assert.Equal(t, 0, len(ids))
+}

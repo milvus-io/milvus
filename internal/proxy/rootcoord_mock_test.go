@@ -980,7 +980,7 @@ func (coord *RootCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.Li
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
 			},
-			Tasks: make([]int64, 0),
+			Tasks: make([]*milvuspb.GetImportStateResponse, 0),
 		}, nil
 	}
 	return &milvuspb.ListImportTasksResponse{
@@ -988,7 +988,7 @@ func (coord *RootCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.Li
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Tasks: make([]int64, 3),
+		Tasks: make([]*milvuspb.GetImportStateResponse, 3),
 	}, nil
 }
 

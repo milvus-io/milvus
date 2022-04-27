@@ -13840,6 +13840,7 @@ class GetImportStateResponse :
     kInfosFieldNumber = 5,
     kStatusFieldNumber = 1,
     kRowCountFieldNumber = 3,
+    kIdFieldNumber = 6,
     kStateFieldNumber = 2,
   };
   // repeated int64 id_list = 4;
@@ -13877,6 +13878,11 @@ class GetImportStateResponse :
   ::PROTOBUF_NAMESPACE_ID::int64 row_count() const;
   void set_row_count(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // int64 id = 6;
+  void clear_id();
+  ::PROTOBUF_NAMESPACE_ID::int64 id() const;
+  void set_id(::PROTOBUF_NAMESPACE_ID::int64 value);
+
   // .milvus.proto.common.ImportState state = 2;
   void clear_state();
   ::milvus::proto::common::ImportState state() const;
@@ -13892,6 +13898,7 @@ class GetImportStateResponse :
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::KeyValuePair > infos_;
   ::milvus::proto::common::Status* status_;
   ::PROTOBUF_NAMESPACE_ID::int64 row_count_;
+  ::PROTOBUF_NAMESPACE_ID::int64 id_;
   int state_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -14136,16 +14143,16 @@ class ListImportTasksResponse :
     kTasksFieldNumber = 2,
     kStatusFieldNumber = 1,
   };
-  // repeated int64 tasks = 2;
+  // repeated .milvus.proto.milvus.GetImportStateResponse tasks = 2;
   int tasks_size() const;
   void clear_tasks();
-  ::PROTOBUF_NAMESPACE_ID::int64 tasks(int index) const;
-  void set_tasks(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
-  void add_tasks(::PROTOBUF_NAMESPACE_ID::int64 value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
-      tasks() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+  ::milvus::proto::milvus::GetImportStateResponse* mutable_tasks(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::GetImportStateResponse >*
       mutable_tasks();
+  const ::milvus::proto::milvus::GetImportStateResponse& tasks(int index) const;
+  ::milvus::proto::milvus::GetImportStateResponse* add_tasks();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::GetImportStateResponse >&
+      tasks() const;
 
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
@@ -14160,8 +14167,7 @@ class ListImportTasksResponse :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > tasks_;
-  mutable std::atomic<int> _tasks_cached_byte_size_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::GetImportStateResponse > tasks_;
   ::milvus::proto::common::Status* status_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
@@ -27688,6 +27694,20 @@ GetImportStateResponse::infos() const {
   return infos_;
 }
 
+// int64 id = 6;
+inline void GetImportStateResponse::clear_id() {
+  id_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 GetImportStateResponse::id() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetImportStateResponse.id)
+  return id_;
+}
+inline void GetImportStateResponse::set_id(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  id_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetImportStateResponse.id)
+}
+
 // -------------------------------------------------------------------
 
 // ListImportTasksRequest
@@ -27741,34 +27761,34 @@ inline void ListImportTasksResponse::set_allocated_status(::milvus::proto::commo
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.ListImportTasksResponse.status)
 }
 
-// repeated int64 tasks = 2;
+// repeated .milvus.proto.milvus.GetImportStateResponse tasks = 2;
 inline int ListImportTasksResponse::tasks_size() const {
   return tasks_.size();
 }
 inline void ListImportTasksResponse::clear_tasks() {
   tasks_.Clear();
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 ListImportTasksResponse::tasks(int index) const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ListImportTasksResponse.tasks)
-  return tasks_.Get(index);
+inline ::milvus::proto::milvus::GetImportStateResponse* ListImportTasksResponse::mutable_tasks(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.ListImportTasksResponse.tasks)
+  return tasks_.Mutable(index);
 }
-inline void ListImportTasksResponse::set_tasks(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
-  tasks_.Set(index, value);
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.ListImportTasksResponse.tasks)
-}
-inline void ListImportTasksResponse::add_tasks(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  tasks_.Add(value);
-  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ListImportTasksResponse.tasks)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
-ListImportTasksResponse::tasks() const {
-  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ListImportTasksResponse.tasks)
-  return tasks_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::GetImportStateResponse >*
 ListImportTasksResponse::mutable_tasks() {
   // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.ListImportTasksResponse.tasks)
   return &tasks_;
+}
+inline const ::milvus::proto::milvus::GetImportStateResponse& ListImportTasksResponse::tasks(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.ListImportTasksResponse.tasks)
+  return tasks_.Get(index);
+}
+inline ::milvus::proto::milvus::GetImportStateResponse* ListImportTasksResponse::add_tasks() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.ListImportTasksResponse.tasks)
+  return tasks_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::GetImportStateResponse >&
+ListImportTasksResponse::tasks() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.ListImportTasksResponse.tasks)
+  return tasks_;
 }
 
 // -------------------------------------------------------------------
