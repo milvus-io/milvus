@@ -235,7 +235,7 @@ class TestPartitionParams(TestcaseBase):
 
         # check that the partition not exists
         assert not collection_w.has_partition(partition_name)[0]
-   
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partiton_respectively(self):
         """
@@ -270,7 +270,6 @@ class TestPartitionParams(TestcaseBase):
         partition_names = ["partition_w1", "partition_w2"]
         collection_w.load(partition_names)
         collection_w.release(partition_names)
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_after_load_partition(self):
@@ -340,7 +339,7 @@ class TestPartitionParams(TestcaseBase):
     def test_load_replica_greater_than_querynodes(self):
         """
         target: test load with replicas that greater than querynodes
-        method: load with 2 replicas (only 1 querynode)
+        method: load with 3 replicas (2 querynode)
         expected: Verify load successfully and 1 available replica
         """
         # create, insert
@@ -352,7 +351,7 @@ class TestPartitionParams(TestcaseBase):
 
         # load with 2 replicas
         error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
-        partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+        partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16641")
     @pytest.mark.tags(CaseLabel.L3)
@@ -383,6 +382,42 @@ class TestPartitionParams(TestcaseBase):
 
         # verify replicas
 
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_partition_replicas_change_cross_partitions(self):
+        """
+        target: test load with different replicas between partitions
+        method: 1.Create two partitions and insert data
+                2.Load two partitions with different replicas
+        expected: Raise an exception
+        """
+        from functools import reduce
+        # Create two partitions and insert data
+        collection_w = self.init_collection_wrap()
+        partition_w1 = self.init_partition_wrap(collection_w)
+        partition_w2 = self.init_partition_wrap(collection_w)
+        partition_w1.insert(cf.gen_default_dataframe_data())
+        partition_w2.insert(cf.gen_default_dataframe_data(start=ct.default_nb))
+        assert collection_w.num_entities == ct.default_nb * 2
+
+        # load with different replicas
+        partition_w1.load(replica_number=1)
+        partition_w1.release()
+        partition_w2.load(replica_number=2)
+
+        # verify different have same replicas
+        replicas_1, _ = partition_w1.get_replicas()
+        replicas_2, _ = partition_w2.get_replicas()
+        group1_ids = list(map(lambda g: g.id, replicas_1.groups))
+        group2_ids = list(map(lambda g: g.id, replicas_1.groups))
+        assert group1_ids.sort() == group2_ids.sort()
+
+        # verify loaded segments included 2 replicas and 1 partition
+        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
+        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
+        num_entities = list(map(lambda seg: seg.num_rows, seg_info))
+        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
+        assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release(self):
         """
@@ -409,13 +444,13 @@ class TestPartitionParams(TestcaseBase):
 
         # load two partitions
         partition_w1.load()
-       
+
         # search  partition1
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         res1, _ = partition_w1.search(data=search_vectors,
                                       anns_field=ct.default_float_vec_field_name,
                                       params={"nprobe": 32}, limit=1)
-        assert len(res1) == 1 
+        assert len(res1) == 1
 
         # release the first partition
         partition_w1.release()
@@ -775,7 +810,6 @@ class TestPartitionOperations(TestcaseBase):
                                       params={"nprobe": 32}, limit=1)
         assert len(res_1) == 1
 
-
         # release collection
         collection_w.release()
 
@@ -965,8 +999,8 @@ class TestPartitionOperations(TestcaseBase):
         partition_name = None
         partition_w = self.init_partition_wrap(collection_w, partition_name)
 
-class TestShowBase(TestcaseBase):
 
+class TestShowBase(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test list partition
@@ -982,7 +1016,7 @@ class TestShowBase(TestcaseBase):
         """
         collection_w = self.init_collection_wrap()
         partition_name = cf.gen_unique_str(prefix)
-        partition_w = self.init_partition_wrap(collection_w,partition_name)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
 
         assert collection_w.partitions[1].name == partition_w.name
 
@@ -996,15 +1030,14 @@ class TestShowBase(TestcaseBase):
         collection_w = self.init_collection_wrap()
         partition_name = cf.gen_unique_str(prefix)
 
-        partition_w = self.init_partition_wrap(collection_w,partition_name)
-        partition_e = self.init_partition_wrap(collection_w,partition_name)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        partition_e = self.init_partition_wrap(collection_w, partition_name)
 
         assert collection_w.partitions[1].name == partition_w.name
         assert collection_w.partitions[1].name == partition_e.name
 
 
 class TestHasBase(TestcaseBase):
-
     """
     ******************************************************************
       The following cases are used to test `has_partition` function
@@ -1052,7 +1085,6 @@ class TestHasBase(TestcaseBase):
         partition_name = cf.gen_unique_str(prefix)
         assert not collection_w.has_partition(partition_name)[0]
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_has_partition_collection_not_existed(self):
         """
@@ -1080,11 +1112,10 @@ class TestHasBase(TestcaseBase):
         collection_w = self.init_collection_wrap()
         partition_name = ct.get_invalid_strs
         collection_w.has_partition(partition_name, check_task=CheckTasks.err_res,
-                                                   check_items={ct.err_code: 1, 'err_msg': "is illegal"})
+                                   check_items={ct.err_code: 1, 'err_msg': "is illegal"})
 
 
 class TestDropBase(TestcaseBase):
-
     """
     ******************************************************************
       The following cases are used to test `drop_partition` function
@@ -1097,7 +1128,7 @@ class TestDropBase(TestcaseBase):
         target: test drop partition twice, check status and partition if existed
         method: create partitions first, then call function: drop_partition
         expected: status not ok, no partitions in db
-        """    
+        """
         collection_w = self.init_collection_wrap()
 
         partition_name = cf.gen_unique_str(prefix)
@@ -1110,7 +1141,7 @@ class TestDropBase(TestcaseBase):
         assert not collection_w.has_partition(partition_name)[0]
 
         collection_w.drop_partition(partition_w.name, check_task=CheckTasks.err_res,
-                                                      check_items={ct.err_code: 1, 'err_msg': "Partition not exist"})
+                                    check_items={ct.err_code: 1, 'err_msg': "Partition not exist"})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_drop_partition_create(self):
@@ -1131,14 +1162,14 @@ class TestDropBase(TestcaseBase):
 
         assert collection_w.has_partition(partition_w.name)
 
-class TestNameInvalid(TestcaseBase):
 
+class TestNameInvalid(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test invalid partition name
     ******************************************************************
     """
-    
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_partition_with_invalid_name(self):
         """
@@ -1149,4 +1180,4 @@ class TestNameInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap()
         partition_name = ct.get_invalid_strs
         collection_w.drop_partition(partition_name, check_task=CheckTasks.err_res,
-                                                    check_items={ct.err_code: 1, 'err_msg': "is illegal"})
+                                    check_items={ct.err_code: 1, 'err_msg': "is illegal"})

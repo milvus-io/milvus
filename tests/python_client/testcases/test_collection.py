@@ -1,3 +1,5 @@
+from functools import reduce
+
 import numpy
 import pandas as pd
 import pytest
@@ -2211,7 +2213,7 @@ class TestLoadCollection(TestcaseBase):
     def test_load_replica_greater_than_querynodes(self):
         """
         target: test load with replicas that greater than querynodes
-        method: load with 2 replicas (only 1 querynode)
+        method: load with 3 replicas (2 querynode)
         expected: Raise exception
         """
         # create, insert
@@ -2221,7 +2223,7 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
         error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
-        collection_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16562")
     @pytest.mark.tags(CaseLabel.L3)
@@ -2242,15 +2244,25 @@ class TestLoadCollection(TestcaseBase):
 
         collection_w.load(replica_number=1)
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
+
+        # verify load different replicas thrown an exception
         collection_w.load(replica_number=2)
-        collection_w.get_replicas()
+        one_replica, _ = collection_w.get_replicas()
+        assert len(one_replica.groups) == 1
 
         collection_w.release()
         collection_w.load(replica_number=2)
+        two_replicas, _ = collection_w.get_replicas()
+        log.debug(two_replicas)
+        assert len(two_replicas.groups) == 2
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
-        # replica_info = collection_w.get_replicas()
 
-        # verify replicas
+        # verify loaded segments included 2 replicas and twice num entities
+        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
+        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
+        num_entities = list(map(lambda seg: seg.num_rows, seg_info))
+        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
+        assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_load_replica_multi(self):
@@ -2350,9 +2362,11 @@ class TestLoadCollection(TestcaseBase):
                     shard_leaders.append(shard.shard_leader)
                 assert len(shard_leaders) == 2
 
-        # Verify repeated segment loaded TODO
+        # Verify 2 replicas segments loaded
         # https://github.com/milvus-io/milvus/issues/16598
-        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)
+        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
+        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
+        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
 
         # verify search successfully
         res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
@@ -2400,6 +2414,11 @@ class TestLoadCollection(TestcaseBase):
                 for shard in group.shards:
                     shard_leaders.append(shard.shard_leader)
                 assert len(shard_leaders) == 3 and len(set(shard_leaders)) == 2
+
+        # Verify 2 replicas segments loaded
+        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
+        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
+        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
 
         # Verify search successfully
         res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
