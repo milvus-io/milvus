@@ -88,3 +88,23 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 		assert.Equal(t, segmentStateLoaded, segment.state)
 	})
 }
+
+func TestShardClusterService_HandoffVChannelSegments(t *testing.T) {
+	qn, err := genSimpleQueryNode(context.Background())
+	require.NoError(t, err)
+
+	client := v3client.New(embedetcdServer.Server)
+	defer client.Close()
+	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
+	clusterService := newShardClusterService(client, session, qn)
+
+	err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{})
+	assert.NoError(t, err)
+
+	clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+	//TODO change shardCluster to interface to mock test behavior
+	assert.NotPanics(t, func() {
+		err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{})
+		assert.NoError(t, err)
+	})
+}

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -78,6 +79,7 @@ type segmentEvent struct {
 type shardQueryNode interface {
 	Search(context.Context, *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	Query(context.Context, *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
+	ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	Stop() error
 }
 
@@ -363,7 +365,6 @@ func (sc *ShardCluster) watchNodes(evtCh <-chan nodeEvent) {
 	for {
 		select {
 		case evt, ok := <-evtCh:
-			log.Debug("node event", zap.Any("evt", evt))
 			if !ok {
 				log.Warn("ShardCluster node channel closed", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID))
 				return
@@ -514,6 +515,8 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		offlineSegments = append(offlineSegments, seg.GetSegmentID())
 	}
 	sc.waitSegmentsNotInUse(offlineSegments)
+
+	removes := make(map[int64][]int64) // nodeID => []segmentIDs
 	// remove offline segments record
 	for _, seg := range info.OfflineSegments {
 		// filter out segments not maintained in this cluster
@@ -521,11 +524,39 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 			continue
 		}
 		sc.removeSegment(segmentEvent{segmentID: seg.GetSegmentID(), nodeID: seg.GetNodeID()})
+
+		removes[seg.GetNodeID()] = append(removes[seg.GetNodeID()], seg.SegmentID)
+	}
+
+	var errs errorutil.ErrorList
+
+	// notify querynode(s) to release segments
+	for nodeID, segmentIDs := range removes {
+		node, ok := sc.getNode(nodeID)
+		if !ok {
+			log.Warn("node not in cluster", zap.Int64("nodeID", nodeID), zap.Int64("collectionID", sc.collectionID), zap.String("vchannel", sc.vchannelName))
+			errs = append(errs, fmt.Errorf("node not in cluster nodeID %d", nodeID))
+			continue
+		}
+		state, err := node.client.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
+			CollectionID: sc.collectionID,
+			SegmentIDs:   segmentIDs,
+		})
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if state.GetErrorCode() != commonpb.ErrorCode_Success {
+			errs = append(errs, fmt.Errorf("Release segments failed with reason: %s", state.GetReason()))
+		}
 	}
 
 	// finish handoff and remove it from pending list
 	sc.finishHandoff(token)
 
+	if len(errs) > 0 {
+		return errs
+	}
 	return nil
 }
 

@@ -137,3 +137,14 @@ func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribut
 
 	return nil
 }
+
+// HandoffVChannelSegments dispatches SegmentChangeInfo to related ShardCluster with VChannel
+func (s *ShardClusterService) HandoffVChannelSegments(vchannel string, info *querypb.SegmentChangeInfo) error {
+	raw, ok := s.clusters.Load(vchannel)
+	if !ok {
+		// not leader for this channel, ignore without error
+		return nil
+	}
+	sc := raw.(*ShardCluster)
+	return sc.HandoffSegments(info)
+}
