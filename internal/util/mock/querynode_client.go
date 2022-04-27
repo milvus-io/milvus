@@ -86,6 +86,10 @@ func (m *QueryNodeClient) Query(ctx context.Context, in *querypb.QueryRequest, o
 	return &internalpb.RetrieveResults{}, m.Err
 }
 
+func (m *QueryNodeClient) SyncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *QueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }

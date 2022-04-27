@@ -315,6 +315,11 @@ func (s *Server) Query(ctx context.Context, req *querypb.QueryRequest) (*interna
 	return s.querynode.Query(ctx, req)
 }
 
+// SyncReplicaSegments syncs replica segment information to shard leader
+func (s *Server) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return s.querynode.SyncReplicaSegments(ctx, req)
+}
+
 // GetMetrics gets the metrics information of QueryNode.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.querynode.GetMetrics(ctx, req)

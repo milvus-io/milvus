@@ -124,6 +124,10 @@ func (m *MockQueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*
 	return m.queryResp, m.err
 }
 
+func (m *MockQueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 func (m *MockQueryNode) SetEtcdClient(client *clientv3.Client) {
 }
 
@@ -330,6 +334,13 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.Query(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("SyncReplicaSegments", func(t *testing.T) {
+		req := &querypb.SyncReplicaSegmentsRequest{}
+		resp, err := server.SyncReplicaSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
 	err = server.Stop()

@@ -125,3 +125,15 @@ func (s *ShardClusterService) HandoffSegments(collectionID int64, info *querypb.
 	})
 	wg.Wait()
 }
+
+// SyncReplicaSegments dispatches nodeID segments distribution to ShardCluster.
+func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribution []*querypb.ReplicaSegmentsInfo) error {
+	sc, ok := s.getShardCluster(vchannelName)
+	if !ok {
+		return fmt.Errorf("Leader of VChannel %s is not this QueryNode %d", vchannelName, s.session.ServerID)
+	}
+
+	sc.SyncSegments(distribution, segmentStateLoaded)
+
+	return nil
+}

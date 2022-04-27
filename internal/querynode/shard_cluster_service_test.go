@@ -50,3 +50,41 @@ func TestShardClusterService_HandoffSegments(t *testing.T) {
 		clusterService.HandoffSegments(defaultCollectionID, &querypb.SegmentChangeInfo{})
 	})
 }
+
+func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
+	qn, err := genSimpleQueryNode(context.Background())
+	require.NoError(t, err)
+
+	client := v3client.New(embedetcdServer.Server)
+	defer client.Close()
+	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
+	clusterService := newShardClusterService(client, session, qn)
+
+	t.Run("sync non-exist shard cluster", func(t *testing.T) {
+		err := clusterService.SyncReplicaSegments(defaultDMLChannel, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("sync shard cluster", func(t *testing.T) {
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+
+		err := clusterService.SyncReplicaSegments(defaultDMLChannel, []*querypb.ReplicaSegmentsInfo{
+			{
+				NodeId:      1,
+				PartitionId: defaultPartitionID,
+
+				SegmentIds: []int64{1},
+			},
+		})
+
+		assert.NoError(t, err)
+
+		cs, ok := clusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		segment, ok := cs.getSegment(1)
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), segment.nodeID)
+		assert.Equal(t, defaultPartitionID, segment.partitionID)
+		assert.Equal(t, segmentStateLoaded, segment.state)
+	})
+}

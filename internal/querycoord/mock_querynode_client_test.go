@@ -165,3 +165,7 @@ func (client *queryNodeClientMock) Search(ctx context.Context, req *querypb.Sear
 func (client *queryNodeClientMock) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	return client.grpcClient.Query(ctx, req)
 }
+
+func (client *queryNodeClientMock) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return client.grpcClient.SyncReplicaSegments(ctx, req)
+}
