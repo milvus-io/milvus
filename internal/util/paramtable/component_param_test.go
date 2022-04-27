@@ -42,6 +42,14 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.RetentionDuration, int64(DefaultRetentionDuration))
 		t.Logf("default retention duration = %d", Params.RetentionDuration)
 
+		assert.Equal(t, int64(Params.EntityExpirationTTL), int64(-1))
+		t.Logf("default entity expiration = %d", Params.EntityExpirationTTL)
+
+		// test the case coommo
+		Params.Base.Save("common.entityExpiration", "50")
+		Params.initEntityExpiration()
+		assert.Equal(t, int64(Params.EntityExpirationTTL.Seconds()), int64(DefaultRetentionDuration))
+
 		assert.NotEqual(t, Params.SimdType, "")
 		t.Logf("knowhere simd type = %s", Params.SimdType)
 

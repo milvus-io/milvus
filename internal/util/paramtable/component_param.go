@@ -12,7 +12,6 @@
 package paramtable
 
 import (
-	"math"
 	"os"
 	"path"
 	"strconv"
@@ -122,6 +121,7 @@ type commonConfig struct {
 	DefaultPartitionName string
 	DefaultIndexName     string
 	RetentionDuration    int64
+	EntityExpirationTTL  time.Duration
 
 	SimdType       string
 	IndexSliceSize int64
@@ -159,6 +159,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initDefaultPartitionName()
 	p.initDefaultIndexName()
 	p.initRetentionDuration()
+	p.initEntityExpiration()
 
 	p.initSimdType()
 	p.initIndexSliceSize()
@@ -335,6 +336,21 @@ func (p *commonConfig) initDefaultIndexName() {
 
 func (p *commonConfig) initRetentionDuration() {
 	p.RetentionDuration = p.Base.ParseInt64WithDefault("common.retentionDuration", DefaultRetentionDuration)
+}
+
+func (p *commonConfig) initEntityExpiration() {
+	ttl := p.Base.ParseInt64WithDefault("common.entityExpiration", -1)
+	if ttl < 0 {
+		p.EntityExpirationTTL = -1
+		return
+	}
+
+	// make sure ttl is larger than retention duration to ensure time travel works
+	if ttl > p.RetentionDuration {
+		p.EntityExpirationTTL = time.Duration(ttl) * time.Second
+	} else {
+		p.EntityExpirationTTL = time.Duration(p.RetentionDuration) * time.Second
+	}
 }
 
 func (p *commonConfig) initSimdType() {
@@ -850,9 +866,6 @@ type dataCoordConfig struct {
 	EnableAutoCompaction    bool
 	EnableGarbageCollection bool
 
-	RetentionDuration          int64
-	CompactionEntityExpiration int64
-
 	// Garbage Collection
 	GCInterval         time.Duration
 	GCMissingTolerance time.Duration
@@ -869,7 +882,6 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
-	p.initCompactionEntityExpiration()
 
 	p.initEnableGarbageCollection()
 	p.initGCInterval()
@@ -918,16 +930,6 @@ func (p *dataCoordConfig) initGCDropTolerance() {
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
 	p.EnableAutoCompaction = p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", false)
-}
-
-func (p *dataCoordConfig) initCompactionEntityExpiration() {
-	p.CompactionEntityExpiration = p.Base.ParseInt64WithDefault("dataCoord.compaction.entityExpiration", math.MaxInt64)
-	p.CompactionEntityExpiration = func(x, y int64) int64 {
-		if x > y {
-			return x
-		}
-		return y
-	}(p.CompactionEntityExpiration, p.RetentionDuration)
 }
 
 func (p *dataCoordConfig) SetNodeID(id UniqueID) {
