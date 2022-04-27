@@ -211,9 +211,16 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channel1), string(data))
 		require.NoError(t, err)
 
-		// TODO: cancel could arrive earlier than etcd action watch channel
-		// if etcd has poor response latency.
-		time.Sleep(time.Second)
+		for {
+			prefix := Params.DataCoordCfg.ChannelWatchSubPath
+			// make sure etcd has finished the operation
+			_, err := metakv.Load(path.Join(prefix, strconv.FormatInt(oldNode, 10), channel1))
+			if err == nil {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
 		cancel()
 		wg.Wait()
 
