@@ -509,7 +509,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 		}
 
-		internalTasks, err := assignInternalTask(ctx, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1)
+		internalTasks, err := assignInternalTask(ctx, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1, lct.broker)
 		if err != nil {
 			log.Error("loadCollectionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
 			lct.setResultInfo(err)
@@ -939,7 +939,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
 		}
 
-		internalTasks, err := assignInternalTask(ctx, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1)
+		internalTasks, err := assignInternalTask(ctx, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1, lpt.broker)
 		if err != nil {
 			log.Error("loadPartitionTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
 			lpt.setResultInfo(err)
@@ -1176,6 +1176,8 @@ type loadSegmentTask struct {
 	meta           Meta
 	cluster        Cluster
 	excludeNodeIDs []int64
+
+	broker *globalMetaBroker
 }
 
 func (lst *loadSegmentTask) msgBase() *commonpb.MsgBase {
@@ -1212,7 +1214,7 @@ func (lst *loadSegmentTask) updateTaskProcess() {
 	parentTask.updateTaskProcess()
 }
 
-func (lst *loadSegmentTask) preExecute(context.Context) error {
+func (lst *loadSegmentTask) preExecute(ctx context.Context) error {
 	segmentIDs := make([]UniqueID, 0)
 	for _, info := range lst.Infos {
 		segmentIDs = append(segmentIDs, info.SegmentID)
@@ -1222,6 +1224,12 @@ func (lst *loadSegmentTask) preExecute(context.Context) error {
 		zap.Int64s("segmentIDs", segmentIDs),
 		zap.Int64("loaded nodeID", lst.DstNodeID),
 		zap.Int64("taskID", lst.getTaskID()))
+
+	if err := lst.broker.acquireSegmentsReferLock(ctx, segmentIDs); err != nil {
+		log.Error("acquire reference lock on segments failed", zap.Int64s("segmentIDs", segmentIDs),
+			zap.Error(err))
+		return err
+	}
 	return nil
 }
 
@@ -1241,6 +1249,14 @@ func (lst *loadSegmentTask) execute(ctx context.Context) error {
 }
 
 func (lst *loadSegmentTask) postExecute(context.Context) error {
+	segmentIDs := make([]UniqueID, 0)
+	for _, info := range lst.Infos {
+		segmentIDs = append(segmentIDs, info.SegmentID)
+	}
+	if err := lst.broker.releaseSegmentReferLock(lst.ctx, segmentIDs); err != nil {
+		panic(err)
+	}
+
 	log.Info("loadSegmentTask postExecute done",
 		zap.Int64("taskID", lst.getTaskID()))
 	return nil
@@ -1275,7 +1291,7 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 	if lst.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
 		wait2AssignTaskSuccess = true
 	}
-	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, wait2AssignTaskSuccess, lst.excludeNodeIDs, nil, lst.ReplicaID)
+	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, wait2AssignTaskSuccess, lst.excludeNodeIDs, nil, lst.ReplicaID, lst.broker)
 	if err != nil {
 		log.Error("loadSegment reschedule failed", zap.Int64s("excludeNodes", lst.excludeNodeIDs), zap.Int64("taskID", lst.getTaskID()), zap.Error(err))
 		return nil, err
@@ -1456,7 +1472,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 	if wdt.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
 		wait2AssignTaskSuccess = true
 	}
-	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, wait2AssignTaskSuccess, wdt.excludeNodeIDs, nil, wdt.ReplicaID)
+	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, wait2AssignTaskSuccess, wdt.excludeNodeIDs, nil, wdt.ReplicaID, nil)
 	if err != nil {
 		log.Error("watchDmChannel reschedule failed", zap.Int64("taskID", wdt.getTaskID()), zap.Int64s("excludeNodes", wdt.excludeNodeIDs), zap.Error(err))
 		return nil, err
@@ -1591,7 +1607,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 		}
 
 		if collectionInfo.LoadType == querypb.LoadType_LoadCollection && ht.meta.hasReleasePartition(collectionID, partitionID) {
-			log.Warn("handoffTask: partition has not been released", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
+			log.Warn("handoffTask: partition has been released", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
 			continue
 		}
 
@@ -1687,7 +1703,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				// we should copy a request because assignInternalTask will change DstNodeID of LoadSegmentRequest
 				clonedReq := proto.Clone(loadSegmentReq).(*querypb.LoadSegmentsRequest)
 				clonedReq.ReplicaID = replica.ReplicaID
-				tasks, err := assignInternalTask(ctx, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{clonedReq}, nil, true, nil, nil, replica.GetReplicaID())
+				tasks, err := assignInternalTask(ctx, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{clonedReq}, nil, true, nil, nil, replica.GetReplicaID(), ht.broker)
 				if err != nil {
 					log.Error("handoffTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.Error(err))
 					ht.setResultInfo(err)
@@ -1960,7 +1976,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 					}
 				}
 
-				tasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs, replica.GetReplicaID())
+				tasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs, replica.GetReplicaID(), lbt.broker)
 				if err != nil {
 					log.Error("loadBalanceTask: assign child task failed", zap.Int64("sourceNodeID", nodeID))
 					lbt.setResultInfo(err)
@@ -2144,7 +2160,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 				return err
 			}
 		}
-		internalTasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, nil, false, lbt.SourceNodeIDs, lbt.DstNodeIDs, lbt.replicaID)
+		internalTasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, nil, false, lbt.SourceNodeIDs, lbt.DstNodeIDs, lbt.replicaID, lbt.broker)
 		if err != nil {
 			log.Error("loadBalanceTask: assign child task failed", zap.Any("balance request", lbt.LoadBalanceRequest))
 			lbt.setResultInfo(err)
@@ -2350,7 +2366,8 @@ func assignInternalTask(ctx context.Context,
 	parentTask task, meta Meta, cluster Cluster,
 	loadSegmentRequests []*querypb.LoadSegmentsRequest,
 	watchDmChannelRequests []*querypb.WatchDmChannelsRequest,
-	wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) ([]task, error) {
+	wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64,
+	broker *globalMetaBroker) ([]task, error) {
 
 	internalTasks := make([]task, 0)
 	err := cluster.allocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs, includeNodeIDs, replicaID)
@@ -2387,6 +2404,7 @@ func assignInternalTask(ctx context.Context,
 					meta:                meta,
 					cluster:             cluster,
 					excludeNodeIDs:      excludeNodeIDs,
+					broker:              broker,
 				}
 				internalTasks = append(internalTasks, loadSegmentTask)
 
@@ -2407,6 +2425,7 @@ func assignInternalTask(ctx context.Context,
 			meta:                meta,
 			cluster:             cluster,
 			excludeNodeIDs:      excludeNodeIDs,
+			broker:              broker,
 		}
 		internalTasks = append(internalTasks, loadSegmentTask)
 	}

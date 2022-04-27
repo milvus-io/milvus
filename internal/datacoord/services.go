@@ -34,10 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
-
-const moduleName = "DataCoord"
 
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
@@ -666,13 +665,15 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		s := s.meta.GetSegment(id)
-		if s != nil && s.GetState() != commonpb.SegmentState_Flushed {
+		segment := s.meta.GetSegment(id)
+		if segment != nil && segment.GetState() != commonpb.SegmentState_Flushed {
 			continue
 		}
+
 		// if this segment == nil, we assume this segment has been compacted and flushed
 		ret = append(ret, id)
 	}
+
 	resp.Segments = ret
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
@@ -1071,4 +1072,67 @@ func getDiff(base, remove []int64) []int64 {
 		}
 	}
 	return diff
+}
+
+// AcquireSegmentLock acquire the reference lock of the segments.
+func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to acquire segments reference lock for closed server")
+		resp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
+		return resp, nil
+	}
+
+	hasSegments, err := s.meta.HasSegments(req.SegmentIDs)
+	if !hasSegments || err != nil {
+		log.Error("AcquireSegmentLock failed", zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, nil
+	}
+
+	err = s.segReferManager.AddSegmentsLock(req.SegmentIDs, req.NodeID)
+	if err != nil {
+		log.Warn("Add reference lock on segments failed", zap.Int64s("segIDs", req.SegmentIDs), zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, nil
+	}
+	hasSegments, err = s.meta.HasSegments(req.SegmentIDs)
+	if !hasSegments || err != nil {
+		log.Error("AcquireSegmentLock failed, try to release reference lock", zap.Error(err))
+		if err2 := retry.Do(ctx, func() error {
+			return s.segReferManager.ReleaseSegmentsLock(req.SegmentIDs, req.NodeID)
+		}, retry.Attempts(100)); err2 != nil {
+			panic(err)
+		}
+		resp.Reason = err.Error()
+		return resp, nil
+	}
+	resp.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
+// ReleaseSegmentLock release the reference lock of the segments.
+func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to release segments reference lock for closed server")
+		resp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
+		return resp, nil
+	}
+
+	err := s.segReferManager.ReleaseSegmentsLock(req.SegmentIDs, req.NodeID)
+	if err != nil {
+		log.Error("DataCoord ReleaseSegmentLock failed", zap.Int64s("segmentIDs", req.SegmentIDs), zap.Int64("nodeID", req.NodeID),
+			zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, nil
+	}
+	resp.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
 }

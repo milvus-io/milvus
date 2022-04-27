@@ -18,8 +18,12 @@ package querycoord
 
 import (
 	"context"
+	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -213,13 +217,14 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 		},
 	}
 	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
-	baseTask.taskID = 100
+	baseTask.taskID = rand.Int63()
 	loadSegmentTask := &loadSegmentTask{
 		baseTask:            baseTask,
 		LoadSegmentsRequest: req,
 		cluster:             queryCoord.cluster,
 		meta:                queryCoord.meta,
 		excludeNodeIDs:      []int64{},
+		broker:              queryCoord.broker,
 	}
 
 	parentReq := &querypb.LoadCollectionRequest{
@@ -764,7 +769,7 @@ func Test_AssignInternalTask(t *testing.T) {
 		loadSegmentRequests = append(loadSegmentRequests, req)
 	}
 
-	internalTasks, err := assignInternalTask(queryCoord.loopCtx, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false, nil, nil, -1)
+	internalTasks, err := assignInternalTask(queryCoord.loopCtx, loadCollectionTask, queryCoord.meta, queryCoord.cluster, loadSegmentRequests, nil, false, nil, nil, -1, nil)
 	assert.Nil(t, err)
 
 	assert.NotEqual(t, 1, len(internalTasks))
@@ -1373,6 +1378,85 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
+
+	err = removeAllSession()
+	assert.Nil(t, err)
+}
+
+func startMockCoord(ctx context.Context) (*QueryCoord, error) {
+	factory := dependency.NewDefaultFactory(true)
+
+	coord, err := NewQueryCoordTest(ctx, factory)
+	if err != nil {
+		return nil, err
+	}
+
+	rootCoord := newRootCoordMock(ctx)
+	rootCoord.createCollection(defaultCollectionID)
+	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
+
+	dataCoord := &dataCoordMock{
+		collections:         make([]UniqueID, 0),
+		col2DmChannels:      make(map[UniqueID][]*datapb.VchannelInfo),
+		partitionID2Segment: make(map[UniqueID][]UniqueID),
+		Segment2Binlog:      make(map[UniqueID]*datapb.SegmentBinlogs),
+		baseSegmentID:       defaultSegmentID,
+		channelNumPerCol:    defaultChannelNum,
+		segmentState:        commonpb.SegmentState_Flushed,
+		errLevel:            1,
+	}
+	indexCoord, err := newIndexCoordMock(queryCoordTestDir)
+	if err != nil {
+		return nil, err
+	}
+
+	coord.SetRootCoord(rootCoord)
+	coord.SetDataCoord(dataCoord)
+	coord.SetIndexCoord(indexCoord)
+	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	if err != nil {
+		return nil, err
+	}
+	coord.SetEtcdClient(etcd)
+	err = coord.Init()
+	if err != nil {
+		return nil, err
+	}
+	err = coord.Start()
+	if err != nil {
+		return nil, err
+	}
+	err = coord.Register()
+	if err != nil {
+		return nil, err
+	}
+	return coord, nil
+}
+
+func Test_LoadSegment(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startMockCoord(ctx)
+	assert.Nil(t, err)
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+
+	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
+	err = loadSegmentTask.meta.setDeltaChannel(111, []*datapb.VchannelInfo{})
+	assert.Nil(t, err)
+	loadCollectionTask := loadSegmentTask.parentTask
+	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
+
+	// 1. Acquire segment reference lock failed, and reschedule task.
+	// 2. Acquire segment reference lock successfully, but release reference lock failed, and retry release the lock.
+	// 3. Release segment reference lock successfully, and task done.
+	waitTaskFinalState(loadSegmentTask, taskDone)
+
+	err = queryCoord.Stop()
+	assert.Nil(t, err)
 
 	err = removeAllSession()
 	assert.Nil(t, err)

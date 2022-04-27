@@ -40,10 +40,14 @@ func TestIndexCoordinateServer(t *testing.T) {
 	Params.Init()
 	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
+	assert.NotNil(t, etcd)
 	indexCoordClient := &indexcoord.Mock{}
 	indexCoordClient.SetEtcdClient(etcd)
 	err = server.SetClient(indexCoordClient)
 	assert.Nil(t, err)
+
+	dcm := &indexcoord.DataCoordMock{}
+	server.dataCoord = dcm
 	err = server.Run()
 	assert.Nil(t, err)
 

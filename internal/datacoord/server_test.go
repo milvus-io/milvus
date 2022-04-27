@@ -30,6 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -38,6 +40,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -627,7 +630,7 @@ func TestService_WatchServices(t *testing.T) {
 	svr.serverLoopWg.Add(1)
 
 	ech := make(chan *sessionutil.SessionEvent)
-	svr.eventCh = ech
+	svr.dnEventCh = ech
 
 	flag := false
 	closed := false
@@ -654,7 +657,7 @@ func TestService_WatchServices(t *testing.T) {
 	ech = make(chan *sessionutil.SessionEvent)
 
 	flag = false
-	svr.eventCh = ech
+	svr.dnEventCh = ech
 	ctx, cancel := context.WithCancel(context.Background())
 	svr.serverLoopWg.Add(1)
 
@@ -668,6 +671,128 @@ func TestService_WatchServices(t *testing.T) {
 	cancel()
 	<-sigDone
 	assert.True(t, flag)
+}
+
+func TestServer_watchCoord(t *testing.T) {
+	Params.Init()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	assert.NotNil(t, etcdKV)
+	factory := dependency.NewDefaultFactory(true)
+	svr := CreateServer(context.TODO(), factory)
+	svr.session = &sessionutil.Session{
+		TriggerKill: true,
+	}
+	svr.kvClient = etcdKV
+
+	dnCh := make(chan *sessionutil.SessionEvent)
+	icCh := make(chan *sessionutil.SessionEvent)
+	qcCh := make(chan *sessionutil.SessionEvent)
+
+	svr.dnEventCh = dnCh
+	svr.icEventCh = icCh
+	svr.qcEventCh = qcCh
+
+	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, segRefer)
+	svr.segReferManager = segRefer
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT)
+	defer signal.Reset(syscall.SIGINT)
+	closed := false
+	sigQuit := make(chan struct{}, 1)
+
+	svr.serverLoopWg.Add(1)
+	go func() {
+		svr.watchService(context.Background())
+	}()
+
+	go func() {
+		<-sc
+		closed = true
+		sigQuit <- struct{}{}
+	}()
+
+	icCh <- &sessionutil.SessionEvent{
+		EventType: sessionutil.SessionAddEvent,
+		Session: &sessionutil.Session{
+			ServerID: 1,
+		},
+	}
+	icCh <- &sessionutil.SessionEvent{
+		EventType: sessionutil.SessionDelEvent,
+		Session: &sessionutil.Session{
+			ServerID: 1,
+		},
+	}
+	close(icCh)
+	<-sigQuit
+	svr.serverLoopWg.Wait()
+	assert.True(t, closed)
+}
+
+func TestServer_watchQueryCoord(t *testing.T) {
+	Params.Init()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	assert.NotNil(t, etcdKV)
+	factory := dependency.NewDefaultFactory(true)
+	svr := CreateServer(context.TODO(), factory)
+	svr.session = &sessionutil.Session{
+		TriggerKill: true,
+	}
+	svr.kvClient = etcdKV
+
+	dnCh := make(chan *sessionutil.SessionEvent)
+	icCh := make(chan *sessionutil.SessionEvent)
+	qcCh := make(chan *sessionutil.SessionEvent)
+
+	svr.dnEventCh = dnCh
+	svr.icEventCh = icCh
+	svr.qcEventCh = qcCh
+
+	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, segRefer)
+	svr.segReferManager = segRefer
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT)
+	defer signal.Reset(syscall.SIGINT)
+	closed := false
+	sigQuit := make(chan struct{}, 1)
+
+	svr.serverLoopWg.Add(1)
+	go func() {
+		svr.watchService(context.Background())
+	}()
+
+	go func() {
+		<-sc
+		closed = true
+		sigQuit <- struct{}{}
+	}()
+
+	qcCh <- &sessionutil.SessionEvent{
+		EventType: sessionutil.SessionAddEvent,
+		Session: &sessionutil.Session{
+			ServerID: 2,
+		},
+	}
+	qcCh <- &sessionutil.SessionEvent{
+		EventType: sessionutil.SessionDelEvent,
+		Session: &sessionutil.Session{
+			ServerID: 2,
+		},
+	}
+	close(qcCh)
+	<-sigQuit
+	svr.serverLoopWg.Wait()
+	assert.True(t, closed)
 }
 
 func TestServer_GetMetrics(t *testing.T) {
@@ -2494,6 +2619,30 @@ func TestImport(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
+
+	t.Run("test acquire segment reference lock with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+
+		status, err := svr.AcquireSegmentLock(context.TODO(), &datapb.AcquireSegmentLockRequest{
+			SegmentIDs: []UniqueID{1, 2},
+			NodeID:     UniqueID(1),
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	})
+
+	t.Run("test release segment reference lock with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+
+		status, err := svr.ReleaseSegmentLock(context.TODO(), &datapb.ReleaseSegmentLockRequest{
+			SegmentIDs: []UniqueID{1, 2},
+			NodeID:     UniqueID(1),
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	})
 }
 
 // https://github.com/milvus-io/milvus/issues/15659
@@ -2579,4 +2728,92 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 	err = svr.CleanMeta()
 	assert.Nil(t, err)
+}
+
+func newTestServer2(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
+	var err error
+	Params.Init()
+	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	factory := dependency.NewDefaultFactory(true)
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	icSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
+	icSession.Init(typeutil.IndexCoordRole, "localhost:31000", true, true)
+	icSession.Register()
+
+	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
+	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
+	qcSession.Register()
+
+	svr := CreateServer(context.TODO(), factory, opts...)
+	svr.SetEtcdClient(etcdCli)
+	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+		return newMockDataNodeClient(0, receiveCh)
+	}
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		return newMockRootCoordService(), nil
+	}
+
+	err = svr.Init()
+	assert.Nil(t, err)
+	err = svr.Start()
+	assert.Nil(t, err)
+
+	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	err = svr.Register()
+	assert.Nil(t, err)
+
+	// Stop channal watch state watcher in tests
+	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
+		svr.channelManager.stopChecker()
+	}
+
+	return svr
+}
+
+func Test_initServiceDiscovery(t *testing.T) {
+	server := newTestServer2(t, nil)
+	assert.NotNil(t, server)
+
+	segmentID := rand.Int63()
+	err := server.meta.AddSegment(&SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:           segmentID,
+			CollectionID: rand.Int63(),
+			PartitionID:  rand.Int63(),
+			NumOfRows:    100,
+		},
+		currRows: 100,
+	})
+	assert.Nil(t, err)
+
+	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, server.etcdCli)
+	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
+	qcSession.Register()
+	req := &datapb.AcquireSegmentLockRequest{
+		NodeID:     qcSession.ServerID,
+		SegmentIDs: []UniqueID{segmentID},
+	}
+	resp, err := server.AcquireSegmentLock(context.TODO(), req)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.QueryCoordRole)
+	_, err = server.etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	for {
+		if !server.segReferManager.HasSegmentLock(segmentID) {
+			break
+		}
+	}
+
+	closeTestServer(t, server)
 }

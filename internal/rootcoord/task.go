@@ -959,7 +959,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	segID2PartID, err := t.core.getSegments(ctx, collMeta.ID)
+	segID2PartID, segID2Binlog, err := t.core.getSegments(ctx, collMeta.ID)
 	flushedSegs := make([]typeutil.UniqueID, 0, len(segID2PartID))
 	for k := range segID2PartID {
 		flushedSegs = append(flushedSegs, k)
@@ -987,7 +987,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 			IndexID:      idxInfo.IndexID,
 			EnableIndex:  false,
 		}
-		info.BuildID, err = t.core.BuildIndex(ctx, segID, &field, idxInfo, false)
+		info.BuildID, err = t.core.BuildIndex(ctx, segID, segID2Binlog[segID].GetNumOfRows(), segID2Binlog[segID].GetFieldBinlogs(), &field, idxInfo, false)
 		if err != nil {
 			return err
 		}

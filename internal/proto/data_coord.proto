@@ -49,6 +49,9 @@ service DataCoord {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
   rpc Import(ImportTaskRequest) returns (ImportTaskResponse) {}
   rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
+
+  rpc AcquireSegmentLock(AcquireSegmentLockRequest) returns (common.Status) {}
+  rpc ReleaseSegmentLock(ReleaseSegmentLockRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -175,6 +178,17 @@ message GetPartitionStatisticsResponse {
 message GetSegmentInfoChannelRequest {
 }
 
+message AcquireSegmentLockRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+  repeated int64 segmentIDs = 3;
+}
+
+message ReleaseSegmentLockRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+  repeated int64 segmentIDs = 3;
+}
 
 message VchannelInfo {
   int64 collectionID = 1;

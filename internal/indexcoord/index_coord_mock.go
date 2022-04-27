@@ -21,11 +21,15 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -81,6 +85,10 @@ func (icm *Mock) Register() error {
 
 func (icm *Mock) SetEtcdClient(client *clientv3.Client) {
 	icm.etcdCli = client
+}
+
+func (icm *Mock) SetDataCoord(dataCoord types.DataCoord) error {
+	return nil
 }
 
 func (icm *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
@@ -242,4 +250,124 @@ func (icm *Mock) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 		Response:      "",
 		ComponentName: "IndexCoord",
 	}, nil
+}
+
+type DataCoordMock struct {
+	types.DataCoord
+
+	Fail bool
+	Err  bool
+}
+
+func (dcm *DataCoordMock) Init() error {
+	if dcm.Err || dcm.Fail {
+		return errors.New("DataCoord mock init failed")
+	}
+	return nil
+}
+
+func (dcm *DataCoordMock) Start() error {
+	if dcm.Err || dcm.Fail {
+		return errors.New("DataCoord mock start failed")
+	}
+	return nil
+}
+
+func (dcm *DataCoordMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	if dcm.Err {
+		return &internalpb.ComponentStates{
+			State: &internalpb.ComponentInfo{
+				StateCode: internalpb.StateCode_Abnormal,
+			},
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "",
+			},
+		}, errors.New("DataCoord component state is not healthy")
+	}
+	if dcm.Fail {
+		return &internalpb.ComponentStates{
+			State: &internalpb.ComponentInfo{
+				StateCode: internalpb.StateCode_Abnormal,
+			},
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "",
+			},
+		}, nil
+	}
+	return &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
+			StateCode: internalpb.StateCode_Healthy,
+		},
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
+}
+
+func (dcm *DataCoordMock) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+	if dcm.Err {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "",
+		}, errors.New("an error occurred")
+	}
+	if dcm.Fail {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "failure reason",
+		}, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (dcm *DataCoordMock) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+	if dcm.Err {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "",
+		}, errors.New("an error occurred")
+	}
+	if dcm.Fail {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "failure reason",
+		}, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+type ChunkManagerMock struct {
+	storage.ChunkManager
+
+	Fail bool
+	Err  bool
+}
+
+func (cmm *ChunkManagerMock) Exist(path string) (bool, error) {
+	if cmm.Err {
+		return false, errors.New("path not exist")
+	}
+	if cmm.Fail {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (cmm *ChunkManagerMock) RemoveWithPrefix(prefix string) error {
+	if cmm.Err {
+		return errors.New("error occurred")
+	}
+	if cmm.Fail {
+		return nil
+	}
+	return nil
 }
