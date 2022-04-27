@@ -27,7 +27,11 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
-if [[ $(uname -s) == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+if [[ $(uname -s) == "Darwin" ]]; then
+    export MallocNanoZone=0
+fi
+
+if [[ "$(uname -m)" == "arm64" ]]; then
   APPLE_SILICON_FLAG="-tags dynamic"
 fi
 
