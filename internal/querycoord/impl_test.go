@@ -937,6 +937,12 @@ func TestLoadCollectionWithReplicas(t *testing.T) {
 		assert.Equal(t, loadCollectionReq.CollectionID, replicas[i].CollectionID)
 	}
 
+	// Load the loaded collection with different replica number should fail
+	loadCollectionReq.ReplicaNumber = 2
+	status, err = queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_IllegalArgument, status.ErrorCode)
+
 	status, err = queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleaseCollection,
@@ -954,7 +960,7 @@ func TestLoadCollectionWithReplicas(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func Test_LoadPartitionsWithReplicas(t *testing.T) {
+func TestLoadPartitionsWithReplicas(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
@@ -993,6 +999,12 @@ func Test_LoadPartitionsWithReplicas(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	waitLoadPartitionDone(ctx, queryCoord,
 		loadPartitionsReq.CollectionID, loadPartitionsReq.PartitionIDs)
+
+	// Load the loaded partitions with different replica number should fail
+	loadPartitionsReq.ReplicaNumber = 2
+	status, err = queryCoord.LoadPartitions(ctx, loadPartitionsReq)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_IllegalArgument, status.ErrorCode)
 
 	status, err = queryCoord.ReleasePartitions(ctx, &querypb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{

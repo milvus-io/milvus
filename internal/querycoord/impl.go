@@ -184,6 +184,24 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	if collectionInfo, err := qc.meta.getCollectionInfoByID(collectionID); err == nil {
 		// if collection has been loaded by load collection request, return success
 		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
+			if collectionInfo.ReplicaNumber != req.ReplicaNumber {
+				msg := fmt.Sprintf("collection has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
+					collectionInfo.ReplicaNumber,
+					req.ReplicaNumber)
+				log.Warn(msg,
+					zap.String("role", typeutil.QueryCoordRole),
+					zap.Int64("collectionID", collectionID),
+					zap.Int64("msgID", req.Base.MsgID),
+					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
+					zap.Int32("requestReplicaNumber", req.ReplicaNumber))
+
+				status.ErrorCode = commonpb.ErrorCode_IllegalArgument
+				status.Reason = msg
+
+				metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+				return status, nil
+			}
+
 			log.Info("collection has already been loaded, return load success directly",
 				zap.String("role", typeutil.QueryCoordRole),
 				zap.Int64("collectionID", collectionID),
@@ -478,6 +496,24 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		}
 
 		if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
+			if collectionInfo.ReplicaNumber != req.ReplicaNumber {
+				msg := fmt.Sprintf("partitions has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
+					collectionInfo.ReplicaNumber,
+					req.ReplicaNumber)
+				log.Warn(msg,
+					zap.String("role", typeutil.QueryCoordRole),
+					zap.Int64("collectionID", collectionID),
+					zap.Int64("msgID", req.Base.MsgID),
+					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
+					zap.Int32("requestReplicaNumber", req.ReplicaNumber))
+
+				status.ErrorCode = commonpb.ErrorCode_IllegalArgument
+				status.Reason = msg
+
+				metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+				return status, nil
+			}
+
 			for _, toLoadPartitionID := range partitionIDs {
 				needLoad := true
 				for _, loadedPartitionID := range collectionInfo.PartitionIDs {
