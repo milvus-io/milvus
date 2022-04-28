@@ -223,7 +223,6 @@ dataCoord:
 
   compaction:
     enableAutoCompaction: true
-    entityExpiration: 9223372037 # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and 9223372037 is the maximum value of entityExpiration
 
   gc:
     interval: 3600 # gc interval in seconds
@@ -288,6 +287,8 @@ common:
   defaultPartitionName: "_default"  # default partition name for a collection
   defaultIndexName: "_default_idx"  # default index name
   retentionDuration: 432000 # 5 days in seconds
+  entityExpiration:  -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
+
 
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
