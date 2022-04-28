@@ -47,6 +47,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 					NodeID:       1,
 					DmChannel:    "dml_1_1_v0",
 					ReplicaIds:   []int64{1, 2},
+					NodeIds:      []UniqueID{1},
 				},
 			},
 			oldGarbage: map[string]string{
@@ -73,6 +74,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 					NodeID:       1,
 					DmChannel:    "dml_1_1_v0",
 					ReplicaIds:   []int64{1, 2},
+					NodeIds:      []UniqueID{1},
 				},
 				"segment_2": {
 					CollectionID: 1,
@@ -80,6 +82,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 					NodeID:       1,
 					DmChannel:    "dml_1_1_v1",
 					ReplicaIds:   []int64{1, 2},
+					NodeIds:      []UniqueID{1},
 				},
 				"segment_3": {
 					CollectionID: 2,
@@ -87,6 +90,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 					NodeID:       2,
 					DmChannel:    "dml_3_2_v0",
 					ReplicaIds:   []int64{1, 2},
+					NodeIds:      []UniqueID{2},
 				},
 				"segment_4": { // may not happen
 					CollectionID: 1,
@@ -94,6 +98,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 					NodeID:       1,
 					DmChannel:    "dml_1_1_v0",
 					ReplicaIds:   []int64{2},
+					NodeIds:      []UniqueID{1},
 				},
 			},
 			expectInitEvents: []segmentEvent{

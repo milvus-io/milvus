@@ -231,6 +231,7 @@ func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.Lo
 			SegmentState: commonpb.SegmentState_Sealed,
 			MemSize:      info.NumOfRows * int64(sizePerRecord),
 			NumRows:      info.NumOfRows,
+			NodeIds:      []UniqueID{qs.queryNodeID},
 		}
 		globalSegInfosMutex.Lock()
 		qs.segmentInfos[info.SegmentID] = segmentInfo

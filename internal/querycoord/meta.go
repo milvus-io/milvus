@@ -221,6 +221,9 @@ func (m *MetaReplica) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
+		if len(dmChannelWatchInfo.NodeIds) == 0 {
+			dmChannelWatchInfo.NodeIds = []int64{dmChannelWatchInfo.NodeIDLoaded}
+		}
 		m.dmChannelInfos[dmChannel] = dmChannelWatchInfo
 	}
 
@@ -860,7 +863,7 @@ func (m *MetaReplica) getSegmentInfosByNode(nodeID int64) []*querypb.SegmentInfo
 	var res []*querypb.SegmentInfo
 	segments := m.segmentsInfo.getSegments()
 	for _, segment := range segments {
-		if segment.GetNodeID() == nodeID {
+		if funcutil.SliceContain(segment.NodeIds, nodeID) {
 			res = append(res, segment)
 		}
 	}
@@ -870,7 +873,7 @@ func (m *MetaReplica) getSegmentInfosByNodeAndCollection(nodeID, collectionID in
 	var res []*querypb.SegmentInfo
 	segments := m.segmentsInfo.getSegments()
 	for _, segment := range segments {
-		if segment.GetNodeID() == nodeID && segment.GetCollectionID() == collectionID {
+		if segment.GetCollectionID() == collectionID && funcutil.SliceContain(segment.NodeIds, nodeID) {
 			res = append(res, segment)
 		}
 	}
@@ -910,7 +913,7 @@ func (m *MetaReplica) getDmChannelInfosByNodeID(nodeID int64) []*querypb.DmChann
 
 	var watchedDmChannelWatchInfo []*querypb.DmChannelWatchInfo
 	for _, channelInfo := range m.dmChannelInfos {
-		if channelInfo.NodeIDLoaded == nodeID {
+		if funcutil.SliceContain(channelInfo.NodeIds, nodeID) {
 			watchedDmChannelWatchInfo = append(watchedDmChannelWatchInfo, proto.Clone(channelInfo).(*querypb.DmChannelWatchInfo))
 		}
 	}
@@ -921,6 +924,12 @@ func (m *MetaReplica) getDmChannelInfosByNodeID(nodeID int64) []*querypb.DmChann
 func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos []*querypb.DmChannelWatchInfo) error {
 	m.dmChannelMu.Lock()
 	defer m.dmChannelMu.Unlock()
+
+	for _, channelInfo := range dmChannelWatchInfos {
+		if old, ok := m.dmChannelInfos[channelInfo.DmChannel]; ok {
+			channelInfo.NodeIds = append(channelInfo.NodeIds, old.NodeIds...)
+		}
+	}
 
 	err := saveDmChannelWatchInfos(dmChannelWatchInfos, m.getKvClient())
 	if err != nil {

@@ -1345,10 +1345,10 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 
 		err := sc.HandoffSegments(&querypb.SegmentChangeInfo{
 			OnlineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName},
+				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{2}},
 			},
 			OfflineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 1, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName},
+				{SegmentID: 1, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{1}},
 			},
 		})
 		if err != nil {
@@ -1396,12 +1396,12 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 
 		err := sc.HandoffSegments(&querypb.SegmentChangeInfo{
 			OnlineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName},
-				{SegmentID: 4, NodeID: 2, CollectionID: otherCollectionID, DmChannel: otherVchannelName},
+				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{2}},
+				{SegmentID: 4, NodeID: 2, CollectionID: otherCollectionID, DmChannel: otherVchannelName, NodeIds: []UniqueID{2}},
 			},
 			OfflineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 3, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName},
-				{SegmentID: 5, NodeID: 2, CollectionID: otherCollectionID, DmChannel: otherVchannelName},
+				{SegmentID: 3, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{1}},
+				{SegmentID: 5, NodeID: 2, CollectionID: otherCollectionID, DmChannel: otherVchannelName, NodeIds: []UniqueID{2}},
 			},
 		})
 		assert.NoError(t, err)
@@ -1453,10 +1453,10 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 		go func() {
 			err := sc.HandoffSegments(&querypb.SegmentChangeInfo{
 				OnlineSegments: []*querypb.SegmentInfo{
-					{SegmentID: 3, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName},
+					{SegmentID: 3, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{1}},
 				},
 				OfflineSegments: []*querypb.SegmentInfo{
-					{SegmentID: 1, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName},
+					{SegmentID: 1, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{1}},
 				},
 			})
 
@@ -1543,10 +1543,10 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 
 		err := sc.HandoffSegments(&querypb.SegmentChangeInfo{
 			OnlineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName},
+				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{2}},
 			},
 			OfflineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 1, NodeID: 3, CollectionID: collectionID, DmChannel: vchannelName},
+				{SegmentID: 1, NodeID: 3, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{3}},
 			},
 		})
 
@@ -1594,7 +1594,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 
 		err := sc.HandoffSegments(&querypb.SegmentChangeInfo{
 			OfflineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 1, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName},
+				{SegmentID: 1, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{1}},
 			},
 		})
 
@@ -1608,7 +1608,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 
 		err = sc.HandoffSegments(&querypb.SegmentChangeInfo{
 			OfflineSegments: []*querypb.SegmentInfo{
-				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName},
+				{SegmentID: 2, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{2}},
 			},
 		})
 

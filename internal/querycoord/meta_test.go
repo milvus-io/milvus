@@ -115,6 +115,7 @@ func TestMetaFunc(t *testing.T) {
 		PartitionID:  defaultPartitionID,
 		SegmentID:    defaultSegmentID,
 		NodeID:       nodeID,
+		NodeIds:      []int64{nodeID},
 	}
 	meta := &MetaReplica{
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
@@ -230,6 +231,7 @@ func TestMetaFunc(t *testing.T) {
 				CollectionID: defaultCollectionID,
 				DmChannel:    channel,
 				NodeIDLoaded: nodeID,
+				NodeIds:      []int64{nodeID},
 			})
 		}
 		err = meta.setDmChannelInfos(dmChannelWatchInfos)
@@ -389,6 +391,7 @@ func TestCreateQueryChannel(t *testing.T) {
 		PartitionID:  defaultPartitionID,
 		SegmentID:    defaultSegmentID,
 		NodeID:       nodeID,
+		NodeIds:      []int64{nodeID},
 	}
 
 	fixedQueryChannel := Params.CommonCfg.QueryCoordSearch + "-0"
@@ -419,5 +422,4 @@ func TestCreateQueryChannel(t *testing.T) {
 			assert.Equal(t, info.GetQueryResultChannel(), test.outResultChannel)
 		})
 	}
-
 }
