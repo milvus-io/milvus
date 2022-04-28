@@ -47,6 +47,7 @@ type Node interface {
 
 	watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error
 	watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error
+	syncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest) error
 	//removeDmChannel(collectionID UniqueID, channels []string) error
 
 	hasWatchedDeltaChannel(collectionID UniqueID) bool
@@ -444,4 +445,20 @@ func (qn *queryNode) getNodeInfo() (Node, error) {
 		memUsageRate: qn.memUsageRate,
 		cpuUsage:     qn.cpuUsage,
 	}, nil
+}
+
+func (qn *queryNode) syncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest) error {
+	if !qn.isOnline() {
+		return errors.New("ReleaseSegments: queryNode is offline")
+	}
+
+	status, err := qn.client.SyncReplicaSegments(ctx, in)
+	if err != nil {
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(status.Reason)
+	}
+
+	return nil
 }
