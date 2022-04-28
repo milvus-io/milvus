@@ -47,6 +47,7 @@ type Validator struct {
 	primaryKey   bool                                                 // true for primary key
 	autoID       bool                                                 // only for primary key field
 	dimension    int                                                  // only for vector field
+	fieldName    string                                               // field name
 }
 
 // method to construct valiator functions
@@ -74,6 +75,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 		validators[schema.GetFieldID()] = &Validator{}
 		validators[schema.GetFieldID()].primaryKey = schema.GetIsPrimaryKey()
 		validators[schema.GetFieldID()].autoID = schema.GetAutoID()
+		validators[schema.GetFieldID()].fieldName = schema.GetName()
 
 		switch schema.DataType {
 		case schemapb.DataType_Bool:
@@ -153,7 +155,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				switch vt := obj.(type) {
 				case []interface{}:
 					if len(vt)*8 != dim {
-						msg := "bit size " + strconv.Itoa(len(vt)*8) + " doesn't equal to vector dimension " + strconv.Itoa(dim)
+						msg := "bit size " + strconv.Itoa(len(vt)*8) + " doesn't equal to vector dimension " + strconv.Itoa(dim) + " of field " + schema.GetName()
 						return errors.New(msg)
 					}
 					for i := 0; i < len(vt); i++ {
@@ -197,7 +199,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				switch vt := obj.(type) {
 				case []interface{}:
 					if len(vt) != dim {
-						msg := "array size " + strconv.Itoa(len(vt)) + " doesn't equal to vector dimension " + strconv.Itoa(dim)
+						msg := "array size " + strconv.Itoa(len(vt)) + " doesn't equal to vector dimension " + strconv.Itoa(dim) + " of field " + schema.GetName()
 						return errors.New(msg)
 					}
 					for i := 0; i < len(vt); i++ {
@@ -295,7 +297,7 @@ func (v *JSONRowValidator) Handle(rows []map[storage.FieldID]interface{}) error 
 			}
 			value, ok := row[id]
 			if !ok {
-				return errors.New("JSON row validator: fieldID " + strconv.FormatInt(id, 10) + " missed at the row " + strconv.FormatInt(v.rowCounter+int64(i), 10))
+				return errors.New("JSON row validator: field " + validator.fieldName + " missed at the row " + strconv.FormatInt(v.rowCounter+int64(i), 10))
 			}
 
 			if err := validator.validateFunc(value); err != nil {
@@ -317,21 +319,21 @@ func (v *JSONRowValidator) Handle(rows []map[storage.FieldID]interface{}) error 
 type JSONColumnValidator struct {
 	downstream JSONColumnHandler              // downstream processor, typically is a JSONColumnComsumer
 	validators map[storage.FieldID]*Validator // validators for each field
-	rowCounter map[storage.FieldID]int64      // row count of each field
+	rowCounter map[string]int64               // row count of each field
 }
 
 func NewJSONColumnValidator(schema *schemapb.CollectionSchema, downstream JSONColumnHandler) *JSONColumnValidator {
 	v := &JSONColumnValidator{
 		validators: make(map[storage.FieldID]*Validator),
 		downstream: downstream,
-		rowCounter: make(map[storage.FieldID]int64),
+		rowCounter: make(map[string]int64),
 	}
 	initValidators(schema, v.validators)
 
 	return v
 }
 
-func (v *JSONColumnValidator) ValidateCount() map[storage.FieldID]int64 {
+func (v *JSONColumnValidator) ValidateCount() map[string]int64 {
 	return v.rowCounter
 }
 
@@ -348,7 +350,7 @@ func (v *JSONColumnValidator) Handle(columns map[storage.FieldID][]interface{}) 
 			if rowCount == -1 {
 				rowCount = counter
 			} else if rowCount != counter {
-				return errors.New("JSON column validator: the field " + strconv.FormatInt(k, 10) + " row count " + strconv.Itoa(int(counter)) + " is not equal to other fields " + strconv.Itoa(int(rowCount)))
+				return errors.New("JSON column validator: the field " + k + " row count " + strconv.Itoa(int(counter)) + " is not equal to other fields " + strconv.Itoa(int(rowCount)))
 			}
 		}
 
@@ -360,8 +362,9 @@ func (v *JSONColumnValidator) Handle(columns map[storage.FieldID][]interface{}) 
 		return nil
 	}
 
-	for name, values := range columns {
-		validator, ok := v.validators[name]
+	for id, values := range columns {
+		validator, ok := v.validators[id]
+		name := validator.fieldName
 		if !ok {
 			// not a valid field name, skip without parsing
 			break

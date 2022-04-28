@@ -831,6 +831,7 @@ message GetImportStateResponse {
   int64 row_count = 3;                     // if the task is finished, this value is how many rows are imported. if the task is not finished, this value is how many rows are parsed. return 0 if failed.
   repeated int64 id_list = 4;              // auto generated ids if the primary key is autoid
   repeated common.KeyValuePair infos = 5;  // more informations about the task, progress percent, file path, failed reason, etc.
+  int64 id = 6;                          // id of an import task
 }
 
 message ListImportTasksRequest {
@@ -838,7 +839,7 @@ message ListImportTasksRequest {
 
 message ListImportTasksResponse {
   common.Status status = 1;
-  repeated int64 tasks = 2;  // id list of all import tasks
+  repeated GetImportStateResponse tasks = 2;  // list of all import tasks
 }
 
 message GetReplicasRequest {

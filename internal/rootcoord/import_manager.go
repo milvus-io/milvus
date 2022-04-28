@@ -378,13 +378,14 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 	func() {
 		m.pendingLock.Lock()
 		defer m.pendingLock.Unlock()
-		for i := 0; i < len(m.pendingTasks); i++ {
-			if tID == m.pendingTasks[i].Id {
+		for _, t := range m.pendingTasks {
+			if tID == t.Id {
 				resp.Status = &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				}
+				resp.Id = tID
 				resp.State = commonpb.ImportState_ImportPending
-				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(m.pendingTasks[i].GetFiles(), ",")})
+				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
 				found = true
 				break
 			}
@@ -402,6 +403,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 			resp.Status = &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			}
+			resp.Id = tID
 			resp.State = v.GetState().GetStateCode()
 			resp.RowCount = v.GetState().GetRowCount()
 			resp.IdList = v.GetState().GetRowIds()
@@ -542,23 +544,49 @@ func (m *importManager) expireOldTasks() {
 	}()
 }
 
-func (m *importManager) listAllTasks() []int64 {
-	tasks := make([]int64, 0)
+func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
+	tasks := make([]*milvuspb.GetImportStateResponse, 0)
 
 	func() {
 		m.pendingLock.Lock()
 		defer m.pendingLock.Unlock()
 		for _, t := range m.pendingTasks {
-			tasks = append(tasks, t.GetId())
+			resp := &milvuspb.GetImportStateResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Infos: make([]*commonpb.KeyValuePair, 0),
+				Id:    t.GetId(),
+				State: commonpb.ImportState_ImportPending,
+			}
+			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
+			tasks = append(tasks, resp)
 		}
+		log.Info("tasks in pending list", zap.Int("count", len(m.pendingTasks)))
 	}()
 
 	func() {
 		m.workingLock.Lock()
 		defer m.workingLock.Unlock()
 		for _, v := range m.workingTasks {
-			tasks = append(tasks, v.GetId())
+			resp := &milvuspb.GetImportStateResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Infos:    make([]*commonpb.KeyValuePair, 0),
+				Id:       v.GetId(),
+				State:    v.GetState().GetStateCode(),
+				RowCount: v.GetState().GetRowCount(),
+				IdList:   v.GetState().GetRowIds(),
+			}
+			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(v.GetFiles(), ",")})
+			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{
+				Key:   FailedReason,
+				Value: v.GetState().GetErrorMessage(),
+			})
+			tasks = append(tasks, resp)
 		}
+		log.Info("tasks in working list", zap.Int("count", len(m.workingTasks)))
 	}()
 
 	return tasks

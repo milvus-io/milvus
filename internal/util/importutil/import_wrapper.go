@@ -25,6 +25,7 @@ import (
 const (
 	JSONFileExt  = ".json"
 	NumpyFileExt = ".npy"
+	MaxFileSize  = 4 * 1024 * 1024 * 1024 // maximum size of each file
 )
 
 type ImportWrapper struct {
@@ -108,10 +109,41 @@ func getFileNameAndExt(filePath string) (string, string) {
 	return fileNameWithoutExt, fileType
 }
 
+func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error {
+	for i := 0; i < len(filePaths); i++ {
+		filePath := filePaths[i]
+		_, fileType := getFileNameAndExt(filePath)
+
+		// check file type
+		if rowBased {
+			if fileType != JSONFileExt {
+				return errors.New("unsupported file type for row-based mode: " + filePath)
+			}
+		} else {
+			if fileType != JSONFileExt && fileType != NumpyFileExt {
+				return errors.New("unsupported file type for column-based mode: " + filePath)
+			}
+		}
+
+		// check file size
+		size, _ := p.chunkManager.Size(filePath)
+		if size > MaxFileSize {
+			return errors.New("the file " + filePath + " size exceeds the maximum file size: " + strconv.FormatInt(MaxFileSize, 10) + " bytes")
+		}
+	}
+
+	return nil
+}
+
 // import process entry
 // filePath and rowBased are from ImportTask
 // if onlyValidate is true, this process only do validation, no data generated, callFlushFunc will not be called
 func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate bool) error {
+	err := p.fileValidation(filePaths, rowBased)
+	if err != nil {
+		return err
+	}
+
 	if rowBased {
 		// parse and consume row-based files
 		// for row-based files, the JSONRowConsumer will generate autoid for primary key, and split rows into segments
@@ -419,15 +451,26 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	tr := timerecord.NewTimeRecorder("split field data")
 	defer tr.Elapse("finished")
 
+	// check existence of each field
+	// check row count, all fields row count must be equal
+	// firstly get the max row count
+	rowCount := 0
+	rowCounter := make(map[string]int)
 	var primaryKey *schemapb.FieldSchema
 	for i := 0; i < len(p.collectionSchema.Fields); i++ {
 		schema := p.collectionSchema.Fields[i]
 		if schema.GetIsPrimaryKey() {
 			primaryKey = schema
-		} else {
-			_, ok := fieldsData[schema.GetFieldID()]
+		}
+
+		if !schema.GetAutoID() {
+			v, ok := fieldsData[schema.GetFieldID()]
 			if !ok {
 				return errors.New("import error: field " + schema.GetName() + " not provided")
+			}
+			rowCounter[schema.GetName()] = v.RowNum()
+			if v.RowNum() > rowCount {
+				rowCount = v.RowNum()
 			}
 		}
 	}
@@ -435,10 +478,9 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 		return errors.New("import error: primary key field is not found")
 	}
 
-	rowCount := 0
-	for _, v := range fieldsData {
-		if v.RowNum() > rowCount {
-			rowCount = v.RowNum()
+	for name, count := range rowCounter {
+		if count != rowCount {
+			return errors.New("import error: field " + name + " row count " + strconv.Itoa(count) + " is not equal to other fields " + strconv.Itoa(rowCount))
 		}
 	}
 
