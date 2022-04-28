@@ -5,13 +5,6 @@ option go_package="github.com/milvus-io/milvus/internal/proto/etcdpb";
 import "common.proto";
 import "schema.proto";
 
-message TenantMeta {
-  int64 ID = 1;
-  int64 num_query_nodes = 2;
-  repeated string insert_channelIDs = 3;
-  string query_channelID = 4;
-}
-
 message ProxyMeta {
   int64 ID = 1;
   common.Address address = 2;
