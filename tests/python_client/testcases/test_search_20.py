@@ -2113,7 +2113,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.load()
 
         # 3. search with expression
-        expression = f"0 < {default_float_field_name} < 5001"
+        expression = f"0 < {default_int64_field_name} < 5001"
         log.info("test_search_with_expression: searching with expression: %s" % expression)
 
         nums = 5000
@@ -2150,7 +2150,7 @@ class TestCollectionSearch(TestcaseBase):
         nums = 5000
         vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
         vectors_id = [random.randint(0,nums)for _ in range(nums)]
-        expression = f"{default_float_field_name} in {vectors_id}"
+        expression = f"{default_int64_field_name} in {vectors_id}"
         search_res, _ = collection_w.search(vectors, default_search_field,
                                             default_search_params, default_limit, expression,
                                             check_task=CheckTasks.check_search_results,
