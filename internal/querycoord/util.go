@@ -168,12 +168,12 @@ func syncReplicaSegments(ctx context.Context, cluster Cluster, childTasks []task
 	}
 
 	for dmc, leaders := range shardLeaders {
-		for _, leader := range leaders {
-			segments, ok := shardSegments[dmc]
-			if !ok {
-				break
-			}
+		segments, ok := shardSegments[dmc]
+		if !ok {
+			continue
+		}
 
+		for _, leader := range leaders {
 			req := querypb.SyncReplicaSegmentsRequest{
 				VchannelName:    dmc,
 				ReplicaSegments: make([]*querypb.ReplicaSegmentsInfo, 0, len(segments)),

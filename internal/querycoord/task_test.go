@@ -480,8 +480,11 @@ func Test_LoadCollectionExecuteFail(t *testing.T) {
 func TestLoadCollectionNoEnoughNodeFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
+	defer removeAllSession()
+
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
+	defer queryCoord.Stop()
 
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
@@ -489,16 +492,13 @@ func TestLoadCollectionNoEnoughNodeFail(t *testing.T) {
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+	defer node1.stop()
+	defer node2.stop()
 
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
 	loadCollectionTask.ReplicaNumber = 3
 	err = queryCoord.scheduler.processTask(loadCollectionTask)
 	assert.Error(t, err)
-
-	assert.NoError(t, node1.stop())
-	assert.NoError(t, node2.stop())
-	assert.NoError(t, queryCoord.Stop())
-	assert.NoError(t, removeAllSession())
 }
 
 func Test_LoadPartitionAssignTaskFail(t *testing.T) {

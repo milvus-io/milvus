@@ -94,6 +94,21 @@ func waitLoadCollectionDone(ctx context.Context, queryCoord *QueryCoord, collect
 	return nil
 }
 
+func waitLoadCollectionRollbackDone(queryCoord *QueryCoord, collectionID UniqueID) bool {
+	maxRetryNum := 100
+
+	for cnt := 0; cnt < maxRetryNum; cnt++ {
+		_, err := queryCoord.meta.getCollectionInfoByID(collectionID)
+		if err != nil {
+			return true
+		}
+		log.Debug("waiting for rollback done...")
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return false
+}
+
 func TestGrpcTask(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
@@ -1022,6 +1037,43 @@ func TestLoadPartitionsWithReplicas(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestLoadCollectionSyncSegmentsFail(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	defer removeAllSession()
+
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+	defer queryCoord.Stop()
+
+	node1, err := startQueryNodeServer(ctx)
+	assert.Nil(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+	defer node1.stop()
+	node1.syncReplicaSegments = returnFailedResult
+
+	// Failed to sync segments should cause rollback
+	loadCollectionReq := &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_LoadCollection,
+		},
+		CollectionID:  defaultCollectionID,
+		Schema:        genDefaultCollectionSchema(false),
+		ReplicaNumber: 1,
+	}
+	status, err := queryCoord.LoadCollection(ctx, loadCollectionReq)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	// Wait for rollback done
+	rollbackDone := waitLoadCollectionRollbackDone(queryCoord, loadCollectionReq.CollectionID)
+	assert.True(t, rollbackDone)
+
+	assert.NoError(t, node1.stop())
+	assert.NoError(t, queryCoord.Stop())
+	assert.NoError(t, removeAllSession())
 }
 
 func Test_RepeatedLoadSamePartitions(t *testing.T) {
