@@ -21,6 +21,8 @@ default_nb = ct.default_nb
 num_loaded_entities = "num_loaded_entities"
 num_total_entities = "num_total_entities"
 loading_progress = "loading_progress"
+num_loaded_partitions = "num_loaded_partitions"
+not_loaded_partitions = "not_loaded_partitions"
 
 
 class TestUtilityParams(TestcaseBase):
@@ -242,6 +244,7 @@ class TestUtilityParams(TestcaseBase):
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue to be discussed")
     @pytest.mark.parametrize("partition_names", [[ct.default_tag], [ct.default_partition_name, ct.default_tag]])
     def test_loading_progress_not_existed_partitions(self, partition_names):
         """
@@ -761,20 +764,19 @@ class TestUtilityBase(TestcaseBase):
         assert res["indexed_rows"] == nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_without_loading(self):
         """
         target: test loading progress without loading
         method: insert and flush data, call loading_progress without loading
-        expected: loaded entities is 0
+        expected: raise exception
         """
         collection_w = self.init_collection_wrap()
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-        exp_res = {loading_progress: '0%'}
-        res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res == exp_res
+        error = {ct.err_code: 1, ct.err_msg: {"has not been loaded into QueryNode"}}
+        self.utility_wrap.loading_progress(collection_w.name,
+                                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])
@@ -818,25 +820,24 @@ class TestUtilityBase(TestcaseBase):
         collection_w = self.init_collection_wrap()
         collection_w.load()
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        exp_res = {loading_progress: '100%'}
+        exp_res = {loading_progress: '100%', num_loaded_partitions: 1, not_loaded_partitions: []}
+
         assert exp_res == res
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_after_release(self):
         """
-        target: test loading progress without loading
-        method: insert and flush data, call loading_progress without loading
-        expected: loaded entities is 0
+        target: test loading progress after release
+        method: insert and flush data, call loading_progress after release
+        expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         collection_w.release()
-        exp_res = {loading_progress: '0%'}
-        res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res == exp_res
+        error = {ct.err_code: 1, ct.err_msg: {"has not been loaded into QueryNode"}}
+        self.utility_wrap.loading_progress(collection_w.name,
+                                           check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_with_release_partition(self):
         """
         target: test loading progress after release part partitions
@@ -852,7 +853,6 @@ class TestUtilityBase(TestcaseBase):
         assert res[loading_progress] == '50%'
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16468")
     def test_loading_progress_with_load_partition(self):
         """
         target: test loading progress after load partition
@@ -892,7 +892,7 @@ class TestUtilityBase(TestcaseBase):
         cw.load()
         self.utility_wrap.wait_for_loading_complete(cw.name)
         res, _ = self.utility_wrap.loading_progress(cw.name)
-        exp_res = {loading_progress: "100%"}
+        exp_res = {loading_progress: "100%", not_loaded_partitions: [], num_loaded_partitions: 1}
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L1)
