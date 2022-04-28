@@ -252,9 +252,9 @@ func (h *historical) searchSegments(segIDs []UniqueID, searchReqs []*searchReque
 			searchResult, err := seg.search(plan, searchReqs, []Timestamp{searchTs})
 
 			// update metrics
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(metrics.SearchLabel,
-				metrics.SealedSegmentLabel,
-				fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+				metrics.SearchLabel,
+				metrics.SealedSegmentLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 			// write back result into list
 			lock.Lock()

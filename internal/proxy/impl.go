@@ -2455,6 +2455,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			},
 		}, nil
 	}
+	tr.Record("search request enqueue")
 
 	log.Debug(
 		rpcEnqueued(method),
@@ -2500,6 +2501,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}, nil
 	}
 
+	span := tr.Record("wait search result")
+	metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.SearchLabel).Observe(float64(span.Milliseconds()))
 	log.Debug(
 		rpcDone(method),
 		zap.String("traceID", traceID),
@@ -2517,7 +2521,6 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
-
 	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(qt.result.GetResults().GetNumQueries()))
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySearchLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
@@ -2681,6 +2684,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			},
 		}, nil
 	}
+	tr.Record("query request enqueue")
 
 	log.Debug(
 		rpcEnqueued(method),
@@ -2716,7 +2720,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			},
 		}, nil
 	}
-
+	span := tr.Record("wait query result")
+	metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.QueryLabel).Observe(float64(span.Milliseconds()))
 	log.Debug(
 		rpcDone(method),
 		zap.String("traceID", traceID),

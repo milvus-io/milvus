@@ -68,6 +68,14 @@ var (
 			Help:      "number of stored rows",
 		}, []string{})
 
+	DataCoordNumStoredRowsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "stored_rows_count",
+			Help:      "count of all stored rows ever",
+		}, []string{})
+
 	DataCoordSyncEpoch = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
