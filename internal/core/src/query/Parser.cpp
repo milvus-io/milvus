@@ -75,13 +75,13 @@ Parser::ParseCompareNode(const Json& out_body) {
     Assert(item0.is_string());
     auto left_field_name = FieldName(item0.get<std::string>());
     expr->left_data_type_ = schema[left_field_name].get_data_type();
-    expr->left_field_offset_ = schema.get_offset(left_field_name);
+    expr->left_field_id_ = schema.get_field_id(left_field_name);
 
     auto& item1 = body[1];
     Assert(item1.is_string());
     auto right_field_name = FieldName(item1.get<std::string>());
     expr->right_data_type_ = schema[right_field_name].get_data_type();
-    expr->right_field_offset_ = schema.get_offset(right_field_name);
+    expr->right_field_id_ = schema.get_field_id(right_field_name);
 
     return expr;
 }
@@ -188,7 +188,7 @@ Parser::ParseVecNode(const Json& out_body) {
     AssertInfo(topk > 0, "topk must greater than 0");
     AssertInfo(topk < 16384, "topk is too large");
 
-    auto field_offset = schema.get_offset(field_name);
+    auto field_id = schema.get_field_id(field_name);
 
     auto vec_node = [&]() -> std::unique_ptr<VectorPlanNode> {
         auto& field_meta = schema.operator[](field_name);
@@ -202,12 +202,12 @@ Parser::ParseVecNode(const Json& out_body) {
     vec_node->search_info_.topk_ = topk;
     vec_node->search_info_.metric_type_ = GetMetricType(vec_info.at("metric_type"));
     vec_node->search_info_.search_params_ = vec_info.at("params");
-    vec_node->search_info_.field_offset_ = field_offset;
+    vec_node->search_info_.field_id_ = field_id;
     vec_node->search_info_.round_decimal_ = vec_info.at("round_decimal");
     vec_node->placeholder_tag_ = vec_info.at("query");
     auto tag = vec_node->placeholder_tag_;
     AssertInfo(!tag2field_.count(tag), "duplicated placeholder tag");
-    tag2field_.emplace(tag, field_offset);
+    tag2field_.emplace(tag, field_id);
     return vec_node;
 }
 
@@ -232,7 +232,8 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
         terms[i] = value;
     }
     std::sort(terms.begin(), terms.end());
-    return std::make_unique<TermExprImpl<T>>(schema.get_offset(field_name), schema[field_name].get_data_type(), terms);
+    return std::make_unique<TermExprImpl<T>>(schema.get_field_id(field_name), schema[field_name].get_data_type(),
+                                             terms);
 }
 
 template <typename T>
@@ -298,8 +299,8 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             }
 
             return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
-                schema.get_offset(field_name), schema[field_name].get_data_type(), arith_op_mapping_.at(arith_op_name),
-                right_operand, mapping_.at(op_name), value);
+                schema.get_field_id(field_name), schema[field_name].get_data_type(),
+                arith_op_mapping_.at(arith_op_name), right_operand, mapping_.at(op_name), value);
         }
 
         if constexpr (std::is_same_v<T, bool>) {
@@ -312,7 +313,7 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             static_assert(always_false<T>, "unsupported type");
         }
         return std::make_unique<UnaryRangeExprImpl<T>>(
-            schema.get_offset(field_name), schema[field_name].get_data_type(), mapping_.at(op_name), item.value());
+            schema.get_field_id(field_name), schema[field_name].get_data_type(), mapping_.at(op_name), item.value());
     } else if (body.size() == 2) {
         bool has_lower_value = false;
         bool has_upper_value = false;
@@ -351,7 +352,7 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             }
         }
         AssertInfo(has_lower_value && has_upper_value, "illegal binary-range node");
-        return std::make_unique<BinaryRangeExprImpl<T>>(schema.get_offset(field_name),
+        return std::make_unique<BinaryRangeExprImpl<T>>(schema.get_field_id(field_name),
                                                         schema[field_name].get_data_type(), lower_inclusive,
                                                         upper_inclusive, lower_value, upper_value);
     } else {

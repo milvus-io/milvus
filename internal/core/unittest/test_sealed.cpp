@@ -31,7 +31,9 @@ TEST(Sealed, without_predicate) {
     auto topK = 5;
     auto metric_type = MetricType::METRIC_L2;
     auto fake_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    schema->AddDebugField("age", DataType::FLOAT);
+    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -55,7 +57,7 @@ TEST(Sealed, without_predicate) {
     auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
-    auto vec_col = dataset.get_col<float>(0);
+    auto vec_col = dataset.get_col<float>(fake_id);
     for (int64_t i = 0; i < 1000 * dim; ++i) {
         vec_col.push_back(0);
     }
@@ -99,7 +101,7 @@ TEST(Sealed, without_predicate) {
     std::vector<int64_t> vec_ids(ids, ids + topK * num_queries);
     std::vector<float> vec_dis(dis, dis + topK * num_queries);
 
-    sr->ids_ = vec_ids;
+    sr->seg_offsets_ = vec_ids;
     sr->distances_ = vec_dis;
     auto ref_result = SearchResultToJson(*sr);
 
@@ -127,7 +129,8 @@ TEST(Sealed, with_predicate) {
     auto topK = 5;
     auto metric_type = MetricType::METRIC_L2;
     auto fake_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
-    schema->AddDebugField("counter", DataType::INT64);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -159,7 +162,7 @@ TEST(Sealed, with_predicate) {
     auto N = ROW_COUNT;
 
     auto dataset = DataGen(schema, N);
-    auto vec_col = dataset.get_col<float>(0);
+    auto vec_col = dataset.get_col<float>(fake_id);
     auto query_ptr = vec_col.data() + 42000 * dim;
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
@@ -204,7 +207,7 @@ TEST(Sealed, with_predicate) {
 
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * topK;
-        ASSERT_EQ(sr->ids_[offset], 42000 + i);
+        ASSERT_EQ(sr->seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(sr->distances_[offset], 0.0);
     }
 }
@@ -219,10 +222,11 @@ TEST(Sealed, LoadFieldData) {
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
     auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
 
-    auto fakevec = dataset.get_col<float>(0);
+    auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto indexing = GenIndexing(N, dim, fakevec.data());
 
@@ -277,10 +281,10 @@ TEST(Sealed, LoadFieldData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(), 1);
-    auto chunk_span1 = segment->chunk_data<int64_t>(FieldOffset(1), 0);
-    auto chunk_span2 = segment->chunk_data<double>(FieldOffset(2), 0);
-    auto ref1 = dataset.get_col<int64_t>(1);
-    auto ref2 = dataset.get_col<double>(2);
+    auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
+    auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
+    auto ref1 = dataset.get_col<int64_t>(counter_id);
+    auto ref2 = dataset.get_col<double>(double_id);
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1[i], ref1[i]);
         ASSERT_EQ(chunk_span2[i], ref2[i]);
@@ -324,6 +328,96 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(std_json.dump(-2), json.dump(-2));
 }
 
+TEST(Sealed, LoadScalarIndex) {
+    auto dim = 16;
+    auto N = ROW_COUNT;
+    auto metric_type = MetricType::METRIC_L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(fakevec_id);
+
+    auto indexing = GenIndexing(N, dim, fakevec.data());
+
+    auto segment = CreateSealedSegment(schema);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "double": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5,
+                        "round_decimal": 3
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    Timestamp time = 1000000;
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    SealedLoader(dataset, *segment);
+
+    LoadIndexInfo vec_info;
+    vec_info.field_id = fakevec_id.get();
+    vec_info.field_type = CDataType::FloatVector;
+    vec_info.index = indexing;
+    vec_info.index_params["metric_type"] = knowhere::Metric::L2;
+    segment->LoadIndex(vec_info);
+
+    LoadIndexInfo counter_index;
+    counter_index.field_id = counter_id.get();
+    counter_index.field_type = CDataType::Int64;
+    counter_index.index_params["index_type"] = "sort";
+    auto counter_data = dataset.get_col<int64_t>(counter_id);
+    counter_index.index = std::move(GenScalarIndexing<int64_t>(N, counter_data.data()));
+    segment->LoadIndex(counter_index);
+
+    LoadIndexInfo double_index;
+    double_index.field_id = double_id.get();
+    double_index.field_type = CDataType::Double;
+    double_index.index_params["index_type"] = "sort";
+    auto double_data = dataset.get_col<double>(double_id);
+    double_index.index = std::move(GenScalarIndexing<double>(N, double_data.data()));
+    segment->LoadIndex(double_index);
+
+    LoadIndexInfo nothing_index;
+    nothing_index.field_id = nothing_id.get();
+    nothing_index.field_type = CDataType::Int32;
+    nothing_index.index_params["index_type"] = "sort";
+    auto nothing_data = dataset.get_col<int32_t>(nothing_id);
+    nothing_index.index = std::move(GenScalarIndexing<int32_t>(N, nothing_data.data()));
+    segment->LoadIndex(nothing_index);
+
+    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto json = SearchResultToJson(*sr);
+    std::cout << json.dump(1);
+}
+
 TEST(Sealed, Delete) {
     auto dim = 16;
     auto topK = 5;
@@ -334,10 +428,11 @@ TEST(Sealed, Delete) {
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
     auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
 
-    auto fakevec = dataset.get_col<float>(0);
+    auto fakevec = dataset.get_col<float>(fakevec_id);
 
     auto segment = CreateSealedSegment(schema);
     std::string dsl = R"({
@@ -380,9 +475,11 @@ TEST(Sealed, Delete) {
 
     int64_t row_count = 5;
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
+    auto ids = std::make_unique<IdArray>();
+    ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
     std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
-    LoadDeletedRecordInfo info = {timestamps.data(), pks.data(), row_count};
+    LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
     segment->LoadDeletedRecord(info);
 
     std::vector<uint8_t> tmp_block{0, 0};
@@ -392,9 +489,11 @@ TEST(Sealed, Delete) {
 
     int64_t new_count = 3;
     std::vector<idx_t> new_pks{6, 7, 8};
+    auto new_ids = std::make_unique<IdArray>();
+    new_ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
     std::vector<idx_t> new_timestamps{10, 10, 10};
     auto reserved_offset = segment->PreDelete(new_count);
     ASSERT_EQ(reserved_offset, row_count);
-    segment->Delete(reserved_offset, new_count, reinterpret_cast<const int64_t*>(new_pks.data()),
+    segment->Delete(reserved_offset, new_count, new_ids.get(),
                     reinterpret_cast<const Timestamp*>(new_timestamps.data()));
 }

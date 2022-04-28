@@ -70,13 +70,13 @@ typedef struct CProto {
 
 typedef struct CLoadFieldDataInfo {
     int64_t field_id;
-    void* blob;
+    const char* blob;
     int64_t row_count;
 } CLoadFieldDataInfo;
 
 typedef struct CLoadDeletedRecordInfo {
     void* timestamps;
-    void* primary_keys;
+    const char* primary_keys;
     int64_t row_count;
 } CLoadDeletedRecordInfo;
 

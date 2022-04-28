@@ -67,7 +67,10 @@ func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 	return nil
 }
 
-func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResult, numSegments int, reqSlices []int32) (searchResultDataBlobs, error) {
+func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResult, plan *SearchPlan, numSegments int, reqSlices []int32) (searchResultDataBlobs, error) {
+	if plan.cSearchPlan == nil {
+		return nil, errors.New("nil search plan")
+	}
 	log.Debug("start marshal...",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("msgID", msgID),
@@ -85,7 +88,7 @@ func marshal(collectionID UniqueID, msgID UniqueID, searchResults []*SearchResul
 
 	var cSearchResultDataBlobs searchResultDataBlobs
 
-	status := C.Marshal(&cSearchResultDataBlobs, cSearchResultPtr, cNumSegments, cSlicesPtr, cNumSlices)
+	status := C.Marshal(&cSearchResultDataBlobs, cSearchResultPtr, plan.cSearchPlan, cNumSegments, cSlicesPtr, cNumSlices)
 	if err := HandleCStatus(&status, "ReorganizeSearchResults failed"); err != nil {
 		return nil, err
 	}

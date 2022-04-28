@@ -32,8 +32,8 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
         Placeholder element;
         element.tag_ = info.tag();
         Assert(plan->tag2field_.count(element.tag_));
-        auto field_offset = plan->tag2field_.at(element.tag_);
-        auto& field_meta = plan->schema_[field_offset];
+        auto field_id = plan->tag2field_.at(element.tag_);
+        auto& field_meta = plan->schema_[field_id];
         element.num_of_queries_ = info.values_size();
         AssertInfo(element.num_of_queries_, "must have queries");
         Assert(element.num_of_queries_ > 0);
@@ -86,9 +86,9 @@ GetNumOfQueries(const PlaceholderGroup* group) {
 // std::unique_ptr<RetrievePlan>
 // CreateRetrievePlan(const Schema& schema, proto::segcore::RetrieveRequest&& request) {
 //    auto plan = std::make_unique<RetrievePlan>();
-//    plan->ids_ = std::unique_ptr<proto::schema::IDs>(request.release_ids());
+//    plan->seg_offsets_ = std::unique_ptr<proto::schema::IDs>(request.release_ids());
 //    for (auto& field_id : request.output_fields_id()) {
-//        plan->field_offsets_.push_back(schema.get_offset(FieldId(field_id)));
+//        plan->field_ids_.push_back(schema.get_offset(FieldId(field_id)));
 //    }
 //    return plan;
 //}

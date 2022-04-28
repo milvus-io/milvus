@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
@@ -62,6 +63,28 @@ type segmentLoader struct {
 	cpuPool *concurrency.Pool
 
 	factory msgstream.Factory
+}
+
+func (loader *segmentLoader) getFieldType(segment *Segment, fieldID FieldID) (schemapb.DataType, error) {
+	var coll *Collection
+	var err error
+
+	switch segment.getType() {
+	case segmentTypeGrowing:
+		coll, err = loader.streamingReplica.getCollectionByID(segment.collectionID)
+		if err != nil {
+			return schemapb.DataType_None, err
+		}
+	case segmentTypeSealed:
+		coll, err = loader.historicalReplica.getCollectionByID(segment.collectionID)
+		if err != nil {
+			return schemapb.DataType_None, err
+		}
+	default:
+		return schemapb.DataType_None, fmt.Errorf("invalid segment type: %s", segment.getType().String())
+	}
+
+	return coll.getFieldType(fieldID)
 }
 
 func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
@@ -217,7 +240,7 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 		return err
 	}
 
-	var nonIndexedFieldBinlogs []*datapb.FieldBinlog
+	var fieldBinlogs []*datapb.FieldBinlog
 	if segment.getType() == segmentTypeSealed {
 		fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, indexInfo := range loadInfo.IndexInfos {
@@ -235,28 +258,26 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 					indexInfo:   indexInfo,
 				}
 				indexedFieldInfos[fieldID] = fieldInfo
+
+				if fieldBinlog.FieldID == pkFieldID {
+					// pk field data should always be loaded.
+					// segCore need a map (pk data -> offset)
+					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+				}
 			} else {
-				nonIndexedFieldBinlogs = append(nonIndexedFieldBinlogs, fieldBinlog)
+				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 			}
 		}
 
-		loadVecFieldsTask := func() error {
-			return loader.loadVecFieldData(segment, indexedFieldInfos)
-		}
-		loadScalarFieldsTask := func() error {
-			return loader.loadSealedFields(segment, nonIndexedFieldBinlogs)
-		}
-
-		err = funcutil.ProcessTaskParallel(2, "loadVecAndScalarFields",
-			loadVecFieldsTask, loadScalarFieldsTask)
-		if err != nil {
+		if err := loader.loadIndexedFieldData(segment, indexedFieldInfos); err != nil {
 			return err
 		}
 	} else {
-		err = loader.loadGrowingFields(segment, loadInfo.BinlogPaths)
-		if err != nil {
-			return err
-		}
+		fieldBinlogs = loadInfo.BinlogPaths
+	}
+
+	if err := loader.loadFiledBinlogData(segment, fieldBinlogs); err != nil {
+		return err
 	}
 
 	if pkFieldID == common.InvalidFieldID {
@@ -287,68 +308,51 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result
 }
 
-// Load segments concurrency granularity: each binlog file
-// Deserialize blobs concurrency granularity: each field
-func (loader *segmentLoader) loadSealedFields(segment *Segment, fields []*datapb.FieldBinlog) error {
-	if segment.getType() != segmentTypeSealed {
-		return fmt.Errorf("illegal segment type when load segment, collectionID = %v, should be sealed segment", segment.collectionID)
+func (loader *segmentLoader) loadFiledBinlogData(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
+	if len(fieldBinlogs) <= 0 {
+		return nil
 	}
 
-	futures := make([]*concurrency.Future, 0, len(fields))
+	segmentType := segment.getType()
 	iCodec := storage.InsertCodec{}
-
-	for i := range fields {
-		field := fields[i]
-
-		// We should acquire the CPU limiter, then start load the field binlogs,
-		// to make sure we can commit a CPU task as soon as possible
-		future := loader.cpuPool.Submit(func() (interface{}, error) {
-			blobs, err := loader.loadFieldBinlogs(field)
-			if err != nil {
-				return nil, err
-			}
-
-			_, _, insertData, err := iCodec.Deserialize(blobs)
-			if err != nil {
-				return nil, err
-			}
-
-			log.Debug("deserialize blobs done",
-				zap.Int64("fieldID", field.FieldID),
-				zap.Int("len(insertData)", len(insertData.Data)))
-
-			return nil, loader.loadSealedSegments(segment, insertData)
-		})
-		futures = append(futures, future)
-	}
-
-	return concurrency.AwaitAll(futures...)
-}
-
-func (loader *segmentLoader) loadGrowingFields(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
-	if segment.getType() != segmentTypeGrowing {
-		return fmt.Errorf("illegal segment type when load segment, collectionID = %v, should be growing segment", segment.collectionID)
-	}
-
-	fieldBlobs := make([]*storage.Blob, 0)
-	for _, field := range fieldBinlogs {
-		blobs, err := loader.loadFieldBinlogs(field)
+	blobs := make([]*storage.Blob, 0)
+	for _, fieldBinlog := range fieldBinlogs {
+		fieldBlobs, err := loader.loadFieldBinlogs(fieldBinlog)
 		if err != nil {
 			return err
 		}
-		fieldBlobs = append(fieldBlobs, blobs...)
+		blobs = append(blobs, fieldBlobs...)
 	}
 
-	iCodec := storage.InsertCodec{}
-	_, _, insertData, err := iCodec.Deserialize(fieldBlobs)
+	_, _, insertData, err := iCodec.Deserialize(blobs)
 	if err != nil {
+		log.Warn(err.Error())
 		return err
 	}
-	timestamps, ids, rowData, err := storage.TransferColumnBasedInsertDataToRowBased(insertData)
-	if err != nil {
+
+	switch segmentType {
+	case segmentTypeGrowing:
+		tsData, ok := insertData.Data[common.TimeStampField]
+		if !ok {
+			return errors.New("cannot get timestamps from insert data")
+		}
+		utss := make([]uint64, tsData.RowNum())
+		for i := 0; i < tsData.RowNum(); i++ {
+			utss[i] = uint64(tsData.GetRow(i).(int64))
+		}
+
+		rowIDData, ok := insertData.Data[common.RowIDField]
+		if !ok {
+			return errors.New("cannot get row ids from insert data")
+		}
+
+		return loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, insertData)
+	case segmentTypeSealed:
+		return loader.loadSealedSegments(segment, insertData)
+	default:
+		err := errors.New(fmt.Sprintln("illegal segment type when load segment, collectionID = ", segment.collectionID))
 		return err
 	}
-	return loader.loadGrowingSegments(segment, ids, timestamps, rowData)
 }
 
 // Load binlogs concurrently into memory from KV storage
@@ -392,11 +396,11 @@ func (loader *segmentLoader) loadFieldBinlogs(field *datapb.FieldBinlog) ([]*sto
 	return blobs, nil
 }
 
-func (loader *segmentLoader) loadVecFieldData(segment *Segment, vecFieldInfos map[int64]*IndexedFieldInfo) error {
+func (loader *segmentLoader) loadIndexedFieldData(segment *Segment, vecFieldInfos map[int64]*IndexedFieldInfo) error {
 	for fieldID, fieldInfo := range vecFieldInfos {
 		if fieldInfo.indexInfo == nil || !fieldInfo.indexInfo.EnableIndex {
 			fieldBinlog := fieldInfo.fieldBinlog
-			err := loader.loadSealedFields(segment, []*datapb.FieldBinlog{fieldBinlog})
+			err := loader.loadFiledBinlogData(segment, []*datapb.FieldBinlog{fieldBinlog})
 			if err != nil {
 				return err
 			}
@@ -456,15 +460,19 @@ func (loader *segmentLoader) loadFieldIndexData(segment *Segment, indexInfo *que
 
 	// 2. use index bytes and index path to update segment
 	indexInfo.IndexFilePaths = filteredPaths
-	err = segment.segmentLoadIndexData(indexBuffer, indexInfo)
-	return err
+	fieldType, err := loader.getFieldType(segment, indexInfo.FieldID)
+	if err != nil {
+		return err
+	}
+	return segment.segmentLoadIndexData(indexBuffer, indexInfo, fieldType)
 }
 
 func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 	ids []UniqueID,
 	timestamps []Timestamp,
-	records []*commonpb.Blob) error {
-	if len(ids) != len(timestamps) || len(timestamps) != len(records) {
+	insertData *storage.InsertData) error {
+	numRows := len(ids)
+	if numRows != len(timestamps) || insertData == nil {
 		return errors.New(fmt.Sprintln("illegal insert data when load segment, collectionID = ", segment.collectionID))
 	}
 
@@ -483,12 +491,18 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 	log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segment.ID()))
 
 	// 2. update bloom filter
+	insertRecord, err := storage.TransferInsertDataToInsertRecord(insertData)
+	if err != nil {
+		return err
+	}
 	tmpInsertMsg := &msgstream.InsertMsg{
 		InsertRequest: internalpb.InsertRequest{
 			CollectionID: segment.collectionID,
 			Timestamps:   timestamps,
 			RowIDs:       ids,
-			RowData:      records,
+			NumRows:      uint64(numRows),
+			FieldsData:   insertRecord.FieldsData,
+			Version:      internalpb.InsertDataVersion_ColumnBased,
 		},
 	}
 	pks, err := getPrimaryKeys(tmpInsertMsg, loader.streamingReplica)
@@ -498,7 +512,7 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 	segment.updateBloomFilter(pks)
 
 	// 3. do insert
-	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offset, ids, timestamps, insertRecord)
 	if err != nil {
 		return err
 	}
@@ -508,54 +522,19 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 }
 
 func (loader *segmentLoader) loadSealedSegments(segment *Segment, insertData *storage.InsertData) error {
-	for fieldID, value := range insertData.Data {
-		var numRows []int64
-		var data interface{}
-		switch fieldData := value.(type) {
-		case *storage.BoolFieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.Int8FieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.Int16FieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.Int32FieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.Int64FieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.FloatFieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.DoubleFieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.StringFieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.FloatVectorFieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		case *storage.BinaryVectorFieldData:
-			numRows = fieldData.NumRows
-			data = fieldData.Data
-		default:
-			return errors.New("unexpected field data type")
-		}
+	insertRecord, err := storage.TransferInsertDataToInsertRecord(insertData)
+	if err != nil {
+		return err
+	}
+	numRows := insertRecord.NumRows
+	for _, fieldData := range insertRecord.FieldsData {
+		fieldID := fieldData.FieldId
 		if fieldID == common.TimeStampField {
-			segment.setIDBinlogRowSizes(numRows)
+			timestampsData := insertData.Data[fieldID].(*storage.Int64FieldData)
+			segment.setIDBinlogRowSizes(timestampsData.NumRows)
 		}
-		totalNumRows := int64(0)
-		for _, numRow := range numRows {
-			totalNumRows += numRow
-		}
-		log.Debug("loadSealedSegments inserts field data",
-			zap.Int64("fieldID", fieldID),
-			zap.Int("totalNumRows", int(totalNumRows)))
-		err := segment.segmentLoadFieldData(fieldID, int(totalNumRows), data)
+
+		err := segment.segmentLoadFieldData(fieldID, numRows, fieldData)
 		if err != nil {
 			// TODO: return or continue?
 			return err

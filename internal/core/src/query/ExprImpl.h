@@ -28,8 +28,8 @@ template <typename T>
 struct TermExprImpl : TermExpr {
     const std::vector<T> terms_;
 
-    TermExprImpl(const FieldOffset field_offset, const DataType data_type, const std::vector<T>& terms)
-        : TermExpr(field_offset, data_type), terms_(terms) {
+    TermExprImpl(const FieldId field_id, const DataType data_type, const std::vector<T>& terms)
+        : TermExpr(field_id, data_type), terms_(terms) {
     }
 };
 
@@ -38,13 +38,13 @@ struct BinaryArithOpEvalRangeExprImpl : BinaryArithOpEvalRangeExpr {
     const T right_operand_;
     const T value_;
 
-    BinaryArithOpEvalRangeExprImpl(const FieldOffset field_offset,
+    BinaryArithOpEvalRangeExprImpl(const FieldId field_id,
                                    const DataType data_type,
                                    const ArithOpType arith_op,
                                    const T right_operand,
                                    const OpType op_type,
                                    const T value)
-        : BinaryArithOpEvalRangeExpr(field_offset, data_type, op_type, arith_op),
+        : BinaryArithOpEvalRangeExpr(field_id, data_type, op_type, arith_op),
           right_operand_(right_operand),
           value_(value) {
     }
@@ -54,8 +54,8 @@ template <typename T>
 struct UnaryRangeExprImpl : UnaryRangeExpr {
     const T value_;
 
-    UnaryRangeExprImpl(const FieldOffset field_offset, const DataType data_type, const OpType op_type, const T value)
-        : UnaryRangeExpr(field_offset, data_type, op_type), value_(value) {
+    UnaryRangeExprImpl(const FieldId field_id, const DataType data_type, const OpType op_type, const T value)
+        : UnaryRangeExpr(field_id, data_type, op_type), value_(value) {
     }
 };
 
@@ -64,13 +64,13 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
     const T lower_value_;
     const T upper_value_;
 
-    BinaryRangeExprImpl(const FieldOffset field_offset,
+    BinaryRangeExprImpl(const FieldId field_id,
                         const DataType data_type,
                         const bool lower_inclusive,
                         const bool upper_inclusive,
                         const T lower_value,
                         const T upper_value)
-        : BinaryRangeExpr(field_offset, data_type, lower_inclusive, upper_inclusive),
+        : BinaryRangeExpr(field_id, data_type, lower_inclusive, upper_inclusive),
           lower_value_(lower_value),
           upper_value_(upper_value) {
     }

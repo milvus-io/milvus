@@ -22,16 +22,19 @@ import (
 	"strconv"
 	"strings"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // enableMultipleVectorFields indicates whether to enable multiple vector fields.
 const enableMultipleVectorFields = false
 
 // maximum length of variable-length strings
-const maxVarCharLength = int64(65535)
+const maxVarCharLengthKey = "max_length_per_row"
+const defaultMaxVarCharLength = 65535
 
 // isAlpha check if c is alpha.
 func isAlpha(c uint8) bool {
@@ -154,13 +157,58 @@ func validateFieldName(fieldName string) error {
 	return nil
 }
 
-func validateDimension(dim int64, isBinary bool) error {
+func validateDimension(field *schemapb.FieldSchema) error {
+	exist := false
+	var dim int64
+	for _, param := range field.TypeParams {
+		if param.Key == "dim" {
+			exist = true
+			tmp, err := strconv.ParseInt(param.Value, 10, 64)
+			if err != nil {
+				return err
+			}
+			dim = tmp
+			break
+		}
+	}
+	if !exist {
+		return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
+	}
+
 	if dim <= 0 || dim > Params.ProxyCfg.MaxDimension {
 		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.ProxyCfg.MaxDimension)
 	}
-	if isBinary && dim%8 != 0 {
+	if field.DataType == schemapb.DataType_BinaryVector && dim%8 != 0 {
 		return fmt.Errorf("invalid dimension: %d. should be multiple of 8. ", dim)
 	}
+	return nil
+}
+
+func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema) error {
+	exist := false
+	for _, param := range field.TypeParams {
+		if param.Key != maxVarCharLengthKey {
+			return fmt.Errorf("type param key(max_length_per_row) should be specified for varChar field, not %s", param.Key)
+		}
+
+		maxLengthPerRow, err := strconv.ParseInt(param.Value, 10, 64)
+		if err != nil {
+			return err
+		}
+		if maxLengthPerRow > defaultMaxVarCharLength || maxLengthPerRow <= 0 {
+			return fmt.Errorf("the maximum length specified for a VarChar shoule be in (0, 65535]")
+		}
+		exist = true
+	}
+	// if not exist, set default max length
+	if !exist {
+		log.Info("append default maxLengthPerRow for varChar field", zap.String("collection name", collectionName))
+		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
+			Key:   maxVarCharLengthKey,
+			Value: strconv.Itoa(defaultMaxVarCharLength),
+		})
+	}
+
 	return nil
 }
 
@@ -235,19 +283,6 @@ func validatePrimaryKey(coll *schemapb.CollectionSchema) error {
 			if field.DataType == schemapb.DataType_VarChar {
 				if field.AutoID {
 					return fmt.Errorf("autoID is not supported when the VarChar field is the primary key")
-				}
-				typeParams := funcutil.KeyValuePair2Map(field.TypeParams)
-				maxLengthPerRowKey := "max_length_per_row"
-				maxLengthPerRowValue, ok := typeParams[maxLengthPerRowKey]
-				if !ok {
-					return fmt.Errorf("the max_length_per_row was not specified when the VarChar field is the primary key")
-				}
-				maxLengthPerRow, err := strconv.ParseInt(maxLengthPerRowValue, 10, 64)
-				if err != nil {
-					return err
-				}
-				if maxLengthPerRow > maxVarCharLength || maxLengthPerRow <= 0 {
-					return fmt.Errorf("the maximum length specified for a VarChar shoule be in (0, 65535]")
 				}
 			}
 

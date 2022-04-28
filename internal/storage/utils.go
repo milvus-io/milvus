@@ -26,18 +26,15 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
-
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
-
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -834,4 +831,187 @@ func FieldDataToBytes(endian binary.ByteOrder, fieldData FieldData) ([]byte, err
 	default:
 		return nil, fmt.Errorf("unsupported field data: %s", field)
 	}
+}
+
+func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.InsertRecord, error) {
+	insertRecord := &segcorepb.InsertRecord{}
+	for fieldID, rawData := range insertData.Data {
+		var fieldData *schemapb.FieldData
+		switch rawData := rawData.(type) {
+		case *BoolFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Bool,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_BoolData{
+							BoolData: &schemapb.BoolArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *Int8FieldData:
+			int32Data := make([]int32, len(rawData.Data))
+			for index, v := range rawData.Data {
+				int32Data[index] = int32(v)
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Int8,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: int32Data,
+							},
+						},
+					},
+				},
+			}
+		case *Int16FieldData:
+			int32Data := make([]int32, len(rawData.Data))
+			for index, v := range rawData.Data {
+				int32Data[index] = int32(v)
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Int16,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: int32Data,
+							},
+						},
+					},
+				},
+			}
+		case *Int32FieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Int32,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_IntData{
+							IntData: &schemapb.IntArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *Int64FieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Int64,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *FloatFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Float,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *DoubleFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Double,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: &schemapb.DoubleArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *StringFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_VarChar,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_StringData{
+							StringData: &schemapb.StringArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *FloatVectorFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_FloatVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: rawData.Data,
+							},
+						},
+						Dim: int64(rawData.Dim),
+					},
+				},
+			}
+		case *BinaryVectorFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_BinaryVector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: rawData.Data,
+						},
+						Dim: int64(rawData.Dim),
+					},
+				},
+			}
+		default:
+			return insertRecord, fmt.Errorf("unsupported data type when transter storage.InsertData to internalpb.InsertRecord")
+		}
+
+		insertRecord.FieldsData = append(insertRecord.FieldsData, fieldData)
+		insertRecord.NumRows = int64(rawData.RowNum())
+	}
+
+	return insertRecord, nil
+}
+
+func TransferInsertMsgToInsertRecord(schema *schemapb.CollectionSchema, msg *msgstream.InsertMsg) (*segcorepb.InsertRecord, error) {
+	if msg.IsRowBased() {
+		insertData, err := RowBasedInsertMsgToInsertData(msg, schema)
+		if err != nil {
+			return nil, err
+		}
+		return TransferInsertDataToInsertRecord(insertData)
+	}
+
+	// column base insert msg
+	insertRecord := &segcorepb.InsertRecord{
+		NumRows: int64(msg.NumRows),
+	}
+
+	insertRecord.FieldsData = append(insertRecord.FieldsData, msg.FieldsData...)
+
+	return insertRecord, nil
 }

@@ -44,7 +44,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	assert.NoError(t, err)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
-	vec := genSimpleFloatVectors()
+	vec := generateFloatVectors(1, defaultDim)
 	var searchRawData []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)
@@ -71,7 +71,7 @@ func TestReduce_AllFunc(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
+	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)

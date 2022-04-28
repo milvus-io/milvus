@@ -268,10 +268,10 @@ TEST(Indexing, BinaryBruteForce) {
     int64_t dim = 8192;
     auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
-    schema->AddDebugField("age", DataType::INT64);
+    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
-    auto bin_vec = dataset.get_col<uint8_t>(0);
+    auto bin_vec = dataset.get_col<uint8_t>(vec_fid);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
     query::dataset::SearchDataset search_dataset{
         faiss::MetricType::METRIC_Jaccard,  //
@@ -287,7 +287,7 @@ TEST(Indexing, BinaryBruteForce) {
     SearchResult sr;
     sr.num_queries_ = num_queries;
     sr.topk_ = topk;
-    sr.ids_ = std::move(sub_result.mutable_ids());
+    sr.seg_offsets_ = std::move(sub_result.mutable_seg_offsets());
     sr.distances_ = std::move(sub_result.mutable_distances());
 
     auto json = SearchResultToJson(sr);

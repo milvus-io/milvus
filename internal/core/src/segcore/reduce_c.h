@@ -25,6 +25,7 @@ ReduceSearchResultsAndFillData(CSearchPlan c_plan, CSearchResult* search_results
 CStatus
 Marshal(CSearchResultDataBlobs* cSearchResultDataBlobs,
         CSearchResult* c_search_results,
+        CSearchPlan c_plan,
         int32_t num_segments,
         int32_t* nq_slice_sizes,
         int32_t num_slices);

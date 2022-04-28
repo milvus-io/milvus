@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func TestStreaming_streaming(t *testing.T) {
@@ -45,7 +47,9 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		res, _, _, err := streaming.search(searchReqs,
@@ -64,7 +68,9 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		res, _, _, err := streaming.search(searchReqs,
@@ -83,7 +89,9 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		col, err := streaming.replica.getCollectionByID(defaultCollectionID)
@@ -109,7 +117,9 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		col, err := streaming.replica.getCollectionByID(defaultCollectionID)
@@ -134,7 +144,9 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = streaming.replica.removePartition(defaultPartitionID)
@@ -156,7 +168,9 @@ func TestStreaming_search(t *testing.T) {
 		assert.NoError(t, err)
 		defer streaming.close()
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := streaming.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		seg, err := streaming.replica.getSegmentByID(defaultSegmentID)
@@ -183,10 +197,12 @@ func TestStreaming_retrieve(t *testing.T) {
 	assert.NoError(t, err)
 	defer streaming.close()
 
-	plan, err := genSimpleRetrievePlan()
+	collection, err := streaming.replica.getCollectionByID(defaultCollectionID)
+	assert.NoError(t, err)
+	plan, err := genSimpleRetrievePlan(collection)
 	assert.NoError(t, err)
 
-	insertMsg, err := genSimpleInsertMsg()
+	insertMsg, err := genSimpleInsertMsg(collection.schema, defaultMsgLength)
 	assert.NoError(t, err)
 
 	segment, err := streaming.replica.getSegmentByID(defaultSegmentID)
@@ -195,7 +211,10 @@ func TestStreaming_retrieve(t *testing.T) {
 	offset, err := segment.segmentPreInsert(len(insertMsg.RowIDs))
 	assert.NoError(t, err)
 
-	err = segment.segmentInsert(offset, &insertMsg.RowIDs, &insertMsg.Timestamps, &insertMsg.RowData)
+	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.schema, insertMsg)
+	assert.NoError(t, err)
+
+	err = segment.segmentInsert(offset, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
 	t.Run("test retrieve", func(t *testing.T) {

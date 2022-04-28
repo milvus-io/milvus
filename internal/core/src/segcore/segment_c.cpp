@@ -20,6 +20,7 @@
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/SimilarityCorelation.h"
 #include "segcore/segment_c.h"
+#include "google/protobuf/text_format.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -133,54 +134,16 @@ Insert(CSegmentInterface c_segment,
        int64_t size,
        const int64_t* row_ids,
        const uint64_t* timestamps,
-       void* raw_data,
-       int sizeof_per_row,
-       int64_t count) {
+       const char* data_info) {
     try {
         auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
-        milvus::segcore::RowBasedRawData dataChunk{};
+        auto proto = std::string(data_info);
+        Assert(!proto.empty());
+        auto insert_data = std::make_unique<milvus::InsertData>();
+        auto suc = google::protobuf::TextFormat::ParseFromString(proto, insert_data.get());
+        AssertInfo(suc, "unmarshal field data string failed");
 
-        dataChunk.raw_data = raw_data;
-        dataChunk.sizeof_per_row = sizeof_per_row;
-        dataChunk.count = count;
-        segment->Insert(reserved_offset, size, row_ids, timestamps, dataChunk);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
-    }
-}
-
-CStatus
-InsertColumnData(CSegmentInterface c_segment,
-                 int64_t reserved_offset,
-                 int64_t size,
-                 const int64_t* row_ids,
-                 const uint64_t* timestamps,
-                 void* raw_data,
-                 int64_t count) {
-    try {
-        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
-        milvus::segcore::ColumnBasedRawData dataChunk{};
-
-        auto& schema = segment->get_schema();
-        auto sizeof_infos = schema.get_sizeof_infos();
-        dataChunk.columns_ = std::vector<milvus::aligned_vector<uint8_t>>(schema.size());
-        // reverse space for each field
-        for (int fid = 0; fid < schema.size(); ++fid) {
-            auto len = sizeof_infos[fid];
-            dataChunk.columns_[fid].resize(len * size);
-        }
-        auto col_data = reinterpret_cast<const char*>(raw_data);
-        int64_t offset = 0;
-        for (int fid = 0; fid < schema.size(); ++fid) {
-            auto len = sizeof_infos[fid] * size;
-            auto src = col_data + offset;
-            auto dst = dataChunk.columns_[fid].data();
-            memcpy(dst, src, len);
-            offset += len;
-        }
-        dataChunk.count = count;
-        segment->Insert(reserved_offset, size, row_ids, timestamps, dataChunk);
+        segment->Insert(reserved_offset, size, row_ids, timestamps, insert_data.get());
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -199,15 +162,16 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
 }
 
 CStatus
-Delete(CSegmentInterface c_segment,
-       int64_t reserved_offset,
-       int64_t size,
-       const int64_t* row_ids,
-       const uint64_t* timestamps) {
+Delete(
+    CSegmentInterface c_segment, int64_t reserved_offset, int64_t size, const char* ids, const uint64_t* timestamps) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-
+    auto proto = std::string(ids);
+    Assert(!proto.empty());
+    auto pks = std::make_unique<milvus::proto::schema::IDs>();
+    auto suc = google::protobuf::TextFormat::ParseFromString(proto, pks.get());
+    AssertInfo(suc, "unmarshal field data string failed");
     try {
-        auto res = segment->Delete(reserved_offset, size, row_ids, timestamps);
+        auto res = segment->Delete(reserved_offset, size, pks.get(), timestamps);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
@@ -228,8 +192,13 @@ LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_in
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
+        auto proto = std::string(load_field_data_info.blob);
+        Assert(!proto.empty());
+        auto field_data = std::make_unique<milvus::DataArray>();
+        auto suc = google::protobuf::TextFormat::ParseFromString(proto, field_data.get());
+        AssertInfo(suc, "unmarshal field data string failed");
         auto load_info =
-            LoadFieldDataInfo{load_field_data_info.field_id, load_field_data_info.blob, load_field_data_info.row_count};
+            LoadFieldDataInfo{load_field_data_info.field_id, field_data.get(), load_field_data_info.row_count};
         segment->LoadFieldData(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -243,8 +212,13 @@ LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_re
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        auto load_info = LoadDeletedRecordInfo{deleted_record_info.timestamps, deleted_record_info.primary_keys,
-                                               deleted_record_info.row_count};
+        auto proto = std::string(deleted_record_info.primary_keys);
+        Assert(!proto.empty());
+        auto pks = std::make_unique<milvus::proto::schema::IDs>();
+        auto suc = google::protobuf::TextFormat::ParseFromString(proto, pks.get());
+        AssertInfo(suc, "unmarshal field data string failed");
+        auto load_info =
+            LoadDeletedRecordInfo{deleted_record_info.timestamps, pks.get(), deleted_record_info.row_count};
         segment->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

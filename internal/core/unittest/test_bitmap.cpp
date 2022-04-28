@@ -18,10 +18,10 @@ TEST(Bitmap, Naive) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("height", DataType::FLOAT);
+    auto field_id = schema->AddDebugField("height", DataType::FLOAT);
     int N = 10000;
     auto raw_data = DataGen(schema, N);
-    auto vec = raw_data.get_col<float>(0);
+    auto vec = raw_data.get_col<float>(field_id);
     auto sort_index = std::make_shared<scalar::ScalarIndexSort<float>>();
     sort_index->Build(N, vec.data());
     {

@@ -21,6 +21,7 @@
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/utils.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "common/Consts.h"
 
 constexpr int64_t NB = 1000000;
 
@@ -59,7 +60,7 @@ IndexBuilder_build(benchmark::State& state) {
 
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(START_USER_FIELDID));
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
 
     for (auto _ : state) {
@@ -88,7 +89,7 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
 
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
 
     for (auto _ : state) {

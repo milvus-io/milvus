@@ -42,6 +42,7 @@ type searchTask struct {
 	qc             types.QueryCoord
 	tr             *timerecord.TimeRecorder
 	collectionName string
+	schema         *schemapb.CollectionSchema
 
 	resultBuf       chan *internalpb.SearchResults
 	toReduceResults []*internalpb.SearchResults
@@ -121,9 +122,9 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	// TODO(dragondriver): necessary to check if partition was loaded into query node?
 	t.Base.MsgType = commonpb.MsgType_Search
 
-	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	t.schema, _ = globalMetaCache.GetCollectionSchema(ctx, collectionName)
 
-	outputFields, err := translateOutputFields(t.request.OutputFields, schema, false)
+	outputFields, err := translateOutputFields(t.request.OutputFields, t.schema, false)
 	if err != nil {
 		return err
 	}
@@ -180,7 +181,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			zap.String("anns field", annsField),
 			zap.Any("query info", queryInfo))
 
-		plan, err := createQueryPlan(schema, t.request.Dsl, annsField, queryInfo)
+		plan, err := createQueryPlan(t.schema, t.request.Dsl, annsField, queryInfo)
 		if err != nil {
 			log.Debug("failed to create query plan",
 				zap.Error(err),
@@ -193,7 +194,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 		for _, name := range t.request.OutputFields {
 			hitField := false
-			for _, field := range schema.Fields {
+			for _, field := range t.schema.Fields {
 				if field.Name == name {
 					if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 						return errors.New("search doesn't support vector field as output_fields")
@@ -361,10 +362,15 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 
 	tr.Record("reduceResultStart")
-	t.result, err = reduceSearchResultData(validSearchResults, t.toReduceResults[0].NumQueries, t.toReduceResults[0].TopK, t.toReduceResults[0].MetricType)
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(t.schema)
 	if err != nil {
 		return err
 	}
+	t.result, err = reduceSearchResultData(validSearchResults, t.toReduceResults[0].NumQueries, t.toReduceResults[0].TopK, t.toReduceResults[0].MetricType, primaryFieldSchema.DataType)
+	if err != nil {
+		return err
+	}
+
 	metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SuccessLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	t.result.CollectionName = t.collectionName
 
@@ -550,39 +556,32 @@ func checkSearchResultData(data *schemapb.SearchResultData, nq int64, topk int64
 		return fmt.Errorf("search result's topk(%d) mis-match with %d", data.TopK, topk)
 	}
 
-	expectedLength := (int)(nq * topk)
-	if len(data.Ids.GetIntId().Data) != expectedLength {
-		return fmt.Errorf("search result's ID length invalid, ID length=%d, expectd length=%d",
-			len(data.Ids.GetIntId().Data), expectedLength)
-	}
-	if len(data.Scores) != expectedLength {
+	pkHitNum := typeutil.GetSizeOfIDs(data.GetIds())
+	if len(data.Scores) != pkHitNum {
 		return fmt.Errorf("search result's score length invalid, score length=%d, expectedLength=%d",
-			len(data.Scores), expectedLength)
+			len(data.Scores), pkHitNum)
 	}
 	return nil
 }
 
-func selectSearchResultData(dataArray []*schemapb.SearchResultData, offsets []int64, topk int64, qi int64) int {
+func selectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffsets [][]int64, offsets []int64, qi int64) int {
 	sel := -1
 	maxDistance := minFloat32        // distance here means score :)
 	for i, offset := range offsets { // query num, the number of ways to merge
-		if offset >= topk {
+		if offset >= dataArray[i].Topks[qi] {
 			continue
 		}
-		idx := qi*topk + offset
-		id := dataArray[i].Ids.GetIntId().Data[idx]
-		if id != -1 {
-			distance := dataArray[i].Scores[idx]
-			if distance > maxDistance {
-				sel = i
-				maxDistance = distance
-			}
+		idx := resultOffsets[i][qi] + offset
+		distance := dataArray[i].Scores[idx]
+		if distance > maxDistance {
+			sel = i
+			maxDistance = distance
 		}
 	}
 	return sel
 }
 
-func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string) (*milvuspb.SearchResults, error) {
+func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq int64, topk int64, metricType string, pkType schemapb.DataType) (*milvuspb.SearchResults, error) {
 
 	tr := timerecord.NewTimeRecorder("reduceSearchResultData")
 	defer func() {
@@ -601,15 +600,25 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 			TopK:       topk,
 			FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
 			Scores:     make([]float32, 0),
-			Ids: &schemapb.IDs{
-				IdField: &schemapb.IDs_IntId{
-					IntId: &schemapb.LongArray{
-						Data: make([]int64, 0),
-					},
-				},
-			},
-			Topks: make([]int64, 0),
+			Ids:        &schemapb.IDs{},
+			Topks:      make([]int64, 0),
 		},
+	}
+	switch pkType {
+	case schemapb.DataType_Int64:
+		ret.GetResults().Ids.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: make([]int64, 0),
+			},
+		}
+	case schemapb.DataType_VarChar:
+		ret.GetResults().Ids.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: make([]string, 0),
+			},
+		}
+	default:
+		return nil, errors.New("unsupported pk type")
 	}
 
 	for i, sData := range searchResultData {
@@ -617,6 +626,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
+			zap.Int64s("topks", sData.Topks),
 			zap.Any("len(FieldsData)", len(sData.FieldsData)))
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			log.Warn("invalid search results", zap.Error(err))
@@ -625,31 +635,35 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 		//printSearchResultData(sData, strconv.FormatInt(int64(i), 10))
 	}
 
+	resultOffsets := make([][]int64, len(searchResultData))
+	for i := 0; i < len(searchResultData); i++ {
+		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
+		for j := int64(1); j < nq; j++ {
+			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
+		}
+	}
+
 	var skipDupCnt int64
 	var realTopK int64 = -1
 	for i := int64(0); i < nq; i++ {
 		offsets := make([]int64, len(searchResultData))
 
-		var idSet = make(map[int64]struct{})
+		var idSet = make(map[interface{}]struct{})
 		var j int64
 		for j = 0; j < topk; {
-			sel := selectSearchResultData(searchResultData, offsets, topk, i)
+			sel := selectSearchResultData(searchResultData, resultOffsets, offsets, i)
 			if sel == -1 {
 				break
 			}
-			idx := i*topk + offsets[sel]
+			idx := resultOffsets[sel][i] + offsets[sel]
 
-			id := searchResultData[sel].Ids.GetIntId().Data[idx]
+			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
 			score := searchResultData[sel].Scores[idx]
-			// ignore invalid search result
-			if id == -1 {
-				continue
-			}
 
 			// remove duplicates
 			if _, ok := idSet[id]; !ok {
 				typeutil.AppendFieldData(ret.Results.FieldsData, searchResultData[sel].FieldsData, idx)
-				ret.Results.Ids.GetIntId().Data = append(ret.Results.Ids.GetIntId().Data, id)
+				typeutil.AppendPKs(ret.Results.Ids, id)
 				ret.Results.Scores = append(ret.Results.Scores, score)
 				idSet[id] = struct{}{}
 				j++

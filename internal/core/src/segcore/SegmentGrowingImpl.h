@@ -42,26 +42,19 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t
     PreInsert(int64_t size) override;
 
-    Status
-    Insert(int64_t reserved_offset,
-           int64_t size,
-           const int64_t* row_ids,
-           const Timestamp* timestamps,
-           const RowBasedRawData& values) override;
-
     void
     Insert(int64_t reserved_offset,
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
-           const ColumnBasedRawData& values) override;
+           const InsertData* insert_data) override;
 
     int64_t
     PreDelete(int64_t size) override;
 
     // TODO: add id into delete log, possibly bitmap
     Status
-    Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
+    Delete(int64_t reserverd_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) override;
 
     int64_t
     GetMemoryUsageInBytes() const override;
@@ -72,7 +65,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
  public:
     const InsertRecord&
     get_insert_record() const {
-        return record_;
+        return insert_record_;
     }
 
     const IndexingRecord&
@@ -97,14 +90,14 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // return count of index that has index, i.e., [0, num_chunk_index) have built index
     int64_t
-    num_chunk_index(FieldOffset field_offset) const final {
+    num_chunk_index(FieldId field_id) const final {
         return indexing_record_.get_finished_ack();
     }
 
     // deprecated
     const knowhere::Index*
-    chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const final {
-        return indexing_record_.get_field_indexing(field_offset).get_chunk_indexing(chunk_id);
+    chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {
+        return indexing_record_.get_field_indexing(field_id).get_chunk_indexing(chunk_id);
     }
 
     int64_t
@@ -121,7 +114,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     int64_t
     get_row_count() const override {
-        return record_.ack_responder_.GetAck();
+        return insert_record_.ack_responder_.GetAck();
     }
 
     ssize_t
@@ -135,8 +128,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // for scalar vectors
     template <typename T>
     void
-    bulk_subscript_impl(
-        const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, T default_value, void* output_raw) const;
+    bulk_subscript_impl(const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, void* output_raw) const;
 
     template <typename T>
     void
@@ -149,8 +141,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const override;
 
-    void
-    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override;
+    std::unique_ptr<DataArray>
+    bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const override;
 
  public:
     friend std::unique_ptr<SegmentGrowing>
@@ -159,7 +151,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
-          record_(*schema_, segcore_config.get_chunk_rows()),
+          insert_record_(*schema_, segcore_config.get_chunk_rows()),
           indexing_record_(*schema_, segcore_config_),
           id_(segment_id) {
     }
@@ -189,6 +181,16 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const override;
 
+    bool
+    HasIndex(FieldId field_id) const override {
+        return true;
+    }
+
+    bool
+    HasFieldData(FieldId field_id) const override {
+        return true;
+    }
+
  protected:
     std::shared_ptr<DeletedRecord::TmpBitmap>
     get_deleted_bitmap(int64_t del_barrier,
@@ -200,7 +202,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     num_chunk() const override;
 
     SpanBase
-    chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const override;
+    chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
     void
     check_search(const query::Plan* plan) const override {
@@ -208,23 +210,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  private:
-    void
-    do_insert(int64_t reserved_begin,
-              int64_t size,
-              const idx_t* row_ids,
-              const Timestamp* timestamps,
-              const std::vector<aligned_vector<uint8_t>>& columns_data);
-
- private:
     SegcoreConfig segcore_config_;
     SchemaPtr schema_;
 
-    InsertRecord record_;
-    mutable DeletedRecord deleted_record_;
+    // small indexes for every chunk
     IndexingRecord indexing_record_;
-    SealedIndexingRecord sealed_indexing_record_;
+    SealedIndexingRecord sealed_indexing_record_;  // not used
 
-    tbb::concurrent_unordered_multimap<idx_t, int64_t> uid2offset_;
+    // inserted fields data and row_ids, timestamps
+    InsertRecord insert_record_;
+
+    // deleted pks
+    mutable DeletedRecord deleted_record_;
+
+    // pks to row offset
+    tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>> pk2offset_;
     int64_t id_;
 
  private:

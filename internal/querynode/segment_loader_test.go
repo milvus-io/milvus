@@ -26,11 +26,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -38,9 +40,9 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	schema := genSimpleInsertDataSchema()
-
-	fieldBinlog, err := saveSimpleBinLog(ctx)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
 	t.Run("test load segment", func(t *testing.T) {
@@ -123,50 +125,49 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	runLoadSegmentFieldData := func(dataType schemapb.DataType) {
+	runLoadSegmentFieldData := func(dataType schemapb.DataType, pkType schemapb.DataType) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		fieldUID := genConstantField(uidField)
-		fieldTimestamp := genConstantField(timestampField)
-
+		var fieldPk *schemapb.FieldSchema
+		switch pkType {
+		case schemapb.DataType_Int64:
+			fieldPk = genPKFieldSchema(simpleInt64Field)
+		case schemapb.DataType_VarChar:
+			fieldPk = genPKFieldSchema(simpleVarCharField)
+		default:
+			panic("unsupported pk type")
+		}
 		schema := &schemapb.CollectionSchema{
 			Name:   defaultCollectionName,
 			AutoID: true,
-			Fields: []*schemapb.FieldSchema{},
-		}
-
-		constFieldID := FieldID(105)
-		constFieldName := "const-field-test"
-		constField := &schemapb.FieldSchema{
-			FieldID: constFieldID,
-			Name:    constFieldName,
+			Fields: []*schemapb.FieldSchema{fieldPk},
 		}
 
 		switch dataType {
 		case schemapb.DataType_Bool:
-			constField.DataType = schemapb.DataType_Bool
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleBoolField))
 		case schemapb.DataType_Int8:
-			constField.DataType = schemapb.DataType_Int8
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleInt8Field))
 		case schemapb.DataType_Int16:
-			constField.DataType = schemapb.DataType_Int16
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleInt16Field))
 		case schemapb.DataType_Int32:
-			constField.DataType = schemapb.DataType_Int32
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleInt32Field))
 		case schemapb.DataType_Int64:
-			constField.DataType = schemapb.DataType_Int64
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleInt64Field))
 		case schemapb.DataType_Float:
-			constField.DataType = schemapb.DataType_Float
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleFloatField))
 		case schemapb.DataType_Double:
-			constField.DataType = schemapb.DataType_Double
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleDoubleField))
+		case schemapb.DataType_VarChar:
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleVarCharField))
 		case schemapb.DataType_FloatVector:
-			constField.DataType = schemapb.DataType_FloatVector
+			schema.Fields = append(schema.Fields, genVectorFieldSchema(simpleFloatVecField))
 		case schemapb.DataType_BinaryVector:
-			constField.DataType = schemapb.DataType_BinaryVector
+			schema.Fields = append(schema.Fields, genVectorFieldSchema(simpleBinVecField))
 		}
-
-		schema.Fields = append(schema.Fields, constField)
 
 		err = loader.historicalReplica.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
@@ -182,25 +183,32 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			true)
 		assert.Nil(t, err)
 
-		schema.Fields = append(schema.Fields, fieldUID)
-		schema.Fields = append(schema.Fields, fieldTimestamp)
-
 		binlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadSealedFields(segment, binlog)
+		err = loader.loadFiledBinlogData(segment, binlog)
 		assert.NoError(t, err)
 	}
 
-	t.Run("test bool", func(t *testing.T) {
-		runLoadSegmentFieldData(schemapb.DataType_Bool)
-		runLoadSegmentFieldData(schemapb.DataType_Int8)
-		runLoadSegmentFieldData(schemapb.DataType_Int16)
-		runLoadSegmentFieldData(schemapb.DataType_Int32)
-		runLoadSegmentFieldData(schemapb.DataType_Int64)
-		runLoadSegmentFieldData(schemapb.DataType_Float)
-		runLoadSegmentFieldData(schemapb.DataType_Double)
+	t.Run("int64 pk", func(t *testing.T) {
+		runLoadSegmentFieldData(schemapb.DataType_Bool, schemapb.DataType_Int64)
+		runLoadSegmentFieldData(schemapb.DataType_Int8, schemapb.DataType_Int64)
+		runLoadSegmentFieldData(schemapb.DataType_Int16, schemapb.DataType_Int64)
+		runLoadSegmentFieldData(schemapb.DataType_Int32, schemapb.DataType_Int64)
+		runLoadSegmentFieldData(schemapb.DataType_Float, schemapb.DataType_Int64)
+		runLoadSegmentFieldData(schemapb.DataType_Double, schemapb.DataType_Int64)
+		//runLoadSegmentFieldData(schemapb.DataType_VarChar)
 	})
+
+	//t.Run("varChar pk", func(t *testing.T) {
+	//	runLoadSegmentFieldData(schemapb.DataType_Bool, schemapb.DataType_VarChar)
+	//	runLoadSegmentFieldData(schemapb.DataType_Int8, schemapb.DataType_VarChar)
+	//	runLoadSegmentFieldData(schemapb.DataType_Int16, schemapb.DataType_VarChar)
+	//	runLoadSegmentFieldData(schemapb.DataType_Int32, schemapb.DataType_VarChar)
+	//	runLoadSegmentFieldData(schemapb.DataType_Int64, schemapb.DataType_VarChar)
+	//	runLoadSegmentFieldData(schemapb.DataType_Float, schemapb.DataType_VarChar)
+	//	runLoadSegmentFieldData(schemapb.DataType_Double, schemapb.DataType_VarChar)
+	//})
 }
 
 func TestSegmentLoader_invalid(t *testing.T) {
@@ -257,7 +265,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 	//		Name:   defaultCollectionName,
 	//		AutoID: true,
 	//		Fields: []*schemapb.FieldSchema{
-	//			genConstantField(constFieldParam{
+	//			genConstantFieldSchema(constFieldParam{
 	//				id:       FieldID(100),
 	//				dataType: schemapb.DataType_Int8,
 	//			}),
@@ -283,10 +291,8 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			Name:   defaultCollectionName,
 			AutoID: true,
 			Fields: []*schemapb.FieldSchema{
-				genConstantField(constFieldParam{
-					id:       FieldID(100),
-					dataType: schemapb.DataType_Int8,
-				}),
+				genConstantFieldSchema(simpleInt8Field),
+				genPKFieldSchema(simpleInt64Field),
 			},
 		}
 		loader.historicalReplica.addCollection(defaultCollectionID, schema)
@@ -365,10 +371,20 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
 		assert.Nil(t, err)
 
-		insertMsg, err := genSimpleInsertMsg()
+		insertData, err := genInsertData(defaultMsgLength, collection.schema)
 		assert.NoError(t, err)
 
-		err = loader.loadGrowingSegments(segment, insertMsg.RowIDs, insertMsg.Timestamps, insertMsg.RowData)
+		tsData, ok := insertData.Data[common.TimeStampField]
+		assert.Equal(t, true, ok)
+		utss := make([]uint64, tsData.RowNum())
+		for i := 0; i < tsData.RowNum(); i++ {
+			utss[i] = uint64(tsData.GetRow(i).(int64))
+		}
+
+		rowIDData, ok := insertData.Data[common.RowIDField]
+		assert.Equal(t, true, ok)
+
+		err = loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, insertData)
 		assert.NoError(t, err)
 	})
 
@@ -384,12 +400,20 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
 		assert.Nil(t, err)
 
-		insertMsg, err := genSimpleInsertMsg()
+		insertData, err := genInsertData(defaultMsgLength, collection.schema)
 		assert.NoError(t, err)
 
-		insertMsg.RowData = nil
+		tsData, ok := insertData.Data[common.TimeStampField]
+		assert.Equal(t, true, ok)
+		utss := make([]uint64, tsData.RowNum())
+		for i := 0; i < tsData.RowNum(); i++ {
+			utss[i] = uint64(tsData.GetRow(i).(int64))
+		}
 
-		err = loader.loadGrowingSegments(segment, insertMsg.RowIDs, insertMsg.Timestamps, insertMsg.RowData)
+		rowIDData, ok := insertData.Data[common.RowIDField]
+		assert.Equal(t, true, ok)
+
+		err = loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, nil)
 		assert.Error(t, err)
 	})
 }
@@ -398,7 +422,8 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	schema := genSimpleInsertDataSchema()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
@@ -464,22 +489,9 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	//generate schema
-	fieldUID := genConstantField(uidField)
-	fieldTimestamp := genConstantField(timestampField)
-	fieldVec := genFloatVectorField(simpleVecField)
-	fieldInt := genConstantField(simpleConstField)
 
-	schema := &schemapb.CollectionSchema{ // schema for insertData
-		Name:   defaultCollectionName,
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			fieldUID,
-			fieldTimestamp,
-			fieldVec,
-			fieldInt,
-		},
-	}
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
 	// generate insert binlog
 	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -487,15 +499,16 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 
 	segmentID := UniqueID(100)
 	// generate index file for segment
-	indexPaths, err := generateIndex(segmentID)
+	indexPaths, err := generateAndSaveIndex(segmentID, defaultMsgLength, IndexFaissIVFPQ, L2)
 	assert.NoError(t, err)
+	_, indexParams := genIndexParams(IndexFaissIVFPQ, L2)
 	indexInfo := &querypb.FieldIndexInfo{
-		FieldID:        simpleVecField.id,
+		FieldID:        simpleFloatVecField.id,
 		EnableIndex:    true,
 		IndexName:      indexName,
 		IndexID:        indexID,
 		BuildID:        buildID,
-		IndexParams:    funcutil.Map2KeyValuePair(genSimpleIndexParams()),
+		IndexParams:    funcutil.Map2KeyValuePair(indexParams),
 		IndexFilePaths: indexPaths,
 	}
 
@@ -528,7 +541,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 
 	segment, err := node.historical.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
-	vecFieldInfo, err := segment.getIndexedFieldInfo(simpleVecField.id)
+	vecFieldInfo, err := segment.getIndexedFieldInfo(simpleFloatVecField.id)
 	assert.NoError(t, err)
 	assert.NotNil(t, vecFieldInfo)
 	assert.Equal(t, true, vecFieldInfo.indexInfo.EnableIndex)
@@ -611,8 +624,8 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 	msgChan := make(chan *msgstream.MsgPack)
 	go func() {
 		msgChan <- nil
-		deleteMsg1 := genDeleteMsg(int64(1), defaultCollectionID+1, schemapb.DataType_Int64)
-		deleteMsg2 := genDeleteMsg(int64(1), defaultCollectionID, schemapb.DataType_Int64)
+		deleteMsg1 := genDeleteMsg(defaultCollectionID+1, schemapb.DataType_Int64, defaultDelLength)
+		deleteMsg2 := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgChan <- &msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg1, deleteMsg2}}
 	}()
 
@@ -690,3 +703,68 @@ func (ms *LoadDeleteMsgStream) GetLatestMsgID(channel string) (msgstream.Message
 }
 
 func (ms *LoadDeleteMsgStream) Start() {}
+
+type getCollectionByIDFunc func(collectionID UniqueID) (*Collection, error)
+
+type mockReplicaInterface struct {
+	ReplicaInterface
+	getCollectionByIDFunc
+}
+
+func (m *mockReplicaInterface) getCollectionByID(collectionID UniqueID) (*Collection, error) {
+	if m.getCollectionByIDFunc != nil {
+		return m.getCollectionByIDFunc(collectionID)
+	}
+	return nil, errors.New("mock")
+}
+
+func newMockReplicaInterface() *mockReplicaInterface {
+	return &mockReplicaInterface{}
+}
+
+func TestSegmentLoader_getFieldType_err(t *testing.T) {
+	loader := &segmentLoader{}
+	// nor growing or sealed.
+	segment := &Segment{segmentType: 200}
+	_, err := loader.getFieldType(segment, 100)
+	assert.Error(t, err)
+}
+
+func TestSegmentLoader_getFieldType(t *testing.T) {
+	replica := newMockReplicaInterface()
+	loader := &segmentLoader{streamingReplica: replica, historicalReplica: replica}
+
+	// failed to get collection.
+	segment := &Segment{segmentType: segmentTypeSealed}
+	_, err := loader.getFieldType(segment, 100)
+	assert.Error(t, err)
+
+	segment.segmentType = segmentTypeGrowing
+	_, err = loader.getFieldType(segment, 100)
+	assert.Error(t, err)
+
+	// normal case.
+	replica.getCollectionByIDFunc = func(collectionID UniqueID) (*Collection, error) {
+		return &Collection{
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:     "test",
+						FieldID:  100,
+						DataType: schemapb.DataType_Int64,
+					},
+				},
+			},
+		}, nil
+	}
+
+	segment.segmentType = segmentTypeGrowing
+	fieldType, err := loader.getFieldType(segment, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Int64, fieldType)
+
+	segment.segmentType = segmentTypeSealed
+	fieldType, err = loader.getFieldType(segment, 100)
+	assert.NoError(t, err)
+	assert.Equal(t, schemapb.DataType_Int64, fieldType)
+}

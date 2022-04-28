@@ -76,10 +76,7 @@ Search_SmallIndex(benchmark::State& state) {
         segment->disable_small_index();
     }
     segment->PreInsert(N);
-    ColumnBasedRawData raw_data;
-    raw_data.columns_ = dataset_.cols_;
-    raw_data.count = N;
-    segment->Insert(0, N, dataset_.row_ids_.data(), dataset_.timestamps_.data(), raw_data);
+    segment->Insert(0, N, dataset_.row_ids_.data(), dataset_.timestamps_.data(), dataset_.raw_);
 
     Timestamp time = 10000000;
 
@@ -104,8 +101,8 @@ Search_Sealed(benchmark::State& state) {
         // Brute Force
     } else if (choice == 1) {
         // ivf
-        auto vec = (const float*)dataset_.cols_[0].data();
-        auto indexing = GenIndexing(N, dim, vec);
+        auto vec = dataset_.get_col<float>(milvus::FieldId(100));
+        auto indexing = GenIndexing(N, dim, vec.data());
         LoadIndexInfo info;
         info.index = indexing;
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();

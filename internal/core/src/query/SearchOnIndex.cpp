@@ -35,7 +35,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
 
     SubSearchResult sub_qr(num_queries, topK, metric_type, round_decimal);
     std::copy_n(dis, num_queries * topK, sub_qr.get_distances());
-    std::copy_n(uids, num_queries * topK, sub_qr.get_ids());
+    std::copy_n(uids, num_queries * topK, sub_qr.get_seg_offsets());
     sub_qr.round_values();
     return sub_qr;
 }

@@ -33,12 +33,14 @@ set(MILVUS_TEST_FILES
         test_query.cpp
         test_reduce.cpp
         test_reduce_c.cpp
+        test_relational.cpp
         test_retrieve.cpp
         test_scalar_index.cpp
         test_sealed.cpp
         test_segcore.cpp
         test_similarity_corelation.cpp
         test_span.cpp
+        test_string_expr.cpp
         test_timestamp_index.cpp
         test_utils.cpp
         )

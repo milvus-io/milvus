@@ -61,7 +61,7 @@ empty_search_result(int64_t num_queries, int64_t topk, int64_t round_decimal, Me
     SubSearchResult result(num_queries, topk, metric_type, round_decimal);
     final_result.num_queries_ = num_queries;
     final_result.topk_ = topk;
-    final_result.ids_ = std::move(result.mutable_ids());
+    final_result.seg_offsets_ = std::move(result.mutable_seg_offsets());
     final_result.distances_ = std::move(result.mutable_distances());
     return final_result;
 }

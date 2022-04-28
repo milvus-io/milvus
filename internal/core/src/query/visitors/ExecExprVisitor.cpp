@@ -18,6 +18,8 @@
 #include "query/ExprImpl.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "query/Utils.h"
+#include "query/Relational.h"
 
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
@@ -42,7 +44,7 @@ class ExecExprVisitor : ExprVisitor {
  public:
     template <typename T, typename IndexFunc, typename ElementFunc>
     auto
-    ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc func, ElementFunc element_func) -> BitsetType;
+    ExecRangeVisitorImpl(FieldId field_id, IndexFunc func, ElementFunc element_func) -> BitsetType;
 
     template <typename T>
     auto
@@ -144,18 +146,17 @@ Assemble(const std::deque<BitsetType>& srcs) -> BitsetType {
 
 template <typename T, typename IndexFunc, typename ElementFunc>
 auto
-ExecExprVisitor::ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc index_func, ElementFunc element_func)
-    -> BitsetType {
+ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, ElementFunc element_func) -> BitsetType {
     auto& schema = segment_.get_schema();
-    auto& field_meta = schema[field_offset];
-    auto indexing_barrier = segment_.num_chunk_index(field_offset);
+    auto& field_meta = schema[field_id];
+    auto indexing_barrier = segment_.num_chunk_index(field_id);
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> results;
 
     using Index = scalar::ScalarIndex<T>;
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
-        const Index& indexing = segment_.chunk_scalar_index<T>(field_offset, chunk_id);
+        const Index& indexing = segment_.chunk_scalar_index<T>(field_id, chunk_id);
         // NOTE: knowhere is not const-ready
         // This is a dirty workaround
         auto data = index_func(const_cast<Index*>(&indexing));
@@ -165,7 +166,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc index_
     for (auto chunk_id = indexing_barrier; chunk_id < num_chunk; ++chunk_id) {
         auto this_size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
         BitsetType result(this_size);
-        auto chunk = segment_.chunk_data<T>(field_offset, chunk_id);
+        auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < this_size; ++index) {
             result[index] = element_func(data[index]);
@@ -180,9 +181,9 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldOffset field_offset, IndexFunc index_
 
 template <typename T, typename ElementFunc>
 auto
-ExecExprVisitor::ExecDataRangeVisitorImpl(FieldOffset field_offset, ElementFunc element_func) -> BitsetType {
+ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, ElementFunc element_func) -> BitsetType {
     auto& schema = segment_.get_schema();
-    auto& field_meta = schema[field_offset];
+    auto& field_meta = schema[field_id];
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> results;
@@ -190,7 +191,7 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldOffset field_offset, ElementFunc 
     for (auto chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         auto this_size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
         BitsetType result(this_size);
-        auto chunk = segment_.chunk_data<T>(field_offset, chunk_id);
+        auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < this_size; ++index) {
             result[index] = element_func(data[index]);
@@ -217,33 +218,44 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
         case OpType::Equal: {
             auto index_func = [val](Index* index) { return index->In(1, &val); };
             auto elem_func = [val](T x) { return (x == val); };
-            return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::NotEqual: {
             auto index_func = [val](Index* index) { return index->NotIn(1, &val); };
             auto elem_func = [val](T x) { return (x != val); };
-            return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::GreaterEqual: {
             auto index_func = [val](Index* index) { return index->Range(val, Operator::GE); };
             auto elem_func = [val](T x) { return (x >= val); };
-            return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::GreaterThan: {
             auto index_func = [val](Index* index) { return index->Range(val, Operator::GT); };
             auto elem_func = [val](T x) { return (x > val); };
-            return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::LessEqual: {
             auto index_func = [val](Index* index) { return index->Range(val, Operator::LE); };
             auto elem_func = [val](T x) { return (x <= val); };
-            return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::LessThan: {
             auto index_func = [val](Index* index) { return index->Range(val, Operator::LT); };
             auto elem_func = [val](T x) { return (x < val); };
-            return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
+        case OpType::PrefixMatch: {
+            auto index_func = [val](Index* index) {
+                auto dataset = std::make_unique<knowhere::Dataset>();
+                dataset->Set(scalar::OPERATOR_TYPE, Operator::PrefixMatchOp);
+                dataset->Set(scalar::PREFIX_VALUE, val);
+                return index->Query(std::move(dataset));
+            };
+            auto elem_func = [val, op](T x) { return Match(x, val, op); };
+            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+        }
+        // TODO: PostfixMatch
         default: {
             PanicInfo("unsupported range node");
         }
@@ -268,25 +280,25 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
             switch (arith_op) {
                 case ArithOpType::Add: {
                     auto elem_func = [val, right_operand](T x) { return ((x + right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Sub: {
                     auto elem_func = [val, right_operand](T x) { return ((x - right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Mul: {
                     auto elem_func = [val, right_operand](T x) { return ((x * right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Div: {
                     auto elem_func = [val, right_operand](T x) { return ((x / right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Mod: {
                     auto elem_func = [val, right_operand](T x) {
                         return (static_cast<T>(fmod(x, right_operand)) == val);
                     };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
@@ -297,25 +309,25 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
             switch (arith_op) {
                 case ArithOpType::Add: {
                     auto elem_func = [val, right_operand](T x) { return ((x + right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Sub: {
                     auto elem_func = [val, right_operand](T x) { return ((x - right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Mul: {
                     auto elem_func = [val, right_operand](T x) { return ((x * right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Div: {
                     auto elem_func = [val, right_operand](T x) { return ((x / right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 case ArithOpType::Mod: {
                     auto elem_func = [val, right_operand](T x) {
                         return (static_cast<T>(fmod(x, right_operand)) != val);
                     };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_offset_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
                 }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
@@ -348,23 +360,23 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> 
     auto index_func = [=](Index* index) { return index->Range(val1, lower_inclusive, val2, upper_inclusive); };
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x <= val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
     } else if (lower_inclusive && !upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x < val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
     } else if (!lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 < x && x <= val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
     } else {
         auto elem_func = [val1, val2](T x) { return (val1 < x && x < val2); };
-        return ExecRangeVisitorImpl<T>(expr.field_offset_, index_func, elem_func);
+        return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
     }
 }
 #pragma clang diagnostic pop
 
 void
 ExecExprVisitor::visit(UnaryRangeExpr& expr) {
-    auto& field_meta = segment_.get_schema()[expr.field_offset_];
+    auto& field_meta = segment_.get_schema()[expr.field_id_];
     AssertInfo(expr.data_type_ == field_meta.get_data_type(),
                "[ExecExprVisitor]DataType of expr isn't field_meta data type");
     BitsetType res;
@@ -397,6 +409,10 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
             res = ExecUnaryRangeVisitorDispatcher<double>(expr);
             break;
         }
+        case DataType::VARCHAR: {
+            res = ExecUnaryRangeVisitorDispatcher<std::string>(expr);
+            break;
+        }
         default:
             PanicInfo("unsupported");
     }
@@ -406,7 +422,7 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
 
 void
 ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
-    auto& field_meta = segment_.get_schema()[expr.field_offset_];
+    auto& field_meta = segment_.get_schema()[expr.field_id_];
     AssertInfo(expr.data_type_ == field_meta.get_data_type(),
                "[ExecExprVisitor]DataType of expr isn't field_meta data type");
     BitsetType res;
@@ -444,7 +460,7 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
 
 void
 ExecExprVisitor::visit(BinaryRangeExpr& expr) {
-    auto& field_meta = segment_.get_schema()[expr.field_offset_];
+    auto& field_meta = segment_.get_schema()[expr.field_id_];
     AssertInfo(expr.data_type_ == field_meta.get_data_type(),
                "[ExecExprVisitor]DataType of expr isn't field_meta data type");
     BitsetType res;
@@ -477,6 +493,10 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
             res = ExecBinaryRangeVisitorDispatcher<double>(expr);
             break;
         }
+        case DataType::VARCHAR: {
+            res = ExecBinaryRangeVisitorDispatcher<std::string>(expr);
+            break;
+        }
         default:
             PanicInfo("unsupported");
     }
@@ -501,52 +521,56 @@ struct relational {
 template <typename Op>
 auto
 ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetType {
-    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double>;
+    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> bitsets;
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
-        auto getChunkData = [&, chunk_id](DataType type, FieldOffset offset) -> std::function<const number(int)> {
+        auto getChunkData = [&, chunk_id](DataType type, FieldId field_id) -> std::function<const number(int)> {
             switch (type) {
                 case DataType::BOOL: {
-                    auto chunk_data = segment_.chunk_data<bool>(offset, chunk_id).data();
+                    auto chunk_data = segment_.chunk_data<bool>(field_id, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
                 case DataType::INT8: {
-                    auto chunk_data = segment_.chunk_data<int8_t>(offset, chunk_id).data();
+                    auto chunk_data = segment_.chunk_data<int8_t>(field_id, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
                 case DataType::INT16: {
-                    auto chunk_data = segment_.chunk_data<int16_t>(offset, chunk_id).data();
+                    auto chunk_data = segment_.chunk_data<int16_t>(field_id, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
                 case DataType::INT32: {
-                    auto chunk_data = segment_.chunk_data<int32_t>(offset, chunk_id).data();
+                    auto chunk_data = segment_.chunk_data<int32_t>(field_id, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
                 case DataType::INT64: {
-                    auto chunk_data = segment_.chunk_data<int64_t>(offset, chunk_id).data();
+                    auto chunk_data = segment_.chunk_data<int64_t>(field_id, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
                 case DataType::FLOAT: {
-                    auto chunk_data = segment_.chunk_data<float>(offset, chunk_id).data();
+                    auto chunk_data = segment_.chunk_data<float>(field_id, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
                 case DataType::DOUBLE: {
-                    auto chunk_data = segment_.chunk_data<double>(offset, chunk_id).data();
+                    auto chunk_data = segment_.chunk_data<double>(field_id, chunk_id).data();
+                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                }
+                case DataType::VARCHAR: {
+                    auto chunk_data = segment_.chunk_data<std::string>(field_id, chunk_id).data();
                     return [chunk_data](int i) -> const number { return chunk_data[i]; };
                 }
                 default:
                     PanicInfo("unsupported datatype");
             }
         };
-        auto left = getChunkData(expr.left_data_type_, expr.left_field_offset_);
-        auto right = getChunkData(expr.right_data_type_, expr.right_field_offset_);
+        auto left = getChunkData(expr.left_data_type_, expr.left_field_id_);
+        auto right = getChunkData(expr.right_data_type_, expr.right_field_id_);
 
         BitsetType bitset(size);
         for (int i = 0; i < size; ++i) {
-            bool is_in = boost::apply_visitor(relational<decltype(op)>{}, left(i), right(i));
+            bool is_in = boost::apply_visitor(Relational<decltype(op)>{}, left(i), right(i));
             bitset[i] = is_in;
         }
         bitsets.emplace_back(std::move(bitset));
@@ -559,8 +583,8 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
 void
 ExecExprVisitor::visit(CompareExpr& expr) {
     auto& schema = segment_.get_schema();
-    auto& left_field_meta = schema[expr.left_field_offset_];
-    auto& right_field_meta = schema[expr.right_field_offset_];
+    auto& left_field_meta = schema[expr.left_field_id_];
+    auto& right_field_meta = schema[expr.right_field_id_];
     AssertInfo(expr.left_data_type_ == left_field_meta.get_data_type(),
                "[ExecExprVisitor]Left data type not equal to left field mata type");
     AssertInfo(expr.right_data_type_ == right_field_meta.get_data_type(),
@@ -592,6 +616,12 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             res = ExecCompareExprDispatcher(expr, std::less<>{});
             break;
         }
+        case OpType::PrefixMatch: {
+            res = ExecCompareExprDispatcher(expr, MatchOp<OpType::PrefixMatch>{});
+            break;
+        }
+            // case OpType::PostfixMatch: {
+            // }
         default: {
             PanicInfo("unsupported optype");
         }
@@ -605,21 +635,37 @@ auto
 ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
     auto& schema = segment_.get_schema();
-    auto primary_offset = schema.get_primary_key_offset();
-    auto field_offset = expr_raw.field_offset_;
-    auto& field_meta = schema[field_offset];
+    auto primary_filed_id = schema.get_primary_field_id();
+    auto field_id = expr_raw.field_id_;
+    auto& field_meta = schema[field_id];
 
     bool use_pk_index = false;
-    if (primary_offset.has_value()) {
-        use_pk_index = primary_offset.value() == field_offset && field_meta.get_data_type() == engine::DataType::INT64;
+    if (primary_filed_id.has_value()) {
+        use_pk_index = primary_filed_id.value() == field_id && IsPrimaryKeyDataType(field_meta.get_data_type());
     }
 
     if (use_pk_index) {
         auto id_array = std::make_unique<IdArray>();
-        auto dst_ids = id_array->mutable_int_id();
-        for (const auto& id : expr.terms_) {
-            dst_ids->add_data(id);
+        switch (field_meta.get_data_type()) {
+            case DataType::INT64: {
+                auto dst_ids = id_array->mutable_int_id();
+                for (const auto& id : expr.terms_) {
+                    dst_ids->add_data((int64_t&)id);
+                }
+                break;
+            }
+            case DataType::VARCHAR: {
+                auto dst_ids = id_array->mutable_str_id();
+                for (const auto& id : expr.terms_) {
+                    dst_ids->add_data((std::string&)id);
+                }
+                break;
+            }
+            default: {
+                PanicInfo("unsupported type");
+            }
         }
+
         auto [uids, seg_offsets] = segment_.search_ids(*id_array, timestamp_);
         BitsetType bitset(row_count_);
         for (const auto& offset : seg_offsets) {
@@ -636,7 +682,7 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-        Span<T> chunk = segment_.chunk_data<T>(field_offset, chunk_id);
+        Span<T> chunk = segment_.chunk_data<T>(field_id, chunk_id);
         auto chunk_data = chunk.data();
         auto size = (chunk_id == num_chunk - 1) ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
         BitsetType bitset(size);
@@ -650,9 +696,34 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
     return final_result;
 }
 
+// TODO: refactor this to use `scalar::ScalarIndex::In`.
+//      made a test to compare the performance.
+//      vector<bool> don't match the template.
+//      boost::container::vector<bool> match.
+template <>
+auto
+ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetType {
+    using T = std::string;
+    auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
+    using Index = scalar::ScalarIndex<T>;
+    using Operator = scalar::OperatorType;
+    const auto& terms = expr.terms_;
+    auto n = terms.size();
+    std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
+
+    auto index_func = [&terms, n](Index* index) { return index->In(n, terms.data()); };
+    auto elem_func = [&terms, &term_set](T x) {
+        //// terms has already been sorted.
+        // return std::binary_search(terms.begin(), terms.end(), x);
+        return term_set.find(x) != term_set.end();
+    };
+
+    return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+}
+
 void
 ExecExprVisitor::visit(TermExpr& expr) {
-    auto& field_meta = segment_.get_schema()[expr.field_offset_];
+    auto& field_meta = segment_.get_schema()[expr.field_id_];
     AssertInfo(expr.data_type_ == field_meta.get_data_type(),
                "[ExecExprVisitor]DataType of expr isn't field_meta data type ");
     BitsetType res;
@@ -683,6 +754,10 @@ ExecExprVisitor::visit(TermExpr& expr) {
         }
         case DataType::DOUBLE: {
             res = ExecTermVisitorImpl<double>(expr);
+            break;
+        }
+        case DataType::VARCHAR: {
+            res = ExecTermVisitorImpl<std::string>(expr);
             break;
         }
         default:

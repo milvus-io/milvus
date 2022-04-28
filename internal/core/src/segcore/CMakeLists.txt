@@ -32,7 +32,8 @@ set(SEGCORE_FILES
         segcore_init_c.cpp
         ScalarIndex.cpp
         TimestampIndex.cpp
-        )
+        Utils.cpp
+        ConcurrentVector.cpp)
 add_library(milvus_segcore SHARED
         ${SEGCORE_FILES}
         )

@@ -12,8 +12,12 @@
 #include <stdlib.h>
 #include <string>
 #include <exception>
+#include <memory>
+#include <utility>
+#include <vector>
 #include <stdexcept>
 #include <knowhere/common/MetricType.h>
+#include "common/QueryResult.h"
 
 namespace milvus::segcore {
 
@@ -50,5 +54,29 @@ MetricTypeToString(faiss::MetricType metric_type) {
             return "Unsupported";
     }
 }
+
+void
+ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);
+
+void
+ParsePksFromIDs(std::vector<PkType>& pks, DataType data_type, const IdArray& data);
+
+int64_t
+GetSizeOfIdArray(const IdArray& data);
+
+// Note: this is temporary solution.
+// modify bulk script implement to make process more clear
+std::unique_ptr<DataArray>
+CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateVectorDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta);
+
+std::unique_ptr<DataArray>
+CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta);
+
+// TODO remove merge dataArray, instead fill target entity when get data slice
+std::unique_ptr<DataArray>
+MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets, const FieldMeta& field_meta);
 
 }  // namespace milvus::segcore

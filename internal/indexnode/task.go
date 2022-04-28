@@ -497,7 +497,6 @@ func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) 
 	it.savePaths = make([]string, blobCnt)
 	saveIndexFile := func(idx int) error {
 		blob := blobs[idx]
-
 		savePath := getSavePathByKey(blob.Key)
 		saveIndexFileFn := func() error {
 			v, err := it.etcdKV.Load(it.req.MetaPath)

@@ -28,33 +28,73 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func loadFields(segment *Segment, DIM int, N int) error {
 	// generate vector field
-	vectorFieldID := int64(100)
 	vectors := make([]float32, N*DIM)
 	for i := 0; i < N*DIM; i++ {
 		vectors[i] = rand.Float32()
 	}
 
 	// generate int field
-	agesFieldID := int64(101)
 	ages := make([]int32, N)
+	rowIDs := make([]int64, N)
 	for i := 0; i < N; i++ {
 		ages[i] = int32(N)
+		rowIDs[i] = int64(i)
 	}
 
-	err := segment.segmentLoadFieldData(vectorFieldID, N, vectors)
+	rowIDData := &schemapb.FieldData{
+		Type:    schemapb.DataType_Int64,
+		FieldId: rowIDFieldID,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: rowIDs,
+					},
+				},
+			},
+		},
+	}
+	ageData := &schemapb.FieldData{
+		Type:    schemapb.DataType_Int32,
+		FieldId: simpleInt32Field.id,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: ages,
+					},
+				},
+			},
+		},
+	}
+	vectorData := &schemapb.FieldData{
+		Type:    schemapb.DataType_FloatVector,
+		FieldId: simpleFloatVecField.id,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{
+						Data: vectors,
+					},
+				},
+			},
+		},
+	}
+
+	err := segment.segmentLoadFieldData(simpleFloatVecField.id, int64(N), vectorData)
 	if err != nil {
 		return err
 	}
-	err = segment.segmentLoadFieldData(agesFieldID, N, ages)
+	err = segment.segmentLoadFieldData(simpleInt32Field.id, int64(N), ageData)
 	if err != nil {
 		return err
 	}
-	rowIDs := ages
-	err = segment.segmentLoadFieldData(rowIDFieldID, N, rowIDs)
+	err = segment.segmentLoadFieldData(rowIDFieldID, int64(N), rowIDData)
 	return err
 }
 
@@ -68,11 +108,8 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 	searchStream.Start()
 
 	// generate search rawData
-	var vec = make([]float32, DIM)
-	for i := 0; i < DIM; i++ {
-		vec[i] = rand.Float32()
-	}
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
+	var vec = generateFloatVectors(1, defaultDim)
+	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\"topk\": 10 \n } \n } \n } \n }"
 	var searchRawData1 []byte
 	var searchRawData2 []byte
 	for i, ele := range vec {
@@ -129,7 +166,6 @@ func sendSearchRequest(ctx context.Context, DIM int) error {
 /*
 func TestSearch_Search(t *testing.T) {
 	const N = 10000
-	const DIM = 16
 
 	// init queryNode
 	collectionID := UniqueID(0)
@@ -152,7 +188,7 @@ func TestSearch_Search(t *testing.T) {
 	assert.NoError(t, err)
 	segment, err := node.historical.replica.getSegmentByID(segmentID)
 	assert.NoError(t, err)
-	err = loadFields(segment, DIM, N)
+	err = loadFields(segment, defaultDim, N)
 	assert.NoError(t, err)
 
 	node.queryService.addQueryCollection(collectionID)
@@ -161,7 +197,7 @@ func TestSearch_Search(t *testing.T) {
 	//TODO: Why error
 	//assert.Error(t, err)
 
-	err = sendSearchRequest(node.queryNodeLoopCtx, DIM)
+	err = sendSearchRequest(node.queryNodeLoopCtx, defaultDim)
 	assert.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
@@ -172,7 +208,6 @@ func TestSearch_Search(t *testing.T) {
 
 func TestSearch_SearchMultiSegments(t *testing.T) {
 	const N = 10000
-	const DIM = 16
 
 	// init queryNode
 	collectionID := UniqueID(0)
@@ -200,17 +235,17 @@ func TestSearch_SearchMultiSegments(t *testing.T) {
 	assert.NoError(t, err)
 	segment1, err := node.historical.replica.getSegmentByID(segmentID1)
 	assert.NoError(t, err)
-	err = loadFields(segment1, DIM, N)
+	err = loadFields(segment1, defaultDim, N)
 	assert.NoError(t, err)
 
 	err = node.historical.replica.addSegment(segmentID2, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
 	assert.NoError(t, err)
 	segment2, err := node.historical.replica.getSegmentByID(segmentID2)
 	assert.NoError(t, err)
-	err = loadFields(segment2, DIM, N)
+	err = loadFields(segment2, defaultDim, N)
 	assert.NoError(t, err)
 
-	err = sendSearchRequest(node.queryNodeLoopCtx, DIM)
+	err = sendSearchRequest(node.queryNodeLoopCtx, defaultDim)
 	assert.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)

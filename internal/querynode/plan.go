@@ -30,18 +30,26 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"unsafe"
 )
 
 // SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan
 type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
+	pkType      schemapb.DataType
 }
 
 // createSearchPlan returns a new SearchPlan and error
 func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+	}
+
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(col.schema)
+	if err != nil {
+		return nil, err
 	}
 
 	cDsl := C.CString(dsl)
@@ -54,13 +62,17 @@ func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 		return nil, err1
 	}
 
-	var newPlan = &SearchPlan{cSearchPlan: cPlan}
+	var newPlan = &SearchPlan{cSearchPlan: cPlan, pkType: primaryFieldSchema.DataType}
 	return newPlan, nil
 }
 
 func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
+	}
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(col.schema)
+	if err != nil {
+		return nil, err
 	}
 
 	var cPlan C.CSearchPlan
@@ -71,7 +83,7 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 		return nil, err1
 	}
 
-	var newPlan = &SearchPlan{cSearchPlan: cPlan}
+	var newPlan = &SearchPlan{cSearchPlan: cPlan, pkType: primaryFieldSchema.DataType}
 	return newPlan, nil
 }
 

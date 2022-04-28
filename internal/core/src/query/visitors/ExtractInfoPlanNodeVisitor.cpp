@@ -30,7 +30,7 @@ class ExtractInfoPlanNodeVisitor : PlanNodeVisitor {
 
 void
 ExtractInfoPlanNodeVisitor::visit(FloatVectorANNS& node) {
-    plan_info_.add_involved_field(node.search_info_.field_offset_);
+    plan_info_.add_involved_field(node.search_info_.field_id_);
     if (node.predicate_.has_value()) {
         ExtractInfoExprVisitor expr_visitor(plan_info_);
         node.predicate_.value()->accept(expr_visitor);
@@ -39,7 +39,7 @@ ExtractInfoPlanNodeVisitor::visit(FloatVectorANNS& node) {
 
 void
 ExtractInfoPlanNodeVisitor::visit(BinaryVectorANNS& node) {
-    plan_info_.add_involved_field(node.search_info_.field_offset_);
+    plan_info_.add_involved_field(node.search_info_.field_id_);
     if (node.predicate_.has_value()) {
         ExtractInfoExprVisitor expr_visitor(plan_info_);
         node.predicate_.value()->accept(expr_visitor);

@@ -18,6 +18,7 @@
 
 #include <cassert>
 #include <type_traits>
+#include <string>
 
 #include "Types.h"
 #include "VectorTrait.h"
@@ -56,7 +57,7 @@ class Span;
 
 // TODO: refine Span to support T=FloatVector
 template <typename T>
-class Span<T, typename std::enable_if_t<std::is_fundamental_v<T>>> {
+class Span<T, typename std::enable_if_t<IsScalar<T> || std::is_same_v<T, PkType>>> {
  public:
     using embeded_type = T;
     explicit Span(const T* data, int64_t row_count) : data_(data), row_count_(row_count) {

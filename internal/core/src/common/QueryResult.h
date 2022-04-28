@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <map>
 #include <limits>
 #include <string>
 #include <utility>
@@ -32,52 +33,49 @@
 namespace milvus {
 struct SearchResult {
     SearchResult() = default;
-    SearchResult(int64_t num_queries, int64_t topk) : topk_(topk), num_queries_(num_queries) {
-        auto count = get_row_count();
-        distances_.resize(count);
-        ids_.resize(count);
+
+    int64_t
+    get_total_result_count() const {
+        int64_t count = 0;
+        for (auto topk : real_topK_per_nq_) {
+            count += topk;
+        }
+        return count;
     }
 
     int64_t
-    get_row_count() const {
-        return topk_ * num_queries_;
-    }
-
-    // vector type
-    void
-    AddField(const FieldName& name,
-             const FieldId id,
-             DataType data_type,
-             int64_t dim,
-             std::optional<MetricType> metric_type) {
-        this->AddField(FieldMeta(name, id, data_type, dim, metric_type));
-    }
-
-    // scalar type
-    void
-    AddField(const FieldName& name, const FieldId id, DataType data_type) {
-        this->AddField(FieldMeta(name, id, data_type));
-    }
-
-    void
-    AddField(FieldMeta&& field_meta) {
-        output_fields_meta_.emplace_back(std::move(field_meta));
+    get_result_count(int nq_offset) const {
+        AssertInfo(nq_offset <= real_topK_per_nq_.size(), "wrong nq offset when get real search result count");
+        int64_t count = 0;
+        for (auto i = 0; i < nq_offset; i++) {
+            count += real_topK_per_nq_[i];
+        }
+        return count;
     }
 
  public:
     int64_t num_queries_;
     int64_t topk_;
-    std::vector<float> distances_;
-    std::vector<int64_t> ids_;  // primary keys
-
- public:
-    // TODO(gexi): utilize these fields
     void* segment_;
+
+    // first fill data during search, and then update data after reducing search results
+    std::vector<float> distances_;
+    std::vector<int64_t> seg_offsets_;
+
+    // fist fill data during fillPrimaryKey, and then update data after reducing search results
+    std::vector<PkType> primary_keys_;
+    DataType pk_type_;
+
+    // fill data during reducing search result
     std::vector<int64_t> result_offsets_;
-    std::vector<int64_t> primary_keys_;
-    aligned_vector<char> ids_data_;
-    std::vector<aligned_vector<char>> output_fields_data_;
-    std::vector<FieldMeta> output_fields_meta_;
+    // after reducing search result done, size(distances_) = size(seg_offsets_) = size(primary_keys_) =
+    // size(primary_keys_)
+
+    // set output fields data when fill target entity
+    std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data_;
+
+    // used for reduce, filter invalid pk, get real topks count
+    std::vector<int64_t> real_topK_per_nq_;
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;

@@ -23,7 +23,7 @@ class SubSearchResult {
         : metric_type_(metric_type),
           num_queries_(num_queries),
           topk_(topk),
-          ids_(num_queries * topk, -1),
+          seg_offsets_(num_queries * topk, -1),
           distances_(num_queries * topk, init_value(metric_type)),
           round_decimal_(round_decimal) {
     }
@@ -57,12 +57,12 @@ class SubSearchResult {
 
     const int64_t*
     get_ids() const {
-        return ids_.data();
+        return seg_offsets_.data();
     }
 
     int64_t*
-    get_ids() {
-        return ids_.data();
+    get_seg_offsets() {
+        return seg_offsets_.data();
     }
 
     const float*
@@ -76,8 +76,8 @@ class SubSearchResult {
     }
 
     auto&
-    mutable_ids() {
-        return ids_;
+    mutable_seg_offsets() {
+        return seg_offsets_;
     }
 
     auto&
@@ -104,7 +104,7 @@ class SubSearchResult {
     int64_t topk_;
     int64_t round_decimal_;
     MetricType metric_type_;
-    std::vector<int64_t> ids_;
+    std::vector<int64_t> seg_offsets_;
     std::vector<float> distances_;
 };
 

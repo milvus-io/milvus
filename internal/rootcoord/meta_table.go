@@ -85,6 +85,12 @@ const (
 
 	// CredentialPrefix prefix for credential user
 	CredentialPrefix = ComponentPrefix + UserSubPrefix
+
+	// DefaultIndexType name of default index type for scalar field
+	DefaultIndexType = "STL_SORT"
+
+	// DefaultStringIndexType name of default index type for varChar/string field
+	DefaultStringIndexType = "Trie"
 )
 
 // MetaTable store all rootcoord meta info
@@ -1062,6 +1068,21 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	fieldSchema, err := mt.unlockGetFieldSchema(collName, fieldName)
+	if err != nil {
+		return nil, fieldSchema, err
+	}
+
+	//TODO:: check index params for sclar field
+	// set default index type for scalar index
+	if !typeutil.IsVectorType(fieldSchema.GetDataType()) {
+		if fieldSchema.DataType == schemapb.DataType_VarChar {
+			idxInfo.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultStringIndexType}}
+		} else {
+			idxInfo.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultIndexType}}
+		}
+	}
+
 	if idxInfo.IndexParams == nil {
 		return nil, schemapb.FieldSchema{}, fmt.Errorf("index param is nil")
 	}
@@ -1075,10 +1096,6 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
 		return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
-	}
-	fieldSchema, err := mt.unlockGetFieldSchema(collName, fieldName)
-	if err != nil {
-		return nil, fieldSchema, err
 	}
 
 	var dupIdx typeutil.UniqueID

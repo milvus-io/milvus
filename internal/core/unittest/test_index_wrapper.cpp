@@ -76,14 +76,14 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
 
         auto dataset = GenDataset(NB, metric_type, is_binary);
         if (!is_binary) {
-            xb_data = dataset.get_col<float>(0);
+            xb_data = dataset.get_col<float>(milvus::FieldId(100));
             xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
-            xq_data = dataset.get_col<float>(0);
+            xq_data = dataset.get_col<float>(milvus::FieldId(100));
             xq_dataset = knowhere::GenDataset(NQ, DIM, xq_data.data());
         } else {
-            xb_bin_data = dataset.get_col<uint8_t>(0);
+            xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
             xb_dataset = knowhere::GenDataset(NB, DIM, xb_bin_data.data());
-            xq_bin_data = dataset.get_col<uint8_t>(0);
+            xq_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
             xq_dataset = knowhere::GenDataset(NQ, DIM, xq_bin_data.data());
         }
     }
@@ -113,7 +113,7 @@ TEST(PQ, Build) {
     auto conf = generate_conf(index_type, metric_type);
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->Train(xb_dataset, conf));
     ASSERT_NO_THROW(index->AddWithoutIds(xb_dataset, conf));
@@ -125,7 +125,7 @@ TEST(IVFFLATNM, Build) {
     auto conf = generate_conf(index_type, metric_type);
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->Train(xb_dataset, conf));
     ASSERT_NO_THROW(index->AddWithoutIds(xb_dataset, conf));
@@ -139,7 +139,7 @@ TEST(IVFFLATNM, Query) {
     auto conf = generate_conf(index_type, metric_type);
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     ASSERT_NO_THROW(index->Train(xb_dataset, conf));
     ASSERT_NO_THROW(index->AddWithoutIds(xb_dataset, conf));
@@ -149,7 +149,7 @@ TEST(IVFFLATNM, Query) {
     bptr->size = DIM * NB * sizeof(float);
     bs.Append(RAW_DATA, bptr);
     index->Load(bs);
-    auto xq_data = dataset.get_col<float>(0);
+    auto xq_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xq_dataset = knowhere::GenDataset(NQ, DIM, xq_data.data());
     auto result = index->Query(xq_dataset, conf, nullptr);
 
@@ -189,7 +189,7 @@ TEST(BINFLAT, Build) {
     auto conf = generate_conf(index_type, metric_type);
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, true);
-    auto xb_data = dataset.get_col<uint8_t>(0);
+    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
     std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
@@ -222,12 +222,12 @@ TEST(BinIVFFlat, Build_and_Query) {
     auto dim = 128;
     auto nq = 10;
     auto dataset = GenDataset(std::max(nq, nb), metric_type, true);
-    auto xb_data = dataset.get_col<uint8_t>(0);
+    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
     std::vector<knowhere::IDType> ids(nb, 0);
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = knowhere::GenDataset(nb, dim, xb_data.data());
     index->BuildAll(xb_dataset, conf);
-    auto xq_data = dataset.get_col<float>(0);
+    auto xq_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xq_dataset = knowhere::GenDataset(nq, dim, xq_data.data());
     auto result = index->Query(xq_dataset, conf, nullptr);
 
@@ -258,7 +258,7 @@ TEST(BINIDMAP, Build) {
     auto conf = generate_conf(index_type, metric_type);
     auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
     auto dataset = GenDataset(NB, metric_type, true);
-    auto xb_data = dataset.get_col<uint8_t>(0);
+    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
     std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
@@ -278,7 +278,7 @@ TEST(PQWrapper, Build) {
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
@@ -298,7 +298,7 @@ TEST(IVFFLATNMWrapper, Build) {
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
     auto index =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
@@ -319,7 +319,7 @@ TEST(IVFFLATNMWrapper, Codec) {
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
     auto dataset = GenDataset(flat_nb, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
     auto xb_dataset = knowhere::GenDataset(flat_nb, DIM, xb_data.data());
     auto index_wrapper =
         std::make_unique<milvus::indexbuilder::VecIndexCreator>(type_params_str.c_str(), index_params_str.c_str());
@@ -353,7 +353,7 @@ TEST(BinFlatWrapper, Build) {
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, true);
-    auto xb_data = dataset.get_col<uint8_t>(0);
+    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
     std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
@@ -376,7 +376,7 @@ TEST(BinIdMapWrapper, Build) {
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, true);
-    auto xb_data = dataset.get_col<uint8_t>(0);
+    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
     std::vector<knowhere::IDType> ids(NB, 0);
     std::iota(ids.begin(), ids.end(), 0);
     auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());

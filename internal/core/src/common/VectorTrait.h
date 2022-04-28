@@ -16,6 +16,7 @@
 
 #pragma once
 #include "Types.h"
+#include <string>
 
 namespace milvus {
 
@@ -48,7 +49,7 @@ template <typename T>
 constexpr bool IsVector = std::is_base_of_v<VectorTrait, T>;
 
 template <typename T>
-constexpr bool IsScalar = std::is_fundamental_v<T>;
+constexpr bool IsScalar = std::is_fundamental_v<T> || std::is_same_v<T, std::string>;
 
 template <typename T, typename Enabled = void>
 struct EmbeddedTypeImpl;
@@ -65,5 +66,18 @@ struct EmbeddedTypeImpl<T, std::enable_if_t<IsVector<T>>> {
 
 template <typename T>
 using EmbeddedType = typename EmbeddedTypeImpl<T>::type;
+
+struct FundamentalTag {};
+struct StringTag {};
+
+template <class T>
+struct TagDispatchTrait {
+    using Tag = FundamentalTag;
+};
+
+template <>
+struct TagDispatchTrait<std::string> {
+    using Tag = StringTag;
+};
 
 }  // namespace milvus

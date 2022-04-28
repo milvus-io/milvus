@@ -18,25 +18,31 @@
 
 #include <map>
 #include <string>
+#include "Types.h"
 
 #include "knowhere/index/vector_index/VecIndex.h"
+#include "common/CDataType.h"
+#include "knowhere/index/Index.h"
 
 struct LoadIndexInfo {
     int64_t field_id;
+    CDataType field_type;
     std::map<std::string, std::string> index_params;
-    knowhere::VecIndexPtr index;
+    knowhere::IndexPtr index;
 };
 
 // NOTE: field_id can be system field
 // NOTE: Refer to common/SystemProperty.cpp for details
+// TODO: use arrow to pass field data instead of proto
 struct LoadFieldDataInfo {
     int64_t field_id;
-    const void* blob = nullptr;
+    //    const void* blob = nullptr;
+    const milvus::DataArray* field_data;
     int64_t row_count = -1;
 };
 
 struct LoadDeletedRecordInfo {
     const void* timestamps = nullptr;
-    const void* primary_keys = nullptr;
+    const milvus::IdArray* primary_keys = nullptr;
     int64_t row_count = -1;
 };

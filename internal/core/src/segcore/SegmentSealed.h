@@ -34,10 +34,6 @@ class SegmentSealed : public SegmentInternalInterface {
     DropIndex(const FieldId field_id) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;
-    virtual bool
-    HasIndex(FieldId field_id) const = 0;
-    virtual bool
-    HasFieldData(FieldId field_id) const = 0;
 };
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;

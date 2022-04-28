@@ -251,7 +251,7 @@ func TestMetaTable(t *testing.T) {
 					Name:         "field110",
 					IsPrimaryKey: false,
 					Description:  "",
-					DataType:     0,
+					DataType:     schemapb.DataType_FloatVector,
 					TypeParams: []*commonpb.KeyValuePair{
 						{
 							Key:   "field110-k1",

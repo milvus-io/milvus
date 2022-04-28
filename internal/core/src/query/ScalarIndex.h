@@ -12,6 +12,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <index/ScalarIndexSort.h>
 
 #include "common/FieldMeta.h"
@@ -45,6 +46,8 @@ generate_scalar_index(SpanBase data, DataType data_type) {
             return generate_scalar_index(Span<float>(data));
         case DataType::DOUBLE:
             return generate_scalar_index(Span<double>(data));
+        case DataType::VARCHAR:
+            return generate_scalar_index(Span<std::string>(data));
         default:
             PanicInfo("unsupported type");
     }

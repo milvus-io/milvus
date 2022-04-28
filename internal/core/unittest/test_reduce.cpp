@@ -52,7 +52,7 @@ TEST(Reduce, SubQueryResult) {
         }
         SubSearchResult sub_result(num_queries, topk, metric_type, round_decimal);
         sub_result.mutable_distances() = distances;
-        sub_result.mutable_ids() = ids;
+        sub_result.mutable_seg_offsets() = ids;
         final_result.merge(sub_result);
     }
 
@@ -62,7 +62,7 @@ TEST(Reduce, SubQueryResult) {
             auto ref_x = ref_results[n].top();
             ref_results[n].pop();
             auto index = n * topk + topk - 1 - k;
-            auto id = final_result.get_ids()[index];
+            auto id = final_result.get_seg_offsets()[index];
             auto distance = final_result.get_distances()[index];
             ASSERT_EQ(id, ref_x);
             ASSERT_EQ(distance, ref_x);
@@ -104,7 +104,7 @@ TEST(Reduce, SubSearchResultDesc) {
         }
         SubSearchResult sub_result(num_queries, topk, metric_type, round_decimal);
         sub_result.mutable_distances() = distances;
-        sub_result.mutable_ids() = ids;
+        sub_result.mutable_seg_offsets() = ids;
         final_result.merge(sub_result);
     }
 
@@ -114,7 +114,7 @@ TEST(Reduce, SubSearchResultDesc) {
             auto ref_x = ref_results[n].top();
             ref_results[n].pop();
             auto index = n * topk + topk - 1 - k;
-            auto id = final_result.get_ids()[index];
+            auto id = final_result.get_seg_offsets()[index];
             auto distance = final_result.get_distances()[index];
             ASSERT_EQ(id, ref_x);
             ASSERT_EQ(distance, ref_x);

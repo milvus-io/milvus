@@ -863,7 +863,7 @@ func (q *queryCollection) search(msg queryMsg) error {
 	if err != nil {
 		return err
 	}
-	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, int(numSegment), reqSlices)
+	blobs, err := marshal(collectionID, searchMsg.ID(), searchResults, plan, int(numSegment), reqSlices)
 	defer deleteSearchResultDataBlobs(blobs)
 	sp.LogFields(oplog.String("statistical time", "reorganizeSearchResults end"))
 	if err != nil {
@@ -1055,7 +1055,7 @@ func (q *queryCollection) retrieve(msg queryMsg) error {
 func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	var ret *segcorepb.RetrieveResults
 	var skipDupCnt int64
-	var idSet = make(map[int64]struct{})
+	var idSet = make(map[interface{}]struct{})
 
 	// merge results and remove duplicates
 	for _, rr := range retrieveResults {
@@ -1066,13 +1066,7 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 
 		if ret == nil {
 			ret = &segcorepb.RetrieveResults{
-				Ids: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{},
-						},
-					},
-				},
+				Ids:        &schemapb.IDs{},
 				FieldsData: make([]*schemapb.FieldData, len(rr.FieldsData)),
 			}
 		}
@@ -1081,10 +1075,11 @@ func mergeRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcor
 			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
 		}
 
-		dstIds := ret.Ids.GetIntId()
-		for i, id := range rr.Ids.GetIntId().GetData() {
+		pkHitNum := typeutil.GetSizeOfIDs(rr.GetIds())
+		for i := 0; i < pkHitNum; i++ {
+			id := typeutil.GetPK(rr.GetIds(), int64(i))
 			if _, ok := idSet[id]; !ok {
-				dstIds.Data = append(dstIds.Data, id)
+				typeutil.AppendPKs(ret.Ids, id)
 				typeutil.AppendFieldData(ret.FieldsData, rr.FieldsData, int64(i))
 				idSet[id] = struct{}{}
 			} else {

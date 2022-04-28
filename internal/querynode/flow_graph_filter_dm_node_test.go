@@ -53,8 +53,10 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 	t.Run("valid test", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -63,7 +65,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	})
 
 	t.Run("test no collection", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		msg.CollectionID = UniqueID(1000)
 		fg, err := getFilterDMNode(ctx)
@@ -73,7 +75,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	})
 
 	t.Run("test no partition", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		msg.PartitionID = UniqueID(1000)
 		fg, err := getFilterDMNode(ctx)
@@ -88,7 +90,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	})
 
 	t.Run("test not target collection", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -98,7 +100,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	})
 
 	t.Run("test no exclude segment", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -108,7 +110,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	})
 
 	t.Run("test segment is exclude segment", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -127,7 +129,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	})
 
 	t.Run("test misaligned messages", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -137,7 +139,7 @@ func TestFlowGraphFilterDmNode_filterInvalidInsertMessage(t *testing.T) {
 	})
 
 	t.Run("test no data", func(t *testing.T) {
-		msg, err := genSimpleInsertMsg()
+		msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -154,8 +156,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	defer cancel()
 
 	t.Run("delete valid test", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		res := fg.filterInvalidDeleteMessage(msg)
@@ -163,8 +164,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msg.CollectionID = UniqueID(1003)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -173,8 +173,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no partition", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msg.PartitionID = UniqueID(1000)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
@@ -188,8 +187,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete not target collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
@@ -198,8 +196,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete misaligned messages", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		msg.Timestamps = make([]Timestamp, 0)
@@ -208,8 +205,7 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no data", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDMNode(ctx)
 		assert.NoError(t, err)
 		msg.Timestamps = make([]Timestamp, 0)
@@ -226,9 +222,11 @@ func TestFlowGraphFilterDmNode_filterInvalidDeleteMessage(t *testing.T) {
 func TestFlowGraphFilterDmNode_Operate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
 	genFilterDMMsg := func() []flowgraph.Msg {
-		iMsg, err := genSimpleInsertMsg()
+		iMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 		assert.NoError(t, err)
 		msg := flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{iMsg}, 0, 1000, nil, nil)
 		return []flowgraph.Msg{msg}

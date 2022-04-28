@@ -32,13 +32,13 @@ SearchOnSealed(const Schema& schema,
     auto topk = search_info.topk_;
     auto round_decimal = search_info.round_decimal_;
 
-    auto field_offset = search_info.field_offset_;
-    auto& field = schema[field_offset];
+    auto field_id = search_info.field_id_;
+    auto& field = schema[field_id];
     // Assert(field.get_data_type() == DataType::VECTOR_FLOAT);
     auto dim = field.get_dim();
 
-    AssertInfo(record.is_ready(field_offset), "[SearchOnSealed]Record isn't ready");
-    auto field_indexing = record.get_field_indexing(field_offset);
+    AssertInfo(record.is_ready(field_id), "[SearchOnSealed]Record isn't ready");
+    auto field_indexing = record.get_field_indexing(field_id);
     AssertInfo(field_indexing->metric_type_ == search_info.metric_type_,
                "Metric type of field index isn't the same with search info");
 
@@ -67,12 +67,12 @@ SearchOnSealed(const Schema& schema,
             distances[i] = round(distances[i] * multiplier) / multiplier;
         }
     }
-    result.ids_.resize(total_num);
+    result.seg_offsets_.resize(total_num);
     result.distances_.resize(total_num);
     result.num_queries_ = num_queries;
     result.topk_ = topk;
 
-    std::copy_n(ids, total_num, result.ids_.data());
+    std::copy_n(ids, total_num, result.seg_offsets_.data());
     std::copy_n(distances, total_num, result.distances_.data());
 }
 }  // namespace milvus::query

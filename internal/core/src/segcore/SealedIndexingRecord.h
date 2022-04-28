@@ -12,6 +12,7 @@
 #pragma once
 
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <shared_mutex>
 #include <utility>
@@ -32,36 +33,36 @@ using SealedIndexingEntryPtr = std::unique_ptr<SealedIndexingEntry>;
 
 struct SealedIndexingRecord {
     void
-    append_field_indexing(FieldOffset field_offset, MetricType metric_type, knowhere::VecIndexPtr indexing) {
+    append_field_indexing(FieldId field_id, MetricType metric_type, knowhere::VecIndexPtr indexing) {
         auto ptr = std::make_unique<SealedIndexingEntry>();
         ptr->indexing_ = indexing;
         ptr->metric_type_ = metric_type;
         std::unique_lock lck(mutex_);
-        field_indexings_[field_offset] = std::move(ptr);
+        field_indexings_[field_id] = std::move(ptr);
     }
 
     const SealedIndexingEntry*
-    get_field_indexing(FieldOffset field_offset) const {
+    get_field_indexing(FieldId field_id) const {
         std::shared_lock lck(mutex_);
-        AssertInfo(field_indexings_.count(field_offset), "field_offset not found");
-        return field_indexings_.at(field_offset).get();
+        AssertInfo(field_indexings_.count(field_id), "field_id not found");
+        return field_indexings_.at(field_id).get();
     }
 
     void
-    drop_field_indexing(FieldOffset field_offset) {
+    drop_field_indexing(FieldId field_id) {
         std::unique_lock lck(mutex_);
-        field_indexings_.erase(field_offset);
+        field_indexings_.erase(field_id);
     }
 
     bool
-    is_ready(FieldOffset field_offset) const {
+    is_ready(FieldId field_id) const {
         std::shared_lock lck(mutex_);
-        return field_indexings_.count(field_offset);
+        return field_indexings_.count(field_id);
     }
 
  private:
     // field_offset -> SealedIndexingEntry
-    std::map<FieldOffset, SealedIndexingEntryPtr> field_indexings_;
+    std::unordered_map<FieldId, SealedIndexingEntryPtr> field_indexings_;
     mutable std::shared_mutex mutex_;
 };
 
