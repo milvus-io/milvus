@@ -18,6 +18,7 @@ package etcdkv_test
 
 import (
 	"errors"
+	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -38,12 +39,18 @@ func TestEmbedEtcd(te *testing.T) {
 	param.Init()
 	param.BaseTable.Save("etcd.use.embed", "true")
 	param.BaseTable.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
-	param.BaseTable.Save("etcd.data.dir", "etcd.test.data.dir")
+
+	dir, err := ioutil.TempDir(os.TempDir(), "kv_etcd")
+	assert.Nil(te, err)
+	param.BaseTable.Save("etcd.data.dir", dir)
+
 	param.EtcdCfg.LoadCfgToMemory()
+
 	//clean up data
 	defer func() {
-		os.RemoveAll("etcd.test.data.dir")
+		err = os.RemoveAll(dir)
 	}()
+
 	te.Run("EtcdKV SaveAndLoad", func(t *testing.T) {
 		rootPath := "/etcd/test/root/saveandload"
 		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
