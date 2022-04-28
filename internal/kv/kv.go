@@ -50,13 +50,6 @@ type BaseKV interface {
 	Close()
 }
 
-// DataKV persists the data.
-type DataKV interface {
-	BaseKV
-	LoadPartial(key string, start, end int64) ([]byte, error)
-	GetSize(key string) (int64, error)
-}
-
 // TxnKV contains extra txn operations of kv. The extra operations is transactional.
 type TxnKV interface {
 	BaseKV

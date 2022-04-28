@@ -351,7 +351,7 @@ func (loader *segmentLoader) loadGrowingFields(segment *Segment, fieldBinlogs []
 	return loader.loadGrowingSegments(segment, ids, timestamps, rowData)
 }
 
-// Load binlogs concurrently into memory from DataKV
+// Load binlogs concurrently into memory from KV storage
 func (loader *segmentLoader) loadFieldBinlogs(field *datapb.FieldBinlog) ([]*storage.Blob, error) {
 	log.Debug("load field binlogs",
 		zap.Int64("fieldID", field.FieldID),

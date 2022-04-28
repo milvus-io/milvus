@@ -30,10 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -46,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -225,47 +222,6 @@ func genStorageBlob(collectionID UniqueID,
 	binLogs, _, err := inCodec.Serialize(partitionID, segmentID, insertData)
 
 	return binLogs, err
-}
-
-func saveSimpleBinLog(ctx context.Context, schema *schemapb.CollectionSchema, dataKV kv.DataKV) ([]*datapb.FieldBinlog, error) {
-	return saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultNumRowPerSegment, schema, dataKV)
-}
-
-func saveBinLog(ctx context.Context,
-	collectionID UniqueID,
-	partitionID UniqueID,
-	segmentID UniqueID,
-	msgLength int,
-	schema *schemapb.CollectionSchema,
-	dataKV kv.DataKV) ([]*datapb.FieldBinlog, error) {
-	binLogs, err := genStorageBlob(collectionID, partitionID, segmentID, msgLength, schema)
-	if err != nil {
-		return nil, err
-	}
-
-	log.Debug(".. [query coord unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
-	kvs := make(map[string]string, len(binLogs))
-
-	// write insert binlog
-	fieldBinlog := make([]*datapb.FieldBinlog, 0)
-	for _, blob := range binLogs {
-		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		log.Debug("[QueryCoord unittest] save binlog", zap.Int64("fieldID", fieldID))
-		if err != nil {
-			return nil, err
-		}
-
-		key := genKey(collectionID, partitionID, segmentID, fieldID)
-		kvs[key] = string(blob.Value[:])
-		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
-			FieldID: fieldID,
-			Binlogs: []*datapb.Binlog{{LogPath: key}},
-		})
-	}
-	log.Debug("[QueryCoord unittest] save binlog file to MinIO/S3")
-
-	err = dataKV.MultiSave(kvs)
-	return fieldBinlog, err
 }
 
 func genKey(collectionID, partitionID, segmentID UniqueID, fieldID int64) string {
