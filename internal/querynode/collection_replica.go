@@ -758,6 +758,7 @@ func (colReplica *collectionReplica) getSegmentInfo(segment *Segment) *querypb.S
 		DmChannel:    segment.vChannelID,
 		SegmentState: segment.segmentType,
 		IndexInfos:   indexInfos,
+		NodeIds:      []UniqueID{Params.QueryNodeCfg.GetNodeID()},
 	}
 	return info
 }

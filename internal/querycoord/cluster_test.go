@@ -640,6 +640,7 @@ func TestSetNodeState(t *testing.T) {
 		CollectionID: defaultCollectionID,
 		DmChannel:    "test-dmChannel",
 		NodeIDLoaded: node.queryNodeID,
+		NodeIds:      []int64{node.queryNodeID},
 	}
 	err = meta.setDmChannelInfos([]*querypb.DmChannelWatchInfo{dmChannelWatchInfo})
 	assert.Nil(t, err)

@@ -269,6 +269,7 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 				DmChannel:    info.ChannelName,
 				NodeIDLoaded: nodeID,
 				ReplicaID:    in.ReplicaID,
+				NodeIds:      []int64{nodeID},
 			}
 		}
 
