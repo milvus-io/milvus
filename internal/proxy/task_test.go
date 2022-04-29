@@ -21,10 +21,13 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"math/rand"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
@@ -2168,4 +2171,266 @@ func TestAlterAlias_all(t *testing.T) {
 	assert.NoError(t, task.PreExecute(ctx))
 	assert.NoError(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
+}
+
+func Test_createIndexTask_getIndexedField(t *testing.T) {
+	collectionName := "test"
+	fieldName := "test"
+
+	cit := &createIndexTask{
+		CreateIndexRequest: &milvuspb.CreateIndexRequest{
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+		},
+	}
+
+	t.Run("normal", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         fieldName,
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_FloatVector,
+						TypeParams:   nil,
+						IndexParams: []*commonpb.KeyValuePair{
+							{
+								Key:   "dim",
+								Value: "128",
+							},
+						},
+						AutoID: false,
+					},
+				},
+			}, nil
+		})
+		globalMetaCache = cache
+		field, err := cit.getIndexedField(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, fieldName, field.GetName())
+	})
+
+	t.Run("schema not found", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
+			return nil, errors.New("mock")
+		})
+		globalMetaCache = cache
+		_, err := cit.getIndexedField(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid schema", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name: fieldName,
+					},
+					{
+						Name: fieldName, // duplicate
+					},
+				},
+			}, nil
+		})
+		globalMetaCache = cache
+		_, err := cit.getIndexedField(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("field not found", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name: fieldName + fieldName,
+					},
+				},
+			}, nil
+		})
+		globalMetaCache = cache
+		_, err := cit.getIndexedField(context.Background())
+		assert.Error(t, err)
+	})
+}
+
+func Test_fillDimension(t *testing.T) {
+	t.Run("scalar", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+		}
+		assert.NoError(t, fillDimension(f, nil))
+	})
+
+	t.Run("no dim in schema", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+		}
+		assert.Error(t, fillDimension(f, nil))
+	})
+
+	t.Run("dimension mismatch", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+		}
+		assert.Error(t, fillDimension(f, map[string]string{"dim": "8"}))
+	})
+
+	t.Run("normal", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+		}
+		m := map[string]string{}
+		assert.NoError(t, fillDimension(f, m))
+		assert.Equal(t, "128", m["dim"])
+	})
+}
+
+func Test_checkTrain(t *testing.T) {
+	t.Run("normal", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+		}
+		m := map[string]string{
+			"index_type":  "IVF_FLAT",
+			"nlist":       "1024",
+			"metric_type": "L2",
+		}
+		assert.NoError(t, checkTrain(f, m))
+	})
+
+	t.Run("scalar", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_Int64,
+		}
+		m := map[string]string{
+			"index_type": "scalar",
+		}
+		assert.NoError(t, checkTrain(f, m))
+	})
+
+	t.Run("dimension mismatch", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+		}
+		m := map[string]string{
+			"index_type":  "IVF_FLAT",
+			"nlist":       "1024",
+			"metric_type": "L2",
+			"dim":         "8",
+		}
+		assert.Error(t, checkTrain(f, m))
+	})
+
+	t.Run("invalid params", func(t *testing.T) {
+		f := &schemapb.FieldSchema{
+			DataType: schemapb.DataType_FloatVector,
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+		}
+		m := map[string]string{
+			"index_type":  "IVF_FLAT",
+			"metric_type": "L2",
+		}
+		assert.Error(t, checkTrain(f, m))
+	})
+}
+
+func Test_createIndexTask_PreExecute(t *testing.T) {
+	collectionName := "test"
+	fieldName := "test"
+
+	cit := &createIndexTask{
+		CreateIndexRequest: &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+		},
+	}
+
+	t.Run("normal", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+			return 100, nil
+		})
+		cache.setGetSchemaFunc(func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
+			return &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         fieldName,
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_FloatVector,
+						TypeParams:   nil,
+						IndexParams: []*commonpb.KeyValuePair{
+							{
+								Key:   "dim",
+								Value: "128",
+							},
+						},
+						AutoID: false,
+					},
+				},
+			}, nil
+		})
+		globalMetaCache = cache
+		cit.CreateIndexRequest.ExtraParams = []*commonpb.KeyValuePair{
+			{
+				Key:   "index_type",
+				Value: "IVF_FLAT",
+			},
+			{
+				Key:   "nlist",
+				Value: "1024",
+			},
+			{
+				Key:   "metric_type",
+				Value: "L2",
+			},
+		}
+		assert.NoError(t, cit.PreExecute(context.Background()))
+	})
+
+	t.Run("collection not found", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+			return 0, errors.New("mock")
+		})
+		globalMetaCache = cache
+		assert.Error(t, cit.PreExecute(context.Background()))
+	})
 }

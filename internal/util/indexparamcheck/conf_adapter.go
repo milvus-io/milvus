@@ -131,10 +131,9 @@ type BaseConfAdapter struct {
 
 // CheckTrain check whether the params contains supported metrics types
 func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
-	// dimension is specified when create collection
-	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-	//	return false
-	//}
+	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
+		return false
+	}
 
 	return CheckStrByValues(params, Metric, METRICS)
 }
@@ -179,8 +178,8 @@ func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
 
 func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
 	dimStr, dimensionExist := params[DIM]
-	if !dimensionExist { // dimension is specified when creating collection
-		return true
+	if !dimensionExist {
+		return false
 	}
 
 	dimension, err := strconv.Atoi(dimStr)
@@ -260,10 +259,9 @@ type BinIDMAPConfAdapter struct {
 
 // CheckTrain checks if a binary flat index can be built with the specific parameters.
 func (adapter *BinIDMAPConfAdapter) CheckTrain(params map[string]string) bool {
-	// dimension is specified when create collection
-	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-	//	return false
-	//}
+	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
+		return false
+	}
 
 	return CheckStrByValues(params, Metric, BinIDMapMetrics)
 }
@@ -278,10 +276,9 @@ type BinIVFConfAdapter struct {
 
 // CheckTrain checks if a binary ivf index can be built with specific parameters.
 func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) bool {
-	// dimension is specified when create collection
-	//if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-	//	return false
-	//}
+	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
+		return false
+	}
 
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {
 		return false

@@ -1795,36 +1795,13 @@ func (cit *createIndexTask) OnEnqueue() error {
 	return nil
 }
 
-func (cit *createIndexTask) PreExecute(ctx context.Context) error {
-	cit.Base.MsgType = commonpb.MsgType_CreateIndex
-	cit.Base.SourceID = Params.ProxyCfg.GetNodeID()
-
-	collName, fieldName := cit.CollectionName, cit.FieldName
-
-	col, err := globalMetaCache.GetCollectionInfo(ctx, collName)
-	if err != nil {
-		return err
-	}
-	cit.collectionID = col.collID
-
-	if err := validateCollectionName(collName); err != nil {
-		return err
-	}
-
-	if err := validateFieldName(fieldName); err != nil {
-		return err
-	}
-
-	// check index param, not accurate, only some static rules
+func parseIndexParams(m []*commonpb.KeyValuePair) (map[string]string, error) {
 	indexParams := make(map[string]string)
-	for _, kv := range cit.CreateIndexRequest.ExtraParams {
+	for _, kv := range m {
 		if kv.Key == "params" { // TODO(dragondriver): change `params` to const variable
 			params, err := funcutil.ParseIndexParamsMap(kv.Value)
 			if err != nil {
-				log.Warn("Failed to parse index params",
-					zap.String("params", kv.Value),
-					zap.Error(err))
-				continue
+				return nil, err
 			}
 			for k, v := range params {
 				indexParams[k] = v
@@ -1833,23 +1810,68 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 			indexParams[kv.Key] = kv.Value
 		}
 	}
-	indexType, exist := indexParams["index_type"] // TODO(dragondriver): change `index_type` to const variable
+	_, exist := indexParams["index_type"] // TODO(dragondriver): change `index_type` to const variable
 	if !exist {
-		indexType = indexparamcheck.IndexFaissIvfPQ // IVF_PQ is the default index type
+		indexParams["index_type"] = indexparamcheck.IndexFaissIvfPQ // IVF_PQ is the default index type
 	}
+	return indexParams, nil
+}
 
-	//TODO:: add default index type for VarChar type field
+func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.FieldSchema, error) {
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, cit.GetCollectionName())
+	if err != nil {
+		log.Error("failed to get collection schema", zap.Error(err))
+		return nil, fmt.Errorf("failed to get collection schema: %s", err)
+	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		log.Error("failed to parse collection schema", zap.Error(err))
+		return nil, fmt.Errorf("failed to parse collection schema: %s", err)
+	}
+	field, err := schemaHelper.GetFieldFromName(cit.GetFieldName())
+	if err != nil {
+		log.Error("create index on non-exist field", zap.Error(err))
+		return nil, fmt.Errorf("cannot create index on non-exist field: %s", cit.GetFieldName())
+	}
+	return field, nil
+}
+
+func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) error {
+	vecDataTypes := []schemapb.DataType{
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_BinaryVector,
+	}
+	if !funcutil.SliceContain(vecDataTypes, field.GetDataType()) {
+		return nil
+	}
+	params := make([]*commonpb.KeyValuePair, 0, len(field.GetTypeParams())+len(field.GetIndexParams()))
+	params = append(params, field.GetTypeParams()...)
+	params = append(params, field.GetIndexParams()...)
+	dimensionInSchema, err := funcutil.GetAttrByKeyFromRepeatedKV("dim", params)
+	if err != nil {
+		return fmt.Errorf("dimension not found in schema")
+	}
+	dimension, exist := indexParams["dim"]
+	if exist {
+		if dimensionInSchema != dimension {
+			return fmt.Errorf("dimension mismatch, dimension in schema: %s, dimension: %s", dimensionInSchema, dimension)
+		}
+	} else {
+		indexParams["dim"] = dimensionInSchema
+	}
+	return nil
+}
+
+func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) error {
+	indexType := indexParams["index_type"]
 
 	// skip params check of non-vector field.
 	vecDataTypes := []schemapb.DataType{
 		schemapb.DataType_FloatVector,
 		schemapb.DataType_BinaryVector,
 	}
-
-	for _, f := range col.schema.GetFields() {
-		if f.GetName() == fieldName && !funcutil.SliceContain(vecDataTypes, f.GetDataType()) {
-			return indexparamcheck.CheckIndexValid(f.GetDataType(), indexType, indexParams)
-		}
+	if !funcutil.SliceContain(vecDataTypes, field.GetDataType()) {
+		return indexparamcheck.CheckIndexValid(field.GetDataType(), indexType, indexParams)
 	}
 
 	adapter, err := indexparamcheck.GetConfAdapterMgrInstance().GetAdapter(indexType)
@@ -1858,13 +1880,44 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
+	if err := fillDimension(field, indexParams); err != nil {
+		return err
+	}
+
 	ok := adapter.CheckTrain(indexParams)
 	if !ok {
 		log.Warn("Create index with invalid params", zap.Any("index_params", indexParams))
-		return fmt.Errorf("invalid index params: %v", cit.CreateIndexRequest.ExtraParams)
+		return fmt.Errorf("invalid index params: %v", indexParams)
 	}
 
 	return nil
+}
+
+func (cit *createIndexTask) PreExecute(ctx context.Context) error {
+	cit.Base.MsgType = commonpb.MsgType_CreateIndex
+	cit.Base.SourceID = Params.ProxyCfg.GetNodeID()
+
+	collName := cit.CollectionName
+
+	collID, err := globalMetaCache.GetCollectionID(ctx, collName)
+	if err != nil {
+		return err
+	}
+	cit.collectionID = collID
+
+	field, err := cit.getIndexedField(ctx)
+	if err != nil {
+		return err
+	}
+
+	// check index param, not accurate, only some static rules
+	indexParams, err := parseIndexParams(cit.GetExtraParams())
+	if err != nil {
+		log.Error("failed to parse index params", zap.Error(err))
+		return fmt.Errorf("failed to parse index params: %s", err)
+	}
+
+	return checkTrain(field, indexParams)
 }
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
