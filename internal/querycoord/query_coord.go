@@ -362,7 +362,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 			SourceNodeIDs: offlineNodeIDs,
 		}
 
-		baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_NodeDown)
+		baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_NodeDown))
 		loadBalanceTask := &loadBalanceTask{
 			baseTask:           baseTask,
 			LoadBalanceRequest: loadBalanceSegment,
@@ -494,7 +494,7 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 					BalanceReason: querypb.TriggerCondition_NodeDown,
 				}
 
-				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_NodeDown)
+				baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_NodeDown))
 				loadBalanceTask := &loadBalanceTask{
 					baseTask:           baseTask,
 					LoadBalanceRequest: loadBalanceSegment,
@@ -677,7 +677,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 							DstNodeIDs:       []UniqueID{dstNodeID},
 							SealedSegmentIDs: []UniqueID{selectedSegmentInfo.SegmentID},
 						}
-						baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_LoadBalance)
+						baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_LoadBalance))
 						balanceTask := &loadBalanceTask{
 							baseTask:           baseTask,
 							LoadBalanceRequest: req,

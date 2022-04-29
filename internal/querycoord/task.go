@@ -73,8 +73,8 @@ type task interface {
 	msgBase() *commonpb.MsgBase
 	msgType() commonpb.MsgType
 	timestamp() Timestamp
-	getTriggerCondition() querypb.TriggerCondition
-	setTriggerCondition(trigger querypb.TriggerCondition)
+	getPriority() int
+	setPriority(priority int)
 	preExecute(ctx context.Context) error
 	execute(ctx context.Context) error
 	postExecute(ctx context.Context) error
@@ -83,7 +83,6 @@ type task interface {
 	rollBack(ctx context.Context) []task
 	waitToFinish() error
 	notify(err error)
-	taskPriority() querypb.TriggerCondition
 	setParentTask(t task)
 	getParentTask() task
 	getChildTask() []task
@@ -112,29 +111,29 @@ type baseTask struct {
 	retryMu    sync.RWMutex
 	//sync.RWMutex
 
-	taskID           UniqueID
-	triggerCondition querypb.TriggerCondition
-	triggerMu        sync.RWMutex
-	parentTask       task
-	childTasks       []task
-	childTasksMu     sync.RWMutex
+	taskID       UniqueID
+	priority     int
+	triggerMu    sync.RWMutex
+	parentTask   task
+	childTasks   []task
+	childTasksMu sync.RWMutex
 
 	timeRecorder *timerecord.TimeRecorder
 }
 
-func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *baseTask {
+func newBaseTask(ctx context.Context, priority int) *baseTask {
 	childCtx, cancel := context.WithCancel(ctx)
 	condition := newTaskCondition(childCtx)
 
 	baseTask := &baseTask{
-		ctx:              childCtx,
-		cancel:           cancel,
-		condition:        condition,
-		state:            taskUndo,
-		retryCount:       MaxRetryNum,
-		triggerCondition: triggerType,
-		childTasks:       []task{},
-		timeRecorder:     timerecord.NewTimeRecorder("QueryCoordBaseTask"),
+		ctx:          childCtx,
+		cancel:       cancel,
+		condition:    condition,
+		state:        taskUndo,
+		retryCount:   MaxRetryNum,
+		priority:     priority,
+		childTasks:   []task{},
+		timeRecorder: timerecord.NewTimeRecorder("QueryCoordBaseTask"),
 	}
 
 	return baseTask
@@ -154,22 +153,18 @@ func (bt *baseTask) traceCtx() context.Context {
 	return bt.ctx
 }
 
-func (bt *baseTask) getTriggerCondition() querypb.TriggerCondition {
+func (bt *baseTask) getPriority() int {
 	bt.triggerMu.RLock()
 	defer bt.triggerMu.RUnlock()
 
-	return bt.triggerCondition
+	return bt.priority
 }
 
-func (bt *baseTask) setTriggerCondition(trigger querypb.TriggerCondition) {
+func (bt *baseTask) setPriority(priority int) {
 	bt.triggerMu.Lock()
 	defer bt.triggerMu.Unlock()
 
-	bt.triggerCondition = trigger
-}
-
-func (bt *baseTask) taskPriority() querypb.TriggerCondition {
-	return bt.triggerCondition
+	bt.priority = priority
 }
 
 func (bt *baseTask) setParentTask(t task) {
@@ -607,7 +602,7 @@ func (lct *loadCollectionTask) rollBack(ctx context.Context) []task {
 			CollectionID: lct.CollectionID,
 			NodeID:       nodeID,
 		}
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
+		baseTask := newBaseTask(ctx, getPriority(querypb.TriggerCondition_GrpcRequest))
 		baseTask.setParentTask(lct)
 		releaseCollectionTask := &releaseCollectionTask{
 			baseTask:                 baseTask,
@@ -693,7 +688,7 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 		for _, nodeID := range onlineNodeIDs {
 			req := proto.Clone(rct.ReleaseCollectionRequest).(*querypb.ReleaseCollectionRequest)
 			req.NodeID = nodeID
-			baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
+			baseTask := newBaseTask(ctx, getPriority(querypb.TriggerCondition_GrpcRequest))
 			baseTask.setParentTask(rct)
 			releaseCollectionTask := &releaseCollectionTask{
 				baseTask:                 baseTask,
@@ -1056,7 +1051,7 @@ func (lpt *loadPartitionTask) rollBack(ctx context.Context) []task {
 			CollectionID: collectionID,
 			NodeID:       nodeID,
 		}
-		baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
+		baseTask := newBaseTask(ctx, getPriority(querypb.TriggerCondition_GrpcRequest))
 		baseTask.setParentTask(lpt)
 		releaseCollectionTask := &releaseCollectionTask{
 			baseTask:                 baseTask,
@@ -1135,7 +1130,7 @@ func (rpt *releasePartitionTask) execute(ctx context.Context) error {
 		for _, nodeID := range onlineNodeIDs {
 			req := proto.Clone(rpt.ReleasePartitionsRequest).(*querypb.ReleasePartitionsRequest)
 			req.NodeID = nodeID
-			baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
+			baseTask := newBaseTask(ctx, getPriority(querypb.TriggerCondition_GrpcRequest))
 			baseTask.setParentTask(rpt)
 			releasePartitionTask := &releasePartitionTask{
 				baseTask:                 baseTask,
@@ -1290,7 +1285,7 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 	lst.excludeNodeIDs = append(lst.excludeNodeIDs, lst.DstNodeID)
 
 	wait2AssignTaskSuccess := false
-	if lst.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
+	if isTriggeredByNodeDown(lst.getParentTask()) {
 		wait2AssignTaskSuccess = true
 	}
 	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, wait2AssignTaskSuccess, lst.excludeNodeIDs, nil, lst.ReplicaID)
@@ -1470,7 +1465,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 	}
 	wdt.excludeNodeIDs = append(wdt.excludeNodeIDs, wdt.NodeID)
 	wait2AssignTaskSuccess := false
-	if wdt.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
+	if isTriggeredByNodeDown(wdt.getParentTask()) {
 		wait2AssignTaskSuccess = true
 	}
 	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, wait2AssignTaskSuccess, wdt.excludeNodeIDs, nil, wdt.ReplicaID)
@@ -1854,7 +1849,7 @@ func (lbt *loadBalanceTask) timestamp() Timestamp {
 func (lbt *loadBalanceTask) preExecute(context.Context) error {
 	lbt.setResultInfo(nil)
 	log.Info("start do loadBalanceTask",
-		zap.Int32("trigger type", int32(lbt.triggerCondition)),
+		zap.Int32("priority", int32(lbt.priority)),
 		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
 		zap.Any("balanceReason", lbt.BalanceReason),
 		zap.Int64("taskID", lbt.getTaskID()))
@@ -1915,7 +1910,7 @@ func (lbt *loadBalanceTask) checkForManualLoadBalance() error {
 	lbt.replicaID = replicaID
 
 	log.Info("start do loadBalanceTask",
-		zap.Int32("trigger type", int32(lbt.triggerCondition)),
+		zap.Int32("priority", int32(lbt.priority)),
 		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
 		zap.Any("balanceReason", lbt.BalanceReason),
 		zap.Int64("taskID", lbt.getTaskID()))
@@ -1925,7 +1920,7 @@ func (lbt *loadBalanceTask) checkForManualLoadBalance() error {
 func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 	defer lbt.reduceRetryCount()
 
-	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
+	if lbt.BalanceReason == querypb.TriggerCondition_NodeDown {
 		var internalTasks []task
 		for _, nodeID := range lbt.SourceNodeIDs {
 			segmentID2Info := make(map[UniqueID]*querypb.SegmentInfo)
@@ -2070,7 +2065,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		log.Info("loadBalanceTask: assign child task done", zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
 	}
 
-	if lbt.triggerCondition == querypb.TriggerCondition_LoadBalance {
+	if lbt.BalanceReason == querypb.TriggerCondition_LoadBalance {
 		if err := lbt.checkForManualLoadBalance(); err != nil {
 			lbt.setResultInfo(err)
 			return err
@@ -2206,7 +2201,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 	}
 
 	log.Info("loadBalanceTask Execute done",
-		zap.Int32("trigger type", int32(lbt.triggerCondition)),
+		zap.Int32("priority", int32(lbt.priority)),
 		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
 		zap.Any("balanceReason", lbt.BalanceReason),
 		zap.Int64("taskID", lbt.getTaskID()))
@@ -2234,7 +2229,7 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 	// if loadBalanceTask execute failed after query node down, the lbt.getResultInfo().ErrorCode will be set to commonpb.ErrorCode_UnexpectedError
 	// then the queryCoord will panic, and the nodeInfo should not be removed immediately
 	// after queryCoord recovery, the balanceTask will redo
-	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown && lbt.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+	if lbt.BalanceReason == querypb.TriggerCondition_NodeDown && lbt.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
 		for _, offlineNodeID := range lbt.SourceNodeIDs {
 			err := lbt.cluster.removeNodeInfo(offlineNodeID)
 			if err != nil {
@@ -2248,7 +2243,7 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 	}
 
 	log.Info("loadBalanceTask postExecute done",
-		zap.Int32("trigger type", int32(lbt.triggerCondition)),
+		zap.Int32("trigger type", int32(lbt.BalanceReason)),
 		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
 		zap.Any("balanceReason", lbt.BalanceReason),
 		zap.Int64("taskID", lbt.getTaskID()))
@@ -2257,7 +2252,7 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 
 func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 	if len(lbt.getChildTask()) > 0 {
-		if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
+		if lbt.BalanceReason == querypb.TriggerCondition_NodeDown {
 			offlineNodes := make(typeutil.UniqueSet, len(lbt.SourceNodeIDs))
 			for _, nodeID := range lbt.SourceNodeIDs {
 				offlineNodes.Insert(nodeID)
@@ -2392,7 +2387,7 @@ func assignInternalTask(ctx context.Context,
 			// Pack current batch, switch to new batch
 			if req.CollectionID != batchReq.CollectionID || req.DstNodeID != batchReq.DstNodeID ||
 				batchSize+proto.Size(req) > MaxSendSizeToEtcd {
-				baseTask := newBaseTask(ctx, parentTask.getTriggerCondition())
+				baseTask := newBaseTask(ctx, parentTask.getPriority())
 				baseTask.setParentTask(parentTask)
 				loadSegmentTask := &loadSegmentTask{
 					baseTask:            baseTask,
@@ -2412,7 +2407,7 @@ func assignInternalTask(ctx context.Context,
 		}
 
 		// Pack the last batch
-		baseTask := newBaseTask(ctx, parentTask.getTriggerCondition())
+		baseTask := newBaseTask(ctx, parentTask.getPriority())
 		baseTask.setParentTask(parentTask)
 		loadSegmentTask := &loadSegmentTask{
 			baseTask:            baseTask,
@@ -2425,7 +2420,7 @@ func assignInternalTask(ctx context.Context,
 	}
 
 	for _, req := range watchDmChannelRequests {
-		baseTask := newBaseTask(ctx, parentTask.getTriggerCondition())
+		baseTask := newBaseTask(ctx, parentTask.getPriority())
 		baseTask.setParentTask(parentTask)
 		watchDmChannelTask := &watchDmChannelTask{
 			baseTask:               baseTask,
@@ -2493,4 +2488,15 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) map[string]*datapb.Vchanne
 	}
 
 	return minPositions
+}
+
+func getPriority(trigger querypb.TriggerCondition) int {
+	// TODO: decouple trigger condition with priority
+	return int(trigger)
+}
+
+func isTriggeredByNodeDown(t task) bool {
+	// only load balance task can be triggered by closedown of query node
+	t0, ok := t.(*loadBalanceTask)
+	return ok && t0.BalanceReason == querypb.TriggerCondition_NodeDown
 }

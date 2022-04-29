@@ -17,10 +17,12 @@
 package querycoord
 
 import (
+	"container/heap"
 	"container/list"
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -77,7 +79,7 @@ func (queue *taskQueue) addTask(t task) {
 	}
 
 	for e := queue.tasks.Back(); e != nil; e = e.Prev() {
-		if t.taskPriority() > e.Value.(task).taskPriority() {
+		if t.getPriority() > e.Value.(task).getPriority() {
 			if e.Prev() == nil {
 				queue.taskChan <- 1
 				queue.tasks.InsertBefore(t, e)
@@ -133,7 +135,7 @@ func newTaskQueue() *taskQueue {
 
 // TaskScheduler controls the scheduling of trigger tasks and internal tasks
 type TaskScheduler struct {
-	triggerTaskQueue         *taskQueue
+	triggerTaskQueue         *taskQueueV2
 	activateTaskChan         chan task
 	meta                     Meta
 	cluster                  Cluster
@@ -169,7 +171,7 @@ func newTaskScheduler(ctx context.Context,
 		stopActivateTaskLoopChan: stopTaskLoopChan,
 		broker:                   broker,
 	}
-	s.triggerTaskQueue = newTaskQueue()
+	s.triggerTaskQueue = newTaskQueueV2()
 
 	err := s.reloadFromKV()
 	if err != nil {
@@ -250,11 +252,13 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 			t.setResultInfo(nil)
 			continue
 		}
-		scheduler.triggerTaskQueue.addTask(t)
+		scheduler.triggerTaskQueue.add(t)
 	}
 
 	if doneTriggerTask != nil {
-		scheduler.triggerTaskQueue.addTaskToFront(doneTriggerTask)
+		// set large priority to make the task be the first task in queue
+		doneTriggerTask.setPriority(int(math.MaxInt32))
+		scheduler.triggerTaskQueue.add(doneTriggerTask)
 	}
 
 	return nil
@@ -267,7 +271,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		return nil, fmt.Errorf("failed to unmarshal message header, err %s ", err.Error())
 	}
 	var newTask task
-	baseTask := newBaseTask(scheduler.ctx, querypb.TriggerCondition_GrpcRequest)
+	baseTask := newBaseTask(scheduler.ctx, getPriority(querypb.TriggerCondition_GrpcRequest))
 	switch header.Base.MsgType {
 	case commonpb.MsgType_LoadCollection:
 		loadReq := querypb.LoadCollectionRequest{}
@@ -402,7 +406,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		}
 		// if triggerCondition == nodeDown, and the queryNode resources are insufficient,
 		// queryCoord will waits until queryNode can load the data, ensuring that the data is not lost
-		baseTask.setTriggerCondition(loadReq.BalanceReason)
+		baseTask.setPriority(getPriority(loadReq.BalanceReason))
 		loadBalanceTask := &loadBalanceTask{
 			baseTask:           baseTask,
 			LoadBalanceRequest: &loadReq,
@@ -460,7 +464,7 @@ func (scheduler *TaskScheduler) Enqueue(t task) error {
 		return err
 	}
 	t.setState(taskUndo)
-	scheduler.triggerTaskQueue.addTask(t)
+	scheduler.triggerTaskQueue.add(t)
 	log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.getTaskID()))
 
 	return nil
@@ -620,8 +624,8 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 		case <-scheduler.ctx.Done():
 			scheduler.stopActivateTaskLoopChan <- 1
 			return
-		case <-scheduler.triggerTaskQueue.Chan():
-			triggerTask = scheduler.triggerTaskQueue.popTask()
+		case <-scheduler.triggerTaskQueue.notifier():
+			triggerTask = scheduler.triggerTaskQueue.pop()
 			if triggerTask == nil {
 				break
 			}
@@ -661,7 +665,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				// so it is necessary to update the meta of segment and dmchannel, or some data may be lost in meta
 
 				// triggerTask may be LoadCollection, LoadPartitions, LoadBalance
-				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
+				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || isTriggeredByNodeDown(triggerTask) {
 					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
 					if err != nil {
 						triggerTask.setResultInfo(err)
@@ -1067,7 +1071,7 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 				QueryResultChannel:   queryChannelInfo.QueryResultChannel,
 				GlobalSealedSegments: queryChannelInfo.GlobalSealedSegments,
 			}
-			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getTriggerCondition())
+			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getPriority())
 			baseTask.setParentTask(triggerTask)
 			watchQueryChannelTask := &watchQueryChannelTask{
 				baseTask: baseTask,
@@ -1095,7 +1099,7 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 				ReplicaId: replicaID,
 			}
 			watchDeltaRequest.NodeID = nodeID
-			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getTriggerCondition())
+			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getPriority())
 			baseTask.setParentTask(triggerTask)
 			watchDeltaTask := &watchDeltaChannelTask{
 				baseTask:                  baseTask,
@@ -1107,4 +1111,62 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 	}
 
 	return derivedInternalTasks, nil
+}
+
+type priorityTaskQueue []task
+
+func (pq priorityTaskQueue) Len() int { return len(pq) }
+func (pq priorityTaskQueue) Less(i, j int) bool {
+	return pq[i].getPriority() > pq[j].getPriority()
+}
+
+func (pq priorityTaskQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+}
+
+func (pq *priorityTaskQueue) Push(t interface{}) {
+	task := t.(task)
+	*pq = append(*pq, task)
+}
+
+func (pq *priorityTaskQueue) Pop() interface{} {
+	oldpq := *pq
+	n := len(oldpq)
+	t := oldpq[n-1]
+	*pq = oldpq[:n-1]
+	return t
+}
+
+type taskQueueV2 struct {
+	mu     sync.Mutex
+	notify chan struct{}
+	tasks  priorityTaskQueue
+}
+
+func newTaskQueueV2() *taskQueueV2 {
+	q := &taskQueueV2{
+		notify: make(chan struct{}, 1024),
+	}
+	heap.Init(&q.tasks)
+	return q
+}
+
+func (q *taskQueueV2) add(t task) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	heap.Push(&q.tasks, t)
+	q.notify <- struct{}{}
+}
+
+func (q *taskQueueV2) pop() task {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.tasks) == 0 {
+		return nil
+	}
+	return heap.Pop(&q.tasks).(task)
+}
+
+func (q *taskQueueV2) notifier() <-chan struct{} {
+	return q.notify
 }

@@ -249,7 +249,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		ctx:              ctx,
 		cancel:           cancel,
 		client:           kv,
-		triggerTaskQueue: newTaskQueue(),
+		triggerTaskQueue: newTaskQueueV2(),
 		taskIDAllocator:  idAllocator,
 	}
 	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, taskScheduler, nil)
@@ -275,7 +275,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, false, taskScheduler.triggerTaskQueue.taskEmpty())
+	assert.NotEmpty(t, taskScheduler.triggerTaskQueue.tasks)
 	cancel()
 	indexChecker.wg.Wait()
 }

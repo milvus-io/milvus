@@ -229,7 +229,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		}
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_GrpcRequest))
 	loadCollectionTask := &loadCollectionTask{
 		baseTask:              baseTask,
 		LoadCollectionRequest: req,
@@ -308,7 +308,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_GrpcRequest))
 	releaseCollectionTask := &releaseCollectionTask{
 		baseTask:                 baseTask,
 		ReleaseCollectionRequest: req,
@@ -555,7 +555,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_GrpcRequest))
 	loadPartitionTask := &loadPartitionTask{
 		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
@@ -696,7 +696,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	}
 
 	var releaseTask task
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_GrpcRequest))
 	if releaseCollection {
 		// if all loaded partitions will be released from memory, then upgrade release partitions request to release collection request
 		log.Info(fmt.Sprintf("all partitions of collection %d will released from QueryNode, so release the collection directly", collectionID),
@@ -934,7 +934,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_LoadBalance)
+	baseTask := newBaseTask(qc.loopCtx, getPriority(querypb.TriggerCondition_LoadBalance))
 	req.BalanceReason = querypb.TriggerCondition_LoadBalance
 	loadBalanceTask := &loadBalanceTask{
 		baseTask:           baseTask,

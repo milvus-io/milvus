@@ -17,6 +17,8 @@
 package querycoord
 
 import (
+	"container/heap"
+	"container/list"
 	"context"
 	"fmt"
 	"strconv"
@@ -90,9 +92,9 @@ func (tt *testTask) execute(ctx context.Context) error {
 			}
 			loadTask := &loadSegmentTask{
 				baseTask: &baseTask{
-					ctx:              tt.ctx,
-					condition:        newTaskCondition(tt.ctx),
-					triggerCondition: tt.triggerCondition,
+					ctx:       tt.ctx,
+					condition: newTaskCondition(tt.ctx),
+					priority:  tt.priority,
 				},
 				LoadSegmentsRequest: req,
 				meta:                tt.meta,
@@ -105,9 +107,9 @@ func (tt *testTask) execute(ctx context.Context) error {
 	case commonpb.MsgType_LoadSegments:
 		childTask := &loadSegmentTask{
 			baseTask: &baseTask{
-				ctx:              tt.ctx,
-				condition:        newTaskCondition(tt.ctx),
-				triggerCondition: tt.triggerCondition,
+				ctx:       tt.ctx,
+				condition: newTaskCondition(tt.ctx),
+				priority:  tt.priority,
 			},
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
 				Base: &commonpb.MsgBase{
@@ -124,9 +126,9 @@ func (tt *testTask) execute(ctx context.Context) error {
 	case commonpb.MsgType_WatchDmChannels:
 		childTask := &watchDmChannelTask{
 			baseTask: &baseTask{
-				ctx:              tt.ctx,
-				condition:        newTaskCondition(tt.ctx),
-				triggerCondition: tt.triggerCondition,
+				ctx:       tt.ctx,
+				condition: newTaskCondition(tt.ctx),
+				priority:  tt.priority,
 			},
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
 				Base: &commonpb.MsgBase{
@@ -142,9 +144,9 @@ func (tt *testTask) execute(ctx context.Context) error {
 	case commonpb.MsgType_WatchQueryChannels:
 		childTask := &watchQueryChannelTask{
 			baseTask: &baseTask{
-				ctx:              tt.ctx,
-				condition:        newTaskCondition(tt.ctx),
-				triggerCondition: tt.triggerCondition,
+				ctx:       tt.ctx,
+				condition: newTaskCondition(tt.ctx),
+				priority:  tt.priority,
 			},
 			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
 				Base: &commonpb.MsgBase{
@@ -180,9 +182,9 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	waitQueryNodeOnline(queryCoord.cluster, nodeID)
 	testTask := &testTask{
 		baseTask: baseTask{
-			ctx:              baseCtx,
-			condition:        newTaskCondition(baseCtx),
-			triggerCondition: querypb.TriggerCondition_GrpcRequest,
+			ctx:       baseCtx,
+			condition: newTaskCondition(baseCtx),
+			priority:  getPriority(querypb.TriggerCondition_GrpcRequest),
 		},
 		baseMsg: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_WatchQueryChannels,
@@ -469,7 +471,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 		ctx:              baseCtx,
 		cancel:           cancel,
 		client:           kv,
-		triggerTaskQueue: newTaskQueue(),
+		triggerTaskQueue: newTaskQueueV2(),
 	}
 
 	kvs := make(map[string]string)
@@ -507,7 +509,7 @@ func TestReloadTaskFromKV(t *testing.T) {
 
 	taskScheduler.reloadFromKV()
 
-	task := taskScheduler.triggerTaskQueue.popTask()
+	task := taskScheduler.triggerTaskQueue.pop()
 	assert.Equal(t, taskDone, task.getState())
 	assert.Equal(t, 1, len(task.getChildTask()))
 }
@@ -521,10 +523,10 @@ func Test_saveInternalTaskToEtcd(t *testing.T) {
 
 	testTask := &testTask{
 		baseTask: baseTask{
-			ctx:              ctx,
-			condition:        newTaskCondition(ctx),
-			triggerCondition: querypb.TriggerCondition_GrpcRequest,
-			taskID:           100,
+			ctx:       ctx,
+			condition: newTaskCondition(ctx),
+			priority:  getPriority(querypb.TriggerCondition_GrpcRequest),
+			taskID:    100,
 		},
 		baseMsg: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
@@ -583,4 +585,112 @@ func Test_generateDerivedInternalTasks(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func BenchmarkOldTaskQueuePush(b *testing.B) {
+	q := &taskQueue{
+		tasks:    list.New(),
+		taskChan: make(chan int, b.N),
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q.addTask(&loadBalanceTask{
+			baseTask: &baseTask{
+				priority: b.N - i,
+			},
+		})
+	}
+}
+
+func BenchmarkOldTaskQueuePop(b *testing.B) {
+	q := &taskQueue{
+		tasks:    list.New(),
+		taskChan: make(chan int, b.N),
+	}
+	for i := 0; i < b.N; i++ {
+		q.addTask(&loadBalanceTask{
+			baseTask: &baseTask{
+				priority: i % 5,
+			},
+		})
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q.popTask()
+	}
+}
+
+func BenchmarkNewTaskQueuePush(b *testing.B) {
+	q := &taskQueueV2{
+		notify: make(chan struct{}, b.N),
+	}
+	heap.Init(&q.tasks)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q.add(&loadBalanceTask{
+			baseTask: &baseTask{
+				priority: b.N - i,
+			},
+		})
+	}
+}
+
+func BenchmarkNewTaskQueuePop(b *testing.B) {
+	q := &taskQueueV2{
+		notify: make(chan struct{}, b.N),
+	}
+	heap.Init(&q.tasks)
+	for i := 0; i < b.N; i++ {
+		q.add(&loadBalanceTask{
+			baseTask: &baseTask{
+				priority: i % 5,
+			},
+		})
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		q.pop()
+	}
+}
+
+func TestPriorityTaskQueue(t *testing.T) {
+	cases := []struct {
+		name  string
+		pushs []int // array of priority
+		pops  []int // array of priority, -1 means nil
+	}{
+		{
+			"empty pop",
+			nil,
+			[]int{-1},
+		},
+		{
+			"push and pop",
+			[]int{1, 3, 0},
+			[]int{3, 1, 0, -1},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			q := newTaskQueueV2()
+			for _, p := range c.pushs {
+				q.add(&loadBalanceTask{
+					baseTask: &baseTask{
+						priority: p,
+					},
+				},
+				)
+			}
+
+			for _, p := range c.pops {
+				task := q.pop()
+				if p == -1 {
+					assert.Nil(t, task)
+				} else {
+					assert.EqualValues(t, p, task.getPriority())
+				}
+			}
+		})
+	}
 }
