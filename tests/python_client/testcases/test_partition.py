@@ -1,3 +1,4 @@
+from functools import reduce
 from os import name
 import threading
 import pytest
@@ -353,8 +354,7 @@ class TestPartitionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16641")
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_replica_change(self):
         """
         target: test load replica change
@@ -372,17 +372,27 @@ class TestPartitionParams(TestcaseBase):
         assert partition_w.num_entities == ct.default_nb
 
         partition_w.load(replica_number=1)
-        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
-        partition_w.load(replica_number=2)
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': [{'int64': 0}]})
+        error = {ct.err_code: 5, ct.err_msg: f"Should release first then reload with the new number of replicas"}
+        partition_w.load(replica_number=2, check_task=CheckTasks.err_res, check_items=error)
 
         partition_w.release()
         partition_w.load(replica_number=2)
-        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
-        # replica_info = partition_w.get_replicas()
+        collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': [{'int64': 0}]})
 
-        # verify replicas
+        two_replicas, _ = collection_w.get_replicas()
+        assert len(two_replicas.groups) == 2
 
-    @pytest.mark.tags(CaseLabel.L3)
+        # verify loaded segments included 2 replicas and twice num entities
+        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
+        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
+        num_entities = list(map(lambda seg: seg.num_rows, seg_info))
+        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
+        assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_partition_replicas_change_cross_partitions(self):
         """
         target: test load with different replicas between partitions
@@ -390,7 +400,6 @@ class TestPartitionParams(TestcaseBase):
                 2.Load two partitions with different replicas
         expected: Raise an exception
         """
-        from functools import reduce
         # Create two partitions and insert data
         collection_w = self.init_collection_wrap()
         partition_w1 = self.init_partition_wrap(collection_w)
