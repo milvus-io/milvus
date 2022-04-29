@@ -35,10 +35,6 @@ func (m *MockBaseKV) Load(key string) (string, error) {
 	return "", nil
 }
 
-func (m *MockBaseKV) MultiLoad(keys []string) ([]string, error) {
-	panic("not implemented") // TODO: Implement
-}
-
 func (m *MockBaseKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	panic("not implemented") // TODO: Implement
 }

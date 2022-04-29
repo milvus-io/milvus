@@ -394,7 +394,6 @@ func NewTimestampAllocator(ctx context.Context, masterAddr string) (*TimestampAl
 ```go
 type BaseKV interface {
 	Load(key string) (string, error)
-	MultiLoad(keys []string) ([]string, error)
 	LoadWithPrefix(key string) ([]string, []string, error)
 	Save(key, value string) error
 	MultiSave(kvs map[string]string) error
@@ -465,7 +464,6 @@ func (kv *EtcdKV) GetPath(key string) string
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error)
 func (kv *EtcdKV) Load(key string) (string, error)
 func (kv *EtcdKV) GetCount(key string) (int64, error)
-func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error)
 func (kv *EtcdKV) Save(key, value string) error
 func (kv *EtcdKV) MultiSave(kvs map[string]string) error
 func (kv *EtcdKV) RemoveWithPrefix(prefix string) error
@@ -494,7 +492,6 @@ func (kv *MemoryKV) Load(key string) (string, error)
 func (kv *MemoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error)
 func (kv *MemoryKV) Save(key, value string) error
 func (kv *MemoryKV) Remove(key string) error
-func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error)
 func (kv *MemoryKV) MultiSave(kvs map[string]string) error
 func (kv *MemoryKV) MultiRemove(keys []string) error
 func (kv *MemoryKV) MultiSaveAndRemove(saves map[string]string, removals []string) error
@@ -517,7 +514,6 @@ type MinIOKV struct {
 
 func (kv *MinIOKV) LoadWithPrefix(key string) ([]string, []string, error)
 func (kv *MinIOKV) Load(key string) (string, error)
-func (kv *MinIOKV) MultiLoad(keys []string) ([]string, error)
 func (kv *MinIOKV) Save(key, value string) error
 func (kv *MinIOKV) MultiSave(kvs map[string]string) error
 func (kv *MinIOKV) RemoveWithPrefix(key string) error
@@ -543,7 +539,6 @@ func (kv *RocksdbKV) Close()
 func (kv *RocksdbKV) GetName() string
 func (kv *RocksdbKV) Load(key string) (string, error)
 func (kv *RocksdbKV) LoadWithPrefix(key string) ([]string, []string, error)
-func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error)
 func (kv *RocksdbKV) Save(key, value string) error
 func (kv *RocksdbKV) MultiSave(kvs map[string]string) error
 func (kv *RocksdbKV) RemoveWithPrefix(key string) error

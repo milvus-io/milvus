@@ -201,42 +201,6 @@ func (kv *EmbedEtcdKV) LoadBytes(key string) ([]byte, error) {
 	return resp.Kvs[0].Value, nil
 }
 
-// MultiLoad returns values of a set of keys
-func (kv *EmbedEtcdKV) MultiLoad(keys []string) ([]string, error) {
-	ops := make([]clientv3.Op, 0, len(keys))
-	for _, keyLoad := range keys {
-		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
-	}
-
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]string, 0, len(keys))
-	invalid := make([]string, 0, len(keys))
-	for index, rp := range resp.Responses {
-		if rp.GetResponseRange().Kvs == nil || len(rp.GetResponseRange().Kvs) == 0 {
-			invalid = append(invalid, keys[index])
-			result = append(result, "")
-		}
-		for _, ev := range rp.GetResponseRange().Kvs {
-			log.Debug("MultiLoad", zap.ByteString("key", ev.Key),
-				zap.ByteString("value", ev.Value))
-			result = append(result, string(ev.Value))
-		}
-	}
-	if len(invalid) != 0 {
-		log.Debug("MultiLoad: there are invalid keys",
-			zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
-		return result, err
-	}
-	return result, nil
-}
-
 // MultiLoadBytes returns values of a set of keys
 func (kv *EmbedEtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	ops := make([]clientv3.Op, 0, len(keys))

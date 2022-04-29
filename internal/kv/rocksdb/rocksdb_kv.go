@@ -196,28 +196,9 @@ func (kv *RocksdbKV) LoadBytesWithPrefix(prefix string) ([]string, [][]byte, err
 	return keys, values, nil
 }
 
-// MultiLoad load a batch of values by keys
-func (kv *RocksdbKV) MultiLoad(keys []string) ([]string, error) {
-	if kv.DB == nil {
-		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
-	}
-	values := make([]string, 0, len(keys))
-	option := gorocksdb.NewDefaultReadOptions()
-	defer option.Destroy()
-	for _, key := range keys {
-		value, err := kv.DB.Get(option, []byte(key))
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, string(value.Data()))
-		value.Free()
-	}
-	return values, nil
-}
-
 func (kv *RocksdbKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	if kv.DB == nil {
-		return nil, errors.New("rocksdb instance is nil when do MultiLoad")
+		return nil, errors.New("rocksdb instance is nil when do MultiLoadBytes")
 	}
 	values := make([][]byte, 0, len(keys))
 	option := gorocksdb.NewDefaultReadOptions()

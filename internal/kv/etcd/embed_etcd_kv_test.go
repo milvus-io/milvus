@@ -381,38 +381,6 @@ func TestEmbedEtcd(te *testing.T) {
 			assert.Equal(t, v, actualV)
 		}
 
-		multiLoadTests := []struct {
-			inputKeys      []string
-			expectedValues []string
-		}{
-			{[]string{"key_1"}, []string{"value_1"}},
-			{[]string{"key_1", "key_2", "key_3/a"}, []string{"value_1", "value_2", "value_3a"}},
-			{[]string{"multikey_1", "multikey_2"}, []string{"multivalue_1", "multivalue_2"}},
-			{[]string{"_"}, []string{"other"}},
-		}
-
-		for _, test := range multiLoadTests {
-			vs, err := metaKv.MultiLoad(test.inputKeys)
-			assert.NoError(t, err)
-			assert.Equal(t, test.expectedValues, vs)
-		}
-
-		invalidMultiLoad := []struct {
-			invalidKeys    []string
-			expectedValues []string
-		}{
-			{[]string{"a", "key_1"}, []string{"", "value_1"}},
-			{[]string{".....", "key_1"}, []string{"", "value_1"}},
-			{[]string{"*********"}, []string{""}},
-			{[]string{"key_1", "1"}, []string{"value_1", ""}},
-		}
-
-		for _, test := range invalidMultiLoad {
-			vs, err := metaKv.MultiLoad(test.invalidKeys)
-			assert.Error(t, err)
-			assert.Equal(t, test.expectedValues, vs)
-		}
-
 		removeWithPrefixTests := []string{
 			"key_1",
 			"multi",

@@ -84,12 +84,6 @@ func TestRocksdbKV(t *testing.T) {
 	assert.Nil(t, err)
 
 	keys = []string{"key_1", "key_2"}
-	vals, err = rocksdbKV.MultiLoad(keys)
-	assert.Nil(t, err)
-	assert.Equal(t, len(vals), len(keys))
-	assert.Equal(t, vals[0], "123")
-	assert.Equal(t, vals[1], "456")
-
 	values, err = rocksdbKV.MultiLoadBytes(keys)
 	assert.Nil(t, err)
 	assert.Equal(t, len(values), len(keys))
@@ -228,8 +222,6 @@ func TestRocksdbKV_DummyDB(t *testing.T) {
 	_, err = rocksdbkv.Load("")
 	assert.Error(t, err)
 	_, _, err = rocksdbkv.LoadWithPrefix("")
-	assert.Error(t, err)
-	_, err = rocksdbkv.MultiLoad(nil)
 	assert.Error(t, err)
 	err = rocksdbkv.Save("", "")
 	assert.Error(t, err)

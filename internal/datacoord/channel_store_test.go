@@ -32,10 +32,6 @@ func (m *mockTxnKv) Load(key string) (string, error) {
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockTxnKv) MultiLoad(keys []string) ([]string, error) {
-	panic("not implemented") // TODO: Implement
-}
-
 func (m *mockTxnKv) LoadWithPrefix(key string) ([]string, []string, error) {
 	panic("not implemented") // TODO: Implement
 }

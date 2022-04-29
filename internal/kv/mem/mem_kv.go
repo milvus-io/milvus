@@ -189,18 +189,6 @@ func (kv *MemoryKV) Remove(key string) error {
 	return nil
 }
 
-// MultiLoad loads objects with multi @keys.
-func (kv *MemoryKV) MultiLoad(keys []string) ([]string, error) {
-	kv.RLock()
-	defer kv.RUnlock()
-	result := make([]string, 0, len(keys))
-	for _, key := range keys {
-		item := kv.tree.Get(memoryKVItem{key: key})
-		result = append(result, item.(memoryKVItem).value.String())
-	}
-	return result, nil
-}
-
 // MultiLoadBytes loads objects with multi @keys.
 func (kv *MemoryKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	kv.RLock()

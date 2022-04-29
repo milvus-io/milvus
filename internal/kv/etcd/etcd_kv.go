@@ -181,41 +181,6 @@ func (kv *EtcdKV) LoadBytes(key string) ([]byte, error) {
 	return resp.Kvs[0].Value, nil
 }
 
-// MultiLoad gets the values of the keys in a transaction.
-func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
-	start := time.Now()
-	ops := make([]clientv3.Op, 0, len(keys))
-	for _, keyLoad := range keys {
-		ops = append(ops, clientv3.OpGet(path.Join(kv.rootPath, keyLoad)))
-	}
-
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
-	if err != nil {
-		return []string{}, err
-	}
-
-	result := make([]string, 0, len(keys))
-	invalid := make([]string, 0, len(keys))
-	for index, rp := range resp.Responses {
-		if rp.GetResponseRange().Kvs == nil || len(rp.GetResponseRange().Kvs) == 0 {
-			invalid = append(invalid, keys[index])
-			result = append(result, "")
-		}
-		for _, ev := range rp.GetResponseRange().Kvs {
-			result = append(result, string(ev.Value))
-		}
-	}
-	if len(invalid) != 0 {
-		log.Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
-		err = fmt.Errorf("there are invalid keys: %s", invalid)
-		return result, err
-	}
-	CheckElapseAndWarn(start, "Slow etcd operation multi load")
-	return result, nil
-}
-
 // MultiLoadBytes gets the values of the keys in a transaction.
 func (kv *EtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 	start := time.Now()
@@ -243,7 +208,7 @@ func (kv *EtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 		}
 	}
 	if len(invalid) != 0 {
-		log.Warn("MultiLoad: there are invalid keys", zap.Strings("keys", invalid))
+		log.Warn("there are invalid keys", zap.Strings("keys", invalid))
 		err = fmt.Errorf("there are invalid keys: %s", invalid)
 		return result, err
 	}

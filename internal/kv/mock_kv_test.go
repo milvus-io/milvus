@@ -35,10 +35,6 @@ func TestMockKV_MetaKV(t *testing.T) {
 	assert.Equal(t, "", value)
 	assert.NoError(t, err)
 
-	assert.Panics(t, func() {
-		mockKv.MultiLoad([]string{testKey})
-	})
-
 	_, _, err = mockKv.LoadWithPrefix(testKey)
 	assert.NoError(t, err)
 
