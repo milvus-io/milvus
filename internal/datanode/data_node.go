@@ -76,7 +76,7 @@ const (
 	MetricRequestsSuccess = "success"
 
 	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
-	ConnectEtcdMaxRetryTime = 1000
+	ConnectEtcdMaxRetryTime = 100
 )
 
 const illegalRequestErrStr = "Illegal request"

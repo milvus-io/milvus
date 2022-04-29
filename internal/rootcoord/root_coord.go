@@ -1074,7 +1074,7 @@ func (c *Core) Init() error {
 			return nil
 		}
 		log.Debug("RootCoord, Connecting to Etcd", zap.String("kv root", Params.EtcdCfg.KvRootPath), zap.String("meta root", Params.EtcdCfg.MetaRootPath))
-		err := retry.Do(c.ctx, connectEtcdFn, retry.Attempts(300))
+		err := retry.Do(c.ctx, connectEtcdFn, retry.Attempts(100))
 		if err != nil {
 			return
 		}

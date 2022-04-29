@@ -183,7 +183,7 @@ func (i *IndexCoord) Init() error {
 			return err
 		}
 		log.Debug("IndexCoord try to connect etcd")
-		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(300))
+		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(100))
 		if err != nil {
 			log.Error("IndexCoord try to connect etcd failed", zap.Error(err))
 			initErr = err

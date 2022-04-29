@@ -55,7 +55,7 @@ import (
 )
 
 const (
-	connEtcdMaxRetryTime = 100000
+	connEtcdMaxRetryTime = 100
 	allPartitionID       = 0 // paritionID means no filtering
 )
 
