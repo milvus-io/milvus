@@ -44,7 +44,6 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
                                        int64_t insert_barrier,
                                        bool force) const {
     auto old = deleted_record_.get_lru_entry();
-
     if (old->bitmap_ptr->count() == insert_barrier) {
         if (old->del_barrier == del_barrier) {
             return old;
@@ -55,58 +54,39 @@ SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
     current->del_barrier = del_barrier;
 
     auto bitmap = current->bitmap_ptr;
+
+    int64_t start, end;
     if (del_barrier < old->del_barrier) {
-        for (auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {
-            // get uid in delete logs
-            auto uid = deleted_record_.uids_[del_index];
-            // map uid to corresponding offsets, select the max one, which should be the target
-            // the max one should be closest to query_timestamp, so the delete log should refer to it
-            int64_t the_offset = -1;
-            auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
-            for (auto iter = iter_b; iter != iter_e; ++iter) {
-                auto offset = iter->second;
-                if (record_.timestamps_[offset] < query_timestamp) {
-                    AssertInfo(offset < insert_barrier, "Timestamp offset is larger than insert barrier");
-                    the_offset = std::max(the_offset, offset);
-                }
-            }
-            // if not found, skip
-            if (the_offset == -1) {
-                continue;
-            }
-            // otherwise, clear the flag
-            bitmap->clear(the_offset);
-        }
-        return current;
+        start = del_barrier;
+        end = old->del_barrier;
     } else {
-        for (auto del_index = old->del_barrier; del_index < del_barrier; ++del_index) {
-            // get uid in delete logs
-            auto uid = deleted_record_.uids_[del_index];
-            // map uid to corresponding offsets, select the max one, which should be the target
-            // the max one should be closest to query_timestamp, so the delete log should refer to it
-            int64_t the_offset = -1;
-            auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
-            for (auto iter = iter_b; iter != iter_e; ++iter) {
-                auto offset = iter->second;
-                if (offset >= insert_barrier) {
-                    continue;
-                }
-                if (record_.timestamps_[offset] < query_timestamp) {
-                    AssertInfo(offset < insert_barrier, "Timestamp offset is larger than insert barrier");
-                    the_offset = std::max(the_offset, offset);
-                }
-            }
+        start = old->del_barrier;
+        end = del_barrier;
+    }
+    for (auto del_index = start; del_index < end; ++del_index) {
+        // get uid in delete logs
+        auto uid = deleted_record_.uids_[del_index];
 
-            // if not found, skip
+        // map uid to corresponding offsets, select the max one, which should be the target
+        // the max one should be closest to query_timestamp, so the delete log should refer to it
+        int64_t the_offset = -1;
+        auto [iter_b, iter_e] = uid2offset_.equal_range(uid);
+
+        for (auto iter = iter_b; iter != iter_e; ++iter) {
+            auto offset = iter->second;
+            AssertInfo(offset < insert_barrier, "Timestamp offset is larger than insert barrier");
+            the_offset = std::max(the_offset, offset);
             if (the_offset == -1) {
                 continue;
             }
-
-            // otherwise, set the flag
-            bitmap->set(the_offset);
+            if (record_.timestamps_[the_offset] >= query_timestamp) {
+                bitmap->clear(the_offset);
+            } else {
+                bitmap->set(the_offset);
+            }
         }
-        this->deleted_record_.insert_lru_entry(current);
     }
+    this->deleted_record_.insert_lru_entry(current);
     return current;
 }
 
@@ -128,9 +108,7 @@ SegmentGrowingImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_ba
     AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
 
     auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
-
     auto final_bitmap = (*deleted_bitmap.get()) | (*filtered_bitmap.get());
-
     BitsetView res = BitsetView(final_bitmap);
     return res;
 }
@@ -508,13 +486,13 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) con
             if (record_.timestamps_[offset.get()] < timestamp) {
                 the_offset = std::max(the_offset, offset);
             }
+            // if not found, skip
+            if (the_offset == SegOffset(-1)) {
+                continue;
+            }
+            res_int_id_arr->add_data(uid);
+            res_offsets.push_back(the_offset);
         }
-        // if not found, skip
-        if (the_offset == SegOffset(-1)) {
-            continue;
-        }
-        res_int_id_arr->add_data(uid);
-        res_offsets.push_back(the_offset);
     }
     return {std::move(res_id_arr), std::move(res_offsets)};
 }
