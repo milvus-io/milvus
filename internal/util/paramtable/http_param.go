@@ -10,6 +10,7 @@ type HTTPConfig struct {
 
 	once         sync.Once
 	Enabled      bool
+	DebugMode    bool
 	Port         int
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
@@ -26,6 +27,7 @@ func (p *HTTPConfig) init() {
 	p.BaseTable.Init()
 
 	p.initHTTPEnabled()
+	p.initHTTPDebugMode()
 	p.initHTTPPort()
 	p.initHTTPReadTimeout()
 	p.initHTTPWriteTimeout()
@@ -33,6 +35,10 @@ func (p *HTTPConfig) init() {
 
 func (p *HTTPConfig) initHTTPEnabled() {
 	p.Enabled = p.ParseBool("proxy.http.enabled", true)
+}
+
+func (p *HTTPConfig) initHTTPDebugMode() {
+	p.DebugMode = p.ParseBool("proxy.http.debug_mode", false)
 }
 
 func (p *HTTPConfig) initHTTPPort() {

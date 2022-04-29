@@ -111,6 +111,7 @@ proxy:
 
   http:
     enabled: true # Whether to enable the http server
+    debug_mode: false # Whether to enable http server debug mode
     port: 8080 # Whether to enable the http server
     readTimeout: 30000 # 30000 ms http read timeout
     writeTimeout: 30000 # 30000 ms http write timeout
