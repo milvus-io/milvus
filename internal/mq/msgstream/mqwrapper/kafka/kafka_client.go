@@ -2,12 +2,16 @@ package kafka
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"go.uber.org/zap"
 )
+
+var Producer *kafka.Producer
+var once sync.Once
 
 type kafkaClient struct {
 	// more configs you can see https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
@@ -34,6 +38,21 @@ func cloneKafkaConfig(config kafka.ConfigMap) *kafka.ConfigMap {
 	return &newConfig
 }
 
+func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
+	var err error
+	once.Do(func() {
+		config := kc.newProducerConfig()
+		Producer, err = kafka.NewProducer(config)
+	})
+
+	if err != nil {
+		log.Error("create sync kafka producer failed", zap.Error(err))
+		return nil, err
+	}
+
+	return Producer, nil
+}
+
 func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	newConf := cloneKafkaConfig(kc.basicConfig)
 	// default max message size 5M
@@ -41,6 +60,7 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	newConf.SetKey("compression.codec", "zstd")
 	newConf.SetKey("go.events.channel.size", 0)
 	newConf.SetKey("go.produce.channel.size", 0)
+	newConf.SetKey("linger.ms", 20)
 	return newConf
 }
 
@@ -68,10 +88,8 @@ func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.Subscrip
 }
 
 func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
-	config := kc.newProducerConfig()
-	pp, err := kafka.NewProducer(config)
+	pp, err := kc.getKafkaProducer()
 	if err != nil {
-		log.Error("kafka create sync producer , error", zap.Error(err))
 		return nil, err
 	}
 

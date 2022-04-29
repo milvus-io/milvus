@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
@@ -24,22 +26,38 @@ func (kp *kafkaProducer) Topic() string {
 }
 
 func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
-	err := kp.p.Produce(&kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &kp.topic, Partition: mqwrapper.DefaultPartitionIdx},
-		Value:          message.Payload,
-	}, kp.deliveryChan)
+	var err error
+	maxAttempt := 3
 
-	if err != nil {
-		return nil, err
+	// In order to avoid https://github.com/confluentinc/confluent-kafka-go/issues/769,
+	// just retry produce again when getting a nil from delivery chan.
+	for i := 0; i < maxAttempt; i++ {
+		err = kp.p.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &kp.topic, Partition: mqwrapper.DefaultPartitionIdx},
+			Value:          message.Payload,
+		}, kp.deliveryChan)
+
+		if err != nil {
+			break
+		}
+
+		e := <-kp.deliveryChan
+		if e == nil {
+			errMsg := "produce message arise exception, delivery Chan return a nil value"
+			err = errors.New(errMsg)
+			log.Warn(errMsg, zap.String("topic", kp.topic), zap.ByteString("msg", message.Payload), zap.Int("retries", i))
+			continue
+		}
+
+		m := e.(*kafka.Message)
+		if m.TopicPartition.Error != nil {
+			return nil, m.TopicPartition.Error
+		}
+
+		return &kafkaID{messageID: int64(m.TopicPartition.Offset)}, nil
 	}
 
-	e := <-kp.deliveryChan
-	m := e.(*kafka.Message)
-	if m.TopicPartition.Error != nil {
-		return nil, m.TopicPartition.Error
-	}
-
-	return &kafkaID{messageID: int64(m.TopicPartition.Offset)}, nil
+	return nil, err
 }
 
 func (kp *kafkaProducer) Close() {
@@ -48,7 +66,6 @@ func (kp *kafkaProducer) Close() {
 		//flush in-flight msg within queue.
 		kp.p.Flush(10000)
 
-		kp.p.Close()
 		close(kp.deliveryChan)
 
 		cost := time.Since(start).Milliseconds()
