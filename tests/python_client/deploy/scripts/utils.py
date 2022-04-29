@@ -15,6 +15,7 @@ default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist"
 
 index_params_map = dict(zip(all_index_types, default_index_params))
 
+NUM_REPLICAS = 2
 
 def filter_collections_by_prefix(prefix):
     col_list = list_collections()
@@ -64,7 +65,7 @@ def get_collections(prefix):
     return col_list
 
 
-def create_collections_and_insert_data(prefix, count=3000):
+def create_collections_and_insert_data(prefix, flush=True, count=3000, collection_cnt=11):
     import random
     dim = 128
     nb = count // 10
@@ -74,7 +75,7 @@ def create_collections_and_insert_data(prefix, count=3000):
         FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
-    for index_name in all_index_types:
+    for index_name in all_index_types[:collection_cnt]:
         print(f"\nCreate collection...")
         col_name = prefix + index_name
         collection = Collection(name=col_name, schema=default_schema) 
@@ -97,11 +98,12 @@ def create_collections_and_insert_data(prefix, count=3000):
             total_time += end_time - start_time
 
         print(f"end insert, time: {total_time:.4f}")
-        print("Get collection entities")
-        start_time = time.time()
-        print(f"collection entities: {collection.num_entities}")
-        end_time = time.time()
-        print("Get collection entities time = %.4fs" % (end_time - start_time))
+        if flush:
+            print("Get collection entities")
+            start_time = time.time()
+            print(f"collection entities: {collection.num_entities}")
+            end_time = time.time()
+            print("Get collection entities time = %.4fs" % (end_time - start_time))
     print(f"\nList collections...")
     print(get_collections(prefix))
 
@@ -126,17 +128,24 @@ def create_index(prefix):
         print(f"create index time: {time.time() - t0:.4f}")
 
 
-def load_and_search(prefix):
+def load_and_search(prefix, replicas=1):
     print("search data starts")
     col_list = get_collections(prefix)
     for col_name in col_list:
         c = Collection(name=col_name)
         print(f"collection name: {col_name}")
+        print("release collection")
+        c.release()
+        print("load collection")
         t0 = time.time()
-        c.load()
+        if replicas == 1:
+            c.load()
+        if replicas > 1:
+            c.load(replica_number=replicas)
+            print(c.get_replicas())
         print(f"load time: {time.time() - t0:.4f}")
         topK = 5
-        vectors = [[0.0 for _ in range(128)] for _ in range(3000)]
+        vectors = [[1.0 for _ in range(128)] for _ in range(3000)]
         index_name = col_name.replace(prefix, "")
         search_params = gen_search_param(index_name)[0]
         print(search_params)
