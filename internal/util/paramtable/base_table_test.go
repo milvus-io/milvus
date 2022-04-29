@@ -22,8 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const defaultYaml = "milvus.yaml"
-
 var baseParams = BaseTable{}
 
 func TestMain(m *testing.M) {

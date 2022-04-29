@@ -27,23 +27,24 @@ namespace milvus::config {
 std::once_flag init_knowhere_once_;
 
 void
-KnowhereInitImpl() {
-    auto init = []() {
+KnowhereInitImpl(const char* conf_file) {
+    auto init = [&]() {
         knowhere::KnowhereConfig::SetBlasThreshold(16384);
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::SetLogHandler();
         knowhere::KnowhereConfig::SetStatisticsLevel(0);
+
+#ifdef EMBEDDED_MILVUS
+        // always disable all logs for embedded milvus.
         el::Configurations el_conf;
-        el_conf.setGlobally(el::ConfigurationType::Enabled, std::to_string(false));
-#if defined(EMBEDDED_MILVUS)
-        // Disable all logs for embedded milvus.
-        el_conf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
-        el_conf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
-        el_conf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
-        el_conf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
-        el_conf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
-        el_conf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
-        el::Loggers::reconfigureLogger("default", el_conf);
+        el_conf.setGlobally(el::ConfigurationType::Enabled, "false");
+        el::Loggers::reconfigureAllLoggers(el_conf);
+#else
+        if (conf_file != nullptr) {
+            el::Configurations el_conf(conf_file);
+            el::Loggers::reconfigureAllLoggers(el_conf);
+            LOG_SERVER_DEBUG_ << "Config easylogging with yaml file: " << conf_file;
+        }
 #endif
     };
 

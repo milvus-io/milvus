@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -176,7 +177,9 @@ func (node *QueryNode) Register() error {
 
 // InitSegcore set init params of segCore, such as chunckRows, SIMD type...
 func (node *QueryNode) InitSegcore() {
-	C.SegcoreInit()
+	cEasyloggingYaml := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
+	C.SegcoreInit(cEasyloggingYaml)
+	C.free(unsafe.Pointer(cEasyloggingYaml))
 
 	// override segcore chunk size
 	cChunkRows := C.int64_t(Params.QueryNodeCfg.ChunkRows)

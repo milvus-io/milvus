@@ -16,20 +16,8 @@
 
 namespace milvus::segcore {
 extern "C" void
-SegcoreInit() {
-    milvus::config::KnowhereInitImpl();
-#if defined(EMBEDDED_MILVUS)
-    el::Configurations defaultConf;
-    defaultConf.setToDefault();
-    // Disable all logs for embedded milvus.
-    defaultConf.set(el::Level::Trace, el::ConfigurationType::Enabled, "false");
-    defaultConf.set(el::Level::Debug, el::ConfigurationType::Enabled, "false");
-    defaultConf.set(el::Level::Info, el::ConfigurationType::Enabled, "false");
-    defaultConf.set(el::Level::Warning, el::ConfigurationType::Enabled, "false");
-    defaultConf.set(el::Level::Error, el::ConfigurationType::Enabled, "false");
-    defaultConf.set(el::Level::Fatal, el::ConfigurationType::Enabled, "false");
-    el::Loggers::reconfigureLogger("default", defaultConf);
-#endif
+SegcoreInit(const char* conf_file) {
+    milvus::config::KnowhereInitImpl(conf_file);
 }
 
 extern "C" void
