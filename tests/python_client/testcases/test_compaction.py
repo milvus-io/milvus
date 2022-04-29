@@ -321,8 +321,10 @@ class TestCompactionParams(TestcaseBase):
 
         # verify queryNode load the compacted segments
         collection_w.load()
+        replicas = collection_w.get_replicas()[0]
+        replica_num = len(replicas.groups)
         segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(segment_info) == 1
+        assert len(segment_info) == 1*replica_num
 
     @pytest.mark.skip(reason="TODO")
     @pytest.mark.tags(CaseLabel.L2)
@@ -763,8 +765,10 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact, check_items={"segment_num": 2})
 
         collection_w.load()
+        replicas = collection_w.get_replicas()[0]
+        replica_num = len(replicas.groups)
         segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(segments_info) == 1
+        assert len(segments_info) == 1*replica_num
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_merge_multi_segments(self):
@@ -790,8 +794,10 @@ class TestCompactionOperation(TestcaseBase):
         target = c_plans.plans[0].target
 
         collection_w.load()
+        replicas = collection_w.get_replicas()[0]
+        replica_num = len(replicas.groups)
         segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(segments_info) == 1
+        assert len(segments_info) == 1*replica_num
         assert segments_info[0].segmentID == target
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -845,13 +851,15 @@ class TestCompactionOperation(TestcaseBase):
         # Estimated auto-merging takes 30s
         cost = 60
         collection_w.load()
+        replicas = collection_w.get_replicas()[0]
+        replica_num = len(replicas.groups)
         start = time()
         while True:
             sleep(5)
             segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
 
             # verify segments reaches threshold, auto-merge ten segments into one
-            if len(segments_info) == 1:
+            if len(segments_info) == 1*replica_num:
                 break
             end = time()
             if end - start > cost:
@@ -874,8 +882,10 @@ class TestCompactionOperation(TestcaseBase):
 
         # load and verify no auto-merge
         collection_w.load()
+        replicas = collection_w.get_replicas()[0]
+        replica_num = len(replicas.groups)
         segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(segments_info) == less_threshold
+        assert len(segments_info) == less_threshold*replica_num
 
     @pytest.mark.skip(reason="Todo")
     @pytest.mark.tags(CaseLabel.L2)
@@ -1042,14 +1052,16 @@ class TestCompactionOperation(TestcaseBase):
 
         t.join()
         collection_w.load()
+        replicas = collection_w.get_replicas()[0]
+        replica_num = len(replicas.groups)
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(seg_info) == 2
+        assert len(seg_info) == 2*replica_num
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_index(self):
         """
         target: test compact during index
-        method: while compact collection start a thread to creat index
+        method: while compact collection start a thread to create index
         expected: No exception
         """
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
@@ -1068,8 +1080,10 @@ class TestCompactionOperation(TestcaseBase):
 
         t.join()
         collection_w.load()
+        replicas = collection_w.get_replicas()[0]
+        replica_num = len(replicas.groups)
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(seg_info) == 1
+        assert len(seg_info) == 1*replica_num
 
     def test_compact_during_search(self):
         """

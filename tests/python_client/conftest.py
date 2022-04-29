@@ -7,7 +7,7 @@ import socket
 import common.common_type as ct
 import common.common_func as cf
 from utils.util_log import test_log as log
-from base.client_base import param_info
+from common.common_func import param_info
 from check.param_check import ip_check, number_check
 from config.log_config import log_config
 from utils.util_pymilvus import get_milvus, gen_unique_str, gen_default_fields, gen_binary_default_fields
@@ -39,6 +39,7 @@ def pytest_addoption(parser):
     parser.addoption('--term_expr', action='store', default="term_expr", help="expr of query quest")
     parser.addoption('--check_content', action='store', default="check_content", help="content of check")
     parser.addoption('--field_name', action='store', default="field_name", help="field_name of index")
+    parser.addoption('--replica_num', type='int', action='store', default=ct.default_replica_num, help="memory replica number")
 
 
 @pytest.fixture
@@ -153,6 +154,7 @@ def initialize_env(request):
     port = request.config.getoption("--port")
     handler = request.config.getoption("--handler")
     clean_log = request.config.getoption("--clean_log")
+    replica_num = request.config.getoption("--replica_num")
 
     """ params check """
     assert ip_check(host) and number_check(port)
@@ -165,7 +167,7 @@ def initialize_env(request):
 
     log.info("#" * 80)
     log.info("[initialize_milvus] Log cleaned up, start testing...")
-    param_info.prepare_param_info(host, port, handler)
+    param_info.prepare_param_info(host, port, handler, replica_num)
 
 
 @pytest.fixture(params=ct.get_invalid_strs)
