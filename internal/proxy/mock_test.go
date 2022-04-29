@@ -395,11 +395,10 @@ func newSimpleMockMsgStreamFactory() *simpleMockMsgStreamFactory {
 	return &simpleMockMsgStreamFactory{}
 }
 
-func generateFieldData(dataType schemapb.DataType, fieldName string, fieldID int64, numRows int) *schemapb.FieldData {
+func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int) *schemapb.FieldData {
 	fieldData := &schemapb.FieldData{
 		Type:      dataType,
 		FieldName: fieldName,
-		FieldId:   fieldID,
 	}
 	switch dataType {
 	case schemapb.DataType_Bool:

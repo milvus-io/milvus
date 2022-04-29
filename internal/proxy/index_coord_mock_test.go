@@ -18,7 +18,10 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
+
+	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
@@ -182,4 +185,22 @@ func NewIndexCoordMock() *IndexCoordMock {
 		timeTickChannel:   funcutil.GenRandomStr(),
 		minioBucketName:   funcutil.GenRandomStr(),
 	}
+}
+
+type GetIndexStatesFunc func(ctx context.Context, request *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
+
+type mockIndexCoord struct {
+	types.IndexCoord
+	GetIndexStatesFunc
+}
+
+func (m *mockIndexCoord) GetIndexStates(ctx context.Context, request *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
+	if m.GetIndexStatesFunc != nil {
+		return m.GetIndexStatesFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func newMockIndexCoord() *mockIndexCoord {
+	return &mockIndexCoord{}
 }

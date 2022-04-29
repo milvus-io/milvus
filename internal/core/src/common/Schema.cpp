@@ -43,7 +43,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
     // NOTE: only two system
 
     for (const milvus::proto::schema::FieldSchema& child : schema_proto.fields()) {
-        auto field_offset = FieldOffset(schema->size());
         auto field_id = FieldId(child.fieldid());
         auto name = FieldName(child.name());
 
@@ -69,25 +68,26 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
                 auto metric_type = GetMetricType(index_map.at("metric_type"));
                 schema->AddField(name, field_id, data_type, dim, metric_type);
             }
+        } else if (datatype_is_string(data_type)) {
+            auto type_map = RepeatedKeyValToMap(child.type_params());
+            AssertInfo(type_map.count(MAX_LENGTH_PER_ROW), "max_length_per_row not found");
+            auto max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH_PER_ROW));
+            schema->AddField(name, field_id, data_type, max_len);
         } else {
             schema->AddField(name, field_id, data_type);
         }
 
         if (child.is_primary_key()) {
-            AssertInfo(!schema->get_primary_key_offset().has_value(), "repetitive primary key");
-            Assert(!schema_proto.autoid());
-            schema->set_primary_key(field_offset);
+            AssertInfo(!schema->get_primary_field_id().has_value(), "repetitive primary key");
+            schema->set_primary_field_id(field_id);
         }
     }
-    if (schema->get_is_auto_id()) {
-        AssertInfo(!schema->get_primary_key_offset().has_value(), "auto id mode: shouldn't have primary key");
-    } else {
-        AssertInfo(schema->get_primary_key_offset().has_value(), "primary key should be specified when autoId is off");
-    }
+
+    AssertInfo(schema->get_primary_field_id().has_value(), "primary key should be specified");
 
     return schema;
 }
 
-const FieldMeta FieldMeta::RowIdMeta(FieldName("RowID"), FieldId(0), DataType::INT64);
+const FieldMeta FieldMeta::RowIdMeta(FieldName("RowID"), RowFieldID, DataType::INT64);
 
 }  // namespace milvus

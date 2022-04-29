@@ -85,7 +85,7 @@ class Parser {
 
  private:
     const Schema& schema;
-    std::map<std::string, FieldOffset> tag2field_;  // PlaceholderName -> field offset
+    std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> field id
     std::optional<std::unique_ptr<VectorPlanNode>> vector_node_opt_;
 };
 

@@ -25,89 +25,127 @@
 #include "query/SearchOnIndex.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
+#include "segcore/Utils.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
 
 using boost::algorithm::starts_with;
 
 namespace milvus::segcore {
 
 struct GeneratedData {
-    std::vector<uint8_t> rows_;
-    std::vector<aligned_vector<uint8_t>> cols_;
     std::vector<idx_t> row_ids_;
     std::vector<Timestamp> timestamps_;
-    RowBasedRawData raw_;
+    InsertData* raw_;
+    std::vector<FieldId> field_ids;
+    SchemaPtr schema_;
     template <typename T>
-    auto
-    get_col(int index) const {
-        auto& target = cols_.at(index);
-        std::vector<T> ret(target.size() / sizeof(T));
-        memcpy(ret.data(), target.data(), target.size());
-        return ret;
+    std::vector<T>
+    get_col(FieldId field_id) const {
+        std::vector<T> ret(raw_->num_rows());
+        for (auto target_field_data : raw_->fields_data()) {
+            if (field_id.get() != target_field_data.field_id()) {
+                continue;
+            }
+
+            auto& field_meta = schema_->operator[](field_id);
+            if (field_meta.is_vector()) {
+                if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                    int len = raw_->num_rows() * field_meta.get_dim();
+                    ret.resize(len);
+                    auto src_data =
+                        reinterpret_cast<const T*>(target_field_data.vectors().float_vector().data().data());
+                    std::copy_n(src_data, len, ret.data());
+                } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
+                    int len = raw_->num_rows() * (field_meta.get_dim() / 8);
+                    ret.resize(len);
+                    auto src_data = reinterpret_cast<const T*>(target_field_data.vectors().binary_vector().data());
+                    std::copy_n(src_data, len, ret.data());
+                } else {
+                    PanicInfo("unsupported");
+                }
+
+                return std::move(ret);
+            }
+            switch (field_meta.get_data_type()) {
+                case DataType::BOOL: {
+                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().bool_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
+                case DataType::INT8:
+                case DataType::INT16:
+                case DataType::INT32: {
+                    auto src_data =
+                        reinterpret_cast<const int32_t*>(target_field_data.scalars().int_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
+                case DataType::INT64: {
+                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().long_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
+                case DataType::FLOAT: {
+                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().float_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
+                case DataType::DOUBLE: {
+                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().double_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
+                case DataType::VARCHAR: {
+                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().string_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
+                default: {
+                    PanicInfo("unsupported");
+                }
+            }
+        }
+        return std::move(ret);
     }
-    template <typename T>
-    auto
-    get_mutable_col(int index) {
-        auto& target = cols_.at(index);
-        assert(target.size() == row_ids_.size() * sizeof(T));
-        auto ptr = reinterpret_cast<T*>(target.data());
-        return ptr;
+
+    std::unique_ptr<DataArray>
+    get_col(FieldId field_id) const {
+        for (auto target_field_data : raw_->fields_data()) {
+            if (field_id.get() == target_field_data.field_id()) {
+                return std::make_unique<DataArray>(target_field_data);
+            }
+        }
+
+        PanicInfo("field id not find");
     }
 
  private:
     GeneratedData() = default;
     friend GeneratedData
     DataGen(SchemaPtr schema, int64_t N, uint64_t seed, uint64_t ts_offset);
-    void
-    generate_rows(int64_t N, SchemaPtr schema);
 };
-
-inline void
-GeneratedData::generate_rows(int64_t N, SchemaPtr schema) {
-    std::vector<int> offset_infos(schema->size() + 1, 0);
-    auto sizeof_infos = schema->get_sizeof_infos();
-    std::partial_sum(sizeof_infos.begin(), sizeof_infos.end(), offset_infos.begin() + 1);
-    int64_t len_per_row = offset_infos.back();
-    assert(len_per_row == schema->get_total_sizeof());
-
-    // change column-based data to row-based data
-    std::vector<uint8_t> result(len_per_row * N);
-    for (int index = 0; index < N; ++index) {
-        for (int fid = 0; fid < schema->size(); ++fid) {
-            auto len = sizeof_infos[fid];
-            auto offset = offset_infos[fid];
-            auto src = cols_[fid].data() + index * len;
-            auto dst = result.data() + index * len_per_row + offset;
-            memcpy(dst, src, len);
-        }
-    }
-    rows_ = std::move(result);
-    raw_.raw_data = rows_.data();
-    raw_.sizeof_per_row = schema->get_total_sizeof();
-    raw_.count = N;
-}
 
 inline GeneratedData
 DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0) {
     using std::vector;
-    std::vector<aligned_vector<uint8_t>> cols;
     std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
 
-    auto insert_cols = [&cols](auto& data) {
-        using T = std::remove_reference_t<decltype(data)>;
-        auto len = sizeof(typename T::value_type) * data.size();
-        auto ptr = aligned_vector<uint8_t>(len);
-        memcpy(ptr.data(), data.data(), len);
-        cols.emplace_back(std::move(ptr));
+    auto insert_data = std::make_unique<InsertData>();
+    auto insert_cols = [&insert_data](auto& data, int64_t count, auto& field_meta) {
+        auto array = milvus::segcore::CreateDataArrayFrom(data.data(), count, field_meta);
+        insert_data->mutable_fields_data()->AddAllocated(array.release());
     };
 
-    for (auto& field : schema->get_fields()) {
-        switch (field.get_data_type()) {
+    for (auto field_id : schema->get_field_ids()) {
+        auto field_meta = schema->operator[](field_id);
+        switch (field_meta.get_data_type()) {
             case engine::DataType::VECTOR_FLOAT: {
-                auto dim = field.get_dim();
+                auto dim = field_meta.get_dim();
                 vector<float> final(dim * N);
-                bool is_ip = starts_with(field.get_name().get(), "normalized");
+                bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
 #pragma omp parallel for
                 for (int n = 0; n < N; ++n) {
                     vector<float> data(dim);
@@ -128,23 +166,23 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
 
                     std::copy(data.begin(), data.end(), final.begin() + dim * n);
                 }
-                insert_cols(final);
+                insert_cols(final, N, field_meta);
                 break;
             }
             case engine::DataType::VECTOR_BINARY: {
-                auto dim = field.get_dim();
+                auto dim = field_meta.get_dim();
                 Assert(dim % 8 == 0);
                 vector<uint8_t> data(dim / 8 * N);
                 for (auto& x : data) {
                     x = er();
                 }
-                insert_cols(data);
+                insert_cols(data, N, field_meta);
                 break;
             }
             case engine::DataType::INT64: {
                 vector<int64_t> data(N);
                 // begin with counter
-                if (starts_with(field.get_name().get(), "counter")) {
+                if (starts_with(field_meta.get_name().get(), "counter")) {
                     int64_t index = 0;
                     for (auto& x : data) {
                         x = index++;
@@ -157,7 +195,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                         i++;
                     }
                 }
-                insert_cols(data);
+                insert_cols(data, N, field_meta);
                 break;
             }
             case engine::DataType::INT32: {
@@ -165,7 +203,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 for (auto& x : data) {
                     x = er() % (2 * N);
                 }
-                insert_cols(data);
+                insert_cols(data, N, field_meta);
                 break;
             }
             case engine::DataType::INT16: {
@@ -173,7 +211,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 for (auto& x : data) {
                     x = er() % (2 * N);
                 }
-                insert_cols(data);
+                insert_cols(data, N, field_meta);
                 break;
             }
             case engine::DataType::INT8: {
@@ -181,7 +219,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 for (auto& x : data) {
                     x = er() % (2 * N);
                 }
-                insert_cols(data);
+                insert_cols(data, N, field_meta);
                 break;
             }
             case engine::DataType::FLOAT: {
@@ -189,7 +227,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 for (auto& x : data) {
                     x = distr(er);
                 }
-                insert_cols(data);
+                insert_cols(data, N, field_meta);
                 break;
             }
             case engine::DataType::DOUBLE: {
@@ -197,7 +235,15 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
                 for (auto& x : data) {
                     x = distr(er);
                 }
-                insert_cols(data);
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case engine::DataType::VARCHAR: {
+                vector<std::string> data(N);
+                for (auto& x : data) {
+                    x = std::to_string(er());
+                }
+                insert_cols(data, N, field_meta);
                 break;
             }
             default: {
@@ -206,14 +252,16 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
         }
         ++offset;
     }
+
     GeneratedData res;
-    res.cols_ = std::move(cols);
+    res.schema_ = schema;
+    res.raw_ = insert_data.release();
+    res.raw_->set_num_rows(N);
     for (int i = 0; i < N; ++i) {
         res.row_ids_.push_back(i);
         res.timestamps_.push_back(i + ts_offset);
     }
-    //    std::shuffle(res.row_ids_.begin(), res.row_ids_.end(), er);
-    res.generate_rows(N, schema);
+
     return res;
 }
 
@@ -306,7 +354,7 @@ SearchResultToJson(const SearchResult& sr) {
         std::vector<std::string> result;
         for (int k = 0; k < topk; ++k) {
             int index = q * topk + k;
-            result.emplace_back(std::to_string(sr.ids_[index]) + "->" + std::to_string(sr.distances_[index]));
+            result.emplace_back(std::to_string(sr.seg_offsets_[index]) + "->" + std::to_string(sr.distances_[index]));
         }
         results.emplace_back(std::move(result));
     }
@@ -319,26 +367,28 @@ SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
     auto row_count = dataset.row_ids_.size();
     {
         LoadFieldDataInfo info;
-        info.blob = dataset.row_ids_.data();
+        FieldMeta field_meta(FieldName("RowID"), RowFieldID, engine::DataType::INT64);
+        auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), row_count, field_meta);
+        info.field_data = array.release();
         info.row_count = dataset.row_ids_.size();
-        info.field_id = 0;  // field id for RowId
+        info.field_id = RowFieldID.get();  // field id for RowId
         seg.LoadFieldData(info);
     }
     {
         LoadFieldDataInfo info;
-        info.blob = dataset.timestamps_.data();
+        FieldMeta field_meta(FieldName("Timestamp"), TimestampFieldID, engine::DataType::INT64);
+        auto array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), row_count, field_meta);
+        info.field_data = array.release();
         info.row_count = dataset.timestamps_.size();
-        info.field_id = 1;
+        info.field_id = TimestampFieldID.get();
         seg.LoadFieldData(info);
     }
-    int field_offset = 0;
-    for (auto& meta : seg.get_schema().get_fields()) {
+    for (auto field_data : dataset.raw_->fields_data()) {
         LoadFieldDataInfo info;
-        info.field_id = meta.get_id().get();
+        info.field_id = field_data.field_id();
         info.row_count = row_count;
-        info.blob = dataset.cols_[field_offset].data();
+        info.field_data = &field_data;
         seg.LoadFieldData(info);
-        ++field_offset;
     }
 }
 
@@ -362,6 +412,20 @@ GenIndexing(int64_t N, int64_t dim, const float* vec) {
     indexing->Train(database, conf);
     indexing->AddWithoutIds(database, conf);
     return indexing;
+}
+
+template <typename T>
+inline scalar::IndexBasePtr
+GenScalarIndexing(int64_t N, const T* data) {
+    if constexpr (std::is_same_v<T, std::string>) {
+        auto indexing = scalar::CreateStringIndexSort();
+        indexing->Build(N, data);
+        return indexing;
+    } else {
+        auto indexing = scalar::CreateScalarIndexSort<T>();
+        indexing->Build(N, data);
+        return indexing;
+    }
 }
 
 }  // namespace milvus::segcore

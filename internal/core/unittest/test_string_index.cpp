@@ -61,6 +61,12 @@ TEST_F(StringIndexMarisaTest, BuildWithDataset) {
     index->BuildWithDataset(str_ds);
 }
 
+TEST_F(StringIndexMarisaTest, Count) {
+    auto index = milvus::scalar::CreateStringIndexMarisa();
+    index->BuildWithDataset(str_ds);
+    ASSERT_EQ(strs.size(), index->Count());
+}
+
 TEST_F(StringIndexMarisaTest, In) {
     auto index = milvus::scalar::CreateStringIndexMarisa();
     index->BuildWithDataset(str_ds);

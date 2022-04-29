@@ -21,3 +21,8 @@ message LoadSegmentMeta {
   repeated LoadFieldMeta metas = 1;
   int64 total_size = 2;
 }
+
+message InsertRecord {
+  repeated schema.FieldData fields_data = 1;
+  int64 num_rows = 2;
+}

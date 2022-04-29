@@ -17,6 +17,7 @@
 package typeutil
 
 import (
+	"reflect"
 	"testing"
 
 	"go.uber.org/zap"
@@ -537,4 +538,77 @@ func TestGetPrimaryFieldSchema(t *testing.T) {
 	primaryField, err := GetPrimaryFieldSchema(schema)
 	assert.Nil(t, err)
 	assert.Equal(t, schemapb.DataType_Int64, primaryField.DataType)
+}
+
+func TestGetPK(t *testing.T) {
+	type args struct {
+		data *schemapb.IDs
+		idx  int64
+	}
+	tests := []struct {
+		name string
+		args args
+		want interface{}
+	}{
+		{
+			args: args{
+				data: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+				idx: 5, // > len(data)
+			},
+			want: nil,
+		},
+		{
+			args: args{
+				data: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+				idx: 1,
+			},
+			want: int64(2),
+		},
+		{
+			args: args{
+				data: &schemapb.IDs{
+					IdField: &schemapb.IDs_StrId{
+						StrId: &schemapb.StringArray{
+							Data: []string{"1", "2", "3"},
+						},
+					},
+				},
+				idx: 1,
+			},
+			want: "2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GetPK(tt.args.data, tt.args.idx); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("GetPK(%v, %v) = %v, want %v", tt.args.data, tt.args.idx, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppendPKs(t *testing.T) {
+	intPks := &schemapb.IDs{}
+	AppendPKs(intPks, int64(1))
+	assert.ElementsMatch(t, []int64{1}, intPks.GetIntId().GetData())
+	AppendPKs(intPks, int64(2))
+	assert.ElementsMatch(t, []int64{1, 2}, intPks.GetIntId().GetData())
+
+	strPks := &schemapb.IDs{}
+	AppendPKs(strPks, "1")
+	assert.ElementsMatch(t, []string{"1"}, strPks.GetStrId().GetData())
+	AppendPKs(strPks, "2")
+	assert.ElementsMatch(t, []string{"1", "2"}, strPks.GetStrId().GetData())
 }

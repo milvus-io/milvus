@@ -33,6 +33,9 @@ class IndexBase : public Index {
 
     virtual const TargetBitmapPtr
     Query(const DatasetPtr& dataset) = 0;
+
+    virtual size_t
+    Count() = 0;
 };
 using IndexBasePtr = std::unique_ptr<IndexBase>;
 

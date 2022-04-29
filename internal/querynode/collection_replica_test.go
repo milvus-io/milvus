@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 //----------------------------------------------------------------------------------------------------- collection
@@ -141,9 +142,10 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	collection, err := node.historical.replica.getCollectionByID(collectionID)
+	assert.NoError(t, err)
 
-	for _, id := range collectionMeta.PartitionIDs {
+	for _, id := range collection.partitionIDs {
 		err := node.historical.replica.addPartition(collectionID, id)
 		assert.NoError(t, err)
 		partition, err := node.historical.replica.getPartitionByID(id)
@@ -151,7 +153,7 @@ func TestCollectionReplica_getPartitionByTag(t *testing.T) {
 		assert.Equal(t, partition.ID(), id)
 		assert.NotNil(t, partition)
 	}
-	err := node.Stop()
+	err = node.Stop()
 	assert.NoError(t, err)
 }
 
@@ -160,8 +162,9 @@ func TestCollectionReplica_hasPartition(t *testing.T) {
 	collectionID := UniqueID(0)
 	initTestMeta(t, node, collectionID, 0)
 
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-	err := node.historical.replica.addPartition(collectionID, collectionMeta.PartitionIDs[0])
+	collection, err := node.historical.replica.getCollectionByID(collectionID)
+	assert.NoError(t, err)
+	err = node.historical.replica.addPartition(collectionID, collection.partitionIDs[0])
 	assert.NoError(t, err)
 	hasPartition := node.historical.replica.hasPartition(defaultPartitionID)
 	assert.Equal(t, hasPartition, true)
@@ -233,14 +236,15 @@ func TestCollectionReplica_getSegmentByID(t *testing.T) {
 func TestCollectionReplica_getSegmentInfosByColID(t *testing.T) {
 	node := newQueryNodeMock()
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-	collection := node.historical.replica.addCollection(collectionMeta.ID, collectionMeta.Schema)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	collection := node.historical.replica.addCollection(collectionID, schema)
 	node.historical.replica.addPartition(collectionID, defaultPartitionID)
 
 	// test get indexed segment info
 	vectorFieldIDDs, err := node.historical.replica.getVecFieldIDsByCollectionID(collectionID)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(vectorFieldIDDs))
+	assert.Equal(t, 2, len(vectorFieldIDDs))
 	fieldID := vectorFieldIDDs[0]
 
 	indexID := UniqueID(10000)

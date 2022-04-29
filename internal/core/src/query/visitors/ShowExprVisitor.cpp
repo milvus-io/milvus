@@ -132,7 +132,7 @@ ShowExprVisitor::visit(TermExpr& expr) {
     }();
 
     Json res{{"expr_type", "Term"},
-             {"field_offset", expr.field_offset_.get()},
+             {"field_id", expr.field_id_.get()},
              {"data_type", datatype_name(expr.data_type_)},
              {"terms", std::move(terms)}};
 
@@ -147,7 +147,7 @@ UnaryRangeExtract(const UnaryRangeExpr& expr_raw) {
     auto expr = dynamic_cast<const UnaryRangeExprImpl<T>*>(&expr_raw);
     AssertInfo(expr, "[ShowExprVisitor]UnaryRangeExpr cast to UnaryRangeExprImpl failed");
     Json res{{"expr_type", "UnaryRange"},
-             {"field_offset", expr->field_offset_.get()},
+             {"field_id", expr->field_id_.get()},
              {"data_type", datatype_name(expr->data_type_)},
              {"op", OpType_Name(static_cast<OpType>(expr->op_type_))},
              {"value", expr->value_}};
@@ -193,7 +193,7 @@ BinaryRangeExtract(const BinaryRangeExpr& expr_raw) {
     auto expr = dynamic_cast<const BinaryRangeExprImpl<T>*>(&expr_raw);
     AssertInfo(expr, "[ShowExprVisitor]BinaryRangeExpr cast to BinaryRangeExprImpl failed");
     Json res{{"expr_type", "BinaryRange"},
-             {"field_offset", expr->field_offset_.get()},
+             {"field_id", expr->field_id_.get()},
              {"data_type", datatype_name(expr->data_type_)},
              {"lower_inclusive", expr->lower_inclusive_},
              {"upper_inclusive", expr->upper_inclusive_},
@@ -240,9 +240,9 @@ ShowExprVisitor::visit(CompareExpr& expr) {
     AssertInfo(!json_opt_.has_value(), "[ShowExprVisitor]Ret json already has value before visit");
 
     Json res{{"expr_type", "Compare"},
-             {"left_field_offset", expr.left_field_offset_.get()},
+             {"left_field_id", expr.left_field_id_.get()},
              {"left_data_type", datatype_name(expr.left_data_type_)},
-             {"right_field_offset", expr.right_field_offset_.get()},
+             {"right_field_id", expr.right_field_id_.get()},
              {"right_data_type", datatype_name(expr.right_data_type_)},
              {"op", OpType_Name(static_cast<OpType>(expr.op_type_))}};
     json_opt_ = res;
@@ -260,7 +260,7 @@ BinaryArithOpEvalRangeExtract(const BinaryArithOpEvalRangeExpr& expr_raw) {
     AssertInfo(expr, "[ShowExprVisitor]BinaryArithOpEvalRangeExpr cast to BinaryArithOpEvalRangeExprImpl failed");
 
     Json res{{"expr_type", "BinaryArithOpEvalRange"},
-             {"field_offset", expr->field_offset_.get()},
+             {"field_offset", expr->field_id_.get()},
              {"data_type", datatype_name(expr->data_type_)},
              {"arith_op", ArithOpType_Name(static_cast<ArithOpType>(expr->arith_op_))},
              {"right_operand", expr->right_operand_},

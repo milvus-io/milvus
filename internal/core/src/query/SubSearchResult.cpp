@@ -27,7 +27,7 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
     for (int64_t qn = 0; qn < num_queries_; ++qn) {
         auto offset = qn * topk_;
 
-        int64_t* __restrict__ left_ids = this->get_ids() + offset;
+        int64_t* __restrict__ left_ids = this->get_seg_offsets() + offset;
         float* __restrict__ left_distances = this->get_distances() + offset;
 
         auto right_ids = right.get_ids() + offset;

@@ -40,28 +40,28 @@ ExtractInfoExprVisitor::visit(LogicalBinaryExpr& expr) {
 
 void
 ExtractInfoExprVisitor::visit(TermExpr& expr) {
-    plan_info_.add_involved_field(expr.field_offset_);
+    plan_info_.add_involved_field(expr.field_id_);
 }
 
 void
 ExtractInfoExprVisitor::visit(UnaryRangeExpr& expr) {
-    plan_info_.add_involved_field(expr.field_offset_);
+    plan_info_.add_involved_field(expr.field_id_);
 }
 
 void
 ExtractInfoExprVisitor::visit(BinaryRangeExpr& expr) {
-    plan_info_.add_involved_field(expr.field_offset_);
+    plan_info_.add_involved_field(expr.field_id_);
 }
 
 void
 ExtractInfoExprVisitor::visit(CompareExpr& expr) {
-    plan_info_.add_involved_field(expr.left_field_offset_);
-    plan_info_.add_involved_field(expr.right_field_offset_);
+    plan_info_.add_involved_field(expr.left_field_id_);
+    plan_info_.add_involved_field(expr.right_field_id_);
 }
 
 void
 ExtractInfoExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
-    plan_info_.add_involved_field(expr.field_offset_);
+    plan_info_.add_involved_field(expr.field_id_);
 }
 
 }  // namespace milvus::query

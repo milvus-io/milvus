@@ -26,14 +26,17 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func genFlowGraphInsertData() (*insertData, error) {
-	insertMsg, err := genSimpleInsertMsg()
+func genFlowGraphInsertData(schema *schemapb.CollectionSchema, numRows int) (*insertData, error) {
+	insertMsg, err := genSimpleInsertMsg(schema, numRows)
+	if err != nil {
+		return nil, err
+	}
+	insertRecord, err := storage.TransferInsertMsgToInsertRecord(schema, insertMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -45,8 +48,9 @@ func genFlowGraphInsertData() (*insertData, error) {
 		insertTimestamps: map[UniqueID][]Timestamp{
 			defaultSegmentID: insertMsg.Timestamps,
 		},
-		insertRecords: map[UniqueID][]*commonpb.Blob{
-			defaultSegmentID: insertMsg.RowData,
+
+		insertRecords: map[UniqueID][]*schemapb.FieldData{
+			defaultSegmentID: insertRecord.FieldsData,
 		},
 		insertOffset: map[UniqueID]int64{
 			defaultSegmentID: 0,
@@ -56,10 +60,7 @@ func genFlowGraphInsertData() (*insertData, error) {
 }
 
 func genFlowGraphDeleteData() (*deleteData, error) {
-	deleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-	if err != nil {
-		return nil, err
-	}
+	deleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 	dData := &deleteData{
 		deleteIDs: map[UniqueID][]primaryKey{
 			defaultSegmentID: storage.ParseIDs2PrimaryKeys(deleteMsg.PrimaryKeys),
@@ -88,7 +89,9 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		insertData, err := genFlowGraphInsertData()
+		collection, err := streaming.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		insertData, err := genFlowGraphInsertData(collection.schema, defaultMsgLength)
 		assert.NoError(t, err)
 
 		wg := &sync.WaitGroup{}
@@ -109,12 +112,14 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		insertData, err := genFlowGraphInsertData()
+		collection, err := streaming.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		insertData, err := genFlowGraphInsertData(collection.schema, defaultMsgLength)
 		assert.NoError(t, err)
 
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
-		insertData.insertRecords[defaultSegmentID][0].Value = insertData.insertRecords[defaultSegmentID][0].Value[:len(insertData.insertRecords[defaultSegmentID][0].Value)/2]
+		insertData.insertRecords[defaultSegmentID] = insertData.insertRecords[defaultSegmentID][:len(insertData.insertRecords[defaultSegmentID])/2]
 		insertNode.insert(insertData, defaultSegmentID, wg)
 	})
 
@@ -160,7 +165,9 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		insertData, err := genFlowGraphInsertData()
+		collection, err := streaming.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		insertData, err := genFlowGraphInsertData(collection.schema, defaultMsgLength)
 		assert.NoError(t, err)
 
 		wg := &sync.WaitGroup{}
@@ -238,10 +245,11 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgInsertMsg, err := genSimpleInsertMsg()
+		collection, err := streaming.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
+		msgInsertMsg, err := genSimpleInsertMsg(collection.schema, defaultMsgLength)
 		assert.NoError(t, err)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		iMsg := insertMsg{
 			insertMessages: []*msgstream.InsertMsg{
 				msgInsertMsg,
@@ -275,8 +283,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgDeleteMsg.PartitionID = common.InvalidPartitionID
 		assert.NoError(t, err)
 		iMsg := insertMsg{
@@ -301,7 +308,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgDeleteMsg.CollectionID = 9999
 		msgDeleteMsg.PartitionID = -1
 		assert.NoError(t, err)
@@ -327,7 +334,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgDeleteMsg.PartitionID = 9999
 		assert.NoError(t, err)
 		iMsg := insertMsg{
@@ -352,10 +359,11 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgInsertMsg, err := genSimpleInsertMsg()
+		collection, err := streaming.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
+		msgInsertMsg, err := genSimpleInsertMsg(collection.schema, defaultMsgLength)
 		assert.NoError(t, err)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		iMsg := insertMsg{
 			insertMessages: []*msgstream.InsertMsg{
 				msgInsertMsg,

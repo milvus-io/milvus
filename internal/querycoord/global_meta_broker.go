@@ -364,8 +364,9 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 			}
 
 			paths, err := broker.getIndexFilePaths(ctx, info.BuildID)
+			//TODO:: returns partially successful index
 			if err != nil {
-				log.Error("failed to get index file paths",
+				log.Warn("failed to get index file paths",
 					zap.Int64("collection", collectionID),
 					zap.Int64("segment", segmentID),
 					zap.Int64("buildID", info.BuildID),
@@ -396,7 +397,6 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 				indexInfo.IndexName = extra.indexName
 				indexInfo.IndexParams = extra.indexParams
 			}
-
 			ret[segmentID] = append(ret[segmentID], indexInfo)
 		}
 	}

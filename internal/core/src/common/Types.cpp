@@ -22,6 +22,7 @@
 #include "common/type_c.h"
 #include "pb/schema.pb.h"
 #include "CGoHelper.h"
+#include "common/Consts.h"
 
 namespace milvus {
 
@@ -53,6 +54,11 @@ MetricTypeToName(MetricType metric_type) {
     AssertInfo(metric_bimap.right.count(metric_type),
                "metric_type enum(" + std::to_string((int)metric_type) + ") not found");
     return metric_bimap.right.at(metric_type);
+}
+
+bool
+IsPrimaryKeyDataType(DataType data_type) {
+    return data_type == engine::DataType::INT64 || data_type == DataType::VARCHAR;
 }
 
 }  // namespace milvus

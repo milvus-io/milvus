@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -31,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -49,7 +50,7 @@ type insertNode struct {
 type insertData struct {
 	insertIDs        map[UniqueID][]int64 // rowIDs
 	insertTimestamps map[UniqueID][]Timestamp
-	insertRecords    map[UniqueID][]*commonpb.Blob
+	insertRecords    map[UniqueID][]*schemapb.FieldData
 	insertOffset     map[UniqueID]int64
 	insertPKs        map[UniqueID][]primaryKey // pks
 }
@@ -84,7 +85,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	iData := insertData{
 		insertIDs:        make(map[UniqueID][]int64),
 		insertTimestamps: make(map[UniqueID][]Timestamp),
-		insertRecords:    make(map[UniqueID][]*commonpb.Blob),
+		insertRecords:    make(map[UniqueID][]*schemapb.FieldData),
 		insertOffset:     make(map[UniqueID]int64),
 		insertPKs:        make(map[UniqueID][]primaryKey),
 	}
@@ -101,6 +102,11 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	// 1. hash insertMessages to insertData
+	// sort timestamps ensures that the data in iData.insertRecords is sorted in ascending order of timestamp
+	// avoiding re-sorting in segCore, which will need data copying
+	sort.Slice(iMsg.insertMessages, func(i, j int) bool {
+		return iMsg.insertMessages[i].BeginTs() < iMsg.insertMessages[j].BeginTs()
+	})
 	for _, insertMsg := range iMsg.insertMessages {
 		// if loadType is loadCollection, check if partition exists, if not, create partition
 		col, err := iNode.streamingReplica.getCollectionByID(insertMsg.CollectionID)
@@ -125,19 +131,19 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 		}
 
-		// trans column field data to row data
-		if insertMsg.IsColumnBased() {
-			insertMsg.RowData, err = typeutil.TransferColumnBasedDataToRowBasedData(col.schema, insertMsg.FieldsData)
-			if err != nil {
-				log.Error("failed to transfer column-based data to row-based data", zap.Error(err))
-				return []Msg{}
-			}
+		insertRecord, err := storage.TransferInsertMsgToInsertRecord(col.schema, insertMsg)
+		if err != nil {
+			log.Error("failed to transfer msgStream.insertMsg to segcorepb.InsertRecord", zap.Error(err))
+			return []Msg{}
 		}
 
 		iData.insertIDs[insertMsg.SegmentID] = append(iData.insertIDs[insertMsg.SegmentID], insertMsg.RowIDs...)
 		iData.insertTimestamps[insertMsg.SegmentID] = append(iData.insertTimestamps[insertMsg.SegmentID], insertMsg.Timestamps...)
-		// using insertMsg.RowData is valid here, since we have already transferred the column-based data.
-		iData.insertRecords[insertMsg.SegmentID] = append(iData.insertRecords[insertMsg.SegmentID], insertMsg.RowData...)
+		if _, ok := iData.insertRecords[insertMsg.SegmentID]; !ok {
+			iData.insertRecords[insertMsg.SegmentID] = insertRecord.FieldsData
+		} else {
+			typeutil.MergeFieldData(iData.insertRecords[insertMsg.SegmentID], insertRecord.FieldsData)
+		}
 		pks, err := getPrimaryKeys(insertMsg, iNode.streamingReplica)
 		if err != nil {
 			log.Warn(err.Error())
@@ -154,7 +160,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			continue
 		}
 
-		var numOfRecords = len(iData.insertRecords[segmentID])
+		var numOfRecords = len(iData.insertIDs[segmentID])
 		if targetSegment != nil {
 			offset, err := targetSegment.segmentPreInsert(numOfRecords)
 			if err != nil {
@@ -314,10 +320,13 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 
 	ids := iData.insertIDs[segmentID]
 	timestamps := iData.insertTimestamps[segmentID]
-	records := iData.insertRecords[segmentID]
 	offsets := iData.insertOffset[segmentID]
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: iData.insertRecords[segmentID],
+		NumRows:    int64(len(ids)),
+	}
 
-	err = targetSegment.segmentInsert(offsets, &ids, &timestamps, &records)
+	err = targetSegment.segmentInsert(offsets, ids, timestamps, insertRecord)
 	if err != nil {
 		log.Debug("QueryNode: targetSegmentInsert failed", zap.Error(err))
 		// TODO: add error handling

@@ -17,7 +17,11 @@
 #pragma once
 
 #include <stdint.h>
+#include "Types.h"
 
-const int64_t INVALID_ID = -1;
-const int64_t INVALID_OFFSET = -1;
+const int64_t INVALID_FIELD_ID = -1;
 const int64_t INVALID_SEG_OFFSET = -1;
+const milvus::PkType INVALID_PK;  // of std::monostate if not set.
+// TODO: default field start id, could get from config.yaml
+const int64_t START_USER_FIELDID = 100;
+const char MAX_LENGTH_PER_ROW[] = "max_length_per_row";

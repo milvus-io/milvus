@@ -146,7 +146,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 				pkField = field.Name
 			}
 		}
-		t.request.Expr = IDs2Expr(pkField, t.ids.GetIntId().Data)
+		t.request.Expr = IDs2Expr(pkField, t.ids)
 	}
 
 	if t.request.Expr == "" {
@@ -480,20 +480,28 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 }
 
 // IDs2Expr converts ids slices to bool expresion with specified field name
-func IDs2Expr(fieldName string, ids []int64) string {
-	idsStr := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids)), ", "), "[]")
+func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
+	var idsStr string
+	switch ids.GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		idsStr = strings.Trim(strings.Join(strings.Fields(fmt.Sprint(ids.GetIntId().GetData())), ", "), "[]")
+	case *schemapb.IDs_StrId:
+		idsStr = strings.Trim(strings.Join(ids.GetStrId().GetData(), ", "), "[]")
+	}
+
 	return fieldName + " in [ " + idsStr + " ]"
 }
 
 func mergeRetrieveResults(retrieveResults []*internalpb.RetrieveResults) (*milvuspb.QueryResults, error) {
 	var ret *milvuspb.QueryResults
 	var skipDupCnt int64
-	var idSet = make(map[int64]struct{})
+	var idSet = make(map[interface{}]struct{})
 
 	// merge results and remove duplicates
 	for _, rr := range retrieveResults {
+		numPks := typeutil.GetSizeOfIDs(rr.GetIds())
 		// skip empty result, it will break merge result
-		if rr == nil || rr.Ids == nil || rr.Ids.GetIntId() == nil || len(rr.Ids.GetIntId().Data) == 0 {
+		if rr == nil || rr.Ids == nil || rr.GetIds() == nil || numPks == 0 {
 			continue
 		}
 
@@ -507,7 +515,8 @@ func mergeRetrieveResults(retrieveResults []*internalpb.RetrieveResults) (*milvu
 			return nil, fmt.Errorf("mismatch FieldData in proxy RetrieveResults, expect %d get %d", len(ret.FieldsData), len(rr.FieldsData))
 		}
 
-		for i, id := range rr.Ids.GetIntId().GetData() {
+		for i := 0; i < numPks; i++ {
+			id := typeutil.GetPK(rr.GetIds(), int64(i))
 			if _, ok := idSet[id]; !ok {
 				typeutil.AppendFieldData(ret.FieldsData, rr.FieldsData, int64(i))
 				idSet[id] = struct{}{}

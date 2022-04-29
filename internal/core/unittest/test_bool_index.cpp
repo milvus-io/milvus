@@ -53,6 +53,26 @@ TEST_F(BoolIndexTest, Constructor) {
     auto index = milvus::scalar::CreateBoolIndex();
 }
 
+TEST_F(BoolIndexTest, Count) {
+    {
+        auto index = milvus::scalar::CreateBoolIndex();
+        index->BuildWithDataset(all_true_ds);
+        ASSERT_EQ(n, index->Count());
+    }
+
+    {
+        auto index = milvus::scalar::CreateBoolIndex();
+        index->BuildWithDataset(all_false_ds);
+        ASSERT_EQ(n, index->Count());
+    }
+
+    {
+        auto index = milvus::scalar::CreateBoolIndex();
+        index->BuildWithDataset(half_ds);
+        ASSERT_EQ(n, index->Count());
+    }
+}
+
 TEST_F(BoolIndexTest, In) {
     auto true_test = std::make_unique<bool>(true);
     auto false_test = std::make_unique<bool>(false);

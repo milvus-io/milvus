@@ -30,8 +30,8 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
 
     // step 1.1: get meta
     // step 1.2: get which vector field to search
-    auto vecfield_offset = info.field_offset_;
-    auto& field = schema[vecfield_offset];
+    auto vecfield_id = info.field_id_;
+    auto& field = schema[vecfield_id];
 
     AssertInfo(field.get_data_type() == DataType::VECTOR_FLOAT, "[FloatSearch]Field data type isn't VECTOR_FLOAT");
     auto dim = field.get_dim();
@@ -44,13 +44,13 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     // std::vector<float> final_dis(total_count, std::numeric_limits<float>::max());
     SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
     dataset::SearchDataset search_dataset{metric_type, num_queries, topk, round_decimal, dim, query_data};
-    auto vec_ptr = record.get_field_data<FloatVector>(vecfield_offset);
+    auto vec_ptr = record.get_field_data<FloatVector>(vecfield_id);
 
     int current_chunk_id = 0;
 
-    if (indexing_record.is_in(vecfield_offset)) {
+    if (indexing_record.is_in(vecfield_id)) {
         auto max_indexed_id = indexing_record.get_finished_ack();
-        const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_offset);
+        const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_id);
         auto search_conf = field_indexing.get_search_params(topk);
         AssertInfo(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk(),
                    "[FloatSearch]Chunk size of vector not equal to chunk size of field index");
@@ -63,7 +63,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             auto sub_qr = SearchOnIndex(search_dataset, *indexing, search_conf, sub_view);
 
             // convert chunk uid to segment uid
-            for (auto& x : sub_qr.mutable_ids()) {
+            for (auto& x : sub_qr.mutable_seg_offsets()) {
                 if (x != -1) {
                     x += chunk_id * size_per_chunk;
                 }
@@ -89,7 +89,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         auto sub_qr = FloatSearchBruteForce(search_dataset, chunk.data(), size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid
-        for (auto& x : sub_qr.mutable_ids()) {
+        for (auto& x : sub_qr.mutable_seg_offsets()) {
             if (x != -1) {
                 x += chunk_id * vec_size_per_chunk;
             }
@@ -98,7 +98,7 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     }
     current_chunk_id = max_chunk;
     results.distances_ = std::move(final_qr.mutable_distances());
-    results.ids_ = std::move(final_qr.mutable_ids());
+    results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
     results.topk_ = topk;
     results.num_queries_ = num_queries;
 
@@ -123,8 +123,8 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 
     // step 2.1: get meta
     // step 2.2: get which vector field to search
-    auto vecfield_offset = info.field_offset_;
-    auto& field = schema[vecfield_offset];
+    auto vecfield_id = info.field_id_;
+    auto& field = schema[vecfield_id];
 
     AssertInfo(field.get_data_type() == DataType::VECTOR_BINARY, "[BinarySearch]Field data type isn't VECTOR_BINARY");
     auto dim = field.get_dim();
@@ -134,7 +134,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     // step 3: small indexing search
     query::dataset::SearchDataset search_dataset{metric_type, num_queries, topk, round_decimal, dim, query_data};
 
-    auto vec_ptr = record.get_field_data<BinaryVector>(vecfield_offset);
+    auto vec_ptr = record.get_field_data<BinaryVector>(vecfield_id);
     auto max_indexed_id = 0;
 
     // step 4: brute force search where small indexing is unavailable
@@ -151,7 +151,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
         auto sub_result = BinarySearchBruteForce(search_dataset, chunk.data(), nsize, sub_view);
 
         // convert chunk uid to segment uid
-        for (auto& x : sub_result.mutable_ids()) {
+        for (auto& x : sub_result.mutable_seg_offsets()) {
             if (x != -1) {
                 x += chunk_id * vec_size_per_chunk;
             }
@@ -161,7 +161,7 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
 
     final_result.round_values();
     results.distances_ = std::move(final_result.mutable_distances());
-    results.ids_ = std::move(final_result.mutable_ids());
+    results.seg_offsets_ = std::move(final_result.mutable_seg_offsets());
     results.topk_ = topk;
     results.num_queries_ = num_queries;
 
@@ -178,7 +178,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const BitsetView& bitset,
                 SearchResult& results) {
     // TODO: add data_type to info
-    auto data_type = segment.get_schema()[info.field_offset_].get_data_type();
+    auto data_type = segment.get_schema()[info.field_id_].get_data_type();
     AssertInfo(datatype_is_vector(data_type), "[SearchOnGrowing]Data type isn't vector type");
     if (data_type == DataType::VECTOR_FLOAT) {
         auto typed_data = reinterpret_cast<const float*>(query_data);

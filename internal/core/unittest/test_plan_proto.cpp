@@ -29,20 +29,18 @@ namespace spb = proto::schema;
 static SchemaPtr
 getStandardSchema() {
     auto schema = std::make_shared<Schema>();
-    schema->AddField(FieldName("FloatVectorField"), FieldId(100 + spb::DataType::FloatVector), DataType::VECTOR_FLOAT,
-                     16, MetricType::METRIC_L2);
-    schema->AddField(FieldName("BinaryVectorField"), FieldId(100 + spb::DataType::BinaryVector),
-                     DataType::VECTOR_BINARY, 16, MetricType::METRIC_Jaccard);
-    schema->AddField(FieldName("Int64Field"), FieldId(100 + spb::DataType::Int64), DataType::INT64);
-    schema->AddField(FieldName("Int32Field"), FieldId(100 + spb::DataType::Int32), DataType::INT32);
-    schema->AddField(FieldName("Int16Field"), FieldId(100 + spb::DataType::Int16), DataType::INT16);
-    schema->AddField(FieldName("Int8Field"), FieldId(100 + spb::DataType::Int8), DataType::INT8);
-    schema->AddField(FieldName("DoubleField"), FieldId(100 + spb::DataType::Double), DataType::DOUBLE);
-    schema->AddField(FieldName("FloatField"), FieldId(100 + spb::DataType::Float), DataType::FLOAT);
+    schema->AddDebugField("FloatVectorField", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("BinaryVectorField", DataType::VECTOR_BINARY, 16, MetricType::METRIC_Jaccard);
+    schema->AddDebugField("Int64Field", DataType::INT64);
+    schema->AddDebugField("Int32Field", DataType::INT32);
+    schema->AddDebugField("Int16Field", DataType::INT16);
+    schema->AddDebugField("Int8Field", DataType::INT8);
+    schema->AddDebugField("DoubleField", DataType::DOUBLE);
+    schema->AddDebugField("FloatField", DataType::FLOAT);
     return schema;
 }
 
-class PlanProtoTest : public ::testing::TestWithParam<std::tuple<spb::DataType>> {
+class PlanProtoTest : public ::testing::TestWithParam<std::tuple<std::string>> {
  public:
     PlanProtoTest() {
         schema = getStandardSchema();
@@ -54,40 +52,44 @@ class PlanProtoTest : public ::testing::TestWithParam<std::tuple<spb::DataType>>
 
 INSTANTIATE_TEST_CASE_P(InstName,
                         PlanProtoTest,
-                        ::testing::Values(                           //
-                            std::make_tuple(spb::DataType::Double),  //
-                            std::make_tuple(spb::DataType::Float),   //
-                            std::make_tuple(spb::DataType::Int64),   //
-                            std::make_tuple(spb::DataType::Int32),   //
-                            std::make_tuple(spb::DataType::Int16),   //
-                            std::make_tuple(spb::DataType::Int8)     //
+                        ::testing::Values(                   //
+                            std::make_tuple("DoubleField"),  //
+                            std::make_tuple("FloatField"),   //
+                            std::make_tuple("Int64Field"),   //
+                            std::make_tuple("Int32Field"),   //
+                            std::make_tuple("Int16Field"),   //
+                            std::make_tuple("Int8Field")     //
                             ));
 
 TEST_P(PlanProtoTest, Range) {
     // xxx.query(predicates = "int64field > 3", topk = 10, ...)
-    auto data_type = std::get<0>(GetParam());
-    auto data_type_str = spb::DataType_Name(data_type);
-    auto field_id = 100 + (int)data_type;
-    auto field_name = data_type_str + "Field";
+    FieldName vec_field_name = FieldName("FloatVectorField");
+    FieldId vec_float_field_id = schema->get_field_id(vec_field_name);
+
+    auto field_name = std::get<0>(GetParam());
+    auto field_id = schema->get_field_id(FieldName(field_name));
+    auto data_type = schema->operator[](field_id).get_data_type();
+    auto data_type_str = spb::DataType_Name(int(data_type));
+
     string value_tag = "bool_val";
-    if (datatype_is_floating((DataType)data_type)) {
+    if (datatype_is_floating(data_type)) {
         value_tag = "float_val";
-    } else if (datatype_is_integer((DataType)data_type)) {
+    } else if (datatype_is_integer(data_type)) {
         value_tag = "int64_val";
     }
 
     auto fmt1 = boost::format(R"(
 vector_anns: <
-  field_id: 201
+  field_id: %1%
   predicates: <
     unary_range_expr: <
       column_info: <
-        field_id: %1%
-        data_type: %2%
+        field_id: %2%
+        data_type: %3%
       >
       op: GreaterThan
       value: <
-        %3%: 3
+        %4%: 3
       >
     >
   >
@@ -99,8 +101,8 @@ vector_anns: <
   >
   placeholder_tag: "$0"
 >
-)") % field_id % data_type_str %
-                value_tag;
+)") % vec_float_field_id.get() %
+                field_id.get() % data_type_str % value_tag;
 
     auto proto_text = fmt1.str();
     planpb::PlanNode node_proto;
@@ -148,34 +150,38 @@ vector_anns: <
 
 TEST_P(PlanProtoTest, TermExpr) {
     // xxx.query(predicates = "int64field in [1, 2, 3]", topk = 10, ...)
-    auto data_type = std::get<0>(GetParam());
-    auto data_type_str = spb::DataType_Name(data_type);
-    auto field_id = 100 + (int)data_type;
-    auto field_name = data_type_str + "Field";
+    FieldName vec_field_name = FieldName("FloatVectorField");
+    FieldId vec_float_field_id = schema->get_field_id(vec_field_name);
+
+    auto field_name = std::get<0>(GetParam());
+    auto field_id = schema->get_field_id(FieldName(field_name));
+    auto data_type = schema->operator[](field_id).get_data_type();
+    auto data_type_str = spb::DataType_Name(int(data_type));
+
     string value_tag = "bool_val";
-    if (datatype_is_floating((DataType)data_type)) {
+    if (datatype_is_floating(data_type)) {
         value_tag = "float_val";
-    } else if (datatype_is_integer((DataType)data_type)) {
+    } else if (datatype_is_integer(data_type)) {
         value_tag = "int64_val";
     }
 
     auto fmt1 = boost::format(R"(
 vector_anns: <
-  field_id: 201
+  field_id: %1%
   predicates: <
     term_expr: <
       column_info: <
-        field_id: %1%
-        data_type: %2%
+        field_id: %2%
+        data_type: %3%
       >
       values: <
-        %3%: 1
+        %4%: 1
       >
       values: <
-        %3%: 2
+        %4%: 2
       >
       values: <
-        %3%: 3
+        %4%: 3
       >
     >
   >
@@ -187,8 +193,8 @@ vector_anns: <
   >
   placeholder_tag: "$0"
 >
-)") % field_id % data_type_str %
-                value_tag;
+)") % vec_float_field_id.get() %
+                field_id.get() % data_type_str % value_tag;
 
     auto proto_text = fmt1.str();
     planpb::PlanNode node_proto;
@@ -237,32 +243,31 @@ vector_anns: <
 TEST(PlanProtoTest, NotExpr) {
     auto schema = getStandardSchema();
     // xxx.query(predicates = "not (int64field > 3)", topk = 10, ...)
+    FieldName vec_field_name = FieldName("FloatVectorField");
+    FieldId vec_float_field_id = schema->get_field_id(vec_field_name);
+
+    FieldName int64_field_name = FieldName("Int64Field");
+    FieldId int64_field_id = schema->get_field_id(int64_field_name);
+    string value_tag = "int64_val";
+
     auto data_type = spb::DataType::Int64;
-    auto data_type_str = spb::DataType_Name(data_type);
-    auto field_id = 100 + (int)data_type;
-    auto field_name = data_type_str + "Field";
-    string value_tag = "bool_val";
-    if (datatype_is_floating((DataType)data_type)) {
-        value_tag = "float_val";
-    } else if (datatype_is_integer((DataType)data_type)) {
-        value_tag = "int64_val";
-    }
+    auto data_type_str = spb::DataType_Name(int(data_type));
 
     auto fmt1 = boost::format(R"(
 vector_anns: <
-  field_id: 201
+  field_id: %1%
   predicates: <
     unary_expr: <
       op: Not
       child: <
         unary_range_expr: <
           column_info: <
-            field_id: %1%
-            data_type: %2%
+            field_id: %2%
+            data_type: %3%
           >
           op: GreaterThan
           value: <
-            %3%: 3
+            %4%: 3
           >
         >
       >
@@ -276,8 +281,8 @@ vector_anns: <
   >
   placeholder_tag: "$0"
 >
-)") % field_id % data_type_str %
-                value_tag;
+)") % vec_float_field_id.get() %
+                int64_field_id.get() % data_type_str % value_tag;
 
     auto proto_text = fmt1.str();
     planpb::PlanNode node_proto;
@@ -319,7 +324,7 @@ vector_anns: <
         ]
     }
 }
-)") % field_name);
+)") % int64_field_name.get());
 
     auto ref_plan = CreatePlan(*schema, dsl_text);
     auto ref_json = ShowPlanNodeVisitor().call_child(*ref_plan->plan_node_);
@@ -330,32 +335,31 @@ vector_anns: <
 TEST(PlanProtoTest, AndOrExpr) {
     auto schema = getStandardSchema();
     // xxx.query(predicates = "(int64field < 3) && (int64field > 2 || int64field == 1)", topk = 10, ...)
+    FieldName vec_field_name = FieldName("FloatVectorField");
+    FieldId vec_float_field_id = schema->get_field_id(vec_field_name);
+
+    FieldName int64_field_name = FieldName("Int64Field");
+    FieldId int64_field_id = schema->get_field_id(int64_field_name);
+    string value_tag = "int64_val";
+
     auto data_type = spb::DataType::Int64;
-    auto data_type_str = spb::DataType_Name(data_type);
-    auto field_id = 100 + (int)data_type;
-    auto field_name = data_type_str + "Field";
-    string value_tag = "bool_val";
-    if (datatype_is_floating((DataType)data_type)) {
-        value_tag = "float_val";
-    } else if (datatype_is_integer((DataType)data_type)) {
-        value_tag = "int64_val";
-    }
+    auto data_type_str = spb::DataType_Name(int(data_type));
 
     auto fmt1 = boost::format(R"(
 vector_anns: <
-  field_id: 201
+  field_id: %1%
   predicates: <
     binary_expr: <
       op: LogicalAnd
       left: <
         unary_range_expr: <
           column_info: <
-            field_id: 105
-            data_type: Int64
+            field_id: %2%
+            data_type: %3%
           >
           op: LessThan
           value: <
-            int64_val: 3
+            %4%: 3
           >
         >
       >
@@ -365,24 +369,24 @@ vector_anns: <
           left: <
             unary_range_expr: <
               column_info: <
-                field_id: 105
-                data_type: Int64
+                field_id: %2%
+                data_type: %3%
               >
               op: GreaterThan
               value: <
-                int64_val: 2
+                %4%: 2
               >
             >
           >
           right: <
             unary_range_expr: <
               column_info: <
-                field_id: 105
-                data_type: Int64
+                field_id: %2%
+                data_type: %3%
               >
               op: Equal
               value: <
-                int64_val: 1
+                %4%: 1
               >
             >
           >
@@ -398,7 +402,8 @@ vector_anns: <
   >
   placeholder_tag: "$0"
 >
-)");
+)") % vec_float_field_id.get() %
+                int64_field_id.get() % data_type_str % value_tag;
 
     auto proto_text = fmt1.str();
     planpb::PlanNode node_proto;
@@ -457,7 +462,7 @@ vector_anns: <
         ]
     }
 }
-)") % field_name);
+)") % int64_field_name.get());
 
     auto ref_plan = CreatePlan(*schema, dsl_text);
     auto ref_json = ShowPlanNodeVisitor().call_child(*ref_plan->plan_node_);
@@ -467,25 +472,29 @@ vector_anns: <
 
 TEST_P(PlanProtoTest, CompareExpr) {
     auto schema = getStandardSchema();
-    schema->AddField(FieldName("age1"), FieldId(128), DataType::INT64);
+    auto age_fid = schema->AddDebugField("age1", DataType::INT64);
     // xxx.query(predicates = "int64field < int64field", topk = 10, ...)
-    auto data_type = std::get<0>(GetParam());
-    auto field_id = 100 + (int)data_type;
-    auto data_type_str = spb::DataType_Name(data_type);
-    auto field_name = data_type_str + "Field";
+
+    FieldName vec_field_name = FieldName("FloatVectorField");
+    FieldId vec_float_field_id = schema->get_field_id(vec_field_name);
+
+    auto field_name = std::get<0>(GetParam());
+    auto field_id = schema->get_field_id(FieldName(field_name));
+    auto data_type = schema->operator[](field_id).get_data_type();
+    auto data_type_str = spb::DataType_Name(int(data_type));
 
     auto fmt1 = boost::format(R"(
 vector_anns: <
-  field_id: 201
+  field_id: %1%
   predicates: <
     compare_expr: <
       left_column_info: <
-        field_id: 128
+        field_id: %2%
         data_type: Int64
       >
       right_column_info: <
-        field_id: %1%
-        data_type: %2%
+        field_id: %3%
+        data_type: %4%
       >
       op: LessThan
     >
@@ -498,7 +507,8 @@ vector_anns: <
   >
   placeholder_tag: "$0"
 >
-)") % field_id % data_type_str;
+)") % vec_float_field_id.get() %
+                age_fid.get() % field_id.get() % data_type_str;
 
     auto proto_text = fmt1.str();
     planpb::PlanNode node_proto;
@@ -547,33 +557,48 @@ vector_anns: <
 
 TEST_P(PlanProtoTest, BinaryArithOpEvalRange) {
     // xxx.query(predicates = "int64field > 3", topk = 10, ...)
-    auto data_type = std::get<0>(GetParam());
-    auto data_type_str = spb::DataType_Name(data_type);
-    auto field_id = 100 + (int)data_type;
-    auto field_name = data_type_str + "Field";
+    //    auto data_type = std::get<0>(GetParam());
+    //    auto data_type_str = spb::DataType_Name(data_type);
+    //    auto field_id = 100 + (int)data_type;
+    //    auto field_name = data_type_str + "Field";
+    //    string value_tag = "bool_val";
+    //    if (datatype_is_floating((DataType)data_type)) {
+    //        value_tag = "float_val";
+    //    } else if (datatype_is_integer((DataType)data_type)) {
+    //        value_tag = "int64_val";
+    //    }
+
+    FieldName vec_field_name = FieldName("FloatVectorField");
+    FieldId vec_float_field_id = schema->get_field_id(vec_field_name);
+
+    auto field_name = std::get<0>(GetParam());
+    auto field_id = schema->get_field_id(FieldName(field_name));
+    auto data_type = schema->operator[](field_id).get_data_type();
+    auto data_type_str = spb::DataType_Name(int(data_type));
+
     string value_tag = "bool_val";
-    if (datatype_is_floating((DataType)data_type)) {
+    if (datatype_is_floating(data_type)) {
         value_tag = "float_val";
-    } else if (datatype_is_integer((DataType)data_type)) {
+    } else if (datatype_is_integer(data_type)) {
         value_tag = "int64_val";
     }
 
     auto fmt1 = boost::format(R"(
 vector_anns: <
-  field_id: 201
+  field_id: %1%
   predicates: <
     binary_arith_op_eval_range_expr: <
       column_info: <
-        field_id: %1%
-        data_type: %2%
+        field_id: %2%
+        data_type: %3%
       >
       arith_op: Add
       right_operand: <
-        %3%: 1029
+        %4%: 1029
       >
       op: Equal
       value: <
-        %3%: 2016
+        %4%: 2016
       >
     >
   >
@@ -585,8 +610,8 @@ vector_anns: <
   >
   placeholder_tag: "$0"
 >
-)") % field_id % data_type_str %
-                value_tag;
+)") % vec_float_field_id.get() %
+                field_id.get() % data_type_str % value_tag;
 
     auto proto_text = fmt1.str();
     planpb::PlanNode node_proto;

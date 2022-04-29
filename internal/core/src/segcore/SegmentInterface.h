@@ -51,6 +51,7 @@ class SegmentInterface {
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
 
+    // TODO: memory use is not correct when load string or load string index
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
 
@@ -64,7 +65,7 @@ class SegmentInterface {
     PreDelete(int64_t size) = 0;
 
     virtual Status
-    Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
+    Delete(int64_t reserved_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) = 0;
 };
 
 // internal API for DSL calculation
@@ -73,16 +74,16 @@ class SegmentInternalInterface : public SegmentInterface {
  public:
     template <typename T>
     Span<T>
-    chunk_data(FieldOffset field_offset, int64_t chunk_id) const {
-        return static_cast<Span<T>>(chunk_data_impl(field_offset, chunk_id));
+    chunk_data(FieldId field_id, int64_t chunk_id) const {
+        return static_cast<Span<T>>(chunk_data_impl(field_id, chunk_id));
     }
 
     template <typename T>
     const scalar::ScalarIndex<T>&
-    chunk_scalar_index(FieldOffset field_offset, int64_t chunk_id) const {
+    chunk_scalar_index(FieldId field_id, int64_t chunk_id) const {
         static_assert(IsScalar<T>);
         using IndexType = scalar::ScalarIndex<T>;
-        auto base_ptr = chunk_index_impl(field_offset, chunk_id);
+        auto base_ptr = chunk_index_impl(field_id, chunk_id);
         auto ptr = dynamic_cast<const IndexType*>(base_ptr);
         AssertInfo(ptr, "entry mismatch");
         return *ptr;
@@ -102,6 +103,12 @@ class SegmentInternalInterface : public SegmentInterface {
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) const override;
 
+    virtual bool
+    HasIndex(FieldId field_id) const = 0;
+
+    virtual bool
+    HasFieldData(FieldId field_id) const = 0;
+
     virtual std::string
     debug() const = 0;
 
@@ -120,7 +127,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // count of chunk that has index available
     virtual int64_t
-    num_chunk_index(FieldOffset field_offset) const = 0;
+    num_chunk_index(FieldId field_id) const = 0;
 
     virtual void
     mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const = 0;
@@ -148,11 +155,11 @@ class SegmentInternalInterface : public SegmentInterface {
  protected:
     // internal API: return chunk_data in span
     virtual SpanBase
-    chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
+    chunk_data_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
     // internal API: return chunk_index in span, support scalar index only
     virtual const knowhere::Index*
-    chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const = 0;
+    chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
     // TODO remove system fields
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
@@ -160,13 +167,8 @@ class SegmentInternalInterface : public SegmentInterface {
     bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
 
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
-    virtual void
-    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
-
-    // TODO: special hack: FieldOffset == -1 -> RowId.
-    // TODO: remove this hack when transfer is done
     virtual std::unique_ptr<DataArray>
-    BulkSubScript(FieldOffset field_offset, const SegOffset* seg_offsets, int64_t count) const;
+    bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;
@@ -174,11 +176,5 @@ class SegmentInternalInterface : public SegmentInterface {
  protected:
     mutable std::shared_mutex mutex_;
 };
-
-static std::unique_ptr<ScalarArray>
-CreateScalarArrayFrom(const void* data_raw, int64_t count, DataType data_type);
-
-std::unique_ptr<DataArray>
-CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta);
 
 }  // namespace milvus::segcore

@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -195,9 +196,10 @@ func TestTask_AddQueryChannel(t *testing.T) {
 func TestTask_watchDmChannelsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
 	genWatchDMChannelsRequest := func() *querypb.WatchDmChannelsRequest {
-		schema := genSimpleSegCoreSchema()
 		req := &querypb.WatchDmChannelsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_WatchDmChannels),
 			CollectionID: defaultCollectionID,
@@ -392,7 +394,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			node: node,
 		}
 
-		fieldBinlog, err := saveSimpleBinLog(ctx)
+		fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
 		task.req.Infos = []*datapb.VchannelInfo{
@@ -508,9 +510,10 @@ func TestTask_watchDeltaChannelsTask(t *testing.T) {
 func TestTask_loadSegmentsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
 	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
-		schema := genSimpleSegCoreSchema()
 		req := &querypb.LoadSegmentsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments),
 			CollectionID: defaultCollectionID,
@@ -547,9 +550,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		schema := genSimpleInsertDataSchema()
-
-		fieldBinlog, err := saveSimpleBinLog(ctx)
+		fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{

@@ -32,9 +32,7 @@ struct DeletedRecord {
     };
     static constexpr int64_t deprecated_size_per_chunk = 32 * 1024;
     DeletedRecord()
-        : lru_(std::make_shared<TmpBitmap>()),
-          timestamps_(deprecated_size_per_chunk),
-          uids_(deprecated_size_per_chunk) {
+        : lru_(std::make_shared<TmpBitmap>()), timestamps_(deprecated_size_per_chunk), pks_(deprecated_size_per_chunk) {
         lru_->bitmap_ptr = std::make_shared<BitsetType>();
     }
 
@@ -60,7 +58,7 @@ struct DeletedRecord {
     std::atomic<int64_t> reserved = 0;
     AckResponder ack_responder_;
     ConcurrentVector<Timestamp> timestamps_;
-    ConcurrentVector<idx_t> uids_;
+    ConcurrentVector<PkType> pks_;
     int64_t record_size_ = 0;
 
  private:

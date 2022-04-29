@@ -1760,10 +1760,8 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			schema:         nil,
 		}
 
-		fieldID := common.StartOfUserFieldID
 		for fieldName, dataType := range fieldName2Types {
-			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), nb))
-			fieldID++
+			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, nb))
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -1982,7 +1980,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 		fieldID := common.StartOfUserFieldID
 		for fieldName, dataType := range fieldName2Types {
-			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), nb))
+			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, nb))
 			fieldID++
 		}
 

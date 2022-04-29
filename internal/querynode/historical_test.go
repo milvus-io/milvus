@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,7 +33,9 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		_, _, _, err = his.search(searchReqs, defaultCollectionID, []UniqueID{defaultPartitionID}, plan, Timestamp(0))
@@ -44,7 +47,9 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = his.replica.removeCollection(defaultCollectionID)
@@ -59,7 +64,9 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = his.replica.removeCollection(defaultCollectionID)
@@ -74,7 +81,9 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		col, err := his.replica.getCollectionByID(defaultCollectionID)
@@ -93,7 +102,9 @@ func TestHistorical_Search(t *testing.T) {
 		his, err := genSimpleHistorical(ctx, tSafe)
 		assert.NoError(t, err)
 
-		plan, searchReqs, err := genSimpleSearchPlanAndRequests(IndexFaissIDMap)
+		collection, err := his.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		plan, searchReqs, err := genSearchPlanAndRequests(collection, IndexFaissIDMap)
 		assert.NoError(t, err)
 
 		err = his.replica.removePartition(defaultPartitionID)
@@ -156,10 +167,9 @@ func TestHistorical_validateSegmentIDs(t *testing.T) {
 		assert.NoError(t, err)
 		err = his.replica.addPartition(defaultCollectionID, defaultPartitionID+1)
 		assert.NoError(t, err)
-		schema := genSimpleSegCoreSchema()
-		schema2 := genSimpleInsertDataSchema()
+		pkType := schemapb.DataType_Int64
+		schema := genTestCollectionSchema(pkType)
 		seg, err := genSealedSegment(schema,
-			schema2,
 			defaultCollectionID,
 			defaultPartitionID+1,
 			defaultSegmentID+1,

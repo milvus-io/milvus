@@ -319,6 +319,10 @@ func getCompareOpType(opStr string, reverse bool) (op planpb.OpType) {
 		op = planpb.OpType_Equal
 	case "!=":
 		op = planpb.OpType_NotEqual
+	case "startsWith":
+		op = planpb.OpType_PrefixMatch
+	case "endsWith":
+		op = planpb.OpType_PostfixMatch
 	default:
 		op = planpb.OpType_Invalid
 	}
@@ -692,7 +696,7 @@ func (pc *parserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Exp
 	switch node.Operator {
 	case "<", "<=", ">", ">=":
 		return pc.handleMultiCmpExpr(node)
-	case "==", "!=":
+	case "==", "!=", "startsWith", "endsWith":
 		return pc.handleCmpExpr(node)
 	case "and", "or", "&&", "||":
 		return pc.handleLogicalExpr(node)

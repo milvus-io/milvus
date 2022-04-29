@@ -12,6 +12,7 @@
 #pragma once
 
 #include <deque>
+#include <unordered_map>
 #include <map>
 #include <memory>
 #include <string>
@@ -62,7 +63,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
  public:
     int64_t
-    num_chunk_index(FieldOffset field_offset) const override;
+    num_chunk_index(FieldId field_id) const override;
 
     int64_t
     num_chunk() const override;
@@ -78,15 +79,15 @@ class SegmentSealedImpl : public SegmentSealed {
     PreDelete(int64_t size) override;
 
     Status
-    Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
+    Delete(int64_t reserved_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) override;
 
  protected:
     // blob and row_count
     SpanBase
-    chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const override;
+    chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
 
     const knowhere::Index*
-    chunk_index_impl(FieldOffset field_offset, int64_t chunk_id) const override;
+    chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]],
     // where Vec is determined from field_offset
@@ -95,8 +96,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
-    void
-    bulk_subscript(FieldOffset field_offset, const int64_t* seg_offsets, int64_t count, void* output) const override;
+    std::unique_ptr<DataArray>
+    bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const override;
 
     void
     check_search(const query::Plan* plan) const override;
@@ -118,6 +119,9 @@ class SegmentSealedImpl : public SegmentSealed {
     static void
     bulk_subscript_impl(
         int64_t element_sizeof, const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
+
+    std::unique_ptr<DataArray>
+    fill_with_empty(FieldId field_id, int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
@@ -162,8 +166,11 @@ class SegmentSealedImpl : public SegmentSealed {
     std::vector<SegOffset>
     search_ids(const BitsetType& view, Timestamp timestamp) const override;
 
-    //    virtual void
-    //    build_index_if_primary_key(FieldId field_id);
+    void
+    LoadVecIndex(const LoadIndexInfo& info);
+
+    void
+    LoadScalarIndex(const LoadIndexInfo& info);
 
  private:
     // segment loading state
@@ -175,18 +182,21 @@ class SegmentSealedImpl : public SegmentSealed {
     // TODO: generate index for scalar
     std::optional<int64_t> row_count_opt_;
 
-    // TODO: use protobuf format
-    // TODO: remove duplicated indexing
-    std::vector<std::unique_ptr<knowhere::Index>> scalar_indexings_;
-    std::unique_ptr<ScalarIndexBase> primary_key_index_;
+    // scalar field index
+    std::unordered_map<FieldId, knowhere::IndexPtr> scalar_indexings_;
+    // vector field index
+    SealedIndexingRecord vector_indexings_;
 
-    std::vector<aligned_vector<char>> fields_data_;
+    // inserted fields data and row_ids, timestamps
+    InsertRecord insert_record_;
+
+    // deleted pks
     mutable DeletedRecord deleted_record_;
 
-    SealedIndexingRecord vecindexs_;
-    aligned_vector<idx_t> row_ids_;
-    aligned_vector<Timestamp> timestamps_;
-    TimestampIndex timestamp_index_;
+    // pks to row offset
+    tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>> pk2offset_;
+    //    std::unique_ptr<ScalarIndexBase> primary_key_index_;
+
     SchemaPtr schema_;
     int64_t id_;
 };

@@ -93,7 +93,9 @@ func TestQueryShard_Search(t *testing.T) {
 	qs, err := genSimpleQueryShard(context.Background())
 	assert.NoError(t, err)
 
-	req, err := genSimpleSearchRequest(IndexFaissIDMap)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	req, err := genSearchRequest(defaultNQ, IndexFaissIDMap, schema)
 	assert.NoError(t, err)
 
 	t.Run("search follower", func(t *testing.T) {
@@ -123,7 +125,9 @@ func TestQueryShard_Query(t *testing.T) {
 	qs, err := genSimpleQueryShard(context.Background())
 	assert.NoError(t, err)
 
-	req, err := genSimpleRetrieveRequest()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	req, err := genRetrieveRequest(schema)
 	assert.NoError(t, err)
 
 	t.Run("query follower", func(t *testing.T) {
@@ -187,9 +191,9 @@ func TestQueryShard_WaitUntilServiceable(t *testing.T) {
 	qs.waitUntilServiceable(context.Background(), 1000, tsTypeDML)
 }
 
-func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32) *schemapb.SearchResultData {
+func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32, topks []int64) *schemapb.SearchResultData {
 	return &schemapb.SearchResultData{
-		NumQueries: nq,
+		NumQueries: 1,
 		TopK:       topk,
 		FieldsData: nil,
 		Scores:     scores,
@@ -200,7 +204,7 @@ func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32) *s
 				},
 			},
 		},
-		Topks: make([]int64, nq),
+		Topks: topks,
 	}
 }
 
@@ -210,15 +214,17 @@ func TestReduceSearchResultData(t *testing.T) {
 		topk       = 4
 		metricType = "L2"
 	)
+	plan := &SearchPlan{pkType: schemapb.DataType_Int64}
 	t.Run("case1", func(t *testing.T) {
 		ids := []int64{1, 2, 3, 4}
 		scores := []float32{-1.0, -2.0, -3.0, -4.0}
-		data1 := genSearchResultData(nq, topk, ids, scores)
-		data2 := genSearchResultData(nq, topk, ids, scores)
+		topks := []int64{int64(len(ids))}
+		data1 := genSearchResultData(nq, topk, ids, scores, topks)
+		data2 := genSearchResultData(nq, topk, ids, scores, topks)
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		res, err := reduceSearchResultData(dataArray, nq, topk, metricType)
+		res, err := reduceSearchResultData(dataArray, nq, topk, plan)
 		assert.Nil(t, err)
 		assert.Equal(t, ids, res.Ids.GetIntId().Data)
 		assert.Equal(t, scores, res.Scores)
@@ -226,14 +232,16 @@ func TestReduceSearchResultData(t *testing.T) {
 	t.Run("case2", func(t *testing.T) {
 		ids1 := []int64{1, 2, 3, 4}
 		scores1 := []float32{-1.0, -2.0, -3.0, -4.0}
+		topks1 := []int64{int64(len(ids1))}
 		ids2 := []int64{5, 1, 3, 4}
 		scores2 := []float32{-1.0, -1.0, -3.0, -4.0}
-		data1 := genSearchResultData(nq, topk, ids1, scores1)
-		data2 := genSearchResultData(nq, topk, ids2, scores2)
+		topks2 := []int64{int64(len(ids2))}
+		data1 := genSearchResultData(nq, topk, ids1, scores1, topks1)
+		data2 := genSearchResultData(nq, topk, ids2, scores2, topks2)
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		res, err := reduceSearchResultData(dataArray, nq, topk, metricType)
+		res, err := reduceSearchResultData(dataArray, nq, topk, plan)
 		assert.Nil(t, err)
 		assert.ElementsMatch(t, []int64{1, 5, 2, 3}, res.Ids.GetIntId().Data)
 	})

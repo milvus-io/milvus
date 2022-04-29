@@ -22,11 +22,14 @@
 #include <utility>
 #include <vector>
 #include <boost/align/aligned_allocator.hpp>
+#include <boost/container/vector.hpp>
 #include <boost/dynamic_bitset.hpp>
 #include <NamedType/named_type.hpp>
+#include <variant>
 
 #include "knowhere/common/MetricType.h"
 #include "pb/schema.pb.h"
+#include "pb/segcore.pb.h"
 #include "utils/Types.h"
 
 namespace milvus {
@@ -36,18 +39,24 @@ constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
 
 using engine::DataType;
 using engine::idx_t;
+constexpr auto MAX_ROW_COUNT = std::numeric_limits<engine::idx_t>::max();
 
 using ScalarArray = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
 using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
 using MetricType = faiss::MetricType;
+using InsertData = proto::segcore::InsertRecord;
+using PkType = std::variant<std::monostate, int64_t, std::string>;
 
 MetricType
 GetMetricType(const std::string& type);
 
 std::string
 MetricTypeToName(MetricType metric_type);
+
+bool
+IsPrimaryKeyDataType(DataType data_type);
 
 // NOTE: dependent type
 // used at meta-template programming
@@ -70,11 +79,16 @@ struct SegOffsetTag;
 
 using FieldId = fluent::NamedType<int64_t, impl::FieldIdTag, fluent::Comparable, fluent::Hashable>;
 using FieldName = fluent::NamedType<std::string, impl::FieldNameTag, fluent::Comparable, fluent::Hashable>;
-using FieldOffset = fluent::NamedType<int64_t, impl::FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
+// using FieldOffset = fluent::NamedType<int64_t, impl::FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
 using SegOffset = fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;
 
 using BitsetType = boost::dynamic_bitset<>;
 using BitsetTypePtr = std::shared_ptr<boost::dynamic_bitset<>>;
 using BitsetTypeOpt = std::optional<BitsetType>;
 
+template <typename Type>
+using FixedVector = boost::container::vector<Type>;
+
+const FieldId RowFieldID = FieldId(0);
+const FieldId TimestampFieldID = FieldId(1);
 }  // namespace milvus

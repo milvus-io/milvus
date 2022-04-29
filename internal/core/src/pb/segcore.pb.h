@@ -48,7 +48,7 @@ struct TableStruct_segcore_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[3]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[4]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -58,6 +58,9 @@ extern const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table
 namespace milvus {
 namespace proto {
 namespace segcore {
+class InsertRecord;
+class InsertRecordDefaultTypeInternal;
+extern InsertRecordDefaultTypeInternal _InsertRecord_default_instance_;
 class LoadFieldMeta;
 class LoadFieldMetaDefaultTypeInternal;
 extern LoadFieldMetaDefaultTypeInternal _LoadFieldMeta_default_instance_;
@@ -71,6 +74,7 @@ extern RetrieveResultsDefaultTypeInternal _RetrieveResults_default_instance_;
 }  // namespace proto
 }  // namespace milvus
 PROTOBUF_NAMESPACE_OPEN
+template<> ::milvus::proto::segcore::InsertRecord* Arena::CreateMaybeMessage<::milvus::proto::segcore::InsertRecord>(Arena*);
 template<> ::milvus::proto::segcore::LoadFieldMeta* Arena::CreateMaybeMessage<::milvus::proto::segcore::LoadFieldMeta>(Arena*);
 template<> ::milvus::proto::segcore::LoadSegmentMeta* Arena::CreateMaybeMessage<::milvus::proto::segcore::LoadSegmentMeta>(Arena*);
 template<> ::milvus::proto::segcore::RetrieveResults* Arena::CreateMaybeMessage<::milvus::proto::segcore::RetrieveResults>(Arena*);
@@ -529,6 +533,150 @@ class LoadSegmentMeta :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_segcore_2eproto;
 };
+// -------------------------------------------------------------------
+
+class InsertRecord :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.segcore.InsertRecord) */ {
+ public:
+  InsertRecord();
+  virtual ~InsertRecord();
+
+  InsertRecord(const InsertRecord& from);
+  InsertRecord(InsertRecord&& from) noexcept
+    : InsertRecord() {
+    *this = ::std::move(from);
+  }
+
+  inline InsertRecord& operator=(const InsertRecord& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline InsertRecord& operator=(InsertRecord&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const InsertRecord& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const InsertRecord* internal_default_instance() {
+    return reinterpret_cast<const InsertRecord*>(
+               &_InsertRecord_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    3;
+
+  friend void swap(InsertRecord& a, InsertRecord& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(InsertRecord* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline InsertRecord* New() const final {
+    return CreateMaybeMessage<InsertRecord>(nullptr);
+  }
+
+  InsertRecord* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<InsertRecord>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const InsertRecord& from);
+  void MergeFrom(const InsertRecord& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(InsertRecord* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.segcore.InsertRecord";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_segcore_2eproto);
+    return ::descriptor_table_segcore_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kFieldsDataFieldNumber = 1,
+    kNumRowsFieldNumber = 2,
+  };
+  // repeated .milvus.proto.schema.FieldData fields_data = 1;
+  int fields_data_size() const;
+  void clear_fields_data();
+  ::milvus::proto::schema::FieldData* mutable_fields_data(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >*
+      mutable_fields_data();
+  const ::milvus::proto::schema::FieldData& fields_data(int index) const;
+  ::milvus::proto::schema::FieldData* add_fields_data();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >&
+      fields_data() const;
+
+  // int64 num_rows = 2;
+  void clear_num_rows();
+  ::PROTOBUF_NAMESPACE_ID::int64 num_rows() const;
+  void set_num_rows(::PROTOBUF_NAMESPACE_ID::int64 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.segcore.InsertRecord)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData > fields_data_;
+  ::PROTOBUF_NAMESPACE_ID::int64 num_rows_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_segcore_2eproto;
+};
 // ===================================================================
 
 
@@ -736,9 +884,56 @@ inline void LoadSegmentMeta::set_total_size(::PROTOBUF_NAMESPACE_ID::int64 value
   // @@protoc_insertion_point(field_set:milvus.proto.segcore.LoadSegmentMeta.total_size)
 }
 
+// -------------------------------------------------------------------
+
+// InsertRecord
+
+// repeated .milvus.proto.schema.FieldData fields_data = 1;
+inline int InsertRecord::fields_data_size() const {
+  return fields_data_.size();
+}
+inline ::milvus::proto::schema::FieldData* InsertRecord::mutable_fields_data(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.segcore.InsertRecord.fields_data)
+  return fields_data_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >*
+InsertRecord::mutable_fields_data() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.segcore.InsertRecord.fields_data)
+  return &fields_data_;
+}
+inline const ::milvus::proto::schema::FieldData& InsertRecord::fields_data(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.InsertRecord.fields_data)
+  return fields_data_.Get(index);
+}
+inline ::milvus::proto::schema::FieldData* InsertRecord::add_fields_data() {
+  // @@protoc_insertion_point(field_add:milvus.proto.segcore.InsertRecord.fields_data)
+  return fields_data_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldData >&
+InsertRecord::fields_data() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.segcore.InsertRecord.fields_data)
+  return fields_data_;
+}
+
+// int64 num_rows = 2;
+inline void InsertRecord::clear_num_rows() {
+  num_rows_ = PROTOBUF_LONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 InsertRecord::num_rows() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.segcore.InsertRecord.num_rows)
+  return num_rows_;
+}
+inline void InsertRecord::set_num_rows(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  
+  num_rows_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.segcore.InsertRecord.num_rows)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

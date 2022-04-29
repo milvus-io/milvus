@@ -114,8 +114,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		dMsg := deleteMsg{
 			deleteMessages: []*msgstream.DeleteMsg{
 				msgDeleteMsg,
@@ -150,8 +149,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgDeleteMsg.PartitionID = common.InvalidPartitionID
 		assert.NoError(t, err)
 		dMsg := deleteMsg{
@@ -176,7 +174,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgDeleteMsg.CollectionID = 9999
 		msgDeleteMsg.PartitionID = -1
 		assert.NoError(t, err)
@@ -202,7 +200,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgDeleteMsg.PartitionID = 9999
 		assert.NoError(t, err)
 		dMsg := deleteMsg{
@@ -227,8 +225,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			true)
 		assert.NoError(t, err)
 
-		msgDeleteMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		dMsg := deleteMsg{
 			deleteMessages: []*msgstream.DeleteMsg{
 				msgDeleteMsg,

@@ -41,6 +41,7 @@ enum class DataType {
     DOUBLE = 11,
 
     STRING = 20,
+    VARCHAR = 21,
 
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,

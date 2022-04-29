@@ -49,7 +49,7 @@ TEST(Retrieve, AutoID) {
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
     auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
-    schema->set_primary_key(FieldOffset(0));
+    schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
     int64_t req_size = 10;
@@ -58,22 +58,21 @@ TEST(Retrieve, AutoID) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
     SealedLoader(dataset, *segment);
-    auto i64_col = dataset.get_col<int64_t>(0);
+    auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
-    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    plan->field_offsets_ = target_offsets;
+    std::vector<FieldId> target_fields_id{fid_64, fid_vec};
+    plan->field_ids_ = target_fields_id;
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
-    Assert(retrieve_results->fields_data_size() == target_offsets.size());
-    FieldOffset field_offset(0);
+    Assert(retrieve_results->fields_data_size() == target_fields_id.size());
     auto field0 = retrieve_results->fields_data(0);
     Assert(field0.has_scalars());
     auto field0_data = field0.scalars().long_data();
@@ -100,7 +99,7 @@ TEST(Retrieve, AutoID2) {
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
     auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
-    schema->set_primary_key(FieldOffset(0));
+    schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
     int64_t req_size = 10;
@@ -109,22 +108,21 @@ TEST(Retrieve, AutoID2) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
     SealedLoader(dataset, *segment);
-    auto i64_col = dataset.get_col<int64_t>(0);
+    auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
-    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    plan->field_offsets_ = target_offsets;
+    std::vector<FieldId> target_offsets{fid_64, fid_vec};
+    plan->field_ids_ = target_offsets;
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
-    FieldOffset field_offset(0);
     auto field0 = retrieve_results->fields_data(0);
     Assert(field0.has_scalars());
     auto field0_data = field0.scalars().long_data();
@@ -146,7 +144,7 @@ TEST(Retrieve, NotExist) {
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
     auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
-    schema->set_primary_key(FieldOffset(0));
+    schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
     int64_t req_size = 10;
@@ -156,7 +154,7 @@ TEST(Retrieve, NotExist) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
     SealedLoader(dataset, *segment);
-    auto i64_col = dataset.get_col<int64_t>(0);
+    auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
@@ -165,15 +163,14 @@ TEST(Retrieve, NotExist) {
         values.emplace_back(choose2(i));
     }
 
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
-    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    plan->field_offsets_ = target_offsets;
+    std::vector<FieldId> target_offsets{fid_64, fid_vec};
+    plan->field_ids_ = target_offsets;
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
-    FieldOffset field_offset(0);
     auto field0 = retrieve_results->fields_data(0);
     Assert(field0.has_scalars());
     auto field0_data = field0.scalars().long_data();
@@ -195,7 +192,7 @@ TEST(Retrieve, Empty) {
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
     auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
-    schema->set_primary_key(FieldOffset(0));
+    schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
     int64_t req_size = 10;
@@ -208,11 +205,11 @@ TEST(Retrieve, Empty) {
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(choose(i));
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
-    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    plan->field_offsets_ = target_offsets;
+    std::vector<FieldId> target_offsets{fid_64, fid_vec};
+    plan->field_ids_ = target_offsets;
 
     auto retrieve_results = segment->Retrieve(plan.get(), 100);
 
@@ -230,7 +227,7 @@ TEST(Retrieve, LargeTimestamp) {
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
     auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
-    schema->set_primary_key(FieldOffset(0));
+    schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
     int64_t req_size = 10;
@@ -240,32 +237,38 @@ TEST(Retrieve, LargeTimestamp) {
     auto dataset = DataGen(schema, N, 42, ts_offset + 1);
     auto segment = CreateSealedSegment(schema);
     SealedLoader(dataset, *segment);
-    auto i64_col = dataset.get_col<int64_t>(0);
+    auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
-    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    plan->field_offsets_ = target_offsets;
+    std::vector<FieldId> target_offsets{fid_64, fid_vec};
+    plan->field_ids_ = target_offsets;
 
     std::vector<int> filter_timestamps{-1, 0, 1, 10, 20};
     filter_timestamps.push_back(N / 2);
     for (const auto& f_ts : filter_timestamps) {
         auto retrieve_results = segment->Retrieve(plan.get(), ts_offset + 1 + f_ts);
         Assert(retrieve_results->fields_data_size() == 2);
-        auto field0 = retrieve_results->fields_data(0);
-        auto field1 = retrieve_results->fields_data(1);
+
         int target_num = (f_ts + choose_sep) / choose_sep;
         if (target_num > req_size) {
             target_num = req_size;
         }
-        Assert(field0.scalars().long_data().data_size() == target_num);
-        Assert(field1.vectors().float_vector().data_size() == target_num * DIM);
+
+        for (auto field_data : retrieve_results->fields_data()) {
+            if (DataType(field_data.type()) == DataType::INT64) {
+                Assert(field_data.scalars().long_data().data_size() == target_num);
+            }
+            if (DataType(field_data.type()) == DataType::VECTOR_FLOAT) {
+                Assert(field_data.vectors().float_vector().data_size() == target_num * DIM);
+            }
+        }
     }
 }
 
@@ -274,7 +277,7 @@ TEST(Retrieve, Delete) {
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
     auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
-    schema->set_primary_key(FieldOffset(0));
+    schema->set_primary_field_id(fid_64);
 
     int64_t N = 10;
     int64_t req_size = 10;
@@ -283,23 +286,22 @@ TEST(Retrieve, Delete) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
     SealedLoader(dataset, *segment);
-    auto i64_col = dataset.get_col<int64_t>(0);
+    auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldOffset(0), DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
-    std::vector<FieldOffset> target_offsets{FieldOffset(0), FieldOffset(1)};
-    plan->field_offsets_ = target_offsets;
+    std::vector<FieldId> target_offsets{fid_64, fid_vec};
+    plan->field_ids_ = target_offsets;
 
     {
         auto retrieve_results = segment->Retrieve(plan.get(), 100);
         Assert(retrieve_results->fields_data_size() == target_offsets.size());
-        FieldOffset field_offset(0);
         auto field0 = retrieve_results->fields_data(0);
         Assert(field0.has_scalars());
         auto field0_data = field0.scalars().long_data();
@@ -326,25 +328,28 @@ TEST(Retrieve, Delete) {
     auto load_delete_record = false;
     if (load_delete_record) {
         std::vector<idx_t> pks{1, 2, 3, 4, 5};
+        auto ids = std::make_unique<IdArray>();
+        ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
+
         std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
-        LoadDeletedRecordInfo info = {timestamps.data(), pks.data(), row_count};
+        LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
         segment->LoadDeletedRecord(info);
         row_count = 5;
     }
 
     int64_t new_count = 6;
     std::vector<idx_t> new_pks{0, 1, 2, 3, 4, 5};
+    auto ids = std::make_unique<IdArray>();
+    ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
     std::vector<idx_t> new_timestamps{10, 10, 10, 10, 10, 10};
     auto reserved_offset = segment->PreDelete(new_count);
     ASSERT_EQ(reserved_offset, row_count);
-    segment->Delete(reserved_offset, new_count, reinterpret_cast<const int64_t*>(new_pks.data()),
-                    reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+    segment->Delete(reserved_offset, new_count, ids.get(), reinterpret_cast<const Timestamp*>(new_timestamps.data()));
 
     {
         auto retrieve_results = segment->Retrieve(plan.get(), 100);
         Assert(retrieve_results->fields_data_size() == target_offsets.size());
-        FieldOffset field_offset(0);
         auto field0 = retrieve_results->fields_data(0);
         Assert(field0.has_scalars());
         auto field0_data = field0.scalars().long_data();

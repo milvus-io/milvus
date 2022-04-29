@@ -22,10 +22,13 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func TestFlowGraphMsg_insertMsg(t *testing.T) {
-	msg, err := genSimpleInsertMsg()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	msg, err := genSimpleInsertMsg(schema, defaultMsgLength)
 	assert.NoError(t, err)
 	timestampMax := Timestamp(1000)
 	im := insertMsg{

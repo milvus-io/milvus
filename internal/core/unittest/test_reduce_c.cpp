@@ -19,15 +19,15 @@ TEST(SearchResultPair, Greater) {
     auto pair2 = SearchResultPair(1, 2.0, nullptr, 1, 0, 10);
     ASSERT_EQ(pair1 > pair2, false);
 
-    pair1.primary_key_ = INVALID_ID;
+    pair1.primary_key_ = INVALID_PK;
     pair2.primary_key_ = 1;
     ASSERT_EQ(pair1 > pair2, false);
 
     pair1.primary_key_ = 0;
-    pair2.primary_key_ = INVALID_ID;
+    pair2.primary_key_ = INVALID_PK;
     ASSERT_EQ(pair1 > pair2, true);
 
-    pair1.primary_key_ = INVALID_ID;
-    pair2.primary_key_ = INVALID_ID;
+    pair1.primary_key_ = INVALID_PK;
+    pair2.primary_key_ = INVALID_PK;
     ASSERT_EQ(pair1 > pair2, false);
 }

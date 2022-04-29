@@ -51,8 +51,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	defer cancel()
 
 	t.Run("delete valid test", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDeleteNode(ctx)
 		assert.NoError(t, err)
 		res := fg.filterInvalidDeleteMessage(msg)
@@ -60,8 +59,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msg.CollectionID = UniqueID(1003)
 		fg, err := getFilterDeleteNode(ctx)
 		assert.NoError(t, err)
@@ -70,8 +68,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete not target collection", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDeleteNode(ctx)
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
@@ -80,8 +77,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 	})
 
 	t.Run("test delete no data", func(t *testing.T) {
-		msg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDeleteNode(ctx)
 		assert.NoError(t, err)
 		msg.Timestamps = make([]Timestamp, 0)
@@ -99,8 +95,7 @@ func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
 	defer cancel()
 
 	genFilterDeleteMsg := func() []flowgraph.Msg {
-		dMsg, err := genSimpleDeleteMsg(schemapb.DataType_Int64)
-		assert.NoError(t, err)
+		dMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msg := flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{dMsg}, 0, 1000, nil, nil)
 		return []flowgraph.Msg{msg}
 	}

@@ -156,10 +156,8 @@ func TestQueryTask_all(t *testing.T) {
 		},
 	}
 
-	fieldID := common.StartOfUserFieldID
 	for fieldName, dataType := range fieldName2Types {
-		result1.FieldsData = append(result1.FieldsData, generateFieldData(dataType, fieldName, int64(fieldID), hitNum))
-		fieldID++
+		result1.FieldsData = append(result1.FieldsData, generateFieldData(dataType, fieldName, hitNum))
 	}
 
 	qn.withQueryResult = result1

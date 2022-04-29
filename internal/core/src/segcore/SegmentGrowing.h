@@ -43,19 +43,12 @@ class SegmentGrowing : public SegmentInternalInterface {
     virtual int64_t
     PreInsert(int64_t size) = 0;
 
-    virtual Status
-    Insert(int64_t reserved_offset,
-           int64_t size,
-           const int64_t* row_ids,
-           const Timestamp* timestamps,
-           const RowBasedRawData& values) = 0;
-
     virtual void
     Insert(int64_t reserved_offset,
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
-           const ColumnBasedRawData& values) = 0;
+           const InsertData* insert_data) = 0;
 
     // virtual int64_t
     // PreDelete(int64_t size) = 0;

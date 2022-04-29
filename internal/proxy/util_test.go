@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -101,15 +102,62 @@ func TestValidateFieldName(t *testing.T) {
 }
 
 func TestValidateDimension(t *testing.T) {
-	assert.Nil(t, validateDimension(1, false))
-	assert.Nil(t, validateDimension(Params.ProxyCfg.MaxDimension, false))
-	assert.Nil(t, validateDimension(8, true))
-	assert.Nil(t, validateDimension(Params.ProxyCfg.MaxDimension, true))
+	fieldSchema := &schemapb.FieldSchema{
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "1",
+			},
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension)),
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
 
 	// invalid dim
-	assert.NotNil(t, validateDimension(-1, false))
-	assert.NotNil(t, validateDimension(Params.ProxyCfg.MaxDimension+1, false))
-	assert.NotNil(t, validateDimension(9, true))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "-1",
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension + 1)),
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
+
+	fieldSchema.DataType = schemapb.DataType_BinaryVector
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "8",
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension)),
+		},
+	}
+	assert.Nil(t, validateDimension(fieldSchema))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "9",
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
 }
 
 func TestValidateVectorFieldMetricType(t *testing.T) {

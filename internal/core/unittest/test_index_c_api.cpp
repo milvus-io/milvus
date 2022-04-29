@@ -43,7 +43,7 @@ TEST(FloatVecIndex, All) {
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
+    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
 
     CDataType dtype = FloatVector;
     CIndex index;
@@ -94,7 +94,7 @@ TEST(BinaryVecIndex, All) {
     ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, true);
-    auto xb_data = dataset.get_col<uint8_t>(0);
+    auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
 
     CDataType dtype = BinaryVector;
     CIndex index;

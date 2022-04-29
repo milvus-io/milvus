@@ -35,13 +35,13 @@ TEST(Query, ShowExecutor) {
     using namespace milvus;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    auto field_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->search_info_;
     info.metric_type_ = MetricType::METRIC_L2;
     info.topk_ = 20;
-    info.field_offset_ = FieldOffset(1000);
+    info.field_id_ = field_id;
     node->predicate_ = std::nullopt;
     ShowPlanNodeVisitor show_visitor;
     PlanNodePtr base(node.release());
@@ -140,6 +140,8 @@ TEST(Query, ExecWithPredicateLoader) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::FLOAT);
+    auto counter_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(counter_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -171,10 +173,7 @@ TEST(Query, ExecWithPredicateLoader) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    ColumnBasedRawData raw_data;
-    raw_data.columns_ = dataset.cols_;
-    raw_data.count = N;
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), raw_data);
+    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -219,6 +218,8 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 7, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -271,6 +272,8 @@ TEST(Query, ExecWithPredicate) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -347,6 +350,8 @@ TEST(Query, ExecTerm) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -430,7 +435,7 @@ TEST(Query, ExecEmpty) {
     auto sr = segment->Search(plan.get(), *ph_group, time);
     std::cout << SearchResultToJson(*sr);
 
-    for (auto i : sr->ids_) {
+    for (auto i : sr->seg_offsets_) {
         ASSERT_EQ(i, -1);
     }
 
@@ -445,6 +450,8 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, std::nullopt);
     schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -489,6 +496,8 @@ TEST(Query, ExecWithoutPredicate) {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
     schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -576,13 +585,15 @@ TEST(Indexing, InnerProduct) {
             ]
         }
     })";
-    schema->AddDebugField("normalized", DataType::VECTOR_FLOAT, dim, MetricType::METRIC_INNER_PRODUCT);
+    auto vec_fid = schema->AddDebugField("normalized", DataType::VECTOR_FLOAT, dim, MetricType::METRIC_INNER_PRODUCT);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     auto plan = CreatePlan(*schema, dsl);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
-    auto col = dataset.get_col<float>(0);
+    auto col = dataset.get_col<float>(vec_fid);
 
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
@@ -637,9 +648,9 @@ TEST(Query, FillSegment) {
     // dispatch here
     int N = 100000;
     auto dataset = DataGen(schema, N);
-    const auto std_vec = dataset.get_col<int64_t>(1);       // ids field
-    const auto std_vfloat_vec = dataset.get_col<float>(0);  // vector field
-    const auto std_i32_vec = dataset.get_col<int32_t>(2);   // scalar field
+    const auto std_vec = dataset.get_col<int64_t>(FieldId(101));       // ids field
+    const auto std_vfloat_vec = dataset.get_col<float>(FieldId(100));  // vector field
+    const auto std_i32_vec = dataset.get_col<int32_t>(FieldId(102));   // scalar field
 
     std::vector<std::unique_ptr<SegmentInternalInterface>> segments;
     segments.emplace_back([&] {
@@ -694,27 +705,32 @@ TEST(Query, FillSegment) {
 
     for (auto& segment : segments) {
         plan->target_entries_.clear();
-        plan->target_entries_.push_back(schema->get_offset(FieldName("fakevec")));
-        plan->target_entries_.push_back(schema->get_offset(FieldName("the_value")));
+        plan->target_entries_.push_back(schema->get_field_id(FieldName("fakevec")));
+        plan->target_entries_.push_back(schema->get_field_id(FieldName("the_value")));
         auto result = segment->Search(plan.get(), *ph, ts);
         // std::cout << SearchResultToJson(result).dump(2);
         result->result_offsets_.resize(topk * num_queries);
         segment->FillTargetEntry(plan.get(), *result);
+        segment->FillPrimaryKeys(plan.get(), *result);
 
-        auto fields_data = result->output_fields_data_;
-        auto fields_meta = result->output_fields_meta_;
+        auto& fields_data = result->output_fields_data_;
         ASSERT_EQ(fields_data.size(), 2);
-        ASSERT_EQ(fields_data.size(), 2);
-        ASSERT_EQ(fields_meta[0].get_sizeof(), sizeof(float) * dim);
-        ASSERT_EQ(fields_meta[1].get_sizeof(), sizeof(int32_t));
-        ASSERT_EQ(fields_data[0].size(), fields_meta[0].get_sizeof() * topk * num_queries);
-        ASSERT_EQ(fields_data[1].size(), fields_meta[1].get_sizeof() * topk * num_queries);
+        for (auto field_id : plan->target_entries_) {
+            ASSERT_EQ(fields_data.count(field_id), true);
+        }
+
+        auto vec_field_id = schema->get_field_id(FieldName("fakevec"));
+        auto output_vec_field_data = fields_data.at(vec_field_id)->vectors().float_vector().data();
+        ASSERT_EQ(output_vec_field_data.size(), topk * num_queries * dim);
+
+        auto i32_field_id = schema->get_field_id(FieldName("the_value"));
+        auto output_i32_field_data = fields_data.at(i32_field_id)->scalars().int_data().data();
+        ASSERT_EQ(output_i32_field_data.size(), topk * num_queries);
 
         for (int i = 0; i < topk * num_queries; i++) {
-            int64_t val;
-            memcpy(&val, &result->ids_data_[i * sizeof(int64_t)], sizeof(int64_t));
+            int64_t val = std::get<int64_t>(result->primary_keys_[i]);
 
-            auto internal_offset = result->ids_[i];
+            auto internal_offset = result->seg_offsets_[i];
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
             std::vector<float> std_vfloat(dim);
@@ -724,12 +740,12 @@ TEST(Query, FillSegment) {
             if (val != -1) {
                 // check vector field
                 std::vector<float> vfloat(dim);
-                memcpy(vfloat.data(), &fields_data[0][i * sizeof(float) * dim], dim * sizeof(float));
+                memcpy(vfloat.data(), &output_vec_field_data[i * dim], dim * sizeof(float));
                 ASSERT_EQ(vfloat, std_vfloat);
 
                 // check int32 field
                 int i32;
-                memcpy(&i32, &fields_data[1][i * sizeof(int32_t)], sizeof(int32_t));
+                memcpy(&i32, &output_i32_field_data[i], sizeof(int32_t));
                 ASSERT_EQ(i32, std_i32);
             }
         }
@@ -740,8 +756,10 @@ TEST(Query, ExecWithPredicateBinary) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
-    schema->AddDebugField("age", DataType::FLOAT);
+    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
+    auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -774,7 +792,7 @@ TEST(Query, ExecWithPredicateBinary) {
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
     segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
-    auto vec_ptr = dataset.get_col<uint8_t>(0);
+    auto vec_ptr = dataset.get_col<uint8_t>(vec_fid);
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;

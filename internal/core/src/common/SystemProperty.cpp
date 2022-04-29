@@ -17,7 +17,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "SystemProperty.h"
-#include "Types.h"
+#include "Consts.h"
 #include "exceptions/EasyAssert.h"
 
 namespace milvus {
@@ -73,10 +73,10 @@ InstanceImpl() {
         using Type = SystemFieldType;
 
         impl.name_to_types_.emplace(FieldName("RowID"), Type::RowId);
-        impl.id_to_types_.emplace(FieldId(0), Type::RowId);
+        impl.id_to_types_.emplace(RowFieldID, Type::RowId);
 
         impl.name_to_types_.emplace(FieldName("Timestamp"), Type::Timestamp);
-        impl.id_to_types_.emplace(FieldId(1), Type::Timestamp);
+        impl.id_to_types_.emplace(TimestampFieldID, Type::Timestamp);
 
         return impl;
     }();

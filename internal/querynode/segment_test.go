@@ -20,7 +20,6 @@ import (
 	"context"
 	"log"
 	"math"
-	"math/rand"
 	"sync"
 	"testing"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -43,7 +41,9 @@ import (
 //-------------------------------------------------------------------------------------- constructor and destructor
 func TestSegment_newSegment(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	collectionMeta := genCollectionMeta(collectionID, schema)
 
 	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
 	assert.Equal(t, collection.ID(), collectionID)
@@ -66,9 +66,11 @@ func TestSegment_newSegment(t *testing.T) {
 
 func TestSegment_deleteSegment(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	collectionMeta := genCollectionMeta(collectionID, schema)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	collection := newCollection(collectionMeta.ID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -80,7 +82,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	deleteCollection(collection)
 
 	t.Run("test delete nil ptr", func(t *testing.T) {
-		s, err := genSimpleSealedSegment()
+		s, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
 		s.segmentPtr = nil
 		deleteSegment(s)
@@ -90,9 +92,10 @@ func TestSegment_deleteSegment(t *testing.T) {
 //-------------------------------------------------------------------------------------- stats functions
 func TestSegment_getRowCount(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -100,44 +103,29 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	ids := []int64{1, 2, 3}
-	timestamps := []Timestamp{0, 0, 0}
+	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+	assert.NoError(t, err)
 
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: insertMsg.FieldsData,
+		NumRows:    int64(insertMsg.NumRows),
 	}
 
-	offset, err := segment.segmentPreInsert(N)
+	offset, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
-	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offset, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
 	rowCount := segment.getRowCount()
-	assert.Equal(t, int64(N), rowCount)
+	assert.Equal(t, int64(defaultMsgLength), rowCount)
 
 	deleteSegment(segment)
 	deleteCollection(collection)
 
 	t.Run("test getRowCount nil ptr", func(t *testing.T) {
-		s, err := genSimpleSealedSegment()
+		s, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
 		s.segmentPtr = nil
 		res := s.getRowCount()
@@ -147,9 +135,10 @@ func TestSegment_getRowCount(t *testing.T) {
 
 func TestSegment_retrieve(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -157,33 +146,17 @@ func TestSegment_retrieve(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	ids := []int64{}
-	timestamps := []Timestamp{}
-	const DIM = 16
-	const N = 100
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		ids = append(ids, int64(i))
-		timestamps = append(timestamps, 0)
-		var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-		var rawData []byte
-		for _, ele := range vec {
-			buf := make([]byte, 4)
-			common.Endian.PutUint32(buf, math.Float32bits(ele+float32(i)*float32(N)))
-			rawData = append(rawData, buf...)
-		}
-		bs := make([]byte, 4)
-		common.Endian.PutUint32(bs, uint32(i+1))
-		rawData = append(rawData, bs...)
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
+	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+	assert.NoError(t, err)
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: insertMsg.FieldsData,
+		NumRows:    int64(insertMsg.NumRows),
 	}
-	offset, err := segment.segmentPreInsert(N)
+
+	offset, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
 	assert.Equal(t, offset, int64(0))
-	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offset, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
 	planNode := &planpb.PlanNode{
@@ -192,8 +165,8 @@ func TestSegment_retrieve(t *testing.T) {
 				Expr: &planpb.Expr_TermExpr{
 					TermExpr: &planpb.TermExpr{
 						ColumnInfo: &planpb.ColumnInfo{
-							FieldId:  101,
-							DataType: schemapb.DataType_Int32,
+							FieldId:  simpleInt32Field.id,
+							DataType: simpleInt32Field.dataType,
 						},
 						Values: []*planpb.GenericValue{
 							{
@@ -216,7 +189,7 @@ func TestSegment_retrieve(t *testing.T) {
 				},
 			},
 		},
-		OutputFieldIds: []FieldID{101},
+		OutputFieldIds: []FieldID{simpleInt32Field.id},
 	}
 	// reqIds := &segcorepb.RetrieveRequest{
 	// 	Ids: &schemapb.IDs{
@@ -242,9 +215,10 @@ func TestSegment_retrieve(t *testing.T) {
 
 func TestSegment_getDeletedCount(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -252,45 +226,26 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	ids := []int64{1, 2, 3}
-	pks := make([]primaryKey, 0)
-	for _, id := range ids {
-		pks = append(pks, newInt64PrimaryKey(id))
+	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+	assert.NoError(t, err)
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: insertMsg.FieldsData,
+		NumRows:    int64(insertMsg.NumRows),
 	}
 
-	timestamps := []uint64{0, 0, 0}
-
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
-	}
-
-	offsetInsert, err := segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
 	var offsetDelete = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
-	err = segment.segmentDelete(offsetDelete, pks, timestamps)
+	pks, err := getPKs(insertMsg, collection.schema)
+	assert.NoError(t, err)
+	err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
 	assert.NoError(t, err)
 
 	var deletedCount = segment.getDeletedCount()
@@ -300,7 +255,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	deleteCollection(collection)
 
 	t.Run("test getDeletedCount nil ptr", func(t *testing.T) {
-		s, err := genSimpleSealedSegment()
+		s, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
 		s.segmentPtr = nil
 		res := s.getDeletedCount()
@@ -310,9 +265,10 @@ func TestSegment_getDeletedCount(t *testing.T) {
 
 func TestSegment_getMemSize(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -320,38 +276,22 @@ func TestSegment_getMemSize(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	ids := []int64{1, 2, 3}
-	timestamps := []uint64{0, 0, 0}
-
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
+	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+	assert.NoError(t, err)
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: insertMsg.FieldsData,
+		NumRows:    int64(insertMsg.NumRows),
 	}
 
-	offset, err := segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
-	assert.GreaterOrEqual(t, offset, int64(0))
+	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
 	var memSize = segment.getMemSize()
-	assert.Equal(t, memSize, int64(2785280))
+	assert.Equal(t, memSize, int64(18776064))
 
 	deleteSegment(segment)
 	deleteCollection(collection)
@@ -360,49 +300,34 @@ func TestSegment_getMemSize(t *testing.T) {
 //-------------------------------------------------------------------------------------- dm & search functions
 func TestSegment_segmentInsert(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
 	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	ids := []int64{1, 2, 3}
-	timestamps := []uint64{0, 0, 0}
-
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
+	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+	assert.NoError(t, err)
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: insertMsg.FieldsData,
+		NumRows:    int64(insertMsg.NumRows),
 	}
 
-	offset, err := segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
-	assert.GreaterOrEqual(t, offset, int64(0))
+	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	err = segment.segmentInsert(offset, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 	deleteSegment(segment)
 	deleteCollection(collection)
 
 	t.Run("test nil segment", func(t *testing.T) {
-		segment, err := genSimpleSealedSegment()
+		segment, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
 		segment.setType(segmentTypeGrowing)
 		segment.segmentPtr = nil
@@ -411,7 +336,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 	})
 
 	t.Run("test invalid segment type", func(t *testing.T) {
-		segment, err := genSimpleSealedSegment()
+		segment, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
 		err = segment.segmentInsert(0, nil, nil, nil)
 		assert.NoError(t, err)
@@ -420,9 +345,9 @@ func TestSegment_segmentInsert(t *testing.T) {
 
 func TestSegment_segmentDelete(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -430,44 +355,26 @@ func TestSegment_segmentDelete(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	ids := []int64{1, 2, 3}
-	pks := make([]primaryKey, 0)
-	for _, id := range ids {
-		pks = append(pks, newInt64PrimaryKey(id))
-	}
-	timestamps := []uint64{0, 0, 0}
-
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
+	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+	assert.NoError(t, err)
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: insertMsg.FieldsData,
+		NumRows:    int64(insertMsg.NumRows),
 	}
 
-	offsetInsert, err := segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
 	var offsetDelete = segment.segmentPreDelete(10)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
-	err = segment.segmentDelete(offsetDelete, pks, timestamps)
+	pks, err := getPKs(insertMsg, schema)
+	assert.NoError(t, err)
+	err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
 	assert.NoError(t, err)
 
 	deleteCollection(collection)
@@ -487,7 +394,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	assert.NoError(t, err)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
-	vec := genSimpleFloatVectors()
+	vec := generateFloatVectors(1, defaultDim)
 	var searchRawData []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)
@@ -514,7 +421,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 		log.Print("marshal placeholderGroup failed")
 	}
 
-	dslString := "{\"bool\": { \n\"vector\": {\n \"vec\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
+	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
@@ -539,9 +446,9 @@ func TestSegment_segmentSearch(t *testing.T) {
 //-------------------------------------------------------------------------------------- preDm functions
 func TestSegment_segmentPreInsert(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -549,27 +456,7 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
-	}
-
-	offset, err := segment.segmentPreInsert(N)
+	offset, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offset, int64(0))
 
@@ -579,9 +466,9 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 
 func TestSegment_segmentPreDelete(t *testing.T) {
 	collectionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -589,34 +476,18 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
-	ids := []int64{1, 2, 3}
-	timestamps := []uint64{0, 0, 0}
-
-	const DIM = 16
-	const N = 3
-	var vec = [DIM]float32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-	var rawData []byte
-	for _, ele := range vec {
-		buf := make([]byte, 4)
-		common.Endian.PutUint32(buf, math.Float32bits(ele))
-		rawData = append(rawData, buf...)
-	}
-	bs := make([]byte, 4)
-	common.Endian.PutUint32(bs, 1)
-	rawData = append(rawData, bs...)
-	var records []*commonpb.Blob
-	for i := 0; i < N; i++ {
-		blob := &commonpb.Blob{
-			Value: rawData,
-		}
-		records = append(records, blob)
+	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+	assert.NoError(t, err)
+	insertRecord := &segcorepb.InsertRecord{
+		FieldsData: insertMsg.FieldsData,
+		NumRows:    int64(insertMsg.NumRows),
 	}
 
-	offsetInsert, err := segment.segmentPreInsert(N)
+	offsetInsert, err := segment.segmentPreInsert(defaultMsgLength)
 	assert.Nil(t, err)
 	assert.GreaterOrEqual(t, offsetInsert, int64(0))
 
-	err = segment.segmentInsert(offsetInsert, &ids, &timestamps, &records)
+	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
 	var offsetDelete = segment.segmentPreDelete(10)
@@ -631,7 +502,7 @@ func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
 		id:       100,
 		dataType: schemapb.DataType_Int64,
 	}
-	field := genPKField(fieldParam)
+	field := genPKFieldSchema(fieldParam)
 	schema := &schemapb.CollectionSchema{
 		Name:   defaultCollectionName,
 		AutoID: false,
@@ -655,195 +526,45 @@ func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
 	}
 	timestamps := []Timestamp{10, 10, 10}
 	var rowCount int64 = 3
-	error := seg.segmentLoadDeletedRecord(pks, timestamps, rowCount)
-	assert.NoError(t, error)
+	err = seg.segmentLoadDeletedRecord(pks, timestamps, rowCount)
+	assert.NoError(t, err)
 }
 
 func TestSegment_segmentLoadFieldData(t *testing.T) {
-	genSchemas := func(dataType schemapb.DataType) (*schemapb.CollectionSchema, *schemapb.CollectionSchema) {
-		constField := constFieldParam{
-			id: 101,
-		}
-		constField.dataType = dataType
-		field := genConstantField(constField)
-		schema1 := &schemapb.CollectionSchema{
-			Name:   defaultCollectionName,
-			AutoID: true,
-			Fields: []*schemapb.FieldSchema{
-				field,
-			},
-		}
-
-		fieldUID := genConstantField(uidField)
-		fieldTimestamp := genConstantField(timestampField)
-		schema2 := &schemapb.CollectionSchema{
-			Name:   defaultCollectionName,
-			AutoID: true,
-			Fields: []*schemapb.FieldSchema{
-				fieldUID,
-				fieldTimestamp,
-				field,
-			},
-		}
-		return schema1, schema2
-	}
-
-	t.Run("test bool", func(t *testing.T) {
-		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Bool)
-		_, err := genSealedSegment(schemaForCreate,
-			schemaForLoad,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			defaultMsgLength)
-		assert.NoError(t, err)
-
-		_, err = genSealedSegment(schemaForCreate,
-			schemaForCreate,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			0)
-		assert.Error(t, err)
-	})
-
-	t.Run("test int8", func(t *testing.T) {
-		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int8)
-		_, err := genSealedSegment(schemaForCreate,
-			schemaForLoad,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			defaultMsgLength)
-		assert.NoError(t, err)
-
-		_, err = genSealedSegment(schemaForCreate,
-			schemaForCreate,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			0)
-		assert.Error(t, err)
-	})
-
-	t.Run("test int16", func(t *testing.T) {
-		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int16)
-		_, err := genSealedSegment(schemaForCreate,
-			schemaForLoad,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			defaultMsgLength)
-		assert.NoError(t, err)
-
-		_, err = genSealedSegment(schemaForCreate,
-			schemaForCreate,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			0)
-		assert.Error(t, err)
-	})
-
-	t.Run("test int32", func(t *testing.T) {
-		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int32)
-		_, err := genSealedSegment(schemaForCreate,
-			schemaForLoad,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			defaultMsgLength)
-		assert.NoError(t, err)
-
-		_, err = genSealedSegment(schemaForCreate,
-			schemaForCreate,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			0)
-		assert.Error(t, err)
-	})
-
-	t.Run("test int64", func(t *testing.T) {
-		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Int64)
-		_, err := genSealedSegment(schemaForCreate,
-			schemaForLoad,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			defaultMsgLength)
-		assert.NoError(t, err)
-
-		_, err = genSealedSegment(schemaForCreate,
-			schemaForCreate,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			0)
-		assert.Error(t, err)
-	})
-
-	t.Run("test float", func(t *testing.T) {
-		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Float)
-		_, err := genSealedSegment(schemaForCreate,
-			schemaForLoad,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			defaultMsgLength)
-		assert.NoError(t, err)
-
-		_, err = genSealedSegment(schemaForCreate,
-			schemaForCreate,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			0)
-		assert.Error(t, err)
-	})
-
-	t.Run("test double", func(t *testing.T) {
-		schemaForCreate, schemaForLoad := genSchemas(schemapb.DataType_Double)
-		_, err := genSealedSegment(schemaForCreate,
-			schemaForLoad,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			defaultMsgLength)
-		assert.NoError(t, err)
-
-		_, err = genSealedSegment(schemaForCreate,
-			schemaForCreate,
-			defaultCollectionID,
-			defaultPartitionID,
-			defaultSegmentID,
-			defaultDMLChannel,
-			0)
-		assert.Error(t, err)
-	})
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	_, err := genSealedSegment(schema,
+		defaultCollectionID,
+		defaultPartitionID,
+		defaultSegmentID,
+		defaultDMLChannel,
+		defaultMsgLength)
+	assert.NoError(t, err)
 }
 
 func TestSegment_ConcurrentOperation(t *testing.T) {
 	const N = 16
 	var ages = []int32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
 
+	ageData := &schemapb.FieldData{
+		Type:    simpleInt32Field.dataType,
+		FieldId: simpleInt32Field.id,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: ages,
+					},
+				},
+			},
+		},
+	}
+
 	collectionID := UniqueID(0)
 	partitionID := UniqueID(0)
-	collectionMeta := genTestCollectionMeta(collectionID, false)
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
+	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	wg := sync.WaitGroup{}
@@ -861,7 +582,7 @@ func TestSegment_ConcurrentOperation(t *testing.T) {
 		}()
 		go func() {
 			// segmentLoadFieldData result error may be nil or not, we just expected this test would not crash.
-			_ = segment.segmentLoadFieldData(101, N, ages)
+			_ = segment.segmentLoadFieldData(simpleInt32Field.id, N, ageData)
 			wg.Done()
 		}()
 	}
@@ -880,7 +601,7 @@ func TestSegment_indexInfo(t *testing.T) {
 	seg, err := h.replica.getSegmentByID(defaultSegmentID)
 	assert.NoError(t, err)
 
-	fieldID := simpleVecField.id
+	fieldID := simpleFloatVecField.id
 
 	indexName := "query-node-test-index"
 	indexParam := make(map[string]string)
@@ -915,7 +636,8 @@ func TestSegment_indexInfo(t *testing.T) {
 }
 
 func TestSegment_BasicMetrics(t *testing.T) {
-	schema := genSimpleSegCoreSchema()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 	collection := newCollection(defaultCollectionID, schema)
 	segment, err := newSegment(collection,
 		defaultSegmentID,
@@ -969,7 +691,8 @@ func TestSegment_fillIndexedFieldsData(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	schema := genSimpleSegCoreSchema()
+	pkType := schemapb.DataType_Int64
+	schema := genTestCollectionSchema(pkType)
 	collection := newCollection(defaultCollectionID, schema)
 	segment, err := newSegment(collection,
 		defaultSegmentID,
@@ -980,7 +703,7 @@ func TestSegment_fillIndexedFieldsData(t *testing.T) {
 		true)
 	assert.Nil(t, err)
 
-	vecCM, err := genVectorChunkManager(ctx)
+	vecCM, err := genVectorChunkManager(ctx, collection)
 	assert.NoError(t, err)
 
 	t.Run("test fillIndexedFieldsData float-vector invalid vectorChunkManager", func(t *testing.T) {
@@ -1048,220 +771,12 @@ func Test_getFieldDataPath(t *testing.T) {
 	assert.Equal(t, int64(1), offsetInBinlog)
 }
 
-func generateBoolArray(numRows int) []bool {
-	ret := make([]bool, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Int()%2 == 0)
-	}
-	return ret
-}
-
-func generateInt8Array(numRows int) []int8 {
-	ret := make([]int8, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int8(rand.Int()))
-	}
-	return ret
-}
-
-func generateInt16Array(numRows int) []int16 {
-	ret := make([]int16, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int16(rand.Int()))
-	}
-	return ret
-}
-
-func generateInt32Array(numRows int) []int32 {
-	ret := make([]int32, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int32(rand.Int()))
-	}
-	return ret
-}
-
-func generateInt64Array(numRows int) []int64 {
-	ret := make([]int64, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int64(rand.Int()))
-	}
-	return ret
-}
-
-func generateFloat32Array(numRows int) []float32 {
-	ret := make([]float32, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Float32())
-	}
-	return ret
-}
-
-func generateStringArray(numRows int) []string {
-	ret := make([]string, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, funcutil.GenRandomStr())
-	}
-	return ret
-}
-
-func generateFloat64Array(numRows int) []float64 {
-	ret := make([]float64, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Float64())
-	}
-	return ret
-}
-
-func generateFloatVectors(numRows, dim int) []float32 {
-	total := numRows * dim
-	ret := make([]float32, 0, total)
-	for i := 0; i < total; i++ {
-		ret = append(ret, rand.Float32())
-	}
-	return ret
-}
-
-func generateBinaryVectors(numRows, dim int) []byte {
-	total := (numRows * dim) / 8
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
-func newScalarFieldData(dType schemapb.DataType, fieldName string, numRows int) *schemapb.FieldData {
-	ret := &schemapb.FieldData{
-		Type:      dType,
-		FieldName: fieldName,
-		Field:     nil,
-	}
-
-	switch dType {
-	case schemapb.DataType_Bool:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_BoolData{
-					BoolData: &schemapb.BoolArray{
-						Data: generateBoolArray(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int8:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int16:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int32:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int64:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: generateInt64Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Float:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_FloatData{
-					FloatData: &schemapb.FloatArray{
-						Data: generateFloat32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Double:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_DoubleData{
-					DoubleData: &schemapb.DoubleArray{
-						Data: generateFloat64Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_VarChar, schemapb.DataType_String:
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: generateStringArray(numRows),
-					},
-				},
-			},
-		}
-	}
-
-	return ret
-}
-
-func newFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
-	return &schemapb.FieldData{
-		Type:      schemapb.DataType_FloatVector,
-		FieldName: fieldName,
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{
-						Data: generateFloatVectors(numRows, dim),
-					},
-				},
-			},
-		},
-	}
-}
-
-func newBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
-	return &schemapb.FieldData{
-		Type:      schemapb.DataType_BinaryVector,
-		FieldName: fieldName,
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_BinaryVector{
-					BinaryVector: generateBinaryVectors(numRows, dim),
-				},
-			},
-		},
-	}
-}
-
 func Test_fillBinVecFieldData(t *testing.T) {
 	var m storage.ChunkManager
 
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newBinaryVectorFieldData("bv", 1, 8)
+	f := newBinaryVectorFieldData(simpleBinVecField.fieldName, 1, 8)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1279,7 +794,7 @@ func Test_fillFloatVecFieldData(t *testing.T) {
 
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newFloatVectorFieldData("fv", 1, 8)
+	f := newFloatVectorFieldData(simpleFloatVecField.fieldName, 1, 8)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1301,7 +816,7 @@ func Test_fillBoolFieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withReadBool(offset))
 
-	f := newScalarFieldData(schemapb.DataType_Bool, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_Bool, simpleBoolField.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1322,7 +837,7 @@ func Test_fillStringFieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withReadString(offset))
 
-	f := newScalarFieldData(schemapb.DataType_VarChar, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_VarChar, simpleVarCharField.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1343,7 +858,7 @@ func Test_fillInt8FieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newScalarFieldData(schemapb.DataType_Int8, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_Int8, simpleInt8Field.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1364,7 +879,7 @@ func Test_fillInt16FieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newScalarFieldData(schemapb.DataType_Int16, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_Int16, simpleInt64Field.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1385,7 +900,7 @@ func Test_fillInt32FieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newScalarFieldData(schemapb.DataType_Int32, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_Int32, simpleInt32Field.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1406,7 +921,7 @@ func Test_fillInt64FieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newScalarFieldData(schemapb.DataType_Int64, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_Int64, simpleInt64Field.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1427,7 +942,7 @@ func Test_fillFloatFieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newScalarFieldData(schemapb.DataType_Float, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_Float, simpleFloatField.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1448,7 +963,7 @@ func Test_fillDoubleFieldData(t *testing.T) {
 	offset := int64(100)
 	m = newMockChunkManager(withDefaultReadAt())
 
-	f := newScalarFieldData(schemapb.DataType_Double, "f", 1)
+	f := newScalarFieldData(schemapb.DataType_Double, simpleDoubleField.fieldName, 1)
 
 	path := funcutil.GenRandomStr()
 	index := 0
@@ -1467,16 +982,16 @@ func Test_fillFieldData(t *testing.T) {
 	var m storage.ChunkManager
 
 	fs := []*schemapb.FieldData{
-		newBinaryVectorFieldData("bv", 1, 8),
-		newFloatVectorFieldData("fv", 1, 8),
-		newScalarFieldData(schemapb.DataType_Bool, "f", 1),
-		newScalarFieldData(schemapb.DataType_VarChar, "f", 1),
-		newScalarFieldData(schemapb.DataType_Int8, "f", 1),
-		newScalarFieldData(schemapb.DataType_Int16, "f", 1),
-		newScalarFieldData(schemapb.DataType_Int32, "f", 1),
-		newScalarFieldData(schemapb.DataType_Int64, "f", 1),
-		newScalarFieldData(schemapb.DataType_Float, "f", 1),
-		newScalarFieldData(schemapb.DataType_Double, "f", 1),
+		newBinaryVectorFieldData(simpleBinVecField.fieldName, 1, 8),
+		newFloatVectorFieldData(simpleFloatVecField.fieldName, 1, 8),
+		newScalarFieldData(schemapb.DataType_Bool, simpleBoolField.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_VarChar, simpleVarCharField.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_Int8, simpleInt8Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_Int16, simpleInt16Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_Int32, simpleInt32Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_Int64, simpleInt64Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_Float, simpleFloatField.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_Double, simpleDoubleField.fieldName, 1),
 	}
 
 	offset := int64(100)
