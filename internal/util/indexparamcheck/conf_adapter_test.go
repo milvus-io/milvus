@@ -12,6 +12,7 @@
 package indexparamcheck
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 )
@@ -50,11 +51,15 @@ func TestBaseConfAdapter_CheckTrain(t *testing.T) {
 		DIM:    strconv.Itoa(128),
 		Metric: L2,
 	}
+	paramsWithoutDim := map[string]string{
+		Metric: L2,
+	}
 	cases := []struct {
 		params map[string]string
 		want   bool
 	}{
 		{validParams, true},
+		{paramsWithoutDim, false},
 	}
 
 	adapter := newBaseConfAdapter()
@@ -141,7 +146,7 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 		{validParamsWithoutNbits, true},
 		{invalidIVFParamsMin(), false},
 		{invalidIVFParamsMax(), false},
-		{validParamsWithoutDim, true},
+		{validParamsWithoutDim, false},
 		{invalidParamsDim, false},
 		{invalidParamsNbits, false},
 		{invalidParamsWithoutIVF, false},
@@ -150,8 +155,9 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 	}
 
 	adapter := newIVFPQConfAdapter()
-	for _, test := range cases {
+	for i, test := range cases {
 		if got := adapter.CheckTrain(test.params); got != test.want {
+			fmt.Printf("i: %d, params: %v\n", i, test.params)
 			t.Errorf("IVFPQConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -187,11 +193,15 @@ func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 		DIM:    strconv.Itoa(128),
 		Metric: JACCARD,
 	}
+	paramsWithoutDim := map[string]string{
+		Metric: JACCARD,
+	}
 	cases := []struct {
 		params map[string]string
 		want   bool
 	}{
 		{validParams, true},
+		{paramsWithoutDim, false},
 	}
 
 	adapter := newBinIDMAPConfAdapter()
@@ -211,6 +221,12 @@ func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 		NBITS:  strconv.Itoa(8),
 		Metric: JACCARD,
 	}
+	paramsWithoutDim := map[string]string{
+		NLIST:  strconv.Itoa(100),
+		IVFM:   strconv.Itoa(4),
+		NBITS:  strconv.Itoa(8),
+		Metric: JACCARD,
+	}
 
 	invalidParams := copyParams(validParams)
 	invalidParams[Metric] = L2
@@ -220,6 +236,7 @@ func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 		want   bool
 	}{
 		{validParams, true},
+		{paramsWithoutDim, false},
 		{invalidIVFParamsMin(), false},
 		{invalidIVFParamsMax(), false},
 		{invalidParams, false},
