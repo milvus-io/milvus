@@ -1,6 +1,6 @@
 import os
 
-from pymilvus import connections, Index
+from pymilvus import connections, Index, MilvusException
 
 from utils.util_log import test_log as log
 from base.collection_wrapper import ApiCollectionWrapper
@@ -9,6 +9,7 @@ from common import common_type as ct
 
 
 def e2e_milvus(host, c_name):
+    """ e2e milvus """
     log.debug(f'pid: {os.getpid()}')
     # connect
     connections.add_connection(default={"host": host, "port": 19530})
@@ -42,3 +43,11 @@ def e2e_milvus(host, c_name):
     term_expr = f'{ct.default_int64_field_name} in [{ids}]'
     query_res, _ = collection_w.query(term_expr, output_fields=["*", "%"])
     assert query_res[0][ct.default_int64_field_name] == ids
+
+
+def check_succ_rate(func_obj):
+    """ check func succ rate"""
+    log.debug(f"{func_obj.name} total: {func_obj.total}, succ: {func_obj.succ}, fail: {func_obj.fail}")
+    if func_obj.total == 0:
+        raise MilvusException(0, f"{func_obj.name} request total 0")
+    assert func_obj.fail == 0 and func_obj.succ // func_obj.total == 1

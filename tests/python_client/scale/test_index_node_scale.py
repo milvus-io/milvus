@@ -1,8 +1,7 @@
 import datetime
-import time
 
 import pytest
-from pymilvus import connections
+from pymilvus import connections, MilvusException
 
 from base.collection_wrapper import ApiCollectionWrapper
 from common.common_type import CaseLabel
@@ -20,6 +19,7 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 class TestIndexNodeScale:
 
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16832")
     @pytest.mark.tags(CaseLabel.L3)
     def test_expand_index_node(self):
         """
@@ -47,12 +47,13 @@ class TestIndexNodeScale:
         }
         mic = MilvusOperator()
         mic.install(data_config)
-        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200):
+        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
         else:
+            # If deploy failed and want to uninsatll mic
             # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
             # mic.uninstall(release_name, namespace=constants.NAMESPACE)
-            raise MilvusException(message=f'Milvus healthy timeout 1200s')
+            raise MilvusException(message=f'Milvus healthy timeout 1800s')
 
         try:
             # connect
@@ -114,6 +115,7 @@ class TestIndexNodeScale:
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16832")
     @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_index_node(self):
         """
@@ -139,12 +141,10 @@ class TestIndexNodeScale:
         }
         mic = MilvusOperator()
         mic.install(data_config)
-        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200):
+        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
         else:
-            # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
-            # mic.uninstall(release_name, namespace=constants.NAMESPACE)
-            raise MilvusException(message=f'Milvus healthy timeout 1200s')
+            raise MilvusException(message=f'Milvus healthy timeout 1800s')
 
         try:
             # connect
@@ -175,7 +175,7 @@ class TestIndexNodeScale:
             collection_w.drop_index()
             assert not collection_w.has_index()[0]
 
-            # expand indexNode from 2 to 1
+            # shrink indexNode from 2 to 1
             mic.upgrade(release_name, {'spec.components.indexNode.replicas': 1}, constants.NAMESPACE)
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")

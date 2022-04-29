@@ -7,16 +7,12 @@ from base.collection_wrapper import ApiCollectionWrapper
 from common.common_type import CaseLabel
 from common import common_func as cf
 from customize.milvus_operator import MilvusOperator
-from scale import constants
-from pymilvus import connections
+from scale import constants, scale_common
+from pymilvus import connections, MilvusException
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
-
-prefix = "data_scale"
-default_schema = cf.gen_default_collection_schema()
-default_search_exp = "int64 >= 0"
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+from utils.wrapper import counter
 
 
 class TestDataNodeScale:
@@ -38,7 +34,6 @@ class TestDataNodeScale:
         release_name = "scale-data"
         image_tag = get_latest_tag()
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
-        fail_count = 0
 
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
@@ -51,12 +46,10 @@ class TestDataNodeScale:
         }
         mic = MilvusOperator()
         mic.install(data_config)
-        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200):
+        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
         else:
-            # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
-            # mic.uninstall(release_name, namespace=constants.NAMESPACE)
-            raise MilvusException(message=f'Milvus healthy timeout 1200s')
+            raise MilvusException(message=f'Milvus healthy timeout 1800s')
 
         try:
             # connect
@@ -65,20 +58,24 @@ class TestDataNodeScale:
 
             # create
             c_name = cf.gen_unique_str("scale_query")
-            # c_name = 'scale_query_DymS7kI4'
             collection_w = ApiCollectionWrapper()
             collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(), shards_num=5)
 
             tmp_nb = 10000
 
+            @counter
             def do_insert():
-                while True:
-                    tmp_df = cf.gen_default_dataframe_data(tmp_nb)
-                    collection_w.insert(tmp_df)
-                    log.debug(collection_w.num_entities)
+                """ do insert and flush """
+                insert_res, is_succ = collection_w.insert(cf.gen_default_dataframe_data(tmp_nb))
+                log.debug(collection_w.num_entities)
+                return insert_res, is_succ
 
-            t_insert = threading.Thread(target=do_insert, args=(), daemon=True)
-            t_insert.start()
+            def loop_insert():
+                """ loop do insert """
+                while True:
+                    do_insert()
+
+            threading.Thread(target=loop_insert, args=(), daemon=True).start()
 
             # scale dataNode to 5
             mic.upgrade(release_name, {'spec.components.dataNode.replicas': 5}, constants.NAMESPACE)
@@ -91,14 +88,19 @@ class TestDataNodeScale:
             collection_w_new = ApiCollectionWrapper()
             collection_w_new.init_collection(name=new_c_name, schema=cf.gen_default_collection_schema(), shards_num=2)
 
+            @counter
             def do_new_insert():
-                while True:
-                    tmp_df = cf.gen_default_dataframe_data(tmp_nb)
-                    collection_w_new.insert(tmp_df)
-                    log.debug(collection_w_new.num_entities)
+                """ do new insert """
+                insert_res, is_succ = collection_w_new.insert(cf.gen_default_dataframe_data(tmp_nb))
+                log.debug(collection_w_new.num_entities)
+                return insert_res, is_succ
 
-            t_insert_new = threading.Thread(target=do_new_insert, args=(), daemon=True)
-            t_insert_new.start()
+            def loop_new_insert():
+                """ loop new insert """
+                while True:
+                    do_new_insert()
+
+            threading.Thread(target=loop_new_insert, args=(), daemon=True).start()
 
             # scale dataNode to 3
             mic.upgrade(release_name, {'spec.components.dataNode.replicas': 3}, constants.NAMESPACE)
@@ -107,16 +109,15 @@ class TestDataNodeScale:
 
             log.debug(collection_w.num_entities)
             time.sleep(300)
+            scale_common.check_succ_rate(do_insert)
+            scale_common.check_succ_rate(do_new_insert)
             log.debug("Shrink dataNode test finished")
 
         except Exception as e:
             log.error(str(e))
-            fail_count += 1
             # raise Exception(str(e))
 
         finally:
-            log.info(f'Test finished with {fail_count} fail request')
-            assert fail_count <= 1
             label = f"app.kubernetes.io/instance={release_name}"
             log.info('Start to export milvus pod logs')
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
