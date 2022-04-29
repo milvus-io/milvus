@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const timeoutForRPC = 10 * time.Second
@@ -1924,16 +1925,16 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		for _, nodeID := range lbt.SourceNodeIDs {
 			segmentID2Info := make(map[UniqueID]*querypb.SegmentInfo)
 			dmChannel2WatchInfo := make(map[string]*querypb.DmChannelWatchInfo)
-			recoveredCollectionIDs := make(map[UniqueID]struct{})
+			recoveredCollectionIDs := make(typeutil.UniqueSet)
 			segmentInfos := lbt.meta.getSegmentInfosByNode(nodeID)
 			for _, segmentInfo := range segmentInfos {
 				segmentID2Info[segmentInfo.SegmentID] = segmentInfo
-				recoveredCollectionIDs[segmentInfo.CollectionID] = struct{}{}
+				recoveredCollectionIDs.Insert(segmentInfo.CollectionID)
 			}
 			dmChannelWatchInfos := lbt.meta.getDmChannelInfosByNodeID(nodeID)
 			for _, watchInfo := range dmChannelWatchInfos {
 				dmChannel2WatchInfo[watchInfo.DmChannel] = watchInfo
-				recoveredCollectionIDs[watchInfo.CollectionID] = struct{}{}
+				recoveredCollectionIDs.Insert(watchInfo.CollectionID)
 			}
 
 			for collectionID := range recoveredCollectionIDs {
@@ -1977,27 +1978,27 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 
 					for _, segmentBingLog := range binlogs {
 						segmentID := segmentBingLog.SegmentID
-						if info, ok := segmentID2Info[segmentID]; ok {
+						if _, ok := segmentID2Info[segmentID]; ok {
 							segmentLoadInfo := lbt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, schema)
+
 							msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
 							msgBase.MsgType = commonpb.MsgType_LoadSegments
-							for _, replica := range info.ReplicaIds {
-								loadSegmentReq := &querypb.LoadSegmentsRequest{
-									Base:         msgBase,
-									Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
-									Schema:       schema,
+
+							loadSegmentReq := &querypb.LoadSegmentsRequest{
+								Base:         msgBase,
+								Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+								Schema:       schema,
+								CollectionID: collectionID,
+
+								LoadMeta: &querypb.LoadMetaInfo{
+									LoadType:     collectionInfo.LoadType,
 									CollectionID: collectionID,
-
-									LoadMeta: &querypb.LoadMetaInfo{
-										LoadType:     collectionInfo.LoadType,
-										CollectionID: collectionID,
-										PartitionIDs: toRecoverPartitionIDs,
-									},
-									ReplicaID: replica,
-								}
-
-								loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+									PartitionIDs: toRecoverPartitionIDs,
+								},
+								ReplicaID: replica.ReplicaID,
 							}
+
+							loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 						}
 					}
 
