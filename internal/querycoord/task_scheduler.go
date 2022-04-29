@@ -659,6 +659,8 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				// if triggerCondition == NodeDown, loadSegment and watchDmchannel request will keep reschedule until the success
 				// the node info has been deleted after assgining child task to triggerTask
 				// so it is necessary to update the meta of segment and dmchannel, or some data may be lost in meta
+
+				// triggerTask may be LoadCollection, LoadPartitions, LoadBalance
 				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
 					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
 					if err != nil {
@@ -919,8 +921,8 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 					collectionID := loadInfo.CollectionID
 					segmentID := loadInfo.SegmentID
 
-					segment, ok := segments[segmentID]
-					if !ok {
+					segment, saved := segments[segmentID]
+					if !saved {
 						segment = &querypb.SegmentInfo{
 							SegmentID:      segmentID,
 							CollectionID:   loadInfo.CollectionID,
@@ -941,7 +943,10 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 					if _, ok := segmentInfosToSave[collectionID]; !ok {
 						segmentInfosToSave[collectionID] = make([]*querypb.SegmentInfo, 0)
 					}
-					segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segment)
+
+					if !saved {
+						segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segment)
+					}
 				}
 			}
 		}
