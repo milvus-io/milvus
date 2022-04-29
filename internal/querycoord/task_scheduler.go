@@ -684,6 +684,14 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				}
 			}
 
+			err = triggerTask.globalPostExecute(triggerTask.traceCtx())
+			if err != nil {
+				log.Error("scheduleLoop: failed to execute globalPostExecute() of task",
+					zap.Int64("taskID", triggerTask.getTaskID()),
+					zap.Error(err))
+				triggerTask.setResultInfo(err)
+			}
+
 			err = removeTaskFromKVFn(triggerTask)
 			if err != nil {
 				log.Error("scheduleLoop: error when remove trigger and internal tasks from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
