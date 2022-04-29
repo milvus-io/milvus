@@ -142,10 +142,10 @@ type Core struct {
 	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
 	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
-	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
+	// Communicates with queryCoord service for segments info.
+	CallGetSegmentInfoService func(ctx context.Context, collectionID int64, segIDs []int64) (*querypb.GetSegmentInfoResponse, error)
 
-	// Update segment state.
-	CallUpdateSegmentStateService func(ctx context.Context, segID typeutil.UniqueID, ss commonpb.SegmentState) error
+	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
 	//assign import task to data service
 	CallImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
@@ -277,9 +277,6 @@ func (c *Core) checkInit() error {
 	if c.CallGetFlushedSegmentsService == nil {
 		return fmt.Errorf("callGetFlushedSegmentsService is nil")
 	}
-	if c.CallUpdateSegmentStateService == nil {
-		return fmt.Errorf("CallUpdateSegmentStateService is nil")
-	}
 	if c.CallWatchChannels == nil {
 		return fmt.Errorf("callWatchChannels is nil")
 	}
@@ -372,15 +369,15 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 			ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Minute)
 			segIDs, err := c.CallGetFlushedSegmentsService(ctx2, collMeta.ID, partID)
 			if err != nil {
-				log.Debug("failed to get flushed segments from data coord",
-					zap.Int64("collection id", collMeta.ID),
-					zap.Int64("partition id", partID),
+				log.Debug("failed to get flushed segments from dataCoord",
+					zap.Int64("collection ID", collMeta.GetID()),
+					zap.Int64("partition ID", partID),
 					zap.Error(err))
 				cancel2()
 				continue
 			}
 			for _, segID := range segIDs {
-				indexInfos := []*etcdpb.FieldIndexInfo{}
+				var indexInfos []*etcdpb.FieldIndexInfo
 				indexMeta, ok := segID2IndexMeta[segID]
 				if !ok {
 					indexInfos = append(indexInfos, collMeta.FieldIndexes...)
@@ -680,29 +677,6 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return rsp.Segments, nil
 	}
 
-	c.CallUpdateSegmentStateService = func(ctx context.Context, segID typeutil.UniqueID, ss commonpb.SegmentState) (retErr error) {
-		defer func() {
-			if err := recover(); err != nil {
-				retErr = fmt.Errorf("update segment state from data coord panic, msg = %v", err)
-			}
-		}()
-		<-initCh
-		req := &datapb.SetSegmentStateRequest{
-			SegmentId: segID,
-			NewState:  ss,
-		}
-		resp, err := s.SetSegmentState(ctx, req)
-		if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Error("failed to update segment state",
-				zap.Any("request", req), zap.Any("response", resp), zap.Error(err))
-			return err
-		}
-		log.Info("successfully set segment state",
-			zap.Int64("segment ID", req.GetSegmentId()),
-			zap.String("new segment state", req.GetNewState().String()))
-		return nil
-	}
-
 	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
@@ -855,7 +829,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	return nil
 }
 
-// SetQueryCoord set querycoord
+// SetQueryCoord sets up queryCoord and queryCoord related function calls.
 func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 	initCh := make(chan struct{})
 	go func() {
@@ -922,6 +896,23 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 			return fmt.Errorf("releasePartitions from query service failed, error = %s", rsp.Reason)
 		}
 		return nil
+	}
+	c.CallGetSegmentInfoService = func(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error) {
+		defer func() {
+			if err := recover(); err != nil {
+				retErr = fmt.Errorf("call segment info service panic, msg = %v", err)
+			}
+		}()
+		<-initCh
+		resp, err := s.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_GetSegmentState,
+				SourceID: c.session.ServerID,
+			},
+			CollectionID: collectionID,
+			SegmentIDs:   segIDs,
+		})
+		return resp, err
 	}
 	return nil
 }
@@ -2290,6 +2281,8 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	// Get collection/partition ID from collection/partition name.
 	var cID int64
 	var ok bool
+	c.MetaTable.ddLock.RLock()
+	defer c.MetaTable.ddLock.RUnlock()
 	if cID, ok = c.MetaTable.collName2ID[req.GetCollectionName()]; !ok {
 		log.Error("failed to find collection ID for collection name",
 			zap.String("collection name", req.GetCollectionName()))
@@ -2356,10 +2349,11 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		}, nil
 	}
 
-	// That's all for reporting, if task hasn't reached persisted or completed status yet.
-	if ti.GetState().GetStateCode() != commonpb.ImportState_ImportPersisted &&
-		ti.GetState().GetStateCode() != commonpb.ImportState_ImportCompleted {
-		log.Debug("transitional import state received, return immediately", zap.Any("import result", ir))
+	// So much for reporting, unless the task just reached `ImportPersisted` state.
+	if ir.GetState() != commonpb.ImportState_ImportPersisted {
+		log.Debug("non import-persisted state received, return immediately",
+			zap.Any("task ID", ir.GetTaskId()),
+			zap.Any("import state", ir.GetState()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -2367,6 +2361,8 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 
 	// Reverse look up collection name on collection ID.
 	var colName string
+	c.MetaTable.ddLock.RLock()
+	defer c.MetaTable.ddLock.RUnlock()
 	for k, v := range c.MetaTable.collName2ID {
 		if v == ti.GetCollectionId() {
 			colName = k
@@ -2390,8 +2386,10 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 			zap.Int64("task ID", ir.GetTaskId()))
 	}()
 
-	// TODO: Resurrect index check when ready.
+	// Flush all import data segments.
 	c.CallFlushOnCollection(ctx, ti.GetCollectionId(), ir.GetSegments())
+	// Check if data are "queryable" and if indices are built on all segments.
+	go c.postImportPersistLoop(c.ctx, ir.GetTaskId(), ti.GetCollectionId(), colName, ir.GetSegments())
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -2467,7 +2465,7 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 			zap.Int64("collection ID", collectionID))
 		return 0, nil
 	}
-	states, err := c.CallGetIndexStatesService(ctx, getIndexStatesRequest.IndexBuildIDs)
+	states, err := c.CallGetIndexStatesService(ctx, getIndexStatesRequest.GetIndexBuildIDs())
 	if err != nil {
 		log.Error("failed to get index state in checkSegmentIndexStates", zap.Error(err))
 		return 0, err
@@ -2489,10 +2487,60 @@ func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, co
 	return ct, nil
 }
 
-// checkCompleteIndexLoop checks index build states for an import task's segments and bring these segments online when
-// the criteria are met. checkCompleteIndexLoop does the check every CheckCompleteIndexInterval and exits if:
-// (1) a certain percent of indices are built, (2) when context is done or (3) when `ImportIndexWaitLimit` has passed.
-func (c *Core) checkCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTaskInfo, colName string, segIDs []UniqueID) {
+func (c *Core) postImportPersistLoop(ctx context.Context, taskID int64, colID int64, colName string, segIDs []UniqueID) {
+	// Loop and check if segments are loaded in queryNodes.
+	c.wg.Add(1)
+	c.checkSegmentLoadedLoop(ctx, taskID, colID, segIDs)
+	// Check if collection has any indexed fields. If so, start a loop to check segments' index states.
+	c.MetaTable.ddLock.RLock()
+	defer c.MetaTable.ddLock.RUnlock()
+	colMeta := c.MetaTable.collID2Meta[colID]
+	if len(colMeta.GetFieldIndexes()) != 0 {
+		c.wg.Add(1)
+		c.checkCompleteIndexLoop(ctx, taskID, colID, colName, segIDs)
+	}
+}
+
+// checkSegmentLoadedLoop loops and checks if all segments in `segIDs` are loaded in queryNodes.
+func (c *Core) checkSegmentLoadedLoop(ctx context.Context, taskID int64, colID int64, segIDs []UniqueID) {
+	defer c.wg.Done()
+	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportSegmentStateCheckInterval*1000) * time.Millisecond)
+	defer ticker.Stop()
+	expireTicker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportSegmentStateWaitLimit*1000) * time.Millisecond)
+	defer expireTicker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("(in check segment loaded loop) context done, exiting checkSegmentLoadedLoop")
+			return
+		case <-ticker.C:
+			log.Info("(in check segment loaded loop) check segments' loading states",
+				zap.Int64("task ID", taskID))
+			resp, err := c.CallGetSegmentInfoService(ctx, colID, segIDs)
+			if err != nil {
+				log.Warn("failed to call get segment info on queryCoord",
+					zap.Int64("collection ID", colID),
+					zap.Int64s("segment IDs", segIDs))
+			} else if len(resp.GetInfos()) == len(segIDs) {
+				// Check if all segment info are loaded in queryNodes.
+				log.Info("all import data segments loaded in queryNodes",
+					zap.Int64("collection ID", colID),
+					zap.Int64s("segment IDs", segIDs))
+				c.importManager.updateTaskStateCode(taskID, commonpb.ImportState_DataQueryable)
+				return
+			}
+		case <-expireTicker.C:
+			log.Warn("(in check segment loaded loop) segments still not loaded after max wait time",
+				zap.Int64("task ID", taskID),
+				zap.Int64("collection ID", colID),
+				zap.Int64s("segment IDs", segIDs))
+			return
+		}
+	}
+}
+
+// checkCompleteIndexLoop loops and checks if all indices are built for an import task's segments.
+func (c *Core) checkCompleteIndexLoop(ctx context.Context, taskID int64, colID int64, colName string, segIDs []UniqueID) {
 	defer c.wg.Done()
 	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportIndexCheckInterval*1000) * time.Millisecond)
 	defer ticker.Stop()
@@ -2501,49 +2549,24 @@ func (c *Core) checkCompleteIndexLoop(ctx context.Context, ti *datapb.ImportTask
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("(in check complete index loop) context done, exiting checkCompleteIndexLoop",
-				zap.Int64("task ID", ti.GetId()))
+			log.Info("(in check complete index loop) context done, exiting checkCompleteIndexLoop")
 			return
 		case <-ticker.C:
-			log.Info("(in check complete index loop) check segments' index states", zap.Int64("task ID", ti.GetId()))
-			if ct, err := c.CountCompleteIndex(ctx, colName, ti.GetCollectionId(), segIDs); err == nil &&
-				segmentsOnlineReady(ct, len(segIDs)) {
-				log.Info("segment indices are ready",
-					zap.Int64("task ID", ti.GetId()),
-					zap.Int("total # of segments", len(segIDs)),
-					zap.Int("# of segments with index ready", ct))
-				c.bringSegmentsOnline(ctx, segIDs)
+			log.Info("(in check complete index loop) check segments' index states",
+				zap.Int64("task ID", taskID))
+			if ct, err := c.CountCompleteIndex(ctx, colName, colID, segIDs); err == nil && ct == len(segIDs) {
+				log.Info("all segment indices are ready!")
+				c.importManager.updateTaskStateCode(taskID, commonpb.ImportState_DataIndexed)
 				return
 			}
 		case <-expireTicker.C:
-			log.Info("(in check complete index loop) waited for sufficiently long time, bring segments online",
-				zap.Int64("task ID", ti.GetId()))
-			c.bringSegmentsOnline(ctx, segIDs)
+			log.Warn("(in check complete index loop) indexing is taken too long",
+				zap.Int64("task ID", taskID),
+				zap.Int64("collection ID", colID),
+				zap.Int64s("segment IDs", segIDs))
 			return
 		}
 	}
-}
-
-// bringSegmentsOnline brings the segments online so that data in these segments become searchable
-// it is done by changing segments' states from `importing` to `flushed`.
-func (c *Core) bringSegmentsOnline(ctx context.Context, segIDs []UniqueID) {
-	log.Info("bringing import task's segments online!", zap.Any("segment IDs", segIDs))
-	// TODO: Make update on segment states atomic.
-	for _, id := range segIDs {
-		// Explicitly mark segment states `flushing`.
-		c.CallUpdateSegmentStateService(ctx, id, commonpb.SegmentState_Flushing)
-	}
-}
-
-// segmentsOnlineReady returns true if segments are ready to go up online (a.k.a. become searchable).
-func segmentsOnlineReady(idxBuilt, segCount int) bool {
-	// Consider segments are ready when:
-	// (1) all but up to 2 segments have indices ready, or
-	// (2) over 85% of segments have indices ready.
-	if segCount-idxBuilt <= 2 || float64(idxBuilt)/float64(segCount) > 0.85 {
-		return true
-	}
-	return false
 }
 
 // ExpireCredCache will call invalidate credential cache

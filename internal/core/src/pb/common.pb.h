@@ -390,7 +390,9 @@ enum ImportState : int {
   ImportDownloaded = 3,
   ImportParsed = 4,
   ImportPersisted = 5,
-  ImportCompleted = 6,
+  DataQueryable = 6,
+  DataIndexed = 7,
+  ImportCompleted = 8,
   ImportState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ImportState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
