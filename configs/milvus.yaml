@@ -176,10 +176,12 @@ queryNode:
       pulsarBufSize: 512 # pulsar channel buffer size
     searchResult:
       recvBufSize: 64 # msgPack channel buffer size
-  # Segcore will divide a segment into multiple chunks.
+  # Segcore will divide a segment into multiple chunks to enbale small index
   segcore:
     chunkRows: 32768 # The number of vectors in a chunk.
-
+    smallIndex:
+      nlist: 256 # small index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
+      nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
   cache:
     enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024

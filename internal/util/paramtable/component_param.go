@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -702,7 +703,9 @@ type queryNodeConfig struct {
 	SliceIndex   int
 
 	// segcore
-	ChunkRows int64
+	ChunkRows        int64
+	SmallIndexNlist  int64
+	SmallIndexNProbe int64
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -730,7 +733,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.initStatsPublishInterval()
 
-	p.initSegcoreChunkRows()
+	p.initSmallIndexParams()
 
 	p.initOverloadedMemoryThresholdPercentage()
 
@@ -797,8 +800,34 @@ func (p *queryNodeConfig) initGracefulTime() {
 	log.Debug("query node init gracefulTime", zap.Any("gracefulTime", p.GracefulTime))
 }
 
-func (p *queryNodeConfig) initSegcoreChunkRows() {
+func (p *queryNodeConfig) initSmallIndexParams() {
 	p.ChunkRows = p.Base.ParseInt64WithDefault("queryNode.segcore.chunkRows", 32768)
+	if p.ChunkRows < 1024 {
+		log.Warn("chunk rows can not be less than 1024, force set to 1024", zap.Any("current", p.ChunkRows))
+		p.ChunkRows = 1024
+	}
+
+	// default NList is the first nlist
+	var defaultNList int64
+	for i := int64(0); i < p.ChunkRows; i++ {
+		if math.Pow(2.0, float64(i)) > math.Sqrt(float64(p.ChunkRows)) {
+			defaultNList = int64(math.Pow(2, float64(i)))
+			break
+		}
+	}
+
+	p.SmallIndexNlist = p.Base.ParseInt64WithDefault("queryNode.segcore.smallIndex.nlist", defaultNList)
+	if p.SmallIndexNlist > p.ChunkRows/8 {
+		log.Warn("small index nlist must smaller than chunkRows/8, force set to", zap.Any("nliit", p.ChunkRows/8))
+		p.SmallIndexNlist = p.ChunkRows / 8
+	}
+
+	defaultNprobe := p.SmallIndexNlist / 16
+	p.SmallIndexNProbe = p.Base.ParseInt64WithDefault("queryNode.segcore.smallIndex.nprobe", defaultNprobe)
+	if p.SmallIndexNProbe > p.SmallIndexNlist {
+		log.Warn("small index nprobe must smaller than nlist, force set to", zap.Any("nprobe", p.SmallIndexNlist))
+		p.SmallIndexNProbe = p.SmallIndexNlist
+	}
 }
 
 func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {

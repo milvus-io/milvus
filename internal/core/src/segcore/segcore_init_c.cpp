@@ -32,11 +32,23 @@ SegcoreInit() {
 #endif
 }
 
+// TODO merge small index config into one config map, including enable/disable small_index
 extern "C" void
 SegcoreSetChunkRows(const int64_t value) {
     milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
     config.set_chunk_rows(value);
-    LOG_SEGCORE_DEBUG_ << "set config chunk_size: " << config.get_chunk_rows();
+}
+
+extern "C" void
+SegcoreSetNlist(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
+    config.set_nlist(value);
+}
+
+extern "C" void
+SegcoreSetNprobe(const int64_t value) {
+    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
+    config.set_nprobe(value);
 }
 
 // return value must be freed by the caller
