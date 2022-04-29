@@ -175,6 +175,9 @@ func (nm *NodeManager) ListNode() []UniqueID {
 					log.Error("get IndexNode metrics info failed", zap.Error(err))
 					return
 				}
+				log.Debug("IndexCoord get IndexNode's metrics success", zap.Int64("nodeID", id),
+					zap.Int("CPUCoreCount", infos.HardwareInfos.CPUCoreCount), zap.Float64("CPUCoreUsage", infos.HardwareInfos.CPUCoreUsage),
+					zap.Uint64("Memory", infos.HardwareInfos.Memory), zap.Uint64("MemoryUsage", infos.HardwareInfos.MemoryUsage))
 				nm.pq.SetMemory(id, infos.HardwareInfos.Memory)
 			}(&wg, id)
 		}
