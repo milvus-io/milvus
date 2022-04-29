@@ -139,6 +139,9 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const = 0;
 
+    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
+
  protected:
     // internal API: return chunk_data in span
     virtual SpanBase
@@ -161,9 +164,6 @@ class SegmentInternalInterface : public SegmentInterface {
     // TODO: remove this hack when transfer is done
     virtual std::unique_ptr<DataArray>
     BulkSubScript(FieldOffset field_offset, const SegOffset* seg_offsets, int64_t count) const;
-
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
-    search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;

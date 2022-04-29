@@ -241,7 +241,6 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
                                       int64_t insert_barrier,
                                       bool force) const {
     auto old = deleted_record_.get_lru_entry();
-
     auto current = old->clone(insert_barrier);
     current->del_barrier = del_barrier;
     auto bitmap = current->bitmap_ptr;
@@ -260,25 +259,25 @@ SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
         return current;
     }
 
+    int64_t start, end;
     if (del_barrier < old->del_barrier) {
-        for (auto del_index = del_barrier; del_index < old->del_barrier; ++del_index) {
-            int64_t the_offset = seg_offsets[del_index].get();
-            AssertInfo(the_offset >= 0, "Seg offset is invalid");
-            if (deleted_record_.timestamps_[del_index] < query_timestamp) {
-                bitmap->clear(the_offset);
-            }
-        }
-        return current;
+        start = del_barrier;
+        end = old->del_barrier;
     } else {
-        for (auto del_index = old->del_barrier; del_index < del_barrier; ++del_index) {
-            int64_t the_offset = seg_offsets[del_index].get();
-            AssertInfo(the_offset >= 0, "Seg offset is invalid");
-            if (deleted_record_.timestamps_[del_index] < query_timestamp) {
-                bitmap->set(the_offset);
-            }
-        }
-        this->deleted_record_.insert_lru_entry(current);
+        start = old->del_barrier;
+        end = del_barrier;
     }
+
+    for (auto del_index = start; del_index < end; ++del_index) {
+        int64_t the_offset = seg_offsets[del_index].get();
+        AssertInfo(the_offset >= 0, "Seg offset is invalid");
+        if (deleted_record_.timestamps_[del_index] >= query_timestamp) {
+            bitmap->clear(the_offset);
+        } else {
+            bitmap->set(the_offset);
+        }
+    }
+    this->deleted_record_.insert_lru_entry(current);
     return current;
 }
 
@@ -300,9 +299,9 @@ SegmentSealedImpl::get_filtered_bitmap(const BitsetView& bitset, int64_t ins_bar
     AssertInfo(deleted_bitmap->count() == bitset.size(), "Deleted bitmap count not equal to filtered bitmap count");
 
     auto filtered_bitmap = std::make_shared<faiss::ConcurrentBitset>(bitset.size(), bitset.data());
-
     auto final_bitmap = (*deleted_bitmap.get()) | (*filtered_bitmap.get());
-    return BitsetView(final_bitmap);
+    auto res = BitsetView(final_bitmap);
+    return res;
 }
 
 void
@@ -429,6 +428,7 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
       scalar_indexings_(schema->size()),
       id_(segment_id) {
 }
+
 void
 SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                                   const int64_t* seg_offsets,
@@ -438,6 +438,7 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
     AssertInfo(system_type == SystemFieldType::RowId, "System field type of id column is not RowId");
     bulk_subscript_impl<int64_t>(row_ids_.data(), seg_offsets, count, output);
 }
+
 template <typename T>
 void
 SegmentSealedImpl::bulk_subscript_impl(const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw) {
@@ -564,7 +565,6 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,
         src_timestamps[i] = t;
         src_uids[i] = uid;
     }
-    auto current_size = deleted_record_.record_size_;
     deleted_record_.timestamps_.set_data(reserved_offset, src_timestamps.data(), row_count);
     deleted_record_.uids_.set_data(reserved_offset, src_uids.data(), row_count);
     deleted_record_.ack_responder_.AddSegment(reserved_offset, row_count);
@@ -612,11 +612,13 @@ SegmentSealedImpl::LoadSegmentMeta(const proto::segcore::LoadSegmentMeta& segmen
     timestamp_index_.set_length_meta(std::move(slice_lengths));
     PanicInfo("unimplemented");
 }
+
 int64_t
 SegmentSealedImpl::get_active_count(Timestamp ts) const {
     // TODO optimize here to reduce expr search range
     return this->get_row_count();
 }
+
 void
 SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const {
     // TODO change the
