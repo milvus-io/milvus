@@ -91,6 +91,7 @@ func (m *meta) reloadFromKV() error {
 		}
 	}
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
+	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(numStoredRows))
 	return nil
 }
 
@@ -224,6 +225,7 @@ func (m *meta) SetState(segmentID UniqueID, state commonpb.SegmentState) error {
 			metrics.DataCoordNumSegments.WithLabelValues(string(state)).Inc()
 			if state == commonpb.SegmentState_Flushed {
 				metrics.DataCoordNumStoredRows.WithLabelValues().Add(float64(curSegInfo.GetNumOfRows()))
+				metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(curSegInfo.GetNumOfRows()))
 			} else if oldState == commonpb.SegmentState_Flushed {
 				metrics.DataCoordNumStoredRows.WithLabelValues().Sub(float64(curSegInfo.GetNumOfRows()))
 			}
@@ -380,6 +382,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	metrics.DataCoordNumSegments.WithLabelValues(string(newSegmentState)).Inc()
 	if newSegmentState == commonpb.SegmentState_Flushed {
 		metrics.DataCoordNumStoredRows.WithLabelValues().Add(float64(clonedSegment.GetNumOfRows()))
+		metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(clonedSegment.GetNumOfRows()))
 	} else if oldSegmentState == commonpb.SegmentState_Flushed {
 		metrics.DataCoordNumStoredRows.WithLabelValues().Sub(float64(segment.GetNumOfRows()))
 	}

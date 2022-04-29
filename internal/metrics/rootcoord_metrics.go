@@ -114,7 +114,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
-			Name:      "msgstream_num",
+			Name:      "msgstream_obj_num",
 			Help:      "number of message streams",
 		})
 
@@ -136,7 +136,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordInsertChannelTimeTick)
 	registry.MustRegister(RootCoordSyncTimeTickLatency)
 
-	// for DDL latency
+	// for DDL
+	registry.MustRegister(RootCoordDDLReqCounter)
 	registry.MustRegister(RootCoordDDLReqLatency)
 
 	// for allocator
