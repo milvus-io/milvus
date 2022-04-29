@@ -13,19 +13,20 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"unsafe"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"unsafe"
 )
 
-// PayloadReader reads data from payload
+// PayloadReaderCgo reads data from payload
 type PayloadReaderCgo struct {
 	payloadReaderPtr C.CPayloadReader
 	colType          schemapb.DataType
 }
 
-func NewPayloadReaderGgo(colType schemapb.DataType, buf []byte) (*PayloadReaderCgo, error) {
+func NewPayloadReaderCgo(colType schemapb.DataType, buf []byte) (*PayloadReaderCgo, error) {
 	if len(buf) == 0 {
 		return nil, errors.New("create Payload reader failed, buffer is empty")
 	}
