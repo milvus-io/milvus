@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+
 	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
 
@@ -55,6 +57,85 @@ func newTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func assertValidExpr(t *testing.T, schema *typeutil.SchemaHelper, exprStr string) {
+	// fmt.Println("expr: ", exprStr)
+
+	_, err := parseExpr(schema, exprStr)
+	assert.Nil(t, err, exprStr)
+
+	// fmt.Println("AST1:")
+	// planparserv2.ShowExpr(expr1)
+}
+
+func assertValidExprV2(t *testing.T, schema *typeutil.SchemaHelper, exprStr string) {
+	expr1, err := parseExpr(schema, exprStr)
+	assert.Nil(t, err)
+
+	expr2, err := planparserv2.ParseExpr(schema, exprStr)
+	assert.Nil(t, err)
+
+	if !planparserv2.CheckIdentical(expr1, expr2) {
+		fmt.Println("expr: ", exprStr)
+
+		fmt.Println("AST1:")
+		planparserv2.ShowExpr(expr1)
+
+		fmt.Println("AST2:")
+		planparserv2.ShowExpr(expr2)
+
+		t.Errorf("parsed asts are not identical")
+	}
+}
+
+func assertInvalidExpr(t *testing.T, schema *typeutil.SchemaHelper, exprStr string) {
+	// fmt.Println("expr: ", exprStr)
+
+	_, err := parseExpr(schema, exprStr)
+	assert.Error(t, err, exprStr)
+
+	_, err = planparserv2.ParseExpr(schema, exprStr)
+	assert.Error(t, err, exprStr)
+}
+
+func assertValidSearchPlan(t *testing.T, schema *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) {
+	_, err := createQueryPlan(schema, exprStr, vectorFieldName, queryInfo)
+	assert.Nil(t, err)
+}
+
+func assertValidSearchPlanV2(t *testing.T, schema *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) {
+	planProto1, err := createQueryPlan(schema, exprStr, vectorFieldName, queryInfo)
+	assert.Nil(t, err)
+
+	planProto2, err := planparserv2.CreateSearchPlan(schema, exprStr, vectorFieldName, queryInfo)
+	assert.Nil(t, err)
+
+	expr1 := planProto1.GetVectorAnns().GetPredicates()
+	assert.NotNil(t, expr1)
+
+	expr2 := planProto2.GetVectorAnns().GetPredicates()
+	assert.NotNil(t, expr2)
+
+	if !planparserv2.CheckIdentical(expr1, expr2) {
+		fmt.Println("expr: ", exprStr)
+
+		fmt.Println("AST1:")
+		planparserv2.ShowExpr(expr1)
+
+		fmt.Println("AST2:")
+		planparserv2.ShowExpr(expr2)
+
+		t.Errorf("parsed asts are not identical")
+	}
+}
+
+func assertInvalidSearchPlan(t *testing.T, schema *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) {
+	_, err := createQueryPlan(schema, exprStr, vectorFieldName, queryInfo)
+	assert.Error(t, err, exprStr)
+
+	_, err = planparserv2.CreateSearchPlan(schema, exprStr, vectorFieldName, queryInfo)
+	assert.Error(t, err, exprStr)
+}
+
 func TestParseExpr_Naive(t *testing.T) {
 	schemaPb := newTestSchema()
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
@@ -67,14 +148,19 @@ func TestParseExpr_Naive(t *testing.T) {
 			"FloatField > +1.0",
 			"FloatField > -1.0",
 			`VarCharField > "str"`,
+		}
+		for _, exprStr := range exprStrs {
+			assertValidExprV2(t, schema, exprStr)
+		}
+	})
+
+	t.Run("test string unary", func(t *testing.T) {
+		exprStrs := []string{
 			`VarCharField startsWith "str"`,
 			`VarCharField endsWith "str"`,
 		}
 		for _, exprStr := range exprStrs {
-			exprProto, err := parseExpr(schema, exprStr)
-			assert.Nil(t, err)
-			str := proto.MarshalTextString(exprProto)
-			println(str)
+			assertValidExpr(t, schema, exprStr)
 		}
 	})
 
@@ -85,9 +171,7 @@ func TestParseExpr_Naive(t *testing.T) {
 			`VarCharField > -aa`,
 		}
 		for _, exprStr := range exprStrs {
-			exprProto, err := parseExpr(schema, exprStr)
-			assert.Error(t, err)
-			assert.Nil(t, exprProto)
+			assertInvalidExpr(t, schema, exprStr)
 		}
 	})
 
@@ -122,10 +206,7 @@ func TestParseExpr_Naive(t *testing.T) {
 			"FloatField > 1.0 ** 2.0",
 		}
 		for _, exprStr := range exprStrs {
-			exprProto, err := parseExpr(schema, exprStr)
-			assert.Nil(t, err)
-			str := proto.MarshalTextString(exprProto)
-			println(str)
+			assertValidExprV2(t, schema, exprStr)
 		}
 	})
 
@@ -156,9 +237,7 @@ func TestParseExpr_Naive(t *testing.T) {
 			"FloatField > aa ** 2.0",
 		}
 		for _, exprStr := range exprStrs {
-			exprProto, err := parseExpr(schema, exprStr)
-			assert.Error(t, err)
-			assert.Nil(t, exprProto)
+			assertInvalidExpr(t, schema, exprStr)
 		}
 	})
 
@@ -184,10 +263,7 @@ func TestParseExpr_Naive(t *testing.T) {
 			"Int64Field % 7 == 5",
 		}
 		for _, exprStr := range exprStrs {
-			exprProto, err := parseExpr(schema, exprStr)
-			assert.Nil(t, err)
-			str := proto.MarshalTextString(exprProto)
-			println(str)
+			assertValidExprV2(t, schema, exprStr)
 		}
 	})
 
@@ -233,11 +309,8 @@ func TestParsePlanNode_Naive(t *testing.T) {
 		"DoubleField in [1.0, 2, 3] && Int64Field < 3 or Int64Field > 2",
 		`not (VarCharField > "str")`,
 		`not ("str" > VarCharField)`,
-		`not (VarCharField startsWith "str")`,
-		`not (VarCharField endsWith "str")`,
 		`VarCharField in ["term0", "term1", "term2"]`,
 		`VarCharField < "str3" and (VarCharField > "str2" || VarCharField == "str1")`,
-		`VarCharField < "str3" and (VarCharField startsWith "str2" || VarCharField endsWith "str1")`,
 		`DoubleField in [1.0, 2, 3] && VarCharField < "str3" or Int64Field > 2`,
 	}
 
@@ -248,16 +321,18 @@ func TestParsePlanNode_Naive(t *testing.T) {
 		SearchParams: "{\"nprobe\": 10}",
 	}
 
-	// Note: use pointer to string to represent nullable string
-	// TODO: change it to better solution
-	for offset, exprStr := range exprStrs {
-		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := createQueryPlan(schema, exprStr, "FloatVectorField", queryInfo)
-		assert.Nil(t, err)
-		dbgStr := proto.MarshalTextString(planProto)
-		println(dbgStr)
+	for _, exprStr := range exprStrs {
+		assertValidSearchPlanV2(t, schema, exprStr, "FloatVectorField", queryInfo)
 	}
 
+	stringFuncs := []string{
+		`not (VarCharField startsWith "str")`,
+		`not (VarCharField endsWith "str")`,
+		`VarCharField < "str3" and (VarCharField startsWith "str2" || VarCharField endsWith "str1")`,
+	}
+	for _, exprStr := range stringFuncs {
+		assertValidSearchPlan(t, schema, exprStr, "FloatVectorField", queryInfo)
+	}
 }
 
 func TestExternalParser(t *testing.T) {
@@ -299,19 +374,15 @@ func TestExprPlan_Str(t *testing.T) {
 		"age not in [1, 2, 3]",
 	}
 
-	for offset, exprStr := range exprStrs {
-		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
-		assert.Nil(t, err)
-		dbgStr := proto.MarshalTextString(planProto)
-		println(dbgStr)
+	for _, exprStr := range exprStrs {
+		assertValidSearchPlanV2(t, schema, exprStr, "fakevec", queryInfo)
 	}
 }
 
 func TestExprMultiRange_Str(t *testing.T) {
 	exprStrs := []string{
 		"3 < FloatN < 4.0",
-		"3 < age1 < 5 < age2 < 7 < FloatN < 9.0 < FloatN2",
+		// "3 < age1 < 5 < age2 < 7 < FloatN < 9.0 < FloatN2",	// no need to support this, ambiguous.
 		"1 + 1 < age1 < 2 * 2",
 		"1 - 1 < age1 < 3 / 2",
 		"1.0 - 1 < FloatN < 3 / 2",
@@ -351,26 +422,18 @@ func TestExprMultiRange_Str(t *testing.T) {
 		SearchParams: "{\"nprobe\": 10}",
 	}
 
-	for offset, exprStr := range exprStrs {
-		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
-		assert.Nil(t, err)
-		dbgStr := proto.MarshalTextString(planProto)
-		println(dbgStr)
+	for _, exprStr := range exprStrs {
+		assertValidSearchPlanV2(t, schema, exprStr, "fakevec", queryInfo)
 	}
-	for offset, exprStr := range invalidExprs {
-		fmt.Printf("invalid case %d: %s\n", offset, exprStr)
-		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
-		assert.Error(t, err)
-		dbgStr := proto.MarshalTextString(planProto)
-		println(dbgStr)
+	for _, exprStr := range invalidExprs {
+		assertInvalidSearchPlan(t, schema, exprStr, "fakevec", queryInfo)
 	}
 }
 
 func TestExprFieldCompare_Str(t *testing.T) {
 	exprStrs := []string{
 		"age1 < age2",
-		"3 < age1 <= age2 < 4",
+		// "3 < age1 <= age2 < 4",	// no need to support this, ambiguous.
 	}
 
 	fields := []*schemapb.FieldSchema{
@@ -393,12 +456,8 @@ func TestExprFieldCompare_Str(t *testing.T) {
 		SearchParams: "{\"nprobe\": 10}",
 	}
 
-	for offset, exprStr := range exprStrs {
-		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
-		assert.Nil(t, err)
-		dbgStr := proto.MarshalTextString(planProto)
-		println(dbgStr)
+	for _, exprStr := range exprStrs {
+		assertValidSearchPlanV2(t, schema, exprStr, "fakevec", queryInfo)
 	}
 }
 
@@ -418,6 +477,8 @@ func TestExprBinaryArithOp_Str(t *testing.T) {
 		"(age1 * 4) != 9",
 		"(5 * FloatN) != 0",
 		"(9 * FloatN) != 0",
+		// Functional nodes at the right can be reversed
+		"0 == (age1 + 3)",
 	}
 
 	unsupportedExprStrs := []string{
@@ -426,8 +487,6 @@ func TestExprBinaryArithOp_Str(t *testing.T) {
 		"(age1 + 2) >= 4",
 		"(age1 + 2) < 4",
 		"(age1 + 2) <= 4",
-		// Functional nodes at the right of the comparison are not allowed
-		"0 == (age1 + 3)",
 		// Field as the right operand for -, /, and % operators are not supported
 		"(10 - age1) == 0",
 		"(20 / age1) == 0",
@@ -459,19 +518,12 @@ func TestExprBinaryArithOp_Str(t *testing.T) {
 		SearchParams: "{\"nprobe\": 10}",
 	}
 
-	for offset, exprStr := range exprStrs {
-		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
-		assert.Nil(t, err)
-		dbgStr := proto.MarshalTextString(planProto)
-		println(dbgStr)
+	for _, exprStr := range exprStrs {
+		assertValidSearchPlanV2(t, schema, exprStr, "fakevec", queryInfo)
 	}
-	for offset, exprStr := range unsupportedExprStrs {
-		fmt.Printf("case %d: %s\n", offset, exprStr)
-		planProto, err := createQueryPlan(schema, exprStr, "fakevec", queryInfo)
-		assert.Error(t, err)
-		dbgStr := proto.MarshalTextString(planProto)
-		println(dbgStr)
+
+	for _, exprStr := range unsupportedExprStrs {
+		assertInvalidSearchPlan(t, schema, exprStr, "fakevec", queryInfo)
 	}
 }
 
@@ -545,4 +597,45 @@ func TestPlanParseAPIs(t *testing.T) {
 		}
 		assert.Nil(t, parseBoolNode(&nodeRaw4))
 	})
+}
+
+func Test_CheckIdentical(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	n := 5000
+	int64s := generateInt64Array(n)
+	largeIntTermExpr := `Int64Field in [`
+	largeFloatTermExpr := `FloatField in [`
+	for _, i := range int64s[:n-1] {
+		largeIntTermExpr += fmt.Sprintf("%d, ", i)
+		largeFloatTermExpr += fmt.Sprintf("%d, ", i)
+	}
+	largeIntTermExpr += fmt.Sprintf("%d]", int64s[n-1])
+	largeFloatTermExpr += fmt.Sprintf("%d]", int64s[n-1])
+
+	// cases in regression.
+	inputs := []string{
+		"Int64Field > 0",
+		"(Int64Field > 0 && Int64Field < 400) or (Int64Field > 500 && Int64Field < 1000)",
+		"Int64Field not in [1, 2, 3]",
+		"Int64Field in [1, 2, 3] and FloatField != 2",
+		"Int64Field == 0 || Int64Field == 1 || Int64Field == 2",
+		"0 < Int64Field < 400",
+		"500 <= Int64Field < 1000",
+		"200+300 < Int64Field <= 500+500",
+		"Int32Field != Int64Field",
+		"Int64Field not in []",
+		largeIntTermExpr,
+		largeFloatTermExpr,
+	}
+	for _, input := range inputs {
+		// fmt.Println("expr: ", input)
+		expr1, err := parseExpr(helper, input)
+		assert.NoError(t, err)
+		expr2, err := planparserv2.ParseExpr(helper, input)
+		assert.NoError(t, err)
+		assert.True(t, planparserv2.CheckIdentical(expr1, expr2))
+	}
 }

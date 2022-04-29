@@ -238,6 +238,11 @@ func IsFloatingType(dataType schemapb.DataType) bool {
 	}
 }
 
+// IsArithmetic returns true if input is of arithmetic type, otherwise false.
+func IsArithmetic(dataType schemapb.DataType) bool {
+	return IsIntegerType(dataType) || IsFloatingType(dataType)
+}
+
 // IsBoolType returns true if input is a bool type, otherwise false
 func IsBoolType(dataType schemapb.DataType) bool {
 	switch dataType {
@@ -251,7 +256,7 @@ func IsBoolType(dataType schemapb.DataType) bool {
 // IsStringType returns true if input is a varChar type, otherwise false
 func IsStringType(dataType schemapb.DataType) bool {
 	switch dataType {
-	case schemapb.DataType_VarChar:
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		return true
 	default:
 		return false
