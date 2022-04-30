@@ -35,7 +35,6 @@ import (
 	"io/ioutil"
 	"math"
 	"net"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -114,14 +113,14 @@ func TestLog(t *testing.T) {
 		zap.Duration("duration", 10*time.Second),
 	)
 	ts.assertMessages(
-		`[INFO] [zap_log_test.go:66] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
-		`[INFO] [zap_log_test.go:71] ["failed to \"fetch\" [URL]: http://example.com"]`,
-		`[DEBUG] [zap_log_test.go:72] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
-		`[INFO] [zap_log_test.go:78] [Welcome]`,
-		`[INFO] [zap_log_test.go:79] [欢迎]`,
-		`[WARN] [zap_log_test.go:80] [Type] [Counter=NaN] [Score=+Inf]`,
-		`[INFO] [zap_log_test.go:85] ["new connection"] [connID=1] [traceID=dse1121]`,
-		`[INFO] [zap_log_test.go:86] ["Testing typs"] [filed1=noquote] `+
+		`[INFO] [zap_log_test.go:65] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
+		`[INFO] [zap_log_test.go:70] ["failed to \"fetch\" [URL]: http://example.com"]`,
+		`[DEBUG] [zap_log_test.go:71] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
+		`[INFO] [zap_log_test.go:77] [Welcome]`,
+		`[INFO] [zap_log_test.go:78] [欢迎]`,
+		`[WARN] [zap_log_test.go:79] [Type] [Counter=NaN] [Score=+Inf]`,
+		`[INFO] [zap_log_test.go:84] ["new connection"] [connID=1] [traceID=dse1121]`,
+		`[INFO] [zap_log_test.go:85] ["Testing typs"] [filed1=noquote] `+
 			`[filed2="in quote"] [urls="[http://mock1.com:2347,http://mock2.com:2432]"] `+
 			`[urls-peer="[t1,\"t2 fine\"]"] ["store ids"="[1,4,5]"] [object="{username=user1}"] `+
 			`[object2="{username=\"user 2\"}"] [binary="YWIxMjM="] ["is processed"=true] `+
@@ -192,8 +191,8 @@ func TestLogJSON(t *testing.T) {
 		"backoff", time.Second,
 	)
 	logger.With(zap.String("connID", "1"), zap.String("traceID", "dse1121")).Info("new connection")
-	ts.assertMessages("{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:189\",\"message\":\"failed to fetch URL\",\"url\":\"http://example.com\",\"attempt\":3,\"backoff\":\"1s\"}",
-		"{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:194\",\"message\":\"new connection\",\"connID\":\"1\",\"traceID\":\"dse1121\"}")
+	ts.assertMessages("{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:188\",\"message\":\"failed to fetch URL\",\"url\":\"http://example.com\",\"attempt\":3,\"backoff\":\"1s\"}",
+		"{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:193\",\"message\":\"new connection\",\"connID\":\"1\",\"traceID\":\"dse1121\"}")
 }
 
 func TestRotateLog(t *testing.T) {
@@ -207,7 +206,7 @@ func TestRotateLog(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.desc, func(t *testing.T) {
-			tempDir, _ := ioutil.TempDir("/tmp", "pd-test-log")
+			tempDir := t.TempDir()
 			conf := &Config{
 				Level: "info",
 				File: FileLogConfig{
@@ -229,7 +228,6 @@ func TestRotateLog(t *testing.T) {
 			}
 			files, _ := ioutil.ReadDir(tempDir)
 			assert.Len(t, files, c.expectedFileNum)
-			_ = os.RemoveAll(tempDir)
 		})
 	}
 }

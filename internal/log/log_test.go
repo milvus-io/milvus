@@ -33,8 +33,6 @@ package log
 import (
 	"bufio"
 	"bytes"
-	"io/ioutil"
-	"os"
 	"testing"
 	"time"
 
@@ -82,8 +80,7 @@ func TestZapTextEncoder(t *testing.T) {
 }
 
 func TestInvalidFileConfig(t *testing.T) {
-	tmpDir, _ := ioutil.TempDir("/tmp", "invalid-log-test")
-	defer os.RemoveAll(tmpDir)
+	tmpDir := t.TempDir()
 
 	invalidFileConf := FileLogConfig{
 		Filename: tmpDir,
