@@ -51,6 +51,9 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 		grpcClient: &grpcclient.ClientBase{
 			ClientMaxRecvSize: ClientParams.ClientMaxRecvSize,
 			ClientMaxSendSize: ClientParams.ClientMaxSendSize,
+			DialTimeout:       ClientParams.DialTimeout,
+			KeepAliveTime:     ClientParams.KeepAliveTime,
+			KeepAliveTimeout:  ClientParams.KeepAliveTimeout,
 		},
 	}
 	client.grpcClient.SetRole(typeutil.QueryNodeRole)

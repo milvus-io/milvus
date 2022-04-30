@@ -135,7 +135,6 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	// must init cluster prefix first
 	p.initClusterPrefix()
-
 	p.initProxySubName()
 
 	p.initRootCoordTimeTick()

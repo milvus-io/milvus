@@ -42,6 +42,8 @@ type FileLogConfig struct {
 type Config struct {
 	// Log level.
 	Level string `toml:"level" json:"level"`
+	// grpc log level
+	GrpcLevel string `toml:"grpc-level" json:"grpc-level"`
 	// Log format. one of json, text, or console.
 	Format string `toml:"format" json:"format"`
 	// Disable automatic timestamps in output.

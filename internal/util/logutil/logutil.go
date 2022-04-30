@@ -29,45 +29,73 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// infoLog indicates Info severity.
+	infoLog int = iota
+	// warningLog indicates Warning severity.
+	warningLog
+	// errorLog indicates Error severity.
+	errorLog
+)
+
 type zapWrapper struct {
-	logger *zap.Logger
+	logger   *zap.Logger
+	logLevel int
 }
 
 // Info logs a message at InfoLevel.
 func (w *zapWrapper) Info(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
+	if infoLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
+	}
 }
 
 func (w *zapWrapper) Infoln(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
+	if infoLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
+	}
 }
 
 func (w zapWrapper) Infof(format string, args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Infof(format, args...)
+	if infoLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Infof(format, args...)
+	}
 }
 
 func (w zapWrapper) Warning(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
+	if warningLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
+	}
 }
 
 func (w zapWrapper) Warningln(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
+	if warningLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
+	}
 }
 
 func (w *zapWrapper) Warningf(format string, args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warnf(format, args...)
+	if warningLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warnf(format, args...)
+	}
 }
 
 func (w zapWrapper) Error(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
+	if errorLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
+	}
 }
 
 func (w *zapWrapper) Errorln(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
+	if errorLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
+	}
 }
 
 func (w zapWrapper) Errorf(format string, args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Errorf(format, args...)
+	if errorLog >= w.logLevel {
+		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Errorf(format, args...)
+	}
 }
 
 func (w *zapWrapper) Fatal(args ...interface{}) {
@@ -88,6 +116,10 @@ func (w *zapWrapper) Fatalf(format string, args ...interface{}) {
 // zap
 // -1=debug, 0=info, 1=warning, 2=error, 3=dpanic, 4=panic, 5=fatal
 func (w *zapWrapper) V(l int) bool {
+	if l < w.logLevel {
+		return false
+	}
+
 	zapLevel := l
 	if l == 3 {
 		zapLevel = 5
@@ -116,8 +148,18 @@ func SetupLogger(cfg *log.Config) {
 			log.Fatal("initialize logger error", zap.Error(err))
 		}
 
-		// initialize grpc and etcd logger
-		wrapper := &zapWrapper{logger}
+		// Initialize grpc log wrapper
+		logLevel := 0
+		switch cfg.GrpcLevel {
+		case "", "ERROR": // If env is unset, set level to ERROR.
+			logLevel = 2
+		case "WARNING":
+			logLevel = 1
+		case "INFO":
+			logLevel = 0
+		}
+
+		wrapper := &zapWrapper{logger, logLevel}
 		grpclog.SetLoggerV2(wrapper)
 
 		log.Info("Log directory", zap.String("configDir", cfg.File.RootPath))

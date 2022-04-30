@@ -41,10 +41,7 @@ const (
 	DefaultMinioSecretAccessKey = "minioadmin"
 	DefaultMinioUseSSL          = "false"
 	DefaultMinioBucketName      = "a-bucket"
-	DefaultPulsarHost           = "localhost"
-	DefaultPulsarPort           = "6650"
 	DefaultEtcdEndpoints        = "localhost:2379"
-	DefaultRocksmqPath          = "/var/lib/milvus/rdb_data"
 	DefaultInsertBufferSize     = "16777216"
 	DefaultEnvPrefix            = "milvus"
 )
@@ -391,6 +388,13 @@ func (gp *BaseTable) InitLogCfg() {
 // SetLogConfig set log config of the base table
 func (gp *BaseTable) SetLogConfig() {
 	gp.LogCfgFunc = func(cfg log.Config) {
+		var err error
+		grpclog, err := gp.Load("grpc.log.level")
+		if err != nil {
+			cfg.GrpcLevel = DefaultLogLevel
+		} else {
+			cfg.GrpcLevel = strings.ToUpper(grpclog)
+		}
 		logutil.SetupLogger(&cfg)
 		defer log.Sync()
 	}

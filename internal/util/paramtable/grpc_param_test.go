@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -68,6 +69,11 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.NotZero(t, Params.ClientMaxRecvSize)
 	t.Logf("ClientMaxRecvSize = %d", Params.ClientMaxRecvSize)
 
+	Params.Remove("grpc.clientMaxRecvSize")
+	Params.Save(role+".grpc.clientMaxRecvSize", "1000")
+	Params.initClientMaxRecvSize()
+	assert.Equal(t, Params.ClientMaxRecvSize, 1000)
+
 	Params.Remove(role + ".grpc.clientMaxRecvSize")
 	Params.initClientMaxRecvSize()
 	assert.Equal(t, Params.ClientMaxRecvSize, DefaultClientMaxRecvSize)
@@ -75,7 +81,40 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.NotZero(t, Params.ClientMaxSendSize)
 	t.Logf("ClientMaxSendSize = %d", Params.ClientMaxSendSize)
 
+	Params.Remove("grpc.clientMaxSendSize")
+	Params.Save(role+".grpc.clientMaxSendSize", "2000")
+	Params.initClientMaxSendSize()
+	assert.Equal(t, Params.ClientMaxSendSize, 2000)
+
 	Params.Remove(role + ".grpc.clientMaxSendSize")
 	Params.initClientMaxSendSize()
 	assert.Equal(t, Params.ClientMaxSendSize, DefaultClientMaxSendSize)
+
+	Params.initDialTimeout()
+	assert.Equal(t, Params.DialTimeout, DefaultDialTimeout)
+	Params.Save("grpc.client.dialTimeout", "aaa")
+	Params.initDialTimeout()
+	assert.Equal(t, Params.DialTimeout, DefaultDialTimeout)
+	Params.Save("grpc.client.dialTimeout", "100")
+	Params.initDialTimeout()
+	assert.Equal(t, Params.DialTimeout, 100*time.Millisecond)
+
+	Params.initKeepAliveTime()
+	assert.Equal(t, Params.KeepAliveTime, DefaultKeepAliveTime)
+	Params.Save("grpc.client.keepAliveTime", "a")
+	Params.initKeepAliveTime()
+	assert.Equal(t, Params.KeepAliveTime, DefaultKeepAliveTime)
+	Params.Save("grpc.client.keepAliveTime", "200")
+	Params.initKeepAliveTime()
+	assert.Equal(t, Params.KeepAliveTime, 200*time.Millisecond)
+
+	Params.initKeepAliveTimeout()
+	assert.Equal(t, Params.KeepAliveTimeout, DefaultKeepAliveTimeout)
+	Params.Save("grpc.client.keepAliveTimeout", "a")
+	Params.initKeepAliveTimeout()
+	assert.Equal(t, Params.KeepAliveTimeout, DefaultKeepAliveTimeout)
+	Params.Save("grpc.client.keepAliveTimeout", "500")
+	Params.initKeepAliveTimeout()
+	assert.Equal(t, Params.KeepAliveTimeout, 500*time.Millisecond)
+
 }
