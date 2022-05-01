@@ -36,7 +36,7 @@ auto index_type_collections = [] {
 
 auto metric_type_collections = [] {
     static std::map<int, knowhere::MetricType> collections{
-        {0, knowhere::Metric::L2},
+        {0, knowhere::metric::L2},
     };
     return collections;
 }();
