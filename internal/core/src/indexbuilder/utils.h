@@ -16,25 +16,26 @@
 #include <tuple>
 #include <vector>
 #include <functional>
-#include <knowhere/common/Typedef.h>
 
+#include <knowhere/common/Typedef.h>
 #include "knowhere/index/IndexType.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus::indexbuilder {
 
-std::vector<std::string>
+std::vector<knowhere::IndexType>
 NM_List();
 
-std::vector<std::string>
+std::vector<knowhere::IndexType>
 BIN_List();
 
-std::vector<std::string>
+std::vector<knowhere::IndexType>
 Need_ID_List();
 
-std::vector<std::string>
+std::vector<knowhere::IndexType>
 Need_BuildAll_list();
 
-std::vector<std::tuple<std::string, std::string>>
+std::vector<std::tuple<knowhere::IndexType, knowhere::MetricType>>
 unsupported_index_combinations();
 
 template <typename T>
