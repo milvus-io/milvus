@@ -11,8 +11,8 @@
 
 #include <gtest/gtest.h>
 
+#include "knowhere/index/VecIndex.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"

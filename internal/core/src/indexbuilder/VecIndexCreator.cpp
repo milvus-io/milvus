@@ -14,14 +14,14 @@
 #include <google/protobuf/text_format.h>
 
 #include "exceptions/EasyAssert.h"
-#include "pb/index_cgo_msg.pb.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/utils.h"
 #include "knowhere/common/Timer.h"
 #include "knowhere/common/Utils.h"
+#include "knowhere/index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "pb/index_cgo_msg.pb.h"
 
 namespace milvus::indexbuilder {
 

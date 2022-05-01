@@ -22,7 +22,7 @@
 #include "AckResponder.h"
 #include "InsertRecord.h"
 #include "common/Schema.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/VecIndex.h"
 #include "segcore/SegcoreConfig.h"
 
 namespace milvus::segcore {

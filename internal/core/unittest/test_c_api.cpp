@@ -9,20 +9,20 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
+#include <boost/format.hpp>
 #include <chrono>
 #include <google/protobuf/text_format.h>
+#include <gtest/gtest.h>
 #include <iostream>
 #include <random>
 #include <string>
 #include <unordered_set>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <knowhere/index/vector_index/IndexIVFPQ.h>
-#include <boost/format.hpp>
 
 #include "common/LoadInfo.h"
+#include "knowhere/index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/IndexIVFPQ.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "pb/milvus.pb.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"

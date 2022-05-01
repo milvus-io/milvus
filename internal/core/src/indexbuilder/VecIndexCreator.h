@@ -16,9 +16,9 @@
 #include <string>
 #include <vector>
 
-#include "knowhere/index/vector_index/VecIndex.h"
-#include "knowhere/common/BinarySet.h"
 #include "indexbuilder/IndexCreatorBase.h"
+#include "knowhere/common/BinarySet.h"
+#include "knowhere/index/VecIndex.h"
 
 namespace milvus::indexbuilder {
 

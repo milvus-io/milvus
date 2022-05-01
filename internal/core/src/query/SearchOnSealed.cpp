@@ -11,7 +11,7 @@
 
 #include <cmath>
 
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/VecIndex.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
