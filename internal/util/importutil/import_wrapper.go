@@ -110,9 +110,21 @@ func getFileNameAndExt(filePath string) (string, string) {
 }
 
 func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error {
+	// use this map to check duplicate files
+	files := make(map[string]struct{})
+
 	for i := 0; i < len(filePaths); i++ {
 		filePath := filePaths[i]
 		_, fileType := getFileNameAndExt(filePath)
+		_, ok := files[filePath]
+		if ok {
+			// only check dupliate numpy file
+			if fileType == NumpyFileExt {
+				return errors.New("duplicate file: " + filePath)
+			}
+		} else {
+			files[filePath] = struct{}{}
+		}
 
 		// check file type
 		if rowBased {
@@ -127,6 +139,9 @@ func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error 
 
 		// check file size
 		size, _ := p.chunkManager.Size(filePath)
+		if size == 0 {
+			return errors.New("the file " + filePath + " is empty")
+		}
 		if size > MaxFileSize {
 			return errors.New("the file " + filePath + " size exceeds the maximum file size: " + strconv.FormatInt(MaxFileSize, 10) + " bytes")
 		}
@@ -141,6 +156,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error 
 func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate bool) error {
 	err := p.fileValidation(filePaths, rowBased)
 	if err != nil {
+		log.Error("import error: " + err.Error())
 		return err
 	}
 
@@ -480,7 +496,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 
 	for name, count := range rowCounter {
 		if count != rowCount {
-			return errors.New("import error: field " + name + " row count " + strconv.Itoa(count) + " is not equal to other fields " + strconv.Itoa(rowCount))
+			return errors.New("import error: field " + name + " row count " + strconv.Itoa(count) + " is not equal to other fields row count " + strconv.Itoa(rowCount))
 		}
 	}
 
