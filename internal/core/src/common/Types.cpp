@@ -58,7 +58,7 @@ MetricTypeToName(MetricType metric_type) {
 
 bool
 IsPrimaryKeyDataType(DataType data_type) {
-    return data_type == engine::DataType::INT64 || data_type == DataType::VARCHAR;
+    return data_type == DataType::INT64 || data_type == DataType::VARCHAR;
 }
 
 }  // namespace milvus

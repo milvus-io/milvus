@@ -26,9 +26,8 @@
 #include <boost/dynamic_bitset.hpp>
 #include <NamedType/named_type.hpp>
 
+#include "common/FieldMeta.h"
 #include "pb/schema.pb.h"
-#include "utils/Types.h"
-#include "FieldMeta.h"
 
 namespace milvus {
 struct SearchResult {

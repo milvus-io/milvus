@@ -244,10 +244,10 @@ GenDataset(int64_t N, const knowhere::MetricType& metric_type, bool is_binary, i
     auto schema = std::make_shared<milvus::Schema>();
     auto faiss_metric_type = knowhere::GetMetricType(metric_type);
     if (!is_binary) {
-        schema->AddDebugField("fakevec", milvus::engine::DataType::VECTOR_FLOAT, dim, faiss_metric_type);
+        schema->AddDebugField("fakevec", milvus::DataType::VECTOR_FLOAT, dim, faiss_metric_type);
         return milvus::segcore::DataGen(schema, N);
     } else {
-        schema->AddDebugField("fakebinvec", milvus::engine::DataType::VECTOR_BINARY, dim, faiss_metric_type);
+        schema->AddDebugField("fakebinvec", milvus::DataType::VECTOR_BINARY, dim, faiss_metric_type);
         return milvus::segcore::DataGen(schema, N);
     }
 }
