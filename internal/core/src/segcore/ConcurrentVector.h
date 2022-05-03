@@ -23,11 +23,11 @@
 
 #include <tbb/concurrent_vector.h>
 
-#include "common/Types.h"
-#include "common/Span.h"
-#include "exceptions/EasyAssert.h"
-#include "utils/Utils.h"
 #include "common/FieldMeta.h"
+#include "common/Span.h"
+#include "common/Types.h"
+#include "common/Utils.h"
+#include "exceptions/EasyAssert.h"
 
 namespace milvus::segcore {
 
