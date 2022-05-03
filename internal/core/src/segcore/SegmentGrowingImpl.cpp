@@ -22,7 +22,6 @@
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/Reduce.h"
 #include "segcore/SegmentGrowingImpl.h"
-#include "utils/Utils.h"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore {

@@ -13,7 +13,6 @@
 
 #include "segcore/SegmentGrowing.h"
 #include "test_utils/DataGen.h"
-#include "utils/Utils.h"
 
 const int64_t ROW_COUNT = 100 * 1000;
 

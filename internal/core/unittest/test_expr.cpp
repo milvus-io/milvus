@@ -16,13 +16,10 @@
 #include "query/Expr.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
-#include "query/generated/ExprVisitor.h"
-#include "query/generated/PlanNodeVisitor.h"
 #include "query/generated/ShowPlanNodeVisitor.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
-#include "utils/Utils.h"
 
 using namespace milvus;
 
