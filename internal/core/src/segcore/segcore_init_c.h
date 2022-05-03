@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 void
-SegcoreInit();
+SegcoreInit(const char*);
 
 void
 SegcoreSetChunkRows(const int64_t);

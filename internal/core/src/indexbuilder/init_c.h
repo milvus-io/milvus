@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 void
-IndexBuilderInit();
+IndexBuilderInit(const char*);
 
 // return value must be freed by the caller
 char*

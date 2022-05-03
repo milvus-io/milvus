@@ -35,6 +35,8 @@ import (
 type UniqueID = typeutil.UniqueID
 
 const (
+	DefaultMilvusYaml           = "milvus.yaml"
+	DefaultEasyloggingYaml      = "easylogging.yaml"
 	DefaultMinioHost            = "localhost"
 	DefaultMinioPort            = "9000"
 	DefaultMinioAccessKey       = "minioadmin"
@@ -49,7 +51,7 @@ const (
 	DefaultEnvPrefix            = "milvus"
 )
 
-var DefaultYaml = "milvus.yaml"
+var defaultYaml = DefaultMilvusYaml
 
 // Base abstracts BaseTable
 // TODO: it's never used, consider to substitute BaseTable or to remove it
@@ -79,7 +81,7 @@ type BaseTable struct {
 // GlobalInitWithYaml should be called only in standalone and embedded Milvus.
 func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
 	gp.once.Do(func() {
-		DefaultYaml = yaml
+		defaultYaml = yaml
 		gp.Init()
 	})
 }
@@ -88,7 +90,7 @@ func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
 func (gp *BaseTable) Init() {
 	gp.params = memkv.NewMemoryKV()
 	gp.configDir = gp.initConfPath()
-	gp.loadFromYaml(DefaultYaml)
+	gp.loadFromYaml(defaultYaml)
 	gp.tryLoadFromEnv()
 	gp.InitLogCfg()
 }

@@ -1,0 +1,25 @@
+* GLOBAL:
+    FORMAT                  =   "%datetime | %level | %logger | %msg"
+    FILENAME                =   "/var/lib/milvus/logs/milvus-%datetime{%y-%M-%d-%H:%m}-easylog.log"
+    ENABLED                 =   false
+    TO_FILE                 =   false
+    TO_STANDARD_OUTPUT      =   false
+    SUBSECOND_PRECISION     =   3
+    PERFORMANCE_TRACKING    =   false
+    MAX_LOG_FILE_SIZE       =   209715200 ## Throw log files away after 200MB
+* INFO:
+    ENABLED                 =   false
+* TRACE:
+    ENABLED                 =   false
+* DEBUG:
+    ENABLED                 =   false
+* WARNING:
+    ENABLED                 =   false
+* ERROR:
+    ENABLED                 =   true
+* FATAL:
+    ENABLED                 =   true
+* VERBOSE:
+    FORMAT                  =   "%datetime{%d/%M/%y} | %level-%vlevel | %msg"
+    TO_FILE                 =   false
+    TO_STANDARD_OUTPUT      =   false

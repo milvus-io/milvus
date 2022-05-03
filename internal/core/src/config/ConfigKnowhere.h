@@ -20,7 +20,7 @@
 namespace milvus::config {
 
 void
-KnowhereInitImpl();
+KnowhereInitImpl(const char*);
 
 std::string
 KnowhereSetSimdType(const char*);

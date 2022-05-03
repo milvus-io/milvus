@@ -36,6 +36,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -146,7 +147,9 @@ func (i *IndexNode) Register() error {
 }
 
 func (i *IndexNode) initKnowhere() {
-	C.IndexBuilderInit()
+	cEasyloggingYaml := C.CString(path.Join(Params.BaseTable.GetConfigDir(), paramtable.DefaultEasyloggingYaml))
+	C.IndexBuilderInit(cEasyloggingYaml)
+	C.free(unsafe.Pointer(cEasyloggingYaml))
 
 	// override index builder SIMD type
 	cSimdType := C.CString(Params.CommonCfg.SimdType)

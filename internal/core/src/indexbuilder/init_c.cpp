@@ -14,8 +14,8 @@
 #include "indexbuilder/init_c.h"
 
 void
-IndexBuilderInit() {
-    milvus::config::KnowhereInitImpl();
+IndexBuilderInit(const char* conf_file) {
+    milvus::config::KnowhereInitImpl(conf_file);
 }
 
 // return value must be freed by the caller

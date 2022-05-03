@@ -17,7 +17,7 @@
 TEST(Init, Naive) {
     using namespace milvus;
     using namespace milvus::segcore;
-    SegcoreInit();
+    SegcoreInit(nullptr);
     SegcoreSetChunkRows(32768);
     SegcoreSetSimdType("auto");
 }
