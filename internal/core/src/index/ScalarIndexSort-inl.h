@@ -107,7 +107,7 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
         auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::In, experted value is: " << *(values + i)
+                std::cout << "error in ScalarIndexSort<T>::In, expected value is: " << *(values + i)
                           << ", but real value is: " << lb->a_;
             }
             bitset->set(lb->idx_);
@@ -129,7 +129,7 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
         auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::NotIn, experted value is: " << *(values + i)
+                std::cout << "error in ScalarIndexSort<T>::NotIn, expected value is: " << *(values + i)
                           << ", but real value is: " << lb->a_;
             }
             bitset->reset(lb->idx_);
