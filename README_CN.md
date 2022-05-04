@@ -376,9 +376,9 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 - [Go SDK](https://github.com/milvus-io/milvus-sdk-go)(开发中)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
-### Milvus insight
+### Attu
 
-Milvus insight 提供了好用的图形化界面，帮助您更好的管理数据和Milvus.
+Attu 提供了好用的图形化界面，帮助您更好的管理数据和Milvus.
 - [快速开始](https://github.com/zilliztech/milvus-insight#quick-start)
 
 ## 社区

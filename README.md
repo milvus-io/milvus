@@ -377,9 +377,9 @@ The implemented SDK and its API documentation are listed below:
 - [Cpp SDK](https://github.com/milvus-io/milvus-sdk-go)(under development)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
-### Milvus insight
+### Attu
 
-Milvus insight provides an intuitive and efficient GUI for Milvus.
+Attu provides an intuitive and efficient GUI for Milvus.
 
 - [Quick start](https://github.com/zilliztech/milvus-insight#quick-start)
 
