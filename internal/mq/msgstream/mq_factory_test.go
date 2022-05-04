@@ -18,7 +18,6 @@ package msgstream
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -42,22 +41,18 @@ func TestPmsFactory(t *testing.T) {
 func TestRmsFactory(t *testing.T) {
 	defer os.Unsetenv("ROCKSMQ_PATH")
 
-	dir, err := ioutil.TempDir(os.TempDir(), "mq")
-	assert.Nil(t, err)
+	dir := t.TempDir()
 
 	rmsFactory := NewRmsFactory(dir)
 
 	ctx := context.Background()
-	_, err = rmsFactory.NewMsgStream(ctx)
+	_, err := rmsFactory.NewMsgStream(ctx)
 	assert.Nil(t, err)
 
 	_, err = rmsFactory.NewTtMsgStream(ctx)
 	assert.Nil(t, err)
 
 	_, err = rmsFactory.NewQueryMsgStream(ctx)
-	assert.Nil(t, err)
-
-	err = os.RemoveAll(dir)
 	assert.Nil(t, err)
 }
 
