@@ -31,8 +31,8 @@ class SegcoreConfig {
     SegcoreConfig() {
         // hard code configurations for small index
         SmallIndexConf sub_conf;
-        sub_conf.build_params["nlist"] = 100;
-        sub_conf.search_params["nprobe"] = 4;
+        sub_conf.build_params["nlist"] = nlist_;
+        sub_conf.search_params["nprobe"] = nprobe_;
         sub_conf.index_type = "IVF";
         table_[MetricType::METRIC_L2] = sub_conf;
         table_[MetricType::METRIC_INNER_PRODUCT] = sub_conf;
@@ -66,12 +66,24 @@ class SegcoreConfig {
     }
 
     void
+    set_nlist(int64_t nlist) {
+        nlist_ = nlist;
+    }
+
+    void
+    set_nprobe(int64_t nprobe) {
+        nprobe_ = nprobe;
+    }
+
+    void
     set_small_index_config(MetricType metric_type, const SmallIndexConf& small_index_conf) {
         table_[metric_type] = small_index_conf;
     }
 
  private:
     int64_t chunk_rows_ = 32 * 1024;
+    int64_t nlist_ = 100;
+    int64_t nprobe_ = 4;
     std::map<MetricType, SmallIndexConf> table_;
 };
 

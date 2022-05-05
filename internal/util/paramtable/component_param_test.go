@@ -236,6 +236,43 @@ func TestComponentParam(t *testing.T) {
 
 		maxParallelism := Params.FlowGraphMaxParallelism
 		assert.Equal(t, int32(1024), maxParallelism)
+
+		// test query side config
+		chunkRows := Params.ChunkRows
+		assert.Equal(t, int64(32768), chunkRows)
+
+		nlist := Params.SmallIndexNlist
+		assert.Equal(t, int64(256), nlist)
+
+		nprobe := Params.SmallIndexNProbe
+		assert.Equal(t, int64(16), nprobe)
+
+		// test small indexNlist/NProbe default
+		Params.Base.Remove("queryNode.segcore.smallIndex.nlist")
+		Params.Base.Remove("queryNode.segcore.smallIndex.nprobe")
+		Params.Base.Save("queryNode.segcore.chunkRows", "8192")
+		Params.initSmallIndexParams()
+		chunkRows = Params.ChunkRows
+		assert.Equal(t, int64(8192), chunkRows)
+
+		nlist = Params.SmallIndexNlist
+		assert.Equal(t, int64(128), nlist)
+
+		nprobe = Params.SmallIndexNProbe
+		assert.Equal(t, int64(8), nprobe)
+
+		Params.Base.Remove("queryNode.segcore.smallIndex.nlist")
+		Params.Base.Remove("queryNode.segcore.smallIndex.nprobe")
+		Params.Base.Save("queryNode.segcore.chunkRows", "64")
+		Params.initSmallIndexParams()
+		chunkRows = Params.ChunkRows
+		assert.Equal(t, int64(1024), chunkRows)
+
+		nlist = Params.SmallIndexNlist
+		assert.Equal(t, int64(64), nlist)
+
+		nprobe = Params.SmallIndexNProbe
+		assert.Equal(t, int64(4), nprobe)
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

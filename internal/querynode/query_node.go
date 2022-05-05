@@ -185,6 +185,12 @@ func (node *QueryNode) InitSegcore() {
 	cChunkRows := C.int64_t(Params.QueryNodeCfg.ChunkRows)
 	C.SegcoreSetChunkRows(cChunkRows)
 
+	nlist := C.int64_t(Params.QueryNodeCfg.SmallIndexNlist)
+	C.SegcoreSetNlist(nlist)
+
+	nprobe := C.int64_t(Params.QueryNodeCfg.SmallIndexNProbe)
+	C.SegcoreSetNprobe(nprobe)
+
 	// override segcore SIMD type
 	cSimdType := C.CString(Params.CommonCfg.SimdType)
 	cRealSimdType := C.SegcoreSetSimdType(cSimdType)
