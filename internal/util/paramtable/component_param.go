@@ -431,8 +431,6 @@ type proxyConfig struct {
 	MaxFieldNum              int64
 	MaxShardNum              int32
 	MaxDimension             int64
-	BufFlagExpireTime        time.Duration
-	BufFlagCleanupInterval   time.Duration
 	GinLogging               bool
 
 	// required from QueryCoord
@@ -460,8 +458,6 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initMaxDimension()
 
 	p.initMaxTaskNum()
-	p.initBufFlagExpireTime()
-	p.initBufFlagCleanupInterval()
 	p.initGinLogging()
 }
 
@@ -544,16 +540,6 @@ func (p *proxyConfig) initMaxDimension() {
 
 func (p *proxyConfig) initMaxTaskNum() {
 	p.MaxTaskNum = p.Base.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
-}
-
-func (p *proxyConfig) initBufFlagExpireTime() {
-	expireTime := p.Base.ParseInt64WithDefault("proxy.bufFlagExpireTime", 3600)
-	p.BufFlagExpireTime = time.Duration(expireTime) * time.Second
-}
-
-func (p *proxyConfig) initBufFlagCleanupInterval() {
-	interval := p.Base.ParseInt64WithDefault("proxy.bufFlagCleanupInterval", 600)
-	p.BufFlagCleanupInterval = time.Duration(interval) * time.Second
 }
 
 func (p *proxyConfig) initGinLogging() {
