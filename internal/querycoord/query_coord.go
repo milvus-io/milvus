@@ -474,6 +474,7 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 					log.Error("unable to allcoate node", zap.Int64("nodeID", serverID), zap.Error(err))
 				}
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
+
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Info("get a del event after QueryNode down", zap.Int64("nodeID", serverID))

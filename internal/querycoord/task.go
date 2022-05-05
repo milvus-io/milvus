@@ -78,6 +78,7 @@ type task interface {
 	preExecute(ctx context.Context) error
 	execute(ctx context.Context) error
 	postExecute(ctx context.Context) error
+	globalPostExecute(ctx context.Context) error // execute after all child task completed
 	reschedule(ctx context.Context) ([]task, error)
 	rollBack(ctx context.Context) []task
 	waitToFinish() error
@@ -271,6 +272,10 @@ func (bt *baseTask) getResultInfo() *commonpb.Status {
 	bt.resultMu.RLock()
 	defer bt.resultMu.RUnlock()
 	return proto.Clone(bt.result).(*commonpb.Status)
+}
+
+func (bt *baseTask) globalPostExecute(ctx context.Context) error {
+	return nil
 }
 
 func (bt *baseTask) updateTaskProcess() {
@@ -2222,13 +2227,6 @@ func (lbt *loadBalanceTask) getReplica(nodeID, collectionID int64) (*milvuspb.Re
 }
 
 func (lbt *loadBalanceTask) postExecute(context.Context) error {
-	err := syncReplicaSegments(lbt.ctx, lbt.cluster, lbt.getChildTask())
-	if err != nil {
-		log.Error("loadBalanceTask: failed to sync replica segments to shard leaders",
-			zap.Int64("taskID", lbt.getTaskID()),
-			zap.Error(err))
-	}
-
 	if lbt.getResultInfo().ErrorCode != commonpb.ErrorCode_Success {
 		lbt.clearChildTasks()
 	}
@@ -2296,6 +2294,13 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 		zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs),
 		zap.Any("balanceReason", lbt.BalanceReason),
 		zap.Int64("taskID", lbt.getTaskID()))
+	return nil
+}
+
+func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
+	if len(lbt.getChildTask()) > 0 {
+		return syncReplicaSegments(ctx, lbt.cluster, lbt.getChildTask())
+	}
 	return nil
 }
 
