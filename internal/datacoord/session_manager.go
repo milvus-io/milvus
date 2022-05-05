@@ -112,7 +112,7 @@ func (c *SessionManager) Flush(ctx context.Context, nodeID int64, req *datapb.Fl
 func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
-		log.Warn("failed to get client", zap.Int64("nodeID", nodeID), zap.Error(err))
+		log.Warn("failed to get dataNode client", zap.Int64("dataNode ID", nodeID), zap.Error(err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, flushTimeout)
@@ -120,11 +120,10 @@ func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datap
 
 	resp, err := cli.FlushSegments(ctx, req)
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Warn("failed to flush", zap.Int64("node", nodeID), zap.Error(err))
-		return
+		log.Error("flush call (perhaps partially) failed", zap.Int64("dataNode ID", nodeID), zap.Error(err))
+	} else {
+		log.Info("flush call succeeded", zap.Int64("dataNode ID", nodeID))
 	}
-
-	log.Info("success to flush", zap.Int64("node", nodeID), zap.Any("segments", req))
 }
 
 // Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.

@@ -537,7 +537,7 @@ func (node *DataNode) ReadyToFlush() error {
 	return nil
 }
 
-// FlushSegments packs flush messages into flowgraph through flushChan.
+// FlushSegments packs flush messages into flowGraph through flushChan.
 //   If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
 //   So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
 //
@@ -547,48 +547,54 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
 		MetricRequestsTotal).Inc()
 
-	status := &commonpb.Status{
+	errStatus := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
 	if node.State.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
-		status.Reason = "DataNode not in HEALTHY state"
-		return status, nil
+		errStatus.Reason = "dataNode not in HEALTHY state"
+		return errStatus, nil
 	}
 
-	log.Info("Receive FlushSegments req",
-		zap.Int64("collectionID", req.GetCollectionID()),
+	log.Info("receiving FlushSegments request",
+		zap.Int64("collection ID", req.GetCollectionID()),
 		zap.Int64s("segments", req.GetSegmentIDs()),
 		zap.Int64s("stale segments", req.GetMarkSegmentIDs()),
 	)
 
-	processSegments := func(segmentIDs []UniqueID, flushed bool) bool {
+	// TODO: Here and in other places, replace `flushed` param with a more meaningful name.
+	processSegments := func(segmentIDs []UniqueID, flushed bool) ([]UniqueID, bool) {
 		noErr := true
-		for _, id := range segmentIDs {
-			if node.segmentCache.checkIfCached(id) {
-				// Segment in flushing, ignore
-				log.Info("segment flushing, ignore the flush request until flush is done.",
-					zap.Int64("collectionID", req.GetCollectionID()), zap.Int64("segmentID", id))
-				status.Reason = "segment is flushing, nothing is done"
-				noErr = false
+		var flushedSeg []UniqueID
+		for _, segID := range segmentIDs {
+			// if the segment in already being flushed, skip it.
+			if node.segmentCache.checkIfCached(segID) {
+				logDupFlush(req.GetCollectionID(), segID)
 				continue
 			}
-
-			node.segmentCache.Cache(id)
-
-			flushCh, err := node.flowgraphManager.getFlushCh(id)
+			// Get the flush channel for the given segment ID.
+			// If no flush channel is found, report an error.
+			flushCh, err := node.flowgraphManager.getFlushCh(segID)
 			if err != nil {
-				status.Reason = "no flush channel found for v-channel"
-				log.Error("no flush channel found for v-channel", zap.Error(err))
+				errStatus.Reason = "no flush channel found for the segment, unable to flush"
+				log.Error(errStatus.Reason, zap.Int64("segment ID", segID), zap.Error(err))
 				noErr = false
 				continue
 			}
 
+			// Cache the segment and send it to its flush channel.
+			flushedSeg = append(flushedSeg, segID)
+			// Double check that the segment is still not cached.
+			exist := node.segmentCache.checkOrCache(segID)
+			if exist {
+				logDupFlush(req.GetCollectionID(), segID)
+				continue
+			}
 			flushCh <- flushMsg{
-				msgID:        req.Base.MsgID,
-				timestamp:    req.Base.Timestamp,
-				segmentID:    id,
-				collectionID: req.CollectionID,
+				msgID:        req.GetBase().GetMsgID(),
+				timestamp:    req.GetBase().GetTimestamp(),
+				segmentID:    segID,
+				collectionID: req.GetCollectionID(),
 				flushed:      flushed,
 			}
 		}
@@ -597,24 +603,28 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			zap.Int64("collection ID", req.GetCollectionID()),
 			zap.Int64s("segments", segmentIDs),
 			zap.Int64s("mark segments", req.GetMarkSegmentIDs()))
-		return noErr
+		return flushedSeg, noErr
 	}
 
-	ok := processSegments(req.GetSegmentIDs(), true)
-	if !ok {
-		return status, nil
+	seg, noErr1 := processSegments(req.GetSegmentIDs(), true)
+	staleSeg, noErr2 := processSegments(req.GetMarkSegmentIDs(), false)
+	// Log success flushed segments.
+	if len(seg)+len(staleSeg) > 0 {
+		log.Info("sending segments to flush channel",
+			zap.Any("newly sealed segment IDs", seg),
+			zap.Any("stale segment IDs", staleSeg))
 	}
-	ok = processSegments(req.GetMarkSegmentIDs(), false)
-	if !ok {
-		return status, nil
+	// Fail FlushSegments call if at least one segment (no matter stale or not) fails to get flushed.
+	if !noErr1 || !noErr2 {
+		return errStatus, nil
 	}
 
-	status.ErrorCode = commonpb.ErrorCode_Success
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
 		MetricRequestsSuccess).Inc()
-
-	return status, nil
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 // Stop will release DataNode resources and shutdown datanode
@@ -1097,4 +1107,10 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		res.RowCount += int64(rowNum)
 		return nil
 	}
+}
+
+func logDupFlush(cID, segID int64) {
+	log.Info("segment is already being flushed, ignoring flush request",
+		zap.Int64("collection ID", cID),
+		zap.Int64("segment ID", segID))
 }
