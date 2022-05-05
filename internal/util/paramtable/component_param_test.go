@@ -276,7 +276,8 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
-		//Params := CParams.DataCoordCfg
+		Params := CParams.DataCoordCfg
+		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime)
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

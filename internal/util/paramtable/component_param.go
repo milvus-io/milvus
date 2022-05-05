@@ -872,6 +872,7 @@ type dataCoordConfig struct {
 	SegmentMaxSize          float64
 	SegmentSealProportion   float64
 	SegAssignmentExpiration int64
+	SegmentMaxLifetime      time.Duration
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -893,6 +894,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initSegmentMaxSize()
 	p.initSegmentSealProportion()
 	p.initSegAssignmentExpiration()
+	p.initSegmentMaxLifetime()
 
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
@@ -913,6 +915,10 @@ func (p *dataCoordConfig) initSegmentSealProportion() {
 
 func (p *dataCoordConfig) initSegAssignmentExpiration() {
 	p.SegAssignmentExpiration = p.Base.ParseInt64WithDefault("dataCoord.segment.assignmentExpiration", 2000)
+}
+
+func (p *dataCoordConfig) initSegmentMaxLifetime() {
+	p.SegmentMaxLifetime = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.segment.maxLife", 24*60*60)) * time.Second
 }
 
 func (p *dataCoordConfig) initChannelWatchPrefix() {
