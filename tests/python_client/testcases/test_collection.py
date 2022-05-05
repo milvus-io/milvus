@@ -2195,7 +2195,7 @@ class TestLoadCollection(TestcaseBase):
         """
         target: test load partition with invalid replica number
         method: load with invalid replica number
-        expected: raise exception
+        expected: load successfully as replica = 1
         """
         # create, insert
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))

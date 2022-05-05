@@ -1,10 +1,12 @@
 import sys
+from numpy import NaN
 
 from pymilvus import Partition
 
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
+from common.common_func import param_info
 
 
 TIMEOUT = 20
@@ -49,8 +51,9 @@ class ApiPartitionWrapper:
                                        check_task, check_items, succ, **kwargs).run()
         return res, check_result
 
-    def load(self, replica_number=1, timeout=None, check_task=None, check_items=None, **kwargs):
+    def load(self, replica_number=NaN, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
+        replica_number = param_info.param_replica_num if replica_number is NaN else replica_number
 
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.load, replica_number, timeout], **kwargs)
