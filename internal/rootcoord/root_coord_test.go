@@ -1559,26 +1559,10 @@ func TestRootCoord_Base(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(collMeta.FieldIndexes))
-		oldIdx := collMeta.FieldIndexes[0].IndexID
 
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
-		time.Sleep(100 * time.Millisecond)
-
-		collMeta, err = core.MetaTable.GetCollectionByName(collName, 0)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(collMeta.FieldIndexes))
-		assert.Equal(t, oldIdx, collMeta.FieldIndexes[0].IndexID)
-
-		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
-		assert.NoError(t, err)
-		assert.Equal(t, Params.CommonCfg.DefaultIndexName, idxMeta.IndexName)
-
-		idxMeta, err = core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
-		assert.NoError(t, err)
-		assert.Equal(t, Params.CommonCfg.DefaultIndexName+"_bak", idxMeta.IndexName)
-
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.ErrorCode)
 	})
 
 	wg.Add(1)

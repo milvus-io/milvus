@@ -2547,6 +2547,7 @@ class TestLoadPartition(TestcaseBase):
             pytest.skip("Skip index Temporary")
 
     @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/16741")
     def test_load_partition_after_index_binary(self, get_binary_index):
         """
         target: test load binary_collection, after index created

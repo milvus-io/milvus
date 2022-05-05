@@ -388,6 +388,29 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("add diff index with same index name", func(t *testing.T) {
+		defer wg.Done()
+		params := []*commonpb.KeyValuePair{
+			{
+				Key:   "field110-k1",
+				Value: "field110-v1",
+			},
+			{
+				Key:   "field110-k2",
+				Value: "field110-v2",
+			},
+		}
+		idxInfo := &pb.IndexInfo{
+			IndexName:   "testColl_index_110",
+			IndexID:     indexID,
+			IndexParams: params,
+		}
+
+		_, _, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo, nil)
+		assert.NotNil(t, err)
+	})
+
+	wg.Add(1)
 	t.Run("get not indexed segments", func(t *testing.T) {
 		defer wg.Done()
 		params := []*commonpb.KeyValuePair{
@@ -441,7 +464,6 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, segID, seg[0])
 		assert.Equal(t, segID2, seg[1])
 		assert.True(t, EqualKeyPairArray(field.TypeParams, tparams))
-
 	})
 
 	wg.Add(1)
@@ -450,7 +472,7 @@ func TestMetaTable(t *testing.T) {
 		_, idx, err := mt.GetIndexByName(collName, "field110")
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(idx))
-		assert.Equal(t, indexID, idx[0].IndexID)
+		assert.Equal(t, int64(2000), idx[0].IndexID)
 		params := []*commonpb.KeyValuePair{
 			{
 				Key:   "field110-i1",
@@ -487,7 +509,7 @@ func TestMetaTable(t *testing.T) {
 		idx, ok, err := mt.DropIndex(collName, "field110", "field110")
 		assert.Nil(t, err)
 		assert.True(t, ok)
-		assert.Equal(t, indexID, idx)
+		assert.Equal(t, int64(2000), idx)
 
 		_, ok, err = mt.DropIndex(collName, "field110", "field110-error")
 		assert.Nil(t, err)
@@ -1024,8 +1046,7 @@ func TestMetaTable(t *testing.T) {
 		bakMeta := mt.indexID2Meta
 		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
 		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idx, nil)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", idxInfo[0].IndexID))
+		assert.Nil(t, err)
 		mt.indexID2Meta = bakMeta
 
 		mockTxnKV.multiSave = func(kvs map[string]string) error {
@@ -1049,19 +1070,7 @@ func TestMetaTable(t *testing.T) {
 		coll.FieldIndexes = append(coll.FieldIndexes, &pb.FieldIndexInfo{FiledID: coll.FieldIndexes[0].FiledID, IndexID: coll.FieldIndexes[0].IndexID + 1})
 
 		mt.collID2Meta[coll.ID] = coll
-		anotherIdx := pb.IndexInfo{
-			IndexName: "no-index",
-			IndexID:   coll.FieldIndexes[1].IndexID,
-			IndexParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "no-idx-k1",
-					Value: "no-idx-v1",
-				},
-			},
-		}
-		mt.indexID2Meta[anotherIdx.IndexID] = anotherIdx
-
-		idx.IndexName = idxInfo[0].IndexName
+		idx.IndexName = "no-index-2"
 		mockTxnKV.multiSave = func(kvs map[string]string) error {
 			return fmt.Errorf("multi save error")
 		}
