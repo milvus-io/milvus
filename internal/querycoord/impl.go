@@ -861,9 +861,9 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	log.Info("getSegmentInfoRequest received",
 		zap.String("role", typeutil.QueryCoordRole),
-		zap.Int64("collectionID", req.CollectionID),
-		zap.Int64s("segmentIDs", req.SegmentIDs),
-		zap.Int64("msgID", req.Base.MsgID))
+		zap.Int64("collection ID", req.GetCollectionID()),
+		zap.Int64s("segment IDs", req.GetSegmentIDs()),
+		zap.Int64("msg ID", req.GetBase().GetMsgID()))
 
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

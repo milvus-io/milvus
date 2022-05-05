@@ -322,6 +322,17 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 	return resp
 }
 
+// updateTaskStateCode updates a task's stateCode to `newState`.
+func (m *importManager) updateTaskStateCode(taskID int64, newState commonpb.ImportState) {
+	m.workingLock.Lock()
+	defer m.workingLock.Unlock()
+	if v, ok := m.workingTasks[taskID]; ok {
+		v.State.StateCode = newState
+	} else {
+		log.Error("task ID not found", zap.Int64("task ID", taskID))
+	}
+}
+
 // updateTaskState updates the task's state in in-memory working tasks list and in task store, given ImportResult
 // result. It returns the ImportTaskInfo of the given task.
 func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.ImportTaskInfo, error) {
@@ -335,7 +346,7 @@ func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.I
 	m.workingLock.Lock()
 	defer m.workingLock.Unlock()
 	ok := false
-	if v, ok = m.workingTasks[ir.TaskId]; ok {
+	if v, ok = m.workingTasks[ir.GetTaskId()]; ok {
 		// If the task has already been marked failed. Prevent further state updating and return an error.
 		if v.GetState().GetStateCode() == commonpb.ImportState_ImportFailed {
 			log.Warn("trying to update an already failed task which will end up being a no-op")
