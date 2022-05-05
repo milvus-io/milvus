@@ -554,17 +554,6 @@ In most cases, a data definition task need to
 
 ###### 6.6.1 Meta
 
-- Tenant Meta
-
-```protobuf
-message TenantMeta {
-  uint64 id = 1;
-  uint64 num_query_nodes = 2;
-  repeated string insert_channel_names = 3;
-  string query_channel_name = 4;
-}
-```
-
 - Proxy Meta
 
 ```protobuf
@@ -621,7 +610,6 @@ message SegmentIndexInfo {
 ###### 6.6.2 KV pairs in EtcdKV
 
 ```go
-"tenant/$tenantId" string -> tenantMetaBlob string
 "proxy/$proxyId" string -> proxyMetaBlob string
 "collection/$collectionId" string -> collectionInfoBlob string
 "partition/$collectionId/$partitionId" string -> partitionInfoBlob string
@@ -631,7 +619,7 @@ message SegmentIndexInfo {
 
 Note that _tenantId_, _proxyId_, _collectionId_, _partitionId_, _indexId_, _segmentId_ are unique strings converted from int64.
 
-_tenantMetaBlob_, _proxyMetaBlob_, _collectionInfoBlob_, _partitionInfoBlob_, _IndexInfoBlob_, _segmentIndexInfoBlog_ are serialized protos.
+_proxyMetaBlob_, _collectionInfoBlob_, _partitionInfoBlob_, _IndexInfoBlob_, _segmentIndexInfoBlog_ are serialized protos.
 
 ###### 6.6.3 Meta Table
 
@@ -639,7 +627,6 @@ _tenantMetaBlob_, _proxyMetaBlob_, _collectionInfoBlob_, _partitionInfoBlob_, _I
 type metaTable struct {
 	txn             kv.TxnKV                                                        // client of a reliable txnkv service, i.e. etcd client
 	snapshot        kv.SnapShotKV                                                   // client of a reliable snapshotkv service, i.e. etcd client
-	tenantID2Meta   map[typeutil.UniqueID]pb.TenantMeta                             // tenant id to tenant meta
 	proxyID2Meta    map[typeutil.UniqueID]pb.ProxyMeta                              // proxy id to proxy meta
 	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection_id -> meta
 	collName2ID     map[string]typeutil.UniqueID                                    // collection name to collection id
@@ -648,14 +635,12 @@ type metaTable struct {
 	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection_id/index_id/partition_id/segment_id -> meta
 	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection_id/index_id -> meta
 
-	tenantLock sync.RWMutex
 	proxyLock  sync.RWMutex
 	ddLock     sync.RWMutex
 }
 
 func NewMetaTable(kv kv.SnapShotKV) (*metaTable, error)
 
-func (mt *metaTable) AddTenant(te *pb.TenantMeta) (typeutil.Timestamp, error)
 func (mt *metaTable) AddProxy(po *pb.ProxyMeta) (typeutil.Timestamp, error)
 func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error)
 func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error)
