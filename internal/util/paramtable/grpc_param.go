@@ -15,6 +15,7 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/go-basic/ipv4"
 	"github.com/milvus-io/milvus/internal/log"
@@ -33,6 +34,14 @@ const (
 
 	// DefaultClientMaxRecvSize defines the maximum size of data per grpc request can receive by client side.
 	DefaultClientMaxRecvSize = 100 * 1024 * 1024
+
+	// DefaultLogLevel defines the log level of grpc
+	DefaultLogLevel = "WARNING"
+
+	// Grpc Timeout related configs
+	DefaultDialTimeout      = 5000 * time.Millisecond
+	DefaultKeepAliveTime    = 10000 * time.Millisecond
+	DefaultKeepAliveTimeout = 3000 * time.Millisecond
 )
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -99,20 +108,22 @@ func (p *GrpcServerConfig) init(domain string) {
 func (p *GrpcServerConfig) initServerMaxSendSize() {
 	var err error
 
-	valueStr, err := p.Load(p.Domain + ".grpc.serverMaxSendSize")
+	valueStr, err := p.Load("grpc.serverMaxSendSize")
 	if err != nil {
-		p.ServerMaxSendSize = DefaultServerMaxSendSize
+		valueStr, err = p.Load(p.Domain + ".grpc.serverMaxSendSize")
 	}
-
-	value, err := strconv.Atoi(valueStr)
 	if err != nil {
-		log.Warn("Failed to parse grpc.serverMaxSendSize, set to default",
-			zap.String("rol", p.Domain), zap.String("grpc.serverMaxSendSize", valueStr),
-			zap.Error(err))
-
 		p.ServerMaxSendSize = DefaultServerMaxSendSize
 	} else {
-		p.ServerMaxSendSize = value
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			log.Warn("Failed to parse grpc.serverMaxSendSize, set to default",
+				zap.String("role", p.Domain), zap.String("grpc.serverMaxSendSize", valueStr),
+				zap.Error(err))
+			p.ServerMaxSendSize = DefaultServerMaxSendSize
+		} else {
+			p.ServerMaxSendSize = value
+		}
 	}
 
 	log.Debug("initServerMaxSendSize",
@@ -121,21 +132,22 @@ func (p *GrpcServerConfig) initServerMaxSendSize() {
 
 func (p *GrpcServerConfig) initServerMaxRecvSize() {
 	var err error
-
-	valueStr, err := p.Load(p.Domain + ".grpc.serverMaxRecvSize")
+	valueStr, err := p.Load("grpc.serverMaxRecvSize")
 	if err != nil {
-		p.ServerMaxRecvSize = DefaultServerMaxRecvSize
+		valueStr, err = p.Load(p.Domain + ".grpc.serverMaxRecvSize")
 	}
-
-	value, err := strconv.Atoi(valueStr)
 	if err != nil {
-		log.Warn("Failed to parse grpc.serverMaxRecvSize, set to default",
-			zap.String("role", p.Domain), zap.String("grpc.serverMaxRecvSize", valueStr),
-			zap.Error(err))
-
 		p.ServerMaxRecvSize = DefaultServerMaxRecvSize
 	} else {
-		p.ServerMaxRecvSize = value
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			log.Warn("Failed to parse grpc.serverMaxRecvSize, set to default",
+				zap.String("role", p.Domain), zap.String("grpc.serverMaxRecvSize", valueStr),
+				zap.Error(err))
+			p.ServerMaxRecvSize = DefaultServerMaxRecvSize
+		} else {
+			p.ServerMaxRecvSize = value
+		}
 	}
 
 	log.Debug("initServerMaxRecvSize",
@@ -148,6 +160,10 @@ type GrpcClientConfig struct {
 
 	ClientMaxSendSize int
 	ClientMaxRecvSize int
+
+	DialTimeout      time.Duration
+	KeepAliveTime    time.Duration
+	KeepAliveTimeout time.Duration
 }
 
 // InitOnce initialize grpc client config once
@@ -162,25 +178,31 @@ func (p *GrpcClientConfig) init(domain string) {
 
 	p.initClientMaxSendSize()
 	p.initClientMaxRecvSize()
+	p.initDialTimeout()
+	p.initKeepAliveTimeout()
+	p.initKeepAliveTime()
 }
 
 func (p *GrpcClientConfig) initClientMaxSendSize() {
 	var err error
 
-	valueStr, err := p.Load(p.Domain + ".grpc.clientMaxSendSize")
+	valueStr, err := p.Load("grpc.clientMaxSendSize")
 	if err != nil {
-		p.ClientMaxSendSize = DefaultClientMaxSendSize
+		valueStr, err = p.Load(p.Domain + ".grpc.clientMaxSendSize")
 	}
-
-	value, err := strconv.Atoi(valueStr)
 	if err != nil {
-		log.Warn("Failed to parse grpc.clientMaxSendSize, set to default",
-			zap.String("role", p.Domain), zap.String("grpc.clientMaxSendSize", valueStr),
-			zap.Error(err))
-
 		p.ClientMaxSendSize = DefaultClientMaxSendSize
 	} else {
-		p.ClientMaxSendSize = value
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			log.Warn("Failed to parse grpc.clientMaxSendSize, set to default",
+				zap.String("role", p.Domain), zap.String("grpc.clientMaxSendSize", valueStr),
+				zap.Error(err))
+
+			p.ClientMaxSendSize = DefaultClientMaxSendSize
+		} else {
+			p.ClientMaxSendSize = value
+		}
 	}
 
 	log.Debug("initClientMaxSendSize",
@@ -189,23 +211,86 @@ func (p *GrpcClientConfig) initClientMaxSendSize() {
 
 func (p *GrpcClientConfig) initClientMaxRecvSize() {
 	var err error
-
-	valueStr, err := p.Load(p.Domain + ".grpc.clientMaxRecvSize")
+	valueStr, err := p.Load("grpc.clientMaxRecvSize")
 	if err != nil {
-		p.ClientMaxRecvSize = DefaultClientMaxRecvSize
+		valueStr, err = p.Load(p.Domain + ".grpc.clientMaxRecvSize")
 	}
-
-	value, err := strconv.Atoi(valueStr)
 	if err != nil {
-		log.Warn("Failed to parse grpc.clientMaxRecvSize, set to default",
-			zap.String("role", p.Domain), zap.String("grpc.clientMaxRecvSize", valueStr),
-			zap.Error(err))
-
 		p.ClientMaxRecvSize = DefaultClientMaxRecvSize
 	} else {
-		p.ClientMaxRecvSize = value
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			log.Warn("Failed to parse grpc.clientMaxRecvSize, set to default",
+				zap.String("role", p.Domain), zap.String("grpc.clientMaxRecvSize", valueStr),
+				zap.Error(err))
+
+			p.ClientMaxRecvSize = DefaultClientMaxRecvSize
+		} else {
+			p.ClientMaxRecvSize = value
+		}
 	}
 
 	log.Debug("initClientMaxRecvSize",
 		zap.String("role", p.Domain), zap.Int("grpc.clientMaxRecvSize", p.ClientMaxRecvSize))
+}
+
+func (p *GrpcClientConfig) initDialTimeout() {
+	var err error
+	valueStr, err := p.Load("grpc.client.dialTimeout")
+	if err != nil {
+		p.DialTimeout = DefaultDialTimeout
+	} else {
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			log.Warn("Failed to parse grpc.client.dialTimeout, set to default",
+				zap.String("role", p.Domain), zap.String("grpc.client.dialTimeout", valueStr),
+				zap.Error(err))
+			p.DialTimeout = DefaultDialTimeout
+		} else {
+			p.DialTimeout = time.Duration(value) * time.Millisecond
+		}
+	}
+	log.Debug("Init dial timeout",
+		zap.String("role", p.Domain), zap.Duration("grpc.log.dialTimeout", p.DialTimeout))
+}
+
+func (p *GrpcClientConfig) initKeepAliveTime() {
+	var err error
+	valueStr, err := p.Load("grpc.client.keepAliveTime")
+	if err != nil {
+		p.KeepAliveTime = DefaultKeepAliveTime
+	} else {
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			log.Warn("Failed to parse grpc.client.keepAliveTime, set to default",
+				zap.String("role", p.Domain), zap.String("grpc.client.keepAliveTime", valueStr),
+				zap.Error(err))
+
+			p.KeepAliveTime = DefaultKeepAliveTime
+		} else {
+			p.KeepAliveTime = time.Duration(value) * time.Millisecond
+		}
+	}
+	log.Debug("Init keep alive time",
+		zap.String("role", p.Domain), zap.Duration("grpc.log.keepAliveTime", p.KeepAliveTime))
+}
+
+func (p *GrpcClientConfig) initKeepAliveTimeout() {
+	var err error
+	valueStr, err := p.Load("grpc.client.keepAliveTimeout")
+	if err != nil {
+		p.KeepAliveTimeout = DefaultKeepAliveTimeout
+	} else {
+		value, err := strconv.Atoi(valueStr)
+		if err != nil {
+			log.Warn("Failed to parse grpc.client.keepAliveTimeout, set to default",
+				zap.String("role", p.Domain), zap.String("grpc.client.keepAliveTimeout", valueStr),
+				zap.Error(err))
+			p.KeepAliveTimeout = DefaultKeepAliveTimeout
+		} else {
+			p.KeepAliveTimeout = time.Duration(value) * time.Millisecond
+		}
+	}
+	log.Debug("Init keep alive timeout",
+		zap.String("role", p.Domain), zap.Duration("grpc.log.keepAliveTimeout", p.KeepAliveTimeout))
 }

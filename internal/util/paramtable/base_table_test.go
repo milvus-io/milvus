@@ -20,6 +20,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/grpclog"
 )
 
 var baseParams = BaseTable{}
@@ -313,5 +314,15 @@ func Test_SetLogger(t *testing.T) {
 		baseParams.RoleName = "datanode"
 		baseParams.SetLogger(UniqueID(0))
 		assert.Equal(t, "datanode-0.log", baseParams.Log.File.Filename)
+	})
+
+	t.Run("TestGrpclog", func(t *testing.T) {
+		baseParams.Save("grpc.log.level", "Warning")
+		baseParams.SetLogConfig()
+
+		baseParams.SetLogger(UniqueID(1))
+		assert.Equal(t, false, grpclog.V(0))
+		assert.Equal(t, true, grpclog.V(1))
+		assert.Equal(t, true, grpclog.V(2))
 	})
 }

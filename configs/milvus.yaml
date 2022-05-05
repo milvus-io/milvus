@@ -79,12 +79,6 @@ rootCoord:
   address: localhost
   port: 53100
 
-  grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32, Maximum data size received by the server
-    serverMaxSendSize: 2147483647 # math.MaxInt32, Maximum data size sent by the server
-    clientMaxRecvSize: 104857600 # 100 MB, Maximum data size received by the client
-    clientMaxSendSize: 104857600 # 100 MB, Maximum data size sent by the client
-
   dmlChannelNum: 256 # The number of dml channels created at system startup
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
@@ -116,12 +110,6 @@ proxy:
     readTimeout: 30000 # 30000 ms http read timeout
     writeTimeout: 30000 # 30000 ms http write timeout
 
-  grpc:
-    serverMaxRecvSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
-    serverMaxSendSize: 536870912 # 512 MB, 512 * 1024 * 1024 Bytes
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
-
   timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
   msgStream:
     timeTick:
@@ -145,23 +133,11 @@ queryCoord:
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
 
-  grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
-
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
   cacheSize: 32 # GB, default 32 GB, `cacheSize` is the memory used for caching data for faster query. The `cacheSize` must be less than system memory size.
   gracefulTime: 0 # Minimum time before the newly inserted data can be searched (in ms)
   port: 21123
-
-  grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
@@ -190,30 +166,12 @@ indexCoord:
   address: localhost
   port: 31000
 
-  grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
-
 indexNode:
   port: 21121
-
-  grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
 dataCoord:
   address: localhost
   port: 13333
-
-  grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
   enableCompaction: true # Enable data segment compression
   enableGarbageCollection: false
 
@@ -234,12 +192,6 @@ dataCoord:
 dataNode:
   port: 21124
 
-  grpc:
-    serverMaxRecvSize: 2147483647 # math.MaxInt32
-    serverMaxSendSize: 2147483647 # math.MaxInt32
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
-
   dataSync:
     flowGraph:
       maxQueueLength: 1024 # Maximum length of task queue in flowgraph
@@ -258,6 +210,20 @@ log:
     maxAge: 10 # Maximum time for log retention in day.
     maxBackups: 20
   format: text # text/json
+
+grpc:
+  log:
+    level: WARNING
+
+  serverMaxRecvSize: 2147483647 # math.MaxInt32
+  serverMaxSendSize: 2147483647 # math.MaxInt32
+  clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
+  clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+
+  client:
+    dialTimeout:      5000
+    keepAliveTime:    10000
+    keepAliveTimeout: 3000
 
 common:
   # Channel name generation rule: ${namePrefix}-${ChannelIdx}

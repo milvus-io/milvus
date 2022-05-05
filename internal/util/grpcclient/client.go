@@ -36,12 +36,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-const (
-	dialTimeout      = 5 * time.Second
-	keepAliveTime    = 10 * time.Second
-	keepAliveTimeout = 3 * time.Second
-)
-
 // GrpcClient abstracts client of grpc
 type GrpcClient interface {
 	SetRole(string)
@@ -65,6 +59,10 @@ type ClientBase struct {
 	role              string
 	ClientMaxSendSize int
 	ClientMaxRecvSize int
+
+	DialTimeout      time.Duration
+	KeepAliveTime    time.Duration
+	KeepAliveTimeout time.Duration
 }
 
 // SetRole sets role of client
@@ -137,7 +135,7 @@ func (c *ClientBase) connect(ctx context.Context) error {
 	}
 
 	opts := trace.GetInterceptorOpts()
-	dialContext, cancel := context.WithTimeout(ctx, dialTimeout)
+	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
 	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
 	retryPolicy := `{
@@ -166,8 +164,8 @@ func (c *ClientBase) connect(ctx context.Context) error {
 		grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
 		grpc.WithDefaultServiceConfig(retryPolicy),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                keepAliveTime,
-			Timeout:             keepAliveTimeout,
+			Time:                c.KeepAliveTime,
+			Timeout:             c.KeepAliveTimeout,
 			PermitWithoutStream: true,
 		}),
 		grpc.WithConnectParams(grpc.ConnectParams{
@@ -177,7 +175,7 @@ func (c *ClientBase) connect(ctx context.Context) error {
 				Jitter:     0.2,
 				MaxDelay:   3 * time.Second,
 			},
-			MinConnectTimeout: dialTimeout,
+			MinConnectTimeout: c.DialTimeout,
 		}),
 		grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
 	)
