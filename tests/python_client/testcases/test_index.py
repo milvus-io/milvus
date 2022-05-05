@@ -145,6 +145,7 @@ class TestIndexOperation(TestcaseBase):
     """ Test case of index interface """
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/16741")
     def test_index_create_with_different_indexes(self):
         """
         target: test create index on one field, with two different type of index
