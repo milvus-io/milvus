@@ -92,7 +92,7 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client) *
 		session.etcdCli = client
 		return nil
 	}
-	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(300))
+	err := retry.Do(ctx, connectEtcdFn, retry.Attempts(100))
 	if err != nil {
 		log.Warn("failed to initialize session",
 			zap.Error(err))
@@ -241,7 +241,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		log.Debug("Session register successfully", zap.Int64("ServerID", s.ServerID))
 		return nil
 	}
-	err := retry.Do(s.ctx, registerFn, retry.Attempts(DefaultRetryTimes), retry.Sleep(500*time.Millisecond))
+	err := retry.Do(s.ctx, registerFn, retry.Attempts(DefaultRetryTimes))
 	if err != nil {
 		return nil, err
 	}

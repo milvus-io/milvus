@@ -948,7 +948,7 @@ func initEtcd(etcdEndpoints []string) (*clientv3.Client, error) {
 		etcdCli = etcd
 		return nil
 	}
-	err := retry.Do(context.TODO(), connectEtcdFn, retry.Attempts(300))
+	err := retry.Do(context.TODO(), connectEtcdFn, retry.Attempts(100))
 	if err != nil {
 		return nil, err
 	}

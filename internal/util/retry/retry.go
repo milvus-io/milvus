@@ -15,6 +15,9 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 )
 
@@ -32,6 +35,9 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
+			if i%10 == 0 {
+				log.Debug("retry func failed", zap.Uint("retry time", i), zap.Error(err))
+			}
 
 			el = append(el, err)
 
