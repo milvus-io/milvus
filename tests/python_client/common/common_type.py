@@ -26,13 +26,14 @@ default_int32_field_name = "int32"
 default_int64_field_name = "int64"
 default_float_field_name = "float"
 default_double_field_name = "double"
-default_string_field_name = "string"
+default_string_field_name = "varchar"
 default_float_vec_field_name = "float_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
 default_tag = "1970_01_01"
 row_count = "row_count"
+default_length = 65535
 default_desc = ""
 default_collection_desc = "default collection"
 default_index_name = "default_index_name"
@@ -143,6 +144,7 @@ get_dict_without_host_port = [
     {"port": ["192.168.1.1"]},
     {"": ""}
 ]
+
 
 get_wrong_format_dict = [
     {"host": "string_host", "port": {}},
