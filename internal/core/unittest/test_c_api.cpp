@@ -20,6 +20,7 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
 #include <knowhere/index/vector_index/IndexIVFPQ.h>
+#include <boost/format.hpp>
 
 #include "common/LoadInfo.h"
 #include "pb/milvus.pb.h"
@@ -619,12 +620,12 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, ReduceSearchWithExpr) {
+void
+testReduceSearchWithExpr(int N, int topK, int num_queries) {
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, Growing, -1);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
-    int N = 10000;
     auto dataset = DataGen(schema, N);
 
     int64_t offset;
@@ -636,22 +637,22 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.c_str());
     assert(ins_res.error_code == Success);
 
-    const char* serialized_expr_plan = R"(vector_anns: <
+    auto fmt = boost::format(R"(vector_anns: <
                                             field_id: 100
                                             query_info: <
-                                                topk: 10
+                                                topk: %1%
                                                 metric_type: "L2"
                                                 search_params: "{\"nprobe\": 10}"
                                             >
                                             placeholder_tag: "$0">
-                                            output_field_ids: 100)";
+                                            output_field_ids: 100)") %
+               topK;
 
-    int topK = 10;
-    int num_queries = 10;
+    auto serialized_expr_plan = fmt.str();
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan.data());
     auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
     assert(status.error_code == Success);
 
@@ -680,7 +681,10 @@ TEST(CApiTest, ReduceSearchWithExpr) {
 
     // 2. marshal
     CSearchResultDataBlobs cSearchResultData;
-    auto req_sizes = std::vector<int32_t>{5, 5};
+    auto req_sizes = std::vector<int32_t>{num_queries / 2, num_queries / 2};
+    if (num_queries == 1) {
+        req_sizes = std::vector<int32_t>{num_queries};
+    }
     status = Marshal(&cSearchResultData, results.data(), plan, results.size(), req_sizes.data(), req_sizes.size());
     assert(status.error_code == Success);
     auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultData);
@@ -704,6 +708,13 @@ TEST(CApiTest, ReduceSearchWithExpr) {
     DeleteSearchResult(res2);
     DeleteCollection(collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, ReduceSearchWithExpr) {
+    testReduceSearchWithExpr(100, 1, 1);
+    testReduceSearchWithExpr(100, 10, 10);
+    testReduceSearchWithExpr(10000, 1, 1);
+    testReduceSearchWithExpr(10000, 10, 10);
 }
 
 TEST(CApiTest, LoadIndexInfo) {

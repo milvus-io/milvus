@@ -112,23 +112,21 @@ ReduceResultData(std::vector<SearchResult*>& search_results, int64_t nq, int64_t
     // after reduce, remove redundant values in primary_keys, distances and ids
     for (int i = 0; i < num_segments; i++) {
         auto search_result = search_results[i];
-        if (search_result->result_offsets_.size() == 0) {
-            continue;
-        }
+        if (search_result->result_offsets_.size() != 0) {
+            std::vector<milvus::PkType> primary_keys;
+            std::vector<float> distances;
+            std::vector<int64_t> ids;
+            for (int j = 0; j < search_records[i].size(); j++) {
+                auto& offset = search_records[i][j];
+                primary_keys.push_back(search_result->primary_keys_[offset]);
+                distances.push_back(search_result->distances_[offset]);
+                ids.push_back(search_result->seg_offsets_[offset]);
+            }
 
-        std::vector<milvus::PkType> primary_keys;
-        std::vector<float> distances;
-        std::vector<int64_t> ids;
-        for (int j = 0; j < search_records[i].size(); j++) {
-            auto& offset = search_records[i][j];
-            primary_keys.push_back(search_result->primary_keys_[offset]);
-            distances.push_back(search_result->distances_[offset]);
-            ids.push_back(search_result->seg_offsets_[offset]);
+            search_result->primary_keys_ = std::move(primary_keys);
+            search_result->distances_ = std::move(distances);
+            search_result->seg_offsets_ = std::move(ids);
         }
-
-        search_result->primary_keys_ = std::move(primary_keys);
-        search_result->distances_ = std::move(distances);
-        search_result->seg_offsets_ = std::move(ids);
         search_result->real_topK_per_nq_ = std::move(final_real_topks[i]);
     }
 }
