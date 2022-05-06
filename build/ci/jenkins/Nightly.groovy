@@ -173,12 +173,15 @@ pipeline {
                                                 def clusterEnabled = "false"
                                                 def mqMode='pulsar'
                                                 int e2e_timeout_seconds = 2 * 60 * 60
+                                                def tag="L0 L1 L2"
                                                 if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                     clusterEnabled = "true"
+                                                    tag="L0 L1 L2 ClusterOnly"
                                     
                                                 } else if("${MILVUS_SERVER_TYPE}" == "distributed-kafka" ) {
                                                     clusterEnabled = "true"
                                                     mqMode='kafka'
+                                                    tag="L0 L1 L2 ClusterOnly"
                                                 }
                                                 if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                     sh """ 
@@ -187,7 +190,7 @@ pipeline {
                                                     MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                                     TEST_TIMEOUT="${e2e_timeout_seconds}" \
                                                     MQ_MODE="${mqMode}" \
-                                                    ./ci_e2e.sh  "-n 6 --tags L0 L1 L2"
+                                                    ./ci_e2e.sh  "-n 6 --tags ${tag}"
                                                     """
                                                 } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
