@@ -284,7 +284,6 @@ func (q *queryShard) setServiceableTime(t Timestamp, tp tsType) {
 func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	collectionID := req.Req.CollectionID
 	partitionIDs := req.Req.PartitionIDs
-	segmentIDs := req.SegmentIDs
 	timestamp := req.Req.TravelTimestamp
 
 	// check ctx timeout
@@ -297,7 +296,7 @@ func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*i
 	defer q.historical.replica.queryRUnlock()
 
 	// lock streaming meta-replica for shard leader
-	if len(req.SegmentIDs) == 0 {
+	if req.IsShardLeader {
 		q.streaming.replica.queryRLock()
 		defer q.streaming.replica.queryRUnlock()
 	}
@@ -349,12 +348,9 @@ func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*i
 	queryNum := searchReq.getNumOfQuery()
 	searchRequests := []*searchRequest{searchReq}
 
-	if len(segmentIDs) == 0 {
-		// segmentIDs not specified, searching as shard leader
+	if req.IsShardLeader {
 		return q.searchLeader(ctx, req, searchRequests, collectionID, partitionIDs, schemaHelper, plan, topK, queryNum, timestamp)
 	}
-
-	// segmentIDs specified search as shard follower
 	return q.searchFollower(ctx, req, searchRequests, collectionID, partitionIDs, schemaHelper, plan, topK, queryNum, timestamp)
 }
 
@@ -711,7 +707,7 @@ func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*int
 	defer q.historical.replica.queryRUnlock()
 
 	// lock streaming meta-replica for shard leader
-	if len(req.SegmentIDs) == 0 {
+	if req.IsShardLeader {
 		q.streaming.replica.queryRLock()
 		defer q.streaming.replica.queryRUnlock()
 	}
@@ -751,8 +747,7 @@ func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*int
 		}
 	}
 
-	// check if shard leader b.c only leader receives request with no segment specified
-	if len(req.GetSegmentIDs()) == 0 {
+	if req.IsShardLeader {
 		cluster, ok := q.clusterService.getShardCluster(req.GetDmlChannel())
 		if !ok {
 			return nil, fmt.Errorf("channel %s leader is not here", req.GetDmlChannel())

@@ -266,12 +266,14 @@ message SearchRequest {
   internal.SearchRequest req = 1;
   string dml_channel = 2;
   repeated int64 segmentIDs = 3;
+  bool is_shard_leader = 4;
 }
 
 message QueryRequest {
   internal.RetrieveRequest req = 1;
   string dml_channel = 2;
   repeated int64 segmentIDs = 3;
+  bool is_shard_leader = 4;
 }
 
 message SyncReplicaSegmentsRequest {

@@ -100,9 +100,10 @@ func TestQueryShard_Search(t *testing.T) {
 
 	t.Run("search follower", func(t *testing.T) {
 		request := &querypb.SearchRequest{
-			Req:        req,
-			DmlChannel: "",
-			SegmentIDs: []int64{defaultSegmentID},
+			Req:           req,
+			IsShardLeader: false,
+			DmlChannel:    "",
+			SegmentIDs:    []int64{defaultSegmentID},
 		}
 
 		_, err = qs.search(context.Background(), request)
@@ -111,9 +112,10 @@ func TestQueryShard_Search(t *testing.T) {
 
 	t.Run("search leader", func(t *testing.T) {
 		request := &querypb.SearchRequest{
-			Req:        req,
-			DmlChannel: defaultDMLChannel,
-			SegmentIDs: []int64{},
+			Req:           req,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
 		}
 
 		_, err = qs.search(context.Background(), request)
@@ -132,9 +134,10 @@ func TestQueryShard_Query(t *testing.T) {
 
 	t.Run("query follower", func(t *testing.T) {
 		request := &querypb.QueryRequest{
-			Req:        req,
-			DmlChannel: "",
-			SegmentIDs: []int64{defaultSegmentID},
+			Req:           req,
+			IsShardLeader: false,
+			DmlChannel:    "",
+			SegmentIDs:    []int64{defaultSegmentID},
 		}
 
 		resp, err := qs.query(context.Background(), request)
@@ -144,9 +147,10 @@ func TestQueryShard_Query(t *testing.T) {
 
 	t.Run("query follower with wrong segment", func(t *testing.T) {
 		request := &querypb.QueryRequest{
-			Req:        req,
-			DmlChannel: "",
-			SegmentIDs: []int64{defaultSegmentID + 1},
+			Req:           req,
+			IsShardLeader: false,
+			DmlChannel:    "",
+			SegmentIDs:    []int64{defaultSegmentID + 1},
 		}
 
 		_, err := qs.query(context.Background(), request)
@@ -155,9 +159,10 @@ func TestQueryShard_Query(t *testing.T) {
 
 	t.Run("query leader", func(t *testing.T) {
 		request := &querypb.QueryRequest{
-			Req:        req,
-			DmlChannel: defaultDMLChannel,
-			SegmentIDs: []int64{},
+			Req:           req,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
 		}
 
 		_, err := qs.query(context.Background(), request)
