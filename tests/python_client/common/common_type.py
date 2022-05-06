@@ -209,9 +209,14 @@ class CaseLabel:
             Stability/Performance/reliability, etc. special tests
             Triggered by cron job or manually
             run duration depends on test configuration
+        Loadbalance:
+            loadbalance testcases which need to be run in multi query nodes
+        ClusterOnly:
+            For functions only suitable to cluster mode
     """
     L0 = "L0"
     L1 = "L1"
     L2 = "L2"
     L3 = "L3"
-    Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi querynodes
+    Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi query nodes
+    ClusterOnly = "ClusterOnly"  # For functions only suitable to cluster mode

@@ -2225,7 +2225,7 @@ class TestLoadCollection(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
         collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_load_replica_change(self):
         """
         target: test load replica change
@@ -2264,7 +2264,7 @@ class TestLoadCollection(TestcaseBase):
         assert reduce(lambda x, y: x ^ y, seg_ids) == 0
         assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_load_replica_multi(self):
         """
         target: test load with multiple replicas
@@ -2292,7 +2292,7 @@ class TestLoadCollection(TestcaseBase):
         search_res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
         assert len(search_res[0]) == ct.default_limit
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_load_replica_partitions(self):
         """
         target: test load replica with partitions

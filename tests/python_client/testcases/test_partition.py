@@ -354,7 +354,7 @@ class TestPartitionParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_load_replica_change(self):
         """
         target: test load replica change
@@ -392,7 +392,7 @@ class TestPartitionParams(TestcaseBase):
         assert reduce(lambda x, y: x ^ y, seg_ids) == 0
         assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_partition_replicas_change_cross_partitions(self):
         """
         target: test load with different replicas between partitions
