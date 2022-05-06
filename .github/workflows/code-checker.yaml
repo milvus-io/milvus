@@ -179,17 +179,30 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: mingw64
-      - name: Install Deps
-        shell: msys2 {0}
-        run: |
-          sh scripts/install_deps_msys.sh
-      - name: Code Check
-        shell: msys2 {0}
-        env:
-          CCACHE_COMPILERCHECK: content
-          CCACHE_COMPRESS: 1
-          CCACHE_COMPRESSLEVEL: 5
-          CCACHE_MAXSIZE: 2G
-          CCACHE_DIR: ${{ github.workspace }}/.ccache
-        run: |
-          mingw32-make verifiers build-go
+      # - name: Install Deps
+      #   shell: msys2 {0}
+      #   run: |
+      #     sh scripts/install_deps_msys.sh
+      # - name: Setup Go environment
+      #   uses: actions/setup-go@v3.0.0
+      #   shell: msys2 {0}
+      #   with:
+      #     go-version: '1.17.1'
+      - shell: msys2 {0}
+        run: | 
+           echo "GOROOT=$GOROOT_1_17_X64" >>$GITHUB_ENV
+           echo "$GOROOT_1_17_X64/bin" >>$GITHUB_PATH
+           go version
+      - shell: msys2 {0}
+        run: | 
+           go version
+      # - name: Code Check
+      #   shell: msys2 {0}
+      #   env:
+      #     CCACHE_COMPILERCHECK: content
+      #     CCACHE_COMPRESS: 1
+      #     CCACHE_COMPRESSLEVEL: 5
+      #     CCACHE_MAXSIZE: 2G
+      #     CCACHE_DIR: ${{ github.workspace }}/.ccache
+      #   run: |
+      #     mingw32-make verifiers build-go
