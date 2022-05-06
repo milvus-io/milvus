@@ -117,9 +117,18 @@ func TestExpr_Like(t *testing.T) {
 
 	exprStrs := []string{
 		`VarCharField like "prefix%"`,
+		`VarCharField like "equal"`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)
+	}
+
+	// TODO: enable these after regex-match is supported.
+	unsupported := []string{
+		`VarCharField like "not_%_supported"`,
+	}
+	for _, exprStr := range unsupported {
+		assertInvalidExpr(t, helper, exprStr)
 	}
 }
 

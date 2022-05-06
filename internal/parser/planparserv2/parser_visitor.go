@@ -396,14 +396,23 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 		return fmt.Errorf("like operation on complicated expr is unsupported")
 	}
 
-	operand := NewString(ctx.StringLiteral().GetText())
+	pattern, err := strconv.Unquote(ctx.StringLiteral().GetText())
+	if err != nil {
+		return err
+	}
+
+	op, operand, err := translatePatternMatch(pattern)
+	if err != nil {
+		return err
+	}
+
 	return &ExprWithType{
 		expr: &planpb.Expr{
 			Expr: &planpb.Expr_UnaryRangeExpr{
 				UnaryRangeExpr: &planpb.UnaryRangeExpr{
 					ColumnInfo: column,
-					Op:         planpb.OpType_Match,
-					Value:      operand,
+					Op:         op,
+					Value:      NewString(operand),
 				},
 			},
 		},
