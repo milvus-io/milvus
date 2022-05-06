@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -24,6 +25,70 @@ import (
 const (
 	TempFilesPath = "/tmp/milvus_test/import/"
 )
+
+type MockChunkManager struct {
+	size int64
+}
+
+func (mc *MockChunkManager) Path(filePath string) (string, error) {
+	return "", nil
+}
+
+func (mc *MockChunkManager) Reader(filePath string) (storage.FileReader, error) {
+	return nil, nil
+}
+
+func (mc *MockChunkManager) Write(filePath string, content []byte) error {
+	return nil
+}
+
+func (mc *MockChunkManager) MultiWrite(contents map[string][]byte) error {
+	return nil
+}
+
+func (mc *MockChunkManager) Exist(filePath string) bool {
+	return true
+}
+
+func (mc *MockChunkManager) Read(filePath string) ([]byte, error) {
+	return nil, nil
+}
+
+func (mc *MockChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
+	return nil, nil
+}
+
+func (mc *MockChunkManager) ListWithPrefix(prefix string) ([]string, error) {
+	return nil, nil
+}
+
+func (mc *MockChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
+	return nil, nil, nil
+}
+
+func (mc *MockChunkManager) ReadAt(filePath string, off int64, length int64) ([]byte, error) {
+	return nil, nil
+}
+
+func (mc *MockChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
+	return nil, nil
+}
+
+func (mc *MockChunkManager) Size(filePath string) (int64, error) {
+	return mc.size, nil
+}
+
+func (mc *MockChunkManager) Remove(filePath string) error {
+	return nil
+}
+
+func (mc *MockChunkManager) MultiRemove(filePaths []string) error {
+	return nil
+}
+
+func (mc *MockChunkManager) RemoveWithPrefix(prefix string) error {
+	return nil
+}
 
 func Test_NewImportWrapper(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
@@ -590,4 +655,67 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 	assert.Equal(t, rowCount, parseCount)
 
 	tr.Record("parse large json files: " + filePath1 + "," + filePath2)
+}
+
+func Test_FileValidation(t *testing.T) {
+	ctx := context.Background()
+
+	cm := &MockChunkManager{
+		size: 1,
+	}
+
+	idAllocator := newIDAllocator(ctx, t)
+	schema := perfSchema(128)
+	shardNum := 2
+	segmentSize := 512 // unit: MB
+
+	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
+
+	// duplicate files
+	var files = [2]string{"1.npy", "1.npy"}
+	err := wrapper.fileValidation(files[:], false)
+	assert.NotNil(t, err)
+	err = wrapper.fileValidation(files[:], true)
+	assert.NotNil(t, err)
+
+	// unsupported file type
+	files[0] = "1"
+	files[1] = "1"
+	err = wrapper.fileValidation(files[:], true)
+	assert.NotNil(t, err)
+
+	err = wrapper.fileValidation(files[:], false)
+	assert.NotNil(t, err)
+
+	// valid cases
+	files[0] = "1.json"
+	files[1] = "2.json"
+	err = wrapper.fileValidation(files[:], true)
+	assert.Nil(t, err)
+
+	files[1] = "2.npy"
+	err = wrapper.fileValidation(files[:], false)
+	assert.Nil(t, err)
+
+	// empty file
+	cm = &MockChunkManager{
+		size: 0,
+	}
+	wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
+	err = wrapper.fileValidation(files[:], true)
+	assert.NotNil(t, err)
+
+	err = wrapper.fileValidation(files[:], false)
+	assert.NotNil(t, err)
+
+	// file size exceed limit
+	cm = &MockChunkManager{
+		size: MaxFileSize + 1,
+	}
+	wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
+	err = wrapper.fileValidation(files[:], true)
+	assert.NotNil(t, err)
+
+	err = wrapper.fileValidation(files[:], false)
+	assert.NotNil(t, err)
 }
