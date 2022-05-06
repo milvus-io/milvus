@@ -382,7 +382,7 @@ class TestQueryParams(TestcaseBase):
         values = df[field].tolist()
         pos = 100
         term_expr = f'{field} not in {values[pos:]}'
-        res = df.iloc[:pos, :2].to_dict('records')
+        res = df.iloc[:pos, :3].to_dict('records')
         self.collection_wrap.query(term_expr, output_fields=["*"],
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
@@ -538,7 +538,7 @@ class TestQueryParams(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-        all_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_float_vec_field_name]
+        all_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name, ct.default_float_vec_field_name]
         res = df.iloc[:2].to_dict('records')
         collection_w.load()
         actual_res, _ = collection_w.query(default_term_expr, output_fields=all_fields,
@@ -691,7 +691,7 @@ class TestQueryParams(TestcaseBase):
         df = vectors[0]
 
         # query with wildcard scale(*)
-        output_fields = [ct.default_int64_field_name, ct.default_float_field_name]
+        output_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name]
         res = df.loc[:1, output_fields].to_dict('records')
         collection_w.query(default_term_expr, output_fields=["*"],
                            check_task=CheckTasks.check_query_results,
@@ -723,14 +723,14 @@ class TestQueryParams(TestcaseBase):
         df = vectors[0]
 
         # query with output_fields=["*", float_vector)
-        res = df.iloc[:2, :3].to_dict('records')
+        res = df.iloc[:2, :4].to_dict('records')
         collection_w.load()
         collection_w.query(default_term_expr, output_fields=["*", ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: res, "with_vec": True})
 
         # query with output_fields=["*", float)
-        res2 = df.iloc[:2, :2].to_dict('records')
+        res2 = df.iloc[:2, :3].to_dict('records')
         collection_w.load()
         collection_w.query(default_term_expr, output_fields=["*", ct.default_float_field_name],
                            check_task=CheckTasks.check_query_results,

@@ -26,13 +26,14 @@ default_int32_field_name = "int32"
 default_int64_field_name = "int64"
 default_float_field_name = "float"
 default_double_field_name = "double"
-default_string_field_name = "string"
+default_string_field_name = "varchar"
 default_float_vec_field_name = "float_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
 default_tag = "1970_01_01"
 row_count = "row_count"
+default_length = 65535
 default_desc = ""
 default_collection_desc = "default collection"
 default_index_name = "default_index_name"
@@ -50,7 +51,7 @@ compact_delta_ratio_reciprocal = 5  # compact_delta_binlog_ratio is 0.2
 compact_retention_duration = 40  # compaction travel time retention range 20s
 max_compaction_interval = 60  # the max time interval (s) from the last compaction
 max_field_num = 256  # Maximum number of fields in a collection
-default_replica_num = 1  # default memory replica number
+default_replica_num = 1
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = True
@@ -144,6 +145,7 @@ get_dict_without_host_port = [
     {"port": ["192.168.1.1"]},
     {"": ""}
 ]
+
 
 get_wrong_format_dict = [
     {"host": "string_host", "port": {}},
