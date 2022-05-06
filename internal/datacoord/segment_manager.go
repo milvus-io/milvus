@@ -62,10 +62,6 @@ func putAllocation(a *Allocation) {
 	allocPool.Put(a)
 }
 
-// segmentMaxLifetime default segment max lifetime value
-// TODO needs to be configurable
-const segmentMaxLifetime = 24 * time.Hour
-
 // Manager manages segment related operations.
 type Manager interface {
 	// AllocSegment allocates rows and record the allocation.
@@ -177,7 +173,7 @@ func defaultAllocatePolicy() AllocatePolicy {
 
 func defaultSegmentSealPolicy() []segmentSealPolicy {
 	return []segmentSealPolicy{
-		sealByLifetimePolicy(segmentMaxLifetime),
+		sealByLifetimePolicy(Params.DataCoordCfg.SegmentMaxLifetime),
 		getSegmentCapacityPolicy(Params.DataCoordCfg.SegmentSealProportion),
 	}
 }
