@@ -817,9 +817,13 @@ func TestCreateCollectionTask(t *testing.T) {
 	collectionName := prefix + funcutil.GenRandomStr()
 	int64Field := "int64"
 	floatVecField := "fvec"
-	dim := 128
+	varCharField := "varChar"
 
-	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
+	fieldName2Type := make(map[string]schemapb.DataType)
+	fieldName2Type[int64Field] = schemapb.DataType_Int64
+	fieldName2Type[varCharField] = schemapb.DataType_VarChar
+	fieldName2Type[floatVecField] = schemapb.DataType_FloatVector
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
 	var marshaledSchema []byte
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
@@ -973,6 +977,19 @@ func TestCreateCollectionTask(t *testing.T) {
 		invalidFieldNameSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = invalidFieldNameSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		// validateMaxLengthPerRow
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		for idx := range schema.Fields {
+			if schema.Fields[idx].DataType == schemapb.DataType_VarChar {
+				schema.Fields[idx].TypeParams = nil
+			}
+		}
+		noTypeParamsSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = noTypeParamsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 

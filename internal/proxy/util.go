@@ -22,9 +22,6 @@ import (
 	"strconv"
 	"strings"
 
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -200,13 +197,9 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 		}
 		exist = true
 	}
-	// if not exist, set default max length
+	// if not exist type params max_length_per_row, return error
 	if !exist {
-		log.Info("append default maxLengthPerRow for varChar field", zap.String("collection name", collectionName))
-		field.TypeParams = append(field.TypeParams, &commonpb.KeyValuePair{
-			Key:   maxVarCharLengthKey,
-			Value: strconv.Itoa(defaultMaxVarCharLength),
-		})
+		return fmt.Errorf("type param(max_length_per_row) should be specified for varChar field of collection %s", collectionName)
 	}
 
 	return nil

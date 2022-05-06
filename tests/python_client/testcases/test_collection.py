@@ -1064,7 +1064,7 @@ class TestCollectionOperation(TestcaseBase):
         self._connect()
         fields = []
         for k, v in DataType.__members__.items():
-            if v and v != DataType.UNKNOWN and v != DataType.STRING and v != DataType.FLOAT_VECTOR and v != DataType.BINARY_VECTOR:
+            if v and v != DataType.UNKNOWN and v != DataType.STRING and v != DataType.VARCHAR and v != DataType.FLOAT_VECTOR and v != DataType.BINARY_VECTOR:
                 field, _ = self.field_schema_wrap.init_field_schema(name=k.lower(), dtype=v)
                 fields.append(field)
         fields.append(cf.gen_float_vec_field())
