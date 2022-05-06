@@ -289,6 +289,16 @@ func isSameOrder(opStr1, opStr2 string) bool {
 	return isLess1 == isLess2
 }
 
+var opMap = map[planpb.OpType]string{
+	planpb.OpType_Invalid:      "invalid",
+	planpb.OpType_GreaterThan:  ">",
+	planpb.OpType_GreaterEqual: ">=",
+	planpb.OpType_LessThan:     "<",
+	planpb.OpType_LessEqual:    "<=",
+	planpb.OpType_Equal:        "==",
+	planpb.OpType_NotEqual:     "!=",
+}
+
 func getCompareOpType(opStr string, reverse bool) (op planpb.OpType) {
 	switch opStr {
 	case ">":
@@ -513,16 +523,23 @@ func (pc *parserContext) handleCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, 
 
 func (pc *parserContext) handleBinaryArithCmpExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
 	leftNode, funcNodeLeft := node.Left.(*ant_ast.FunctionNode)
-	_, funcNodeRight := node.Right.(*ant_ast.FunctionNode)
+	rightNode, funcNodeRight := node.Right.(*ant_ast.FunctionNode)
 
-	if funcNodeRight {
-		return nil, fmt.Errorf("right node as a function is not supported yet")
-	} else if !funcNodeLeft {
-		// Both left and right are not function nodes, pass to createCmpExpr
-		return pc.createCmpExpr(node.Left, node.Right, node.Operator)
-	} else {
+	if funcNodeLeft && funcNodeRight {
+		return nil, fmt.Errorf("left and right are both expression are not supported")
+	} else if funcNodeRight {
+		// Only the right node is a function node
+		op := getCompareOpType(node.Operator, true)
+		if op == planpb.OpType_Invalid {
+			return nil, fmt.Errorf("invalid right expression")
+		}
+		return pc.createBinaryArithOpEvalExpr(rightNode, &node.Left, opMap[op])
+	} else if funcNodeLeft {
 		// Only the left node is a function node
 		return pc.createBinaryArithOpEvalExpr(leftNode, &node.Right, node.Operator)
+	} else {
+		// Both left and right are not function nodes, pass to createCmpExpr
+		return pc.createCmpExpr(node.Left, node.Right, node.Operator)
 	}
 }
 
@@ -687,9 +704,10 @@ func (pc *parserContext) handleMultiCmpExpr(node *ant_ast.BinaryNode) (*planpb.E
 }
 
 func (pc *parserContext) handleBinaryExpr(node *ant_ast.BinaryNode) (*planpb.Expr, error) {
-	_, arithExpr := node.Left.(*ant_ast.FunctionNode)
+	_, leftArithExpr := node.Left.(*ant_ast.FunctionNode)
+	_, rightArithExpr := node.Right.(*ant_ast.FunctionNode)
 
-	if arithExpr {
+	if leftArithExpr || rightArithExpr {
 		return pc.handleBinaryArithCmpExpr(node)
 	}
 
