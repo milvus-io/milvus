@@ -1,5 +1,5 @@
 from datetime import datetime
-
+import time
 from pymilvus import utility
 import sys
 
@@ -15,6 +15,59 @@ class ApiUtilityWrapper:
     """ Method of encapsulating utility files """
 
     ut = utility
+
+    def bulk_load(self, collection_name,  partition_name="",
+                  channels="", row_based=True, files="", timeout=None,
+                  using="default", check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.bulk_load, collection_name, partition_name,
+                                    channels, row_based,files, timeout,
+                                    using], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       collection_name=collection_name, using=using).run()
+        return res, check_result
+
+    def get_bulk_load_state(self, task_id, timeout=None, using="default", check_task=None, check_items=None,  **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.get_bulk_load_state, task_id, timeout, using], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       task_id=task_id, using=using).run()
+        return res, check_result
+
+    def wait_for_bulk_load_tasks_completed(self, task_ids, timeout=None, using="default", **kwargs):
+        start = time.time()
+        successes = {}
+        fails = {}
+        if timeout is not None:
+            task_timeout = timeout / len(task_ids)
+        else:
+            task_timeout = TIMEOUT
+        while True and (len(successes) + len(fails)) < len(task_ids):
+            in_progress = {}
+            time.sleep(0.5)
+            for task_id in task_ids:
+                if successes.get(task_id, None) is not None or fails.get(task_id, None) is not None:
+                    continue
+                else:
+                    state, _ = self.get_bulk_load_state(task_id, task_timeout, using, **kwargs)
+                    if state.state_name == "BulkLoadPersisted":     # "BulkLoadCompleted"
+                        successes[task_id] = state
+                    elif state.state_name == "BulkLoadFailed":
+                        fails[task_id] = state
+                    else:
+                        in_progress[task_id] = state
+            end = time.time()
+            if timeout is not None:
+                if end - start > timeout:
+                    in_progress.update(fails)
+                    in_progress.update(successes)
+                    return False, in_progress
+
+        if len(fails) == 0:
+            return True, successes
+        else:
+            fails.update(successes)
+            return False, fails
 
     def get_query_segment_info(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
         timeout = TIMEOUT if timeout is None else timeout
@@ -161,3 +214,4 @@ class ApiUtilityWrapper:
     def mkts_from_hybridts(self, hybridts, milliseconds=0., delta=None):
         res, _ = api_request([self.ut.mkts_from_hybridts, hybridts, milliseconds, delta])
         return res
+
