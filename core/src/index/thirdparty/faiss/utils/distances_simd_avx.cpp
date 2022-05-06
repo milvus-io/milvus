@@ -188,16 +188,16 @@ float fvec_Linf_avx (const float* x, const float* y, size_t d) {
     return  _mm_cvtss_f32 (msum2);
 }
 
-const __m256i lookup = _mm256_setr_epi8(
-        /* 0 */ 0, /* 1 */ 1, /* 2 */ 1, /* 3 */ 2,
-        /* 4 */ 1, /* 5 */ 2, /* 6 */ 2, /* 7 */ 3,
-        /* 8 */ 1, /* 9 */ 2, /* a */ 2, /* b */ 3,
-        /* c */ 2, /* d */ 3, /* e */ 3, /* f */ 4,
-
-        /* 0 */ 0, /* 1 */ 1, /* 2 */ 1, /* 3 */ 2,
-        /* 4 */ 1, /* 5 */ 2, /* 6 */ 2, /* 7 */ 3,
-        /* 8 */ 1, /* 9 */ 2, /* a */ 2, /* b */ 3,
-        /* c */ 2, /* d */ 3, /* e */ 3, /* f */ 4
+#define DECLARE_LOOKUP \
+const __m256i lookup = _mm256_setr_epi8( \
+        /* 0 */ 0, /* 1 */ 1, /* 2 */ 1, /* 3 */ 2, \
+        /* 4 */ 1, /* 5 */ 2, /* 6 */ 2, /* 7 */ 3, \
+        /* 8 */ 1, /* 9 */ 2, /* a */ 2, /* b */ 3, \
+        /* c */ 2, /* d */ 3, /* e */ 3, /* f */ 4, \
+        /* 0 */ 0, /* 1 */ 1, /* 2 */ 1, /* 3 */ 2, \
+        /* 4 */ 1, /* 5 */ 2, /* 6 */ 2, /* 7 */ 3, \
+        /* 8 */ 1, /* 9 */ 2, /* a */ 2, /* b */ 3, \
+        /* c */ 2, /* d */ 3, /* e */ 3, /* f */ 4 \
 );
 
 int popcnt_AVX2_lookup(const uint8_t* data, const size_t n) {
@@ -218,6 +218,7 @@ int popcnt_AVX2_lookup(const uint8_t* data, const size_t n) {
         i += 32; \
     }
 
+    DECLARE_LOOKUP
     while (i + 8*32 <= n) {
         __m256i local = _mm256_setzero_si256();
         ITER ITER ITER ITER
@@ -271,6 +272,7 @@ int xor_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const siz
         i += 32; \
     }
 
+    DECLARE_LOOKUP
     while (i + 8*32 <= n) {
         __m256i local = _mm256_setzero_si256();
         ITER ITER ITER ITER
@@ -324,6 +326,7 @@ int or_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const size
         i += 32; \
     }
 
+    DECLARE_LOOKUP
     while (i + 8*32 <= n) {
         __m256i local = _mm256_setzero_si256();
         ITER ITER ITER ITER
@@ -377,6 +380,7 @@ int and_popcnt_AVX2_lookup(const uint8_t* data1, const uint8_t* data2, const siz
         i += 32; \
     }
 
+    DECLARE_LOOKUP
     while (i + 8*32 <= n) {
         __m256i local = _mm256_setzero_si256();
         ITER ITER ITER ITER
