@@ -236,7 +236,7 @@ func TestDataNode(t *testing.T) {
 		// dup call
 		status, err := node1.FlushSegments(node1.ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 		// failure call
 		req = &datapb.FlushSegmentsRequest{

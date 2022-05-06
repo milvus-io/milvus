@@ -48,6 +48,13 @@ func (c *Cache) Cache(ID UniqueID) {
 	c.cacheMap.Store(ID, struct{}{})
 }
 
+// checkOrCache returns true if `key` is present.
+// Otherwise, it returns false and stores `key` into cache.
+func (c *Cache) checkOrCache(key UniqueID) bool {
+	_, exist := c.cacheMap.LoadOrStore(key, struct{}{})
+	return exist
+}
+
 // Remove removes a set of IDs from the cache
 func (c *Cache) Remove(IDs ...UniqueID) {
 	for _, id := range IDs {
