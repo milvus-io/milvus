@@ -16,6 +16,7 @@ on:
 jobs:
   contributor:
     runs-on: ubuntu-latest
+    if: github.repository == 'milvus-io/milvus'
     steps:
       - name: checkout code
         uses: actions/checkout@v2
