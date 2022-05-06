@@ -582,14 +582,16 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 				continue
 			}
 
-			// Cache the segment and send it to its flush channel.
-			flushedSeg = append(flushedSeg, segID)
 			// Double check that the segment is still not cached.
+			// Skip this flush if segment ID is cached, otherwise cache the segment ID and proceed.
 			exist := node.segmentCache.checkOrCache(segID)
 			if exist {
 				logDupFlush(req.GetCollectionID(), segID)
 				continue
 			}
+			// flushedSeg is only for logging purpose.
+			flushedSeg = append(flushedSeg, segID)
+			// Send the segment to its flush channel.
 			flushCh <- flushMsg{
 				msgID:        req.GetBase().GetMsgID(),
 				timestamp:    req.GetBase().GetTimestamp(),
