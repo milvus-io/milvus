@@ -37,5 +37,5 @@ func PeekClientV1(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 			return pq.items[i].key
 		}
 	}
-	return UniqueID(-1)
+	return UniqueID(0)
 }

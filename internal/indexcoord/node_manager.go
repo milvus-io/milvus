@@ -113,8 +113,13 @@ func (nm *NodeManager) PeekClient(meta Meta) (UniqueID, types.IndexNode) {
 	log.Debug("IndexCoord peek IndexNode client from pq", zap.Uint64("data size", dataSize))
 	nodeID := nm.pq.Peek(dataSize*indexSizeFactor, meta.indexMeta.Req.IndexParams, meta.indexMeta.Req.TypeParams)
 	if nodeID == -1 {
+		log.Error("there is no indexnode online")
+		return nodeID, nil
+	}
+	if nodeID == 0 {
 		log.Error("No IndexNode available", zap.Uint64("data size", dataSize),
 			zap.Uint64("IndexNode must have memory size", dataSize*indexSizeFactor))
+		return nodeID, nil
 	}
 	nm.lock.Lock()
 	defer nm.lock.Unlock()

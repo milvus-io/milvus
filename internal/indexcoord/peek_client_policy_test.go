@@ -26,14 +26,14 @@ import (
 func TestPeekClientV0(t *testing.T) {
 	pq := newPriorityQueue()
 	key := PeekClientV0(10, []*commonpb.KeyValuePair{}, []*commonpb.KeyValuePair{}, pq)
-	assert.Equal(t, UniqueID(0), key)
+	assert.Equal(t, UniqueID(1), key)
 }
 
 func TestPeekClientV1(t *testing.T) {
 	pq := newPriorityQueue()
 	key := PeekClientV1(10, []*commonpb.KeyValuePair{}, []*commonpb.KeyValuePair{}, pq)
-	assert.Equal(t, UniqueID(0), key)
+	assert.Equal(t, UniqueID(1), key)
 
 	key2 := PeekClientV1(10000, []*commonpb.KeyValuePair{}, []*commonpb.KeyValuePair{}, pq)
-	assert.Equal(t, UniqueID(-1), key2)
+	assert.Equal(t, UniqueID(0), key2)
 }

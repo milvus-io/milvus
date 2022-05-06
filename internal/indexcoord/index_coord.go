@@ -889,6 +889,10 @@ func (i *IndexCoord) assignTaskLoop() {
 			return
 		case <-timeTicker.C:
 			serverIDs := i.nodeManager.ListNode()
+			if len(serverIDs) == 0 {
+				log.Warn("there is no indexnode online")
+				continue
+			}
 			metas := i.metaTable.GetUnassignedTasks(serverIDs)
 			sort.Slice(metas, func(i, j int) bool {
 				return metas[i].indexMeta.Version <= metas[j].indexMeta.Version
@@ -906,9 +910,13 @@ func (i *IndexCoord) assignTaskLoop() {
 				log.Debug("The version of the task has been updated", zap.Int64("indexBuildID", indexBuildID))
 
 				nodeID, builderClient := i.nodeManager.PeekClient(meta)
-				if builderClient == nil {
-					log.Warn("IndexCoord assignmentTasksLoop can not find available IndexNode")
+				if builderClient == nil && nodeID == -1 {
+					log.Warn("there is no indexnode online")
 					break
+				}
+				if builderClient == nil && nodeID == 0 {
+					log.Warn("The memory of all indexnodes does not meet the requirements")
+					continue
 				}
 				log.Debug("IndexCoord PeekClient success", zap.Int64("nodeID", nodeID))
 				req := &indexpb.CreateIndexRequest{
