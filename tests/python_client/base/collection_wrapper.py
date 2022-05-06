@@ -1,6 +1,7 @@
 import sys
 import time
 import timeout_decorator
+from numpy import NaN
 
 from pymilvus import Collection
 
@@ -10,6 +11,7 @@ from utils.api_request import api_request
 from utils.wrapper import trace
 from utils.util_log import test_log as log
 from pymilvus.orm.types import CONSISTENCY_STRONG
+from common.common_func import param_info
 
 TIMEOUT = 20
 
@@ -85,9 +87,10 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def load(self, partition_names=None, replica_number=1, timeout=None, check_task=None, check_items=None, **kwargs):
+    def load(self, partition_names=None, replica_number=NaN, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
-
+        replica_number = param_info.param_replica_num if replica_number is NaN else replica_number
+        
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.load, partition_names, replica_number, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,

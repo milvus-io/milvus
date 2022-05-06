@@ -704,7 +704,9 @@ func TestRootCoord_Base(t *testing.T) {
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	Params.RootCoordCfg.ImportIndexCheckInterval = 0.1
 	Params.RootCoordCfg.ImportIndexWaitLimit = 0.2
-	core, err := NewCore(ctx, coreFactory)
+	Params.RootCoordCfg.ImportSegmentStateCheckInterval = 0.1
+	Params.RootCoordCfg.ImportSegmentStateWaitLimit = 0.2
+	core, err := NewCore(context.WithValue(ctx, ctxKey{}, ""), coreFactory)
 	assert.NoError(t, err)
 	randVal := rand.Int()
 	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
@@ -1384,7 +1386,7 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("list import stasks", func(t *testing.T) {
+	t.Run("list import tasks", func(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.ListImportTasksRequest{}
 		rsp, err := core.ListImportTasks(ctx, req)
@@ -1401,7 +1403,7 @@ func TestRootCoord_Base(t *testing.T) {
 			TaskId:   1,
 			RowCount: 100,
 			Segments: []int64{1003, 1004, 1005},
-			State:    commonpb.ImportState_ImportCompleted,
+			State:    commonpb.ImportState_ImportPersisted,
 		}
 
 		for _, segmentID := range []int64{1003, 1004, 1005} {
@@ -1461,7 +1463,7 @@ func TestRootCoord_Base(t *testing.T) {
 			TaskId:   101,
 			RowCount: 100,
 			Segments: []int64{1003, 1004, 1005},
-			State:    commonpb.ImportState_ImportCompleted,
+			State:    commonpb.ImportState_ImportPersisted,
 		}
 		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), reqIR)
 		assert.NoError(t, err)
@@ -1484,13 +1486,13 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("report import bring segments online", func(t *testing.T) {
+	t.Run("report import bring wait for index", func(t *testing.T) {
 		defer wg.Done()
 		req := &rootcoordpb.ImportResult{
 			TaskId:   1,
 			RowCount: 100,
 			Segments: []int64{1000, 1001, 1002},
-			State:    commonpb.ImportState_ImportCompleted,
+			State:    commonpb.ImportState_ImportPersisted,
 		}
 		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
@@ -1505,7 +1507,7 @@ func TestRootCoord_Base(t *testing.T) {
 			TaskId:   1,
 			RowCount: 100,
 			Segments: []int64{999}, /* pre-injected failure for segment ID = 999 */
-			State:    commonpb.ImportState_ImportCompleted,
+			State:    commonpb.ImportState_ImportPersisted,
 		}
 		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
@@ -1528,7 +1530,7 @@ func TestRootCoord_Base(t *testing.T) {
 			&rootcoordpb.ImportResult{
 				TaskId:   1,
 				RowCount: 100,
-				State:    commonpb.ImportState_ImportCompleted,
+				State:    commonpb.ImportState_ImportPersisted,
 				Segments: []int64{1000, 1001, 1002},
 			})
 		assert.NoError(t, err)
@@ -1559,26 +1561,10 @@ func TestRootCoord_Base(t *testing.T) {
 		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(collMeta.FieldIndexes))
-		oldIdx := collMeta.FieldIndexes[0].IndexID
 
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
-		time.Sleep(100 * time.Millisecond)
-
-		collMeta, err = core.MetaTable.GetCollectionByName(collName, 0)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(collMeta.FieldIndexes))
-		assert.Equal(t, oldIdx, collMeta.FieldIndexes[0].IndexID)
-
-		idxMeta, err := core.MetaTable.GetIndexByID(collMeta.FieldIndexes[1].IndexID)
-		assert.NoError(t, err)
-		assert.Equal(t, Params.CommonCfg.DefaultIndexName, idxMeta.IndexName)
-
-		idxMeta, err = core.MetaTable.GetIndexByID(collMeta.FieldIndexes[0].IndexID)
-		assert.NoError(t, err)
-		assert.Equal(t, Params.CommonCfg.DefaultIndexName+"_bak", idxMeta.IndexName)
-
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.ErrorCode)
 	})
 
 	wg.Add(1)
@@ -2945,12 +2931,6 @@ func TestCheckInit(t *testing.T) {
 	assert.Error(t, err)
 
 	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
-		return nil
-	}
-	err = c.checkInit()
-	assert.Error(t, err)
-
-	c.CallUpdateSegmentStateService = func(ctx context.Context, segID typeutil.UniqueID, ss commonpb.SegmentState) error {
 		return nil
 	}
 	err = c.checkInit()

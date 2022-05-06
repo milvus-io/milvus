@@ -57,12 +57,8 @@ VecIndexCreator::parse_impl(const std::string& serialized_params_str, knowhere::
         conf[key] = value;
     }
 
-    auto stoi_closure = [](const std::string& s) -> auto {
-        return std::stoi(s);
-    };
-    auto stof_closure = [](const std::string& s) -> auto {
-        return std::stof(s);
-    };
+    auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
+    auto stof_closure = [](const std::string& s) -> float { return std::stof(s); };
 
     /***************************** meta *******************************/
     check_parameter<int>(conf, knowhere::meta::DIM, stoi_closure, std::nullopt);

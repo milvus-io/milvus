@@ -15,21 +15,6 @@ from common import common_func as cf
 from common import common_type as ct
 
 
-class ParamInfo:
-    def __init__(self):
-        self.param_host = ""
-        self.param_port = ""
-        self.param_handler = ""
-
-    def prepare_param_info(self, host, port, handler):
-        self.param_host = host
-        self.param_port = port
-        self.param_handler = handler
-
-
-param_info = ParamInfo()
-
-
 class Base:
     """ Initialize class object """
     connection_wrap = None
@@ -65,8 +50,8 @@ class Base:
         try:
             """ Drop collection before disconnect """
             if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
-                self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
-                                             port=param_info.param_port)
+                self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
+                                             port=cf.param_info.param_port)
 
             if self.collection_wrap.collection is not None:
                 self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
@@ -100,8 +85,8 @@ class TestcaseBase(Base):
 
     def _connect(self):
         """ Add a connection and create the connect """
-        res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=param_info.param_host,
-                                                    port=param_info.param_port)
+        res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
+                                                    port=cf.param_info.param_port)
         return res
 
     def init_collection_wrap(self, name=None, schema=None, shards_num=2, check_task=None, check_items=None, **kwargs):

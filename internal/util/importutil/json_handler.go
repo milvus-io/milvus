@@ -350,7 +350,7 @@ func (v *JSONColumnValidator) Handle(columns map[storage.FieldID][]interface{}) 
 			if rowCount == -1 {
 				rowCount = counter
 			} else if rowCount != counter {
-				return errors.New("JSON column validator: the field " + k + " row count " + strconv.Itoa(int(counter)) + " is not equal to other fields " + strconv.Itoa(int(rowCount)))
+				return errors.New("JSON column validator: the field " + k + " row count " + strconv.Itoa(int(counter)) + " is not equal to other fields row count" + strconv.Itoa(int(rowCount)))
 			}
 		}
 

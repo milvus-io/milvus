@@ -433,8 +433,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) error {
 	// add tsafe watch in query shard if exists
 	for _, dmlChannel := range vChannels {
 		if !w.node.queryShardService.hasQueryShard(dmlChannel) {
-			//TODO add replica id in req
-			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, 0)
+			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
 		}
 
 		qs, err := w.node.queryShardService.getQueryShard(dmlChannel)
@@ -582,8 +581,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 			continue
 		}
 		if !w.node.queryShardService.hasQueryShard(dmlChannel) {
-			//TODO add replica id in req
-			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, 0)
+			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaId())
 		}
 
 		qs, err := w.node.queryShardService.getQueryShard(dmlChannel)

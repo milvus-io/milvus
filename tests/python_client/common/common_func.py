@@ -13,6 +13,22 @@ from utils.util_log import test_log as log
 
 """" Methods of processing data """
 
+class ParamInfo:
+    def __init__(self):
+        self.param_host = ""
+        self.param_port = ""
+        self.param_handler = ""
+        self.param_replica_num = ct.default_replica_num
+
+    def prepare_param_info(self, host, port, handler, replica_num):
+        self.param_host = host
+        self.param_port = port
+        self.param_handler = handler
+        self.param_replica_num = replica_num
+
+
+param_info = ParamInfo()
+
 
 def gen_unique_str(str_value=None):
     prefix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))

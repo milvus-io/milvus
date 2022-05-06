@@ -684,6 +684,14 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				}
 			}
 
+			err = triggerTask.globalPostExecute(triggerTask.traceCtx())
+			if err != nil {
+				log.Error("scheduleLoop: failed to execute globalPostExecute() of task",
+					zap.Int64("taskID", triggerTask.getTaskID()),
+					zap.Error(err))
+				triggerTask.setResultInfo(err)
+			}
+
 			err = removeTaskFromKVFn(triggerTask)
 			if err != nil {
 				log.Error("scheduleLoop: error when remove trigger and internal tasks from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
@@ -1005,26 +1013,27 @@ func reverseSealedSegmentChangeInfo(changeInfosMap map[UniqueID]*querypb.SealedS
 // generateDerivedInternalTasks generate watchDeltaChannel and watchQueryChannel tasks
 func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) ([]task, error) {
 	var derivedInternalTasks []task
-	watchQueryChannelInfo := make(map[int64]map[UniqueID]struct{})
-	watchDeltaChannelInfo := make(map[int64]map[UniqueID]struct{})
-	addChannelWatchInfoFn := func(nodeID int64, collectionID UniqueID, watchInfo map[int64]map[UniqueID]struct{}) {
+	watchQueryChannelInfo := make(map[int64]map[UniqueID]UniqueID)
+	watchDeltaChannelInfo := make(map[int64]map[UniqueID]UniqueID)
+	addChannelWatchInfoFn := func(nodeID int64, collectionID UniqueID, replicaID UniqueID, watchInfo map[int64]map[UniqueID]UniqueID) {
 		if _, ok := watchInfo[nodeID]; !ok {
-			watchInfo[nodeID] = make(map[UniqueID]struct{})
+			watchInfo[nodeID] = make(map[UniqueID]UniqueID)
 		}
 
-		watchInfo[nodeID][collectionID] = struct{}{}
+		watchInfo[nodeID][collectionID] = replicaID
 	}
 
 	for _, childTask := range triggerTask.getChildTask() {
 		if childTask.msgType() == commonpb.MsgType_LoadSegments {
 			loadSegmentTask := childTask.(*loadSegmentTask)
 			collectionID := loadSegmentTask.CollectionID
+			replicaID := loadSegmentTask.GetReplicaID()
 			nodeID := loadSegmentTask.DstNodeID
 			if !cluster.hasWatchedQueryChannel(triggerTask.traceCtx(), nodeID, collectionID) {
-				addChannelWatchInfoFn(nodeID, collectionID, watchQueryChannelInfo)
+				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchQueryChannelInfo)
 			}
 			if !cluster.hasWatchedDeltaChannel(triggerTask.traceCtx(), nodeID, collectionID) {
-				addChannelWatchInfoFn(nodeID, collectionID, watchDeltaChannelInfo)
+				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchDeltaChannelInfo)
 			}
 		}
 
@@ -1032,8 +1041,9 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 			watchDmChannelTask := childTask.(*watchDmChannelTask)
 			collectionID := watchDmChannelTask.CollectionID
 			nodeID := watchDmChannelTask.NodeID
+			replicaID := watchDmChannelTask.GetReplicaID()
 			if !cluster.hasWatchedQueryChannel(triggerTask.traceCtx(), nodeID, collectionID) {
-				addChannelWatchInfoFn(nodeID, collectionID, watchQueryChannelInfo)
+				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchQueryChannelInfo)
 			}
 		}
 	}
@@ -1064,7 +1074,7 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 	}
 
 	for nodeID, collectionIDs := range watchDeltaChannelInfo {
-		for collectionID := range collectionIDs {
+		for collectionID, replicaID := range collectionIDs {
 			deltaChannelInfo, err := meta.getDeltaChannelsByCollectionID(collectionID)
 			if err != nil {
 				return nil, err
@@ -1075,6 +1085,8 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 				Base:         msgBase,
 				CollectionID: collectionID,
 				Infos:        deltaChannelInfo,
+
+				ReplicaId: replicaID,
 			}
 			watchDeltaRequest.NodeID = nodeID
 			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getTriggerCondition())

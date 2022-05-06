@@ -90,17 +90,17 @@ const (
 	DefaultStringIndexType = "Trie"
 )
 
-// MetaTable store all rootcoord meta info
+// MetaTable store all rootCoord meta info
 type MetaTable struct {
 	txn             kv.TxnKV                                                        // client of a reliable txnkv service, i.e. etcd client
 	snapshot        kv.SnapShotKV                                                   // client of a reliable snapshotkv service, i.e. etcd client
 	proxyID2Meta    map[typeutil.UniqueID]pb.ProxyMeta                              // proxy id to proxy meta
-	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection_id -> meta
+	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection id -> collection meta
 	collName2ID     map[string]typeutil.UniqueID                                    // collection name to collection id
 	collAlias2ID    map[string]typeutil.UniqueID                                    // collection alias to collection id
-	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool                // partition_id -> segment_id -> bool
-	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection_id/index_id/partition_id/segment_id -> meta
-	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection_id/index_id -> meta
+	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool                // partition id -> segment_id -> bool
+	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection id/index_id/partition_id/segment_id -> meta
+	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection id/index_id -> meta
 
 	proxyLock sync.RWMutex
 	ddLock    sync.RWMutex
@@ -1056,37 +1056,28 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
 	}
 
-	var dupIdx typeutil.UniqueID
+	dupIdx := false
 	for _, f := range collMeta.FieldIndexes {
 		if info, ok := mt.indexID2Meta[f.IndexID]; ok {
 			if info.IndexName == idxInfo.IndexName {
-				dupIdx = info.IndexID
-				break
+				// the index name must be different for different indexes
+				if !EqualKeyPairArray(info.IndexParams, idxInfo.IndexParams) || f.FiledID != fieldSchema.FieldID {
+					return nil, schemapb.FieldSchema{}, fmt.Errorf("index name(%s) has been exist in collectio(%s), field(%s)", info.IndexName, collName, fieldName)
+				}
+
+				// same index name, index params, and fieldId
+				dupIdx = true
 			}
 		}
 	}
 
-	exist := false
-	var existInfo pb.IndexInfo
-	for _, f := range collMeta.FieldIndexes {
-		if f.FiledID == fieldSchema.FieldID {
-			existInfo, ok = mt.indexID2Meta[f.IndexID]
-			if !ok {
-				return nil, schemapb.FieldSchema{}, fmt.Errorf("index id = %d not found", f.IndexID)
-			}
-			if EqualKeyPairArray(existInfo.IndexParams, idxInfo.IndexParams) {
-				exist = true
-				break
-			}
-		}
-	}
-	if !exist {
+	// if no same index exist, save new index info to etcd
+	if !dupIdx {
 		idx := &pb.FieldIndexInfo{
 			FiledID: fieldSchema.FieldID,
 			IndexID: idxInfo.IndexID,
 		}
 		collMeta.FieldIndexes = append(collMeta.FieldIndexes, idx)
-		mt.collID2Meta[collMeta.ID] = collMeta
 		k1 := path.Join(CollectionMetaPrefix, strconv.FormatInt(collMeta.ID, 10))
 		v1, err := proto.Marshal(&collMeta)
 		if err != nil {
@@ -1095,7 +1086,6 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal collMeta fail key:%s, err:%w", k1, err)
 		}
 
-		mt.indexID2Meta[idx.IndexID] = *idxInfo
 		k2 := path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
 		v2, err := proto.Marshal(idxInfo)
 		if err != nil {
@@ -1105,57 +1095,14 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		}
 		meta := map[string]string{k1: string(v1), k2: string(v2)}
 
-		if dupIdx != 0 {
-			dupInfo := mt.indexID2Meta[dupIdx]
-			dupInfo.IndexName = dupInfo.IndexName + "_bak"
-			mt.indexID2Meta[dupIdx] = dupInfo
-			k := path.Join(IndexMetaPrefix, strconv.FormatInt(dupInfo.IndexID, 10))
-			v, err := proto.Marshal(&dupInfo)
-			if err != nil {
-				log.Error("MetaTable GetNotIndexedSegments Marshal dupInfo fail",
-					zap.String("key", k), zap.Error(err))
-				return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal dupInfo fail key:%s, err:%w", k, err)
-			}
-			meta[k] = string(v)
-		}
 		err = mt.txn.MultiSave(meta)
 		if err != nil {
 			log.Error("TxnKV MultiSave fail", zap.Error(err))
 			panic("TxnKV MultiSave fail")
 		}
-	} else {
-		idxInfo.IndexID = existInfo.IndexID
-		if existInfo.IndexName != idxInfo.IndexName { //replace index name
-			existInfo.IndexName = idxInfo.IndexName
-			mt.indexID2Meta[existInfo.IndexID] = existInfo
-			k := path.Join(IndexMetaPrefix, strconv.FormatInt(existInfo.IndexID, 10))
-			v, err := proto.Marshal(&existInfo)
-			if err != nil {
-				log.Error("MetaTable GetNotIndexedSegments Marshal existInfo fail",
-					zap.String("key", k), zap.Error(err))
-				return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal existInfo fail key:%s, err:%w", k, err)
-			}
-			meta := map[string]string{k: string(v)}
-			if dupIdx != 0 {
-				dupInfo := mt.indexID2Meta[dupIdx]
-				dupInfo.IndexName = dupInfo.IndexName + "_bak"
-				mt.indexID2Meta[dupIdx] = dupInfo
-				k := path.Join(IndexMetaPrefix, strconv.FormatInt(dupInfo.IndexID, 10))
-				v, err := proto.Marshal(&dupInfo)
-				if err != nil {
-					log.Error("MetaTable GetNotIndexedSegments Marshal dupInfo fail",
-						zap.String("key", k), zap.Error(err))
-					return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal dupInfo fail key:%s, err:%w", k, err)
-				}
-				meta[k] = string(v)
-			}
 
-			err = mt.txn.MultiSave(meta)
-			if err != nil {
-				log.Error("SnapShotKV MultiSave fail", zap.Error(err))
-				panic("SnapShotKV MultiSave fail")
-			}
-		}
+		mt.collID2Meta[collMeta.ID] = collMeta
+		mt.indexID2Meta[idx.IndexID] = *idxInfo
 	}
 
 	rstID := make([]typeutil.UniqueID, 0, 16)
