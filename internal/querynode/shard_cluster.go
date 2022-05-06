@@ -23,13 +23,14 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
 )
 
 type shardClusterState int32
@@ -656,6 +657,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 
 	for nodeID, segments := range segAllocs {
 		nodeReq := proto.Clone(req).(*querypb.SearchRequest)
+		nodeReq.IsShardLeader = false
 		nodeReq.SegmentIDs = segments
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
@@ -710,6 +712,7 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([
 
 	for nodeID, segments := range segAllocs {
 		nodeReq := proto.Clone(req).(*querypb.QueryRequest)
+		nodeReq.IsShardLeader = false
 		nodeReq.SegmentIDs = segments
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
