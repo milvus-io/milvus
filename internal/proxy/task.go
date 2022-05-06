@@ -664,7 +664,7 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 			}
 		}
 		// valid max length per row parameters
-		// if max_length_per_row not specified, set default value
+		// if max_length_per_row not specified, return error
 		if field.DataType == schemapb.DataType_VarChar {
 			err = validateMaxLengthPerRow(cct.schema.Name, field)
 			if err != nil {
