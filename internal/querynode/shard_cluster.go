@@ -168,6 +168,7 @@ func NewShardCluster(collectionID int64, replicaID int64, vchannelName string,
 }
 
 func (sc *ShardCluster) Close() {
+	log.Info("Close shard cluster")
 	sc.closeOnce.Do(func() {
 		sc.state.Store(int32(unavailable))
 		close(sc.closeCh)
@@ -176,7 +177,7 @@ func (sc *ShardCluster) Close() {
 
 // addNode add a node into cluster
 func (sc *ShardCluster) addNode(evt nodeEvent) {
-	log.Debug("ShardCluster add node", zap.Int64("nodeID", evt.nodeID))
+	log.Info("ShardCluster add node", zap.Int64("nodeID", evt.nodeID))
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
 
@@ -198,6 +199,7 @@ func (sc *ShardCluster) addNode(evt nodeEvent) {
 
 // removeNode handles node offline and setup related segments
 func (sc *ShardCluster) removeNode(evt nodeEvent) {
+	log.Info("ShardCluster remove node", zap.Int64("nodeID", evt.nodeID))
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
 
@@ -220,8 +222,7 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 
 // updateSegment apply segment change to shard cluster
 func (sc *ShardCluster) updateSegment(evt segmentEvent) {
-	log.Debug("ShardCluster update segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
-
+	log.Info("ShardCluster update segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
 	// notify handoff wait online if any
 	defer func() {
 		sc.segmentCond.L.Lock()
@@ -248,6 +249,7 @@ func (sc *ShardCluster) updateSegment(evt segmentEvent) {
 
 // SyncSegments synchronize segment distribution in batch
 func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo, state segmentState) {
+	log.Info("ShardCluster sync segments", zap.Any("replica segments", distribution), zap.Int32("state", int32(state)))
 	// notify handoff wait online if any
 	defer func() {
 		sc.segmentCond.L.Lock()
@@ -312,7 +314,7 @@ func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt segmentEvent)
 // removeSegment removes segment from cluster
 // should only applied in hand-off or load balance procedure
 func (sc *ShardCluster) removeSegment(evt segmentEvent) {
-	log.Debug("ShardCluster remove segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
+	log.Info("ShardCluster remove segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
 
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
@@ -680,6 +682,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 
 	wg.Wait()
 	if err != nil {
+		log.Error(err.Error())
 		return nil, err
 	}
 
@@ -735,6 +738,7 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([
 
 	wg.Wait()
 	if err != nil {
+		log.Error(err.Error())
 		return nil, err
 	}
 

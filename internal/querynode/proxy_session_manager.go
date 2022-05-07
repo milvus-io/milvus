@@ -58,7 +58,7 @@ func NewSessionManager(options ...SessionOpt) *SessionManager {
 func (c *SessionManager) AddSession(node *NodeInfo) {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
-
+	log.Info("add proxy session", zap.Int64("node", node.NodeID))
 	session := NewSession(node, c.sessionCreator)
 	c.sessions.data[node.NodeID] = session
 }
@@ -73,7 +73,7 @@ func (c *SessionManager) Startup(nodes []*NodeInfo) {
 func (c *SessionManager) DeleteSession(node *NodeInfo) {
 	c.sessions.Lock()
 	defer c.sessions.Unlock()
-
+	log.Info("delete proxy session", zap.Int64("node", node.NodeID))
 	if session, ok := c.sessions.data[node.NodeID]; ok {
 		session.Dispose()
 		delete(c.sessions.data, node.NodeID)

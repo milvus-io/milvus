@@ -83,7 +83,7 @@ func (c *Collection) addPartitionID(partitionID UniqueID) {
 	defer c.releaseMu.Unlock()
 
 	c.partitionIDs = append(c.partitionIDs, partitionID)
-	log.Debug("queryNode collection info after add a partition",
+	log.Info("queryNode collection info after add a partition",
 		zap.Int64("partitionID", partitionID), zap.Int64("collectionID", c.id),
 		zap.Int64s("partitions", c.partitionIDs))
 }
@@ -107,14 +107,14 @@ OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.vChannels {
 			if dstChan == srcChan {
-				log.Debug("vChannel has been existed in collection's vChannels",
+				log.Warn("vChannel has been existed in collection's vChannels",
 					zap.Int64("collectionID", c.ID()),
 					zap.String("vChannel", dstChan),
 				)
 				continue OUTER
 			}
 		}
-		log.Debug("add vChannel to collection",
+		log.Info("add vChannel to collection",
 			zap.Int64("collectionID", c.ID()),
 			zap.String("vChannel", dstChan),
 		)
@@ -144,7 +144,7 @@ func (c *Collection) removeVChannel(channel Channel) {
 		}
 	}
 	c.vChannels = tmpChannels
-	log.Debug("remove vChannel from collection",
+	log.Info("remove vChannel from collection",
 		zap.Int64("collectionID", c.ID()),
 		zap.String("channel", channel),
 	)
@@ -160,14 +160,14 @@ OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.pChannels {
 			if dstChan == srcChan {
-				log.Debug("pChannel has been existed in collection's pChannels",
+				log.Info("pChannel has been existed in collection's pChannels",
 					zap.Int64("collectionID", c.ID()),
 					zap.String("pChannel", dstChan),
 				)
 				continue OUTER
 			}
 		}
-		log.Debug("add pChannel to collection",
+		log.Info("add pChannel to collection",
 			zap.Int64("collectionID", c.ID()),
 			zap.String("pChannel", dstChan),
 		)
@@ -192,14 +192,14 @@ OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.pDeltaChannels {
 			if dstChan == srcChan {
-				log.Debug("pChannel has been existed in collection's pChannels",
+				log.Info("pChannel has been existed in collection's pChannels",
 					zap.Int64("collectionID", c.ID()),
 					zap.String("pChannel", dstChan),
 				)
 				continue OUTER
 			}
 		}
-		log.Debug("add pChannel to collection",
+		log.Info("add pChannel to collection",
 			zap.Int64("collectionID", c.ID()),
 			zap.String("pChannel", dstChan),
 		)
@@ -232,14 +232,14 @@ OUTER:
 	for _, dstChan := range channels {
 		for _, srcChan := range c.vDeltaChannels {
 			if dstChan == srcChan {
-				log.Debug("vDeltaChannel has been existed in collection's vDeltaChannels",
+				log.Info("vDeltaChannel has been existed in collection's vDeltaChannels",
 					zap.Int64("collectionID", c.ID()),
 					zap.String("vChannel", dstChan),
 				)
 				continue OUTER
 			}
 		}
-		log.Debug("add vDeltaChannel to collection",
+		log.Info("add vDeltaChannel to collection",
 			zap.Int64("collectionID", c.ID()),
 			zap.String("vDeltaChannel", dstChan),
 		)
@@ -259,7 +259,7 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 		}
 	}
 	c.vDeltaChannels = tmpChannels
-	log.Debug("remove vDeltaChannel from collection",
+	log.Info("remove vDeltaChannel from collection",
 		zap.Int64("collectionID", c.ID()),
 		zap.String("channel", channel),
 	)
@@ -323,7 +323,7 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	}
 	C.free(unsafe.Pointer(cSchemaBlob))
 
-	log.Debug("create collection", zap.Int64("collectionID", collectionID))
+	log.Info("create collection", zap.Int64("collectionID", collectionID))
 
 	newCollection.setReleaseTime(Timestamp(math.MaxUint64))
 	return newCollection
@@ -340,7 +340,7 @@ func deleteCollection(collection *Collection) {
 
 	collection.collectionPtr = nil
 
-	log.Debug("delete collection", zap.Int64("collectionID", collection.ID()))
+	log.Info("delete collection", zap.Int64("collectionID", collection.ID()))
 
 	collection = nil
 }

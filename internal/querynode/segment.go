@@ -199,7 +199,7 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		return nil, err
 	}
 
-	log.Debug("create segment",
+	log.Info("create segment",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID),
@@ -236,7 +236,7 @@ func deleteSegment(segment *Segment) {
 	C.DeleteSegment(cPtr)
 	segment.segmentPtr = nil
 
-	log.Debug("delete segment from memory", zap.Int64("collectionID", segment.collectionID), zap.Int64("partitionID", segment.partitionID), zap.Int64("segmentID", segment.ID()))
+	log.Info("delete segment from memory", zap.Int64("collectionID", segment.collectionID), zap.Int64("partitionID", segment.partitionID), zap.Int64("segmentID", segment.ID()))
 
 	segment = nil
 }
@@ -345,6 +345,7 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Debug("do retrieve on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
 	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
 		return nil, err
 	}
@@ -570,7 +571,7 @@ func (s *Segment) updateBloomFilter(pks []primaryKey) {
 			stringValue := pk.(*varCharPrimaryKey).Value
 			s.pkFilter.AddString(stringValue)
 		default:
-			//TODO::
+			log.Warn("failed to update bloomfilter", zap.Any("PK type", pk.Type()))
 		}
 	}
 }
@@ -759,7 +760,7 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *sche
 		return err
 	}
 
-	log.Debug("load field done",
+	log.Info("load field done",
 		zap.Int64("fieldID", fieldID),
 		zap.Int64("row count", rowCount),
 		zap.Int64("segmentID", s.ID()))
@@ -827,7 +828,7 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 		return err
 	}
 
-	log.Debug("load deleted record done",
+	log.Info("load deleted record done",
 		zap.Int64("row count", rowCount),
 		zap.Int64("segmentID", s.ID()))
 	return nil
@@ -861,7 +862,7 @@ func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.F
 		return err
 	}
 
-	log.Debug("updateSegmentIndex done", zap.Int64("segmentID", s.ID()))
+	log.Info("updateSegmentIndex done", zap.Int64("segmentID", s.ID()))
 
 	return nil
 }

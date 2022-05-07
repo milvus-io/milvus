@@ -44,11 +44,11 @@ func (qc *queryChannel) AsConsumer(channelName string, subName string, position 
 		qc.queryMsgStream.AsConsumer([]string{channelName}, subName)
 		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
 		if position == nil || len(position.MsgID) == 0 {
-			log.Debug("QueryNode AsConsumer", zap.String("channel", channelName), zap.String("sub name", subName))
+			log.Info("QueryNode AsConsumer", zap.String("channel", channelName), zap.String("sub name", subName))
 		} else {
 			err = qc.queryMsgStream.Seek([]*internalpb.MsgPosition{position})
 			if err == nil {
-				log.Debug("querynode seek query channel: ", zap.Any("consumeChannel", channelName),
+				log.Info("querynode seek query channel: ", zap.Any("consumeChannel", channelName),
 					zap.String("seek position", string(position.MsgID)))
 			}
 		}

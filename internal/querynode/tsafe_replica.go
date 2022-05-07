@@ -77,11 +77,11 @@ func (t *tSafeReplica) addTSafe(vChannel Channel) {
 	defer t.mu.Unlock()
 	if _, ok := t.tSafes[vChannel]; !ok {
 		t.tSafes[vChannel] = newTSafe(vChannel)
-		log.Debug("add tSafe done",
+		log.Info("add tSafe done",
 			zap.String("channel", vChannel),
 		)
 	} else {
-		log.Debug("tSafe has been existed",
+		log.Info("tSafe has been existed",
 			zap.String("channel", vChannel),
 		)
 	}
@@ -91,7 +91,7 @@ func (t *tSafeReplica) removeTSafe(vChannel Channel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	log.Debug("remove tSafe replica",
+	log.Info("remove tSafe replica",
 		zap.String("vChannel", vChannel),
 	)
 	delete(t.tSafes, vChannel)

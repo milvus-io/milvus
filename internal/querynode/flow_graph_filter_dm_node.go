@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -43,8 +44,6 @@ func (fdmNode *filterDmNode) Name() string {
 
 // Operate handles input messages, to filter invalid insert messages
 func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	//log.Debug("Do filterDmNode operation")
-
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in filterDmNode", zap.Int("input length", len(in)))
 		return []Msg{}
@@ -52,7 +51,11 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Warn("type assertion failed for MsgStreamMsg")
+		if in[0] == nil {
+			log.Debug("type assertion failed for MsgStreamMsg because it's nil")
+		} else {
+			log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		}
 		return []Msg{}
 	}
 
@@ -78,7 +81,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	for i, msg := range msgStreamMsg.TsMessages() {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
-		log.Info("Filter invalid message in QueryNode", zap.String("traceID", traceID))
+		log.Debug("Filter invalid message in QueryNode", zap.String("traceID", traceID))
 		switch msg.Type() {
 		case commonpb.MsgType_Insert:
 			resMsg := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
@@ -192,7 +195,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	for _, segmentInfo := range excludedSegments {
 		// unFlushed segment may not have checkPoint, so `segmentInfo.DmlPosition` may be nil
 		if segmentInfo.DmlPosition == nil {
-			log.Debug("filter unFlushed segment without checkPoint",
+			log.Warn("filter unFlushed segment without checkPoint",
 				zap.Any("collectionID", msg.CollectionID),
 				zap.Any("partitionID", msg.PartitionID))
 			return nil

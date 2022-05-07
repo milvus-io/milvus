@@ -65,7 +65,7 @@ func (nd *etcdShardNodeDetector) Close() {
 
 // watchNodes lists current online nodes and returns a channel for incoming events.
 func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64, vchannelName string) ([]nodeEvent, <-chan nodeEvent) {
-	log.Debug("nodeDetector watch", zap.Int64("collectionID", collectionID), zap.Int64("replicaID", replicaID), zap.String("vchannelName", vchannelName))
+	log.Info("nodeDetector watch", zap.Int64("collectionID", collectionID), zap.Int64("replicaID", replicaID), zap.String("vchannelName", vchannelName))
 	resp, err := nd.client.Get(context.Background(), nd.path, clientv3.WithPrefix())
 	if err != nil {
 		log.Warn("Etcd NodeDetector get replica info failed", zap.Error(err))
@@ -74,7 +74,7 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 
 	idAddr, err := nd.idAddr()
 	if err != nil {
-		log.Warn("Etcd NodeDetector session map failed", zap.Error(err))
+		log.Error("Etcd NodeDetector session map failed", zap.Error(err))
 		panic(err)
 	}
 
@@ -121,7 +121,6 @@ func (nd *etcdShardNodeDetector) cancelClose(cancel func()) {
 }
 
 func (nd *etcdShardNodeDetector) watch(ch clientv3.WatchChan, collectionID, replicaID int64) {
-	log.Debug("etcdNodeDetector start watch")
 	defer nd.wg.Done()
 	for {
 		select {
@@ -171,7 +170,7 @@ func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID,
 
 	idAddr, err := nd.idAddr()
 	if err != nil {
-		log.Warn("Etcd NodeDetector session map failed", zap.Error(err))
+		log.Error("Etcd NodeDetector session map failed", zap.Error(err))
 		panic(err)
 	}
 	// all node is added
@@ -247,7 +246,7 @@ func (nd *etcdShardNodeDetector) handleDelEvent(e *clientv3.Event, collectionID,
 	}
 	idAddr, err := nd.idAddr()
 	if err != nil {
-		log.Warn("Etcd NodeDetector session map failed", zap.Error(err))
+		log.Error("Etcd NodeDetector session map failed", zap.Error(err))
 		panic(err)
 	}
 	for _, id := range prevInfo.GetNodeIds() {

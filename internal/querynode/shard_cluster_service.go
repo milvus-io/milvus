@@ -8,11 +8,13 @@ import (
 	"sync"
 
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 const (
@@ -75,6 +77,7 @@ func (s *ShardClusterService) addShardCluster(collectionID, replicaID int64, vch
 		})
 
 	s.clusters.Store(vchannelName, cs)
+	log.Info("successfully add shard cluster", zap.Int64("collectionID", collectionID), zap.Int64("replica", replicaID), zap.String("vchan", vchannelName))
 }
 
 // getShardCluster gets shardCluster of specified vchannel if exists.
@@ -107,6 +110,7 @@ func (s *ShardClusterService) releaseCollection(collectionID int64) {
 		}
 		return true
 	})
+	log.Info("successfully release collection", zap.Int64("collectionID", collectionID))
 }
 
 // HandoffSegments dispatch segmentChangeInfo to related shardClusters
@@ -124,6 +128,7 @@ func (s *ShardClusterService) HandoffSegments(collectionID int64, info *querypb.
 		return true
 	})
 	wg.Wait()
+	log.Info("successfully handoff segments", zap.Int64("collectionID", collectionID))
 }
 
 // SyncReplicaSegments dispatches nodeID segments distribution to ShardCluster.
@@ -134,7 +139,7 @@ func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribut
 	}
 
 	sc.SyncSegments(distribution, segmentStateLoaded)
-
+	log.Info("successfully sync segments", zap.String("channel", vchannelName), zap.Any("distribution", distribution))
 	return nil
 }
 
@@ -146,5 +151,11 @@ func (s *ShardClusterService) HandoffVChannelSegments(vchannel string, info *que
 		return nil
 	}
 	sc := raw.(*ShardCluster)
-	return sc.HandoffSegments(info)
+	err := sc.HandoffSegments(info)
+	if err != nil {
+		log.Info("successfully handoff ", zap.String("channel", vchannel), zap.Any("segment", info))
+	} else {
+		log.Warn("failed to handoff", zap.String("channel", vchannel), zap.Any("segment", info), zap.Error(err))
+	}
+	return err
 }

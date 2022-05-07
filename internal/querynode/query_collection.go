@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"sync"
 	"time"
 
@@ -181,7 +182,7 @@ func (q *queryCollection) registerCollectionTSafe() error {
 			return err
 		}
 	}
-	log.Debug("register tSafe watcher and init watcher select case",
+	log.Info("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", streamingCollection.ID()),
 		zap.Any("dml channels", streamingCollection.getVChannels()))
 
@@ -195,7 +196,7 @@ func (q *queryCollection) registerCollectionTSafe() error {
 			return err
 		}
 	}
-	log.Debug("register tSafe watcher and init watcher select case",
+	log.Info("register tSafe watcher and init watcher select case",
 		zap.Any("collectionID", historicalCollection.ID()),
 		zap.Any("delta channels", historicalCollection.getVDeltaChannels()))
 
@@ -215,9 +216,10 @@ func (q *queryCollection) addTSafeWatcher(vChannel Channel) error {
 	q.tSafeWatchers[vChannel] = newTSafeWatcher()
 	err := q.streaming.tSafeReplica.registerTSafeWatcher(vChannel, q.tSafeWatchers[vChannel])
 	if err != nil {
+		log.Warn("failed to register tsafe watcher", zap.Error(err))
 		return err
 	}
-	log.Debug("add tSafeWatcher to queryCollection",
+	log.Info("add tSafeWatcher to queryCollection",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", vChannel),
 	)
@@ -236,7 +238,7 @@ func (q *queryCollection) removeTSafeWatcher(channel Channel) error {
 	}
 	q.tSafeWatchers[channel].close()
 	delete(q.tSafeWatchers, channel)
-	log.Debug("remove tSafeWatcher from queryCollection",
+	log.Info("remove tSafeWatcher from queryCollection",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", channel),
 	)
@@ -247,10 +249,10 @@ func (q *queryCollection) startWatcher(channel <-chan bool, closeCh <-chan struc
 	for {
 		select {
 		case <-q.releaseCtx.Done():
-			log.Debug("stop queryCollection watcher because queryCollection ctx done", zap.Any("collectionID", q.collectionID))
+			log.Info("stop queryCollection watcher because queryCollection ctx done", zap.Any("collectionID", q.collectionID))
 			return
 		case <-closeCh:
-			log.Debug("stop queryCollection watcher because watcher closed", zap.Any("collectionID", q.collectionID))
+			log.Info("stop queryCollection watcher because watcher closed", zap.Any("collectionID", q.collectionID))
 			return
 		case <-channel:
 			// TODO: check if channel is closed
@@ -352,7 +354,7 @@ func (q *queryCollection) consumeQuery() {
 	for {
 		select {
 		case <-q.releaseCtx.Done():
-			log.Debug("stop queryCollection's receiveQueryMsg", zap.Int64("collectionID", q.collectionID))
+			log.Info("stop queryCollection's receiveQueryMsg", zap.Int64("collectionID", q.collectionID))
 			return
 		case msgPack, ok := <-q.queryMsgStream.Chan():
 			if !ok {
@@ -378,7 +380,7 @@ func (q *queryCollection) consumeQuery() {
 				case *msgstream.SealedSegmentsChangeInfoMsg:
 					q.adjustByChangeInfo(sm)
 				default:
-					log.Warn("unsupported msg type in search channel", zap.Int64("msgID", sm.ID()))
+					log.Warn("unsupported msg type in search channel", zap.Int64("msgID", sm.ID()), zap.String("name", reflect.TypeOf(msg).Name()))
 				}
 			}
 		}
@@ -446,17 +448,9 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 	case commonpb.MsgType_Retrieve:
 		collectionID = msg.(*msgstream.RetrieveMsg).CollectionID
 		msgTypeStr = "retrieve"
-		//log.Debug("consume retrieve message",
-		//	zap.Any("collectionID", collectionID),
-		//	zap.Int64("msgID", msg.ID()),
-		//)
 	case commonpb.MsgType_Search:
 		collectionID = msg.(*msgstream.SearchMsg).CollectionID
 		msgTypeStr = "search"
-		//log.Debug("consume search message",
-		//	zap.Any("collectionID", collectionID),
-		//	zap.Int64("msgID", msg.ID()),
-		//)
 	default:
 		err := fmt.Errorf("receive invalid msgType = %d", msgType)
 		return err
@@ -493,7 +487,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
 			return finalErr
 		}
-		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+		log.Warn("do query failed in receiveQueryMsg, publish failed query result",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("msgID", msg.ID()),
 			zap.String("msgType", msgTypeStr),
@@ -508,7 +502,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 			finalErr := fmt.Errorf("first err = %s, second err = %s", err, publishErr)
 			return finalErr
 		}
-		log.Debug("do query failed in receiveQueryMsg, publish failed query result",
+		log.Warn("do query failed in receiveQueryMsg, publish failed query result",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("msgID", msg.ID()),
 			zap.String("msgType", msgTypeStr),
@@ -588,7 +582,7 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 	for {
 		select {
 		case <-q.releaseCtx.Done():
-			log.Debug("stop Collection's doUnsolvedMsg", zap.Int64("collectionID", q.collectionID))
+			log.Info("stop Collection's doUnsolvedMsg", zap.Int64("collectionID", q.collectionID))
 			return
 		default:
 			//time.Sleep(10 * time.Millisecond)
@@ -628,10 +622,10 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 					err := errors.New(fmt.Sprintln("do query failed in doUnsolvedQueryMsg because timeout"+
 						", collectionID = ", q.collectionID,
 						", msgID = ", m.ID()))
-					log.Warn(err.Error())
+					log.Warn("query timeout", zap.Error(err))
 					publishErr := q.publishFailedQueryResult(m, err.Error())
 					if publishErr != nil {
-						log.Error(publishErr.Error())
+						log.Warn("failed to publish failed result", zap.Error(publishErr))
 					}
 					continue
 				}
@@ -678,24 +672,22 @@ func (q *queryCollection) doUnsolvedQueryMsg() {
 				}
 
 				if err != nil {
-					log.Warn(err.Error())
+					log.Debug("do query failed in doUnsolvedMsg, publish failed query result",
+						zap.Int64("collectionID", q.collectionID),
+						zap.Int64("msgID", m.ID()),
+					)
 					err = q.publishFailedQueryResult(m, err.Error())
 					if err != nil {
-						log.Warn(err.Error())
-					} else {
-						log.Debug("do query failed in doUnsolvedMsg, publish failed query result",
-							zap.Int64("collectionID", q.collectionID),
-							zap.Int64("msgID", m.ID()),
-						)
+						log.Warn("failed to publish failed result", zap.Error(err))
 					}
+				} else {
+					log.Debug("do query done in doUnsolvedMsg",
+						zap.Int64("collectionID", q.collectionID),
+						zap.Int64("msgID", m.ID()),
+					)
 				}
 				sp.Finish()
-				log.Debug("do query done in doUnsolvedMsg",
-					zap.Int64("collectionID", q.collectionID),
-					zap.Int64("msgID", m.ID()),
-				)
 			}
-			log.Debug("doUnsolvedMsg: do query done", zap.Int("num of query msg", len(unSolvedMsg)))
 		}
 	}
 }
@@ -854,7 +846,6 @@ func (q *queryCollection) search(msg queryMsg) error {
 	log.Debug("QueryNode reduce data finished", zap.Int64("msgID", searchMsg.ID()))
 	sp.LogFields(oplog.String("statistical time", "reduceSearchResults end"))
 	if err != nil {
-		log.Error("QueryNode reduce data failed", zap.Int64("msgID", searchMsg.ID()), zap.Error(err))
 		return err
 	}
 	nqOfReqs := []int64{nq}
@@ -1160,69 +1151,3 @@ func (q *queryCollection) publishFailedQueryResultWithCtx(ctx context.Context, m
 func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
 	return q.publishFailedQueryResultWithCtx(q.releaseCtx, msg, errMsg)
 }
-
-// func (q *queryCollection) publishQueryResult(msg msgstream.TsMsg, collectionID UniqueID) error {
-// 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-// 	defer span.Finish()
-// 	msg.SetTraceCtx(ctx)
-// 	msgPack := msgstream.MsgPack{}
-// 	msgPack.Msgs = append(msgPack.Msgs, msg)
-// 	err := q.queryResultMsgStream.Produce(&msgPack)
-// 	if err != nil {
-// 		log.Error(err.Error())
-// 	}
-//
-// 	return err
-// }
-
-// func (q *queryCollection) publishFailedQueryResult(msg msgstream.TsMsg, errMsg string) error {
-// 	msgType := msg.Type()
-// 	span, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-// 	defer span.Finish()
-// 	msg.SetTraceCtx(ctx)
-// 	msgPack := msgstream.MsgPack{}
-//
-// 	resultChannelInt := 0
-// 	baseMsg := msgstream.BaseMsg{
-// 		HashValues: []uint32{uint32(resultChannelInt)},
-// 	}
-// 	baseResult := &commonpb.MsgBase{
-// 		MsgID:     msg.ID(),
-// 		Timestamp: msg.BeginTs(),
-// 		SourceID:  msg.SourceID(),
-// 	}
-//
-// 	switch msgType {
-// 	case commonpb.MsgType_Retrieve:
-// 		retrieveMsg := msg.(*msgstream.RetrieveMsg)
-// 		baseResult.MsgType = commonpb.MsgType_RetrieveResult
-// 		retrieveResultMsg := &msgstream.RetrieveResultMsg{
-// 			BaseMsg: baseMsg,
-// 			RetrieveResults: internalpb.RetrieveResults{
-// 				Base:            baseResult,
-// 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-// 				ResultChannelID: retrieveMsg.ResultChannelID,
-// 				Ids:             nil,
-// 				FieldsData:      nil,
-// 			},
-// 		}
-// 		msgPack.Msgs = append(msgPack.Msgs, retrieveResultMsg)
-// 	case commonpb.MsgType_Search:
-// 		searchMsg := msg.(*msgstream.SearchMsg)
-// 		baseResult.MsgType = commonpb.MsgType_SearchResult
-// 		searchResultMsg := &msgstream.SearchResultMsg{
-// 			BaseMsg: baseMsg,
-// 			SearchResults: internalpb.SearchResults{
-// 				Base:            baseResult,
-// 				Status:          &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: errMsg},
-// 				ResultChannelID: searchMsg.ResultChannelID,
-// 			},
-// 		}
-// 		msgPack.Msgs = append(msgPack.Msgs, searchResultMsg)
-// 	default:
-// 		return fmt.Errorf("publish invalid msgType %d", msgType)
-// 	}
-//
-// 	return q.queryResultMsgStream.Produce(&msgPack)
-// }
-//

@@ -179,10 +179,10 @@ func (q *queryShard) watchTs(channel <-chan bool, closeCh <-chan struct{}, tp ts
 	for {
 		select {
 		case <-q.ctx.Done():
-			log.Debug("stop queryShard watcher due to ctx done", zap.Int64("collectionID", q.collectionID), zap.String("vChannel", q.channel))
+			log.Info("stop queryShard watcher due to ctx done", zap.Int64("collectionID", q.collectionID), zap.String("vChannel", q.channel))
 			return
 		case <-closeCh:
-			log.Debug("stop queryShard watcher due to watcher closed", zap.Int64("collectionID", q.collectionID), zap.String("vChannel", q.channel))
+			log.Info("stop queryShard watcher due to watcher closed", zap.Int64("collectionID", q.collectionID), zap.String("vChannel", q.channel))
 			return
 		case _, ok := <-channel:
 			if !ok {
@@ -458,7 +458,6 @@ func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchReques
 	}
 
 	// reduce shard search results: unmarshal -> reduce -> marshal
-	log.Debug("shard leader get search results", zap.Int("numbers", len(results)))
 	searchResultData, err := decodeSearchResults(results)
 	if err != nil {
 		log.Warn("shard leader decode search results errors", zap.Error(err))

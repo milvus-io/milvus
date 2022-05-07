@@ -592,7 +592,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					// auto balance is executed on replica level
 					onlineNodeIDs := replica.GetNodeIds()
 					if len(onlineNodeIDs) == 0 {
-						log.Error("loadBalanceSegmentLoop: there are no online QueryNode to balance")
+						log.Error("loadBalanceSegmentLoop: there are no online QueryNode to balance", zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID))
 						continue
 					}
 					var availableNodeIDs []int64
@@ -601,7 +601,9 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 						if _, ok := nodeID2MemUsage[nodeID]; !ok {
 							nodeInfo, err := qc.cluster.getNodeInfoByID(nodeID)
 							if err != nil {
-								log.Warn("loadBalanceSegmentLoop: get node info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+								log.Warn("loadBalanceSegmentLoop: get node info from QueryNode failed",
+									zap.Int64("nodeID", nodeID), zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID),
+									zap.Error(err))
 								continue
 							}
 							nodeID2MemUsageRate[nodeID] = nodeInfo.(*queryNode).memUsageRate
@@ -615,7 +617,9 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 						for _, segmentInfo := range segmentInfos {
 							leastInfo, err := qc.cluster.getSegmentInfoByID(ctx, segmentInfo.SegmentID)
 							if err != nil {
-								log.Warn("loadBalanceSegmentLoop: get segment info from QueryNode failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+								log.Warn("loadBalanceSegmentLoop: get segment info from QueryNode failed", zap.Int64("nodeID", nodeID),
+									zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID),
+									zap.Error(err))
 								updateSegmentInfoDone = false
 								break
 							}
@@ -626,9 +630,12 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 							nodeID2SegmentInfos[nodeID] = leastSegmentInfos
 						}
 					}
-					log.Info("loadBalanceSegmentLoop: memory usage rate of all online QueryNode", zap.Any("mem rate", nodeID2MemUsageRate))
+					log.Info("loadBalanceSegmentLoop: memory usage rate of all online QueryNode", zap.Int64("collection", replica.CollectionID),
+						zap.Int64("replica", replica.ReplicaID), zap.Any("mem rate", nodeID2MemUsageRate))
 					if len(availableNodeIDs) <= 1 {
-						log.Warn("loadBalanceSegmentLoop: there are too few available query nodes to balance", zap.Int64s("onlineNodeIDs", onlineNodeIDs), zap.Int64s("availableNodeIDs", availableNodeIDs))
+						log.Info("loadBalanceSegmentLoop: there are too few available query nodes to balance",
+							zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID),
+							zap.Int64s("onlineNodeIDs", onlineNodeIDs), zap.Int64s("availableNodeIDs", availableNodeIDs))
 						continue
 					}
 
@@ -678,6 +685,9 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 							cluster:            qc.cluster,
 							meta:               qc.meta,
 						}
+						log.Info("loadBalanceSegmentLoop: generate a loadBalance task",
+							zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID),
+							zap.Any("task", balanceTask))
 						loadBalanceTasks = append(loadBalanceTasks, balanceTask)
 						nodeID2MemUsage[sourceNodeID] -= uint64(selectedSegmentInfo.MemSize)
 						nodeID2MemUsage[dstNodeID] += uint64(selectedSegmentInfo.MemSize)
@@ -690,13 +700,12 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					if memoryInsufficient {
 						// no enough memory on query nodes to balance, then notify proxy to stop insert
 						//TODO:: xige-16
-						log.Warn("loadBalanceSegmentLoop: QueryNode has insufficient memory, stop inserting data")
+						log.Warn("loadBalanceSegmentLoop: QueryNode has insufficient memory, stop inserting data", zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID))
 					}
 				}
 			}
 			for _, t := range loadBalanceTasks {
 				qc.scheduler.Enqueue(t)
-				log.Info("loadBalanceSegmentLoop: enqueue a loadBalance task", zap.Any("task", t))
 				err := t.waitToFinish()
 				if err != nil {
 					// if failed, wait for next balance loop
@@ -707,7 +716,6 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					log.Info("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
 				}
 			}
-			log.Info("loadBalanceSegmentLoop: load balance Done in this loop", zap.Any("tasks", loadBalanceTasks))
 		}
 	}
 }

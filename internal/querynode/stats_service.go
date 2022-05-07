@@ -54,7 +54,7 @@ func (sService *statsService) start() {
 
 	statsStream, _ := sService.msFactory.NewMsgStream(sService.ctx)
 	statsStream.AsProducer(producerChannels)
-	log.Debug("QueryNode statsService AsProducer succeed", zap.Strings("channels", producerChannels))
+	log.Info("QueryNode statsService AsProducer succeed", zap.Strings("channels", producerChannels))
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
@@ -65,7 +65,7 @@ func (sService *statsService) start() {
 	for {
 		select {
 		case <-sService.ctx.Done():
-			log.Debug("stats service closed")
+			log.Info("stats service closed")
 			return
 		case <-time.After(time.Duration(sleepTimeInterval) * time.Millisecond):
 			sService.publicStatistic(nil)
@@ -103,6 +103,6 @@ func (sService *statsService) publicStatistic(fieldStats []*internalpb.FieldStat
 	}
 	err := sService.statsStream.Produce(&msgPack)
 	if err != nil {
-		log.Error(err.Error())
+		log.Warn("failed to publish stats", zap.Error(err))
 	}
 }

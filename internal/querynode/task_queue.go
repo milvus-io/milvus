@@ -141,7 +141,7 @@ func (queue *baseTaskQueue) PopActiveTask(tID UniqueID) task {
 		delete(queue.activeTasks, tID)
 		return t
 	}
-	log.Debug("queryNode", zap.Int64("cannot found ID in the active task list!", tID))
+	log.Info("queryNode", zap.Int64("cannot found ID in the active task list!", tID))
 	return nil
 }
 

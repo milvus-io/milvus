@@ -204,7 +204,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraph(channel Channel, subName ConsumeSu
 		return errors.New("null dml message stream in flow graph")
 	}
 	q.dmlStream.AsConsumer([]string{channel}, subName)
-	log.Debug("query node flow graph consumes from pChannel",
+	log.Info("query node flow graph consumes from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", channel),
 		zap.Any("subName", subName),
@@ -220,7 +220,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromLatest(channel Channel, subName
 		return errors.New("null dml message stream in flow graph")
 	}
 	q.dmlStream.AsConsumerWithPosition([]string{channel}, subName, mqwrapper.SubscriptionPositionLatest)
-	log.Debug("query node flow graph consumes from pChannel",
+	log.Info("query node flow graph consumes from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", channel),
 		zap.Any("subName", subName),
@@ -234,7 +234,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromLatest(channel Channel, subName
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
 	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup)
 	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
-	log.Debug("query node flow graph seeks from pChannel",
+	log.Info("query node flow graph seeks from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", position.ChannelName),
 	)
@@ -250,7 +250,7 @@ func (q *queryNodeFlowGraph) close() {
 	if q.dmlStream != nil && q.consumerCnt > 0 {
 		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(q.consumerCnt))
 	}
-	log.Debug("stop query node flow graph",
+	log.Info("stop query node flow graph",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", q.channel),
 	)

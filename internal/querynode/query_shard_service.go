@@ -23,8 +23,10 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"go.uber.org/zap"
 )
 
 type queryShardService struct {
@@ -92,6 +94,7 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 		q.localCacheEnabled,
 	)
 	q.queryShards[channel] = qs
+	log.Info("Successfully add query shard", zap.Int64("collection", collectionID), zap.Int64("replica", replicaID), zap.String("channel", channel))
 	return nil
 }
 
@@ -102,6 +105,7 @@ func (q *queryShardService) removeQueryShard(channel Channel) error {
 		return errors.New(fmt.Sprintln("query shard(channel) ", channel, " does not exist"))
 	}
 	delete(q.queryShards, channel)
+	log.Info("Successfully remove query shard", zap.String("channel", channel))
 	return nil
 }
 
@@ -122,6 +126,7 @@ func (q *queryShardService) getQueryShard(channel Channel) (*queryShard, error) 
 }
 
 func (q *queryShardService) close() {
+	log.Warn("Close query shard service")
 	q.cancel()
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
@@ -161,4 +166,5 @@ func (q *queryShardService) releaseCollection(collectionID int64) {
 		}
 	}
 	q.queryShardsMu.Unlock()
+	log.Info("release collection in query shard service", zap.Int64("collectionId", collectionID))
 }
