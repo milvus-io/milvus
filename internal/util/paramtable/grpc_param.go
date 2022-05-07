@@ -42,6 +42,9 @@ const (
 	DefaultDialTimeout      = 5000 * time.Millisecond
 	DefaultKeepAliveTime    = 10000 * time.Millisecond
 	DefaultKeepAliveTimeout = 3000 * time.Millisecond
+
+	ProxyInternalPort = 19529
+	ProxyExternalPort = 19530
 )
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -49,10 +52,15 @@ const (
 type grpcConfig struct {
 	ServiceParam
 
-	once   sync.Once
-	Domain string
-	IP     string
-	Port   int
+	once          sync.Once
+	Domain        string
+	IP            string
+	TLSEnabled    bool
+	Port          int
+	InternalPort  int
+	ServerPemPath string
+	ServerKeyPath string
+	CaPemPath     string
 }
 
 func (p *grpcConfig) init(domain string) {
@@ -62,6 +70,7 @@ func (p *grpcConfig) init(domain string) {
 	p.LoadFromEnv()
 	p.LoadFromArgs()
 	p.initPort()
+	p.initTLSPath()
 }
 
 // LoadFromEnv is used to initialize configuration items from env.
@@ -75,12 +84,24 @@ func (p *grpcConfig) LoadFromArgs() {
 }
 
 func (p *grpcConfig) initPort() {
-	p.Port = p.ParseInt(p.Domain + ".port")
+	p.Port = p.ParseIntWithDefault(p.Domain+".port", ProxyExternalPort)
+	p.InternalPort = p.ParseIntWithDefault(p.Domain+".internalPort", ProxyInternalPort)
+}
+
+func (p *grpcConfig) initTLSPath() {
+	p.TLSEnabled = p.ParseBool("common.security.tlsEnabled", false)
+	p.ServerPemPath = p.Get("tls.serverPemPath")
+	p.ServerKeyPath = p.Get("tls.serverKeyPath")
+	p.CaPemPath = p.Get("tls.caPemPath")
 }
 
 // GetAddress return grpc address
 func (p *grpcConfig) GetAddress() string {
 	return p.IP + ":" + strconv.Itoa(p.Port)
+}
+
+func (p *grpcConfig) GetInternalAddress() string {
+	return p.IP + ":" + strconv.Itoa(p.InternalPort)
 }
 
 // GrpcServerConfig is configuration for grpc server.

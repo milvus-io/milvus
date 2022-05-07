@@ -18,13 +18,18 @@ package grpcproxy
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc/credentials"
 
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 
@@ -72,11 +77,12 @@ var (
 
 // Server is the Proxy Server
 type Server struct {
-	ctx        context.Context
-	wg         sync.WaitGroup
-	proxy      types.ProxyComponent
-	grpcServer *grpc.Server
-	httpServer *http.Server
+	ctx                context.Context
+	wg                 sync.WaitGroup
+	proxy              types.ProxyComponent
+	grpcInternalServer *grpc.Server
+	grpcExternalServer *grpc.Server
+	httpServer         *http.Server
 	// avoid race
 	httpServerMtx sync.Mutex
 
@@ -139,9 +145,14 @@ func (s *Server) startHTTPServer(port int) {
 	}
 }
 
-func (s *Server) startGrpcLoop(grpcPort int) {
-	defer s.wg.Done()
+func (s *Server) startRPCServer(grpcPort, grpcInternalPort int) {
+	s.wg.Add(2)
+	go s.startInternalGrpc(grpcInternalPort)
+	go s.startExternalGrpc(grpcPort)
+}
 
+func (s *Server) startExternalGrpc(grpcPort int) {
+	defer s.wg.Done()
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
@@ -163,9 +174,91 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
+	opts := trace.GetInterceptorOpts()
+	grpcOpts := []grpc.ServerOption{
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			ot.UnaryServerInterceptor(opts...),
+			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
+		)),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			ot.StreamServerInterceptor(opts...),
+			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor))),
+	}
+
+	if Params.TLSEnabled {
+		cert, err := tls.LoadX509KeyPair(Params.ServerPemPath, Params.ServerKeyPath)
+		if err != nil {
+			log.Warn("proxy cant load x509 key pair", zap.Error(err))
+			panic(err)
+		}
+
+		certPool := x509.NewCertPool()
+		rootBuf, err := ioutil.ReadFile(Params.CaPemPath)
+		if err != nil {
+			log.Warn("failed read ca pem", zap.Error(err))
+			panic(err)
+		}
+		if !certPool.AppendCertsFromPEM(rootBuf) {
+			log.Warn("fail to append ca to cert")
+			panic("fail to append ca to cert")
+		}
+
+		tlsConf := &tls.Config{
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			Certificates: []tls.Certificate{cert},
+			ClientCAs:    certPool,
+			MinVersion:   tls.VersionTLS13,
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsConf)))
+	}
+	s.grpcExternalServer = grpc.NewServer(grpcOpts...)
+	proxypb.RegisterProxyServer(s.grpcExternalServer, s)
+	milvuspb.RegisterMilvusServiceServer(s.grpcExternalServer, s)
+	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)
+	log.Debug("create Proxy grpc server",
+		zap.Any("enforcement policy", kaep),
+		zap.Any("server parameters", kasp))
+
+	log.Debug("waiting for Proxy grpc server to be ready")
+	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
+
+	log.Debug("Proxy grpc server has been ready, serve grpc requests on listen")
+	if err := s.grpcExternalServer.Serve(lis); err != nil {
+		log.Warn("failed to serve on Proxy's listener", zap.Error(err))
+		s.grpcErrChan <- err
+	}
+}
+
+func (s *Server) startInternalGrpc(grpcPort int) {
+	defer s.wg.Done()
+	var kaep = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
+		PermitWithoutStream: true,            // Allow pings even when there are no active streams
+	}
+
+	var kasp = keepalive.ServerParameters{
+		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
+		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
+	}
+
+	log.Debug("Proxy internal server listen on tcp", zap.Int("port", grpcPort))
+	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
+	if err != nil {
+		log.Warn("Proxy internal server failed to listen on", zap.Error(err), zap.Int("port", grpcPort))
+		s.grpcErrChan <- err
+		return
+	}
+	log.Debug("Proxy internal server already listen on tcp", zap.Int("port", grpcPort))
+
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
 
 	opts := trace.GetInterceptorOpts()
-	s.grpcServer = grpc.NewServer(
+	s.grpcInternalServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
@@ -179,19 +272,19 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor),
 		)),
 	)
-	proxypb.RegisterProxyServer(s.grpcServer, s)
-	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
-	grpc_health_v1.RegisterHealthServer(s.grpcServer, s)
-	log.Debug("create Proxy grpc server",
+	proxypb.RegisterProxyServer(s.grpcInternalServer, s)
+	milvuspb.RegisterMilvusServiceServer(s.grpcInternalServer, s)
+	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
+	log.Debug("create Proxy internal grpc server",
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
-	log.Debug("waiting for Proxy grpc server to be ready")
+	log.Debug("waiting for Proxy internal grpc server to be ready")
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 
-	log.Debug("Proxy grpc server has been ready, serve grpc requests on listen")
-	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Warn("failed to serve on Proxy's listener", zap.Error(err))
+	log.Debug("Proxy internal grpc server has been ready, serve grpc requests on listen")
+	if err := s.grpcInternalServer.Serve(lis); err != nil {
+		log.Warn("failed to internal serve on Proxy's listener", zap.Error(err))
 		s.grpcErrChan <- err
 	}
 }
@@ -227,8 +320,8 @@ func (s *Server) init() error {
 	}
 
 	proxy.Params.InitOnce()
-	proxy.Params.ProxyCfg.NetworkAddress = Params.GetAddress()
-	log.Debug("init Proxy's parameter table done", zap.String("address", Params.GetAddress()))
+	proxy.Params.ProxyCfg.NetworkAddress = Params.GetInternalAddress()
+	log.Debug("init Proxy's parameter table done", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
 
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port)
 	closer := trace.InitTracing(serviceName)
@@ -242,8 +335,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.proxy.SetEtcdClient(s.etcdCli)
-	s.wg.Add(1)
-	go s.startGrpcLoop(Params.Port)
+	s.startRPCServer(Params.Port, Params.InternalPort)
 	log.Debug("waiting for grpc server of Proxy to be started")
 	if err := <-s.grpcErrChan; err != nil {
 		log.Warn("failed to start Proxy's grpc server", zap.Error(err))
@@ -403,7 +495,7 @@ func (s *Server) start() error {
 
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
-	log.Debug("Proxy stop", zap.String("Address", Params.GetAddress()))
+	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
@@ -426,22 +518,27 @@ func (s *Server) Stop() error {
 			s.httpServer.Shutdown(context.TODO())
 		}
 	}()
+
 	gracefulWg.Add(1)
 	go func() {
 		defer gracefulWg.Done()
-		if s.grpcServer != nil {
-			log.Debug("Graceful stop grpc server...")
-			s.grpcServer.GracefulStop()
+		if s.grpcInternalServer != nil {
+			log.Debug("Graceful stop grpc internal server...")
+			s.grpcInternalServer.GracefulStop()
+		}
+		if s.grpcExternalServer != nil {
+			log.Debug("Graceful stop grpc external server...")
+			s.grpcExternalServer.GracefulStop()
 		}
 	}()
 	gracefulWg.Wait()
+
+	s.wg.Wait()
 
 	err = s.proxy.Stop()
 	if err != nil {
 		return err
 	}
-
-	s.wg.Wait()
 
 	return nil
 }

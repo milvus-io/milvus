@@ -1199,3 +1199,26 @@ func Test_NewServer_HTTPServerDisabled(t *testing.T) {
 	err = server.Stop()
 	assert.Nil(t, err)
 }
+func Test_NewServer_TLS(t *testing.T) {
+	ctx := context.Background()
+	server, err := NewServer(ctx, nil)
+	assert.NotNil(t, server)
+	assert.Nil(t, err)
+
+	server.proxy = &MockProxy{}
+	server.rootCoordClient = &MockRootCoord{}
+	server.indexCoordClient = &MockIndexCoord{}
+	server.queryCoordClient = &MockQueryCoord{}
+	server.dataCoordClient = &MockDataCoord{}
+
+	Params.TLSEnabled = true
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	Params.CaPemPath = "../../../configs/cert/ca.pem"
+
+	err = server.Run()
+	assert.Nil(t, err)
+	assert.Nil(t, server.httpServer)
+	err = server.Stop()
+	assert.Nil(t, err)
+}
