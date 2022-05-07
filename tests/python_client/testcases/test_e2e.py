@@ -12,7 +12,7 @@ prefix = "e2e_"
 
 class TestE2e(TestcaseBase):
     """ Test case of end to end"""
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_default(self):
         # create
         name = cf.gen_unique_str(prefix)
