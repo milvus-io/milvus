@@ -704,19 +704,13 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
 		}
-
 		defer func() {
 			if err := recover(); err != nil {
 				resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 				resp.Status.Reason = "assign import task to data coord panic"
 			}
 		}()
-
 		resp, _ = s.Import(ctx, req)
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return resp
-		}
-
 		return resp
 	}
 
@@ -1293,12 +1287,13 @@ func (c *Core) Start() error {
 			log.Fatal("RootCoord Start reSendDdMsg failed", zap.Error(err))
 			panic(err)
 		}
-		c.wg.Add(5)
+		c.wg.Add(6)
 		go c.startTimeTickLoop()
 		go c.tsLoop()
 		go c.chanTimeTick.startWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
 		go c.importManager.expireOldTasksLoop(&c.wg)
+		go c.importManager.sendOutTasksLoop(&c.wg)
 		Params.RootCoordCfg.CreatedTime = time.Now()
 		Params.RootCoordCfg.UpdatedTime = time.Now()
 	})

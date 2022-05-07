@@ -998,9 +998,10 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	return resp, nil
 }
 
-// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
+// Import distributes the import tasks to dataNodes.
+// It returns a failed status if no dataNode is available or if any error occurs.
 func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	log.Info("receive import request", zap.Any("import task request", itr))
+	log.Info("received import request", zap.Any("import task request", itr))
 	resp := &datapb.ImportTaskResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1008,18 +1009,17 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 	}
 
 	if s.isClosed() {
-		log.Warn("failed to import because of closed server", zap.Any("import task request", itr))
+		log.Error("failed to import for closed dataCoord service")
 		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
 		return resp, nil
 	}
 
-	workingNodes := itr.WorkingNodes
 	nodes := s.channelManager.store.GetNodes()
 	if len(nodes) == 0 {
-		log.Error("import failed as all dataNodes are offline", zap.Any("import task request", itr))
+		log.Error("import failed as all dataNodes are offline")
 		return resp, nil
 	}
-	avaNodes := getDiff(nodes, workingNodes)
+	avaNodes := getDiff(nodes, itr.GetWorkingNodes())
 	if len(avaNodes) > 0 {
 		// If there exists available DataNodes, pick one at random.
 		dnID := avaNodes[rand.Intn(len(avaNodes))]
@@ -1028,12 +1028,11 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 			zap.Int64("picking free dataNode with ID", dnID))
 		s.cluster.Import(s.ctx, dnID, itr)
 	} else {
-		// No DataNodes are available, choose a still working DataNode randomly.
-		dnID := nodes[rand.Intn(len(nodes))]
-		log.Info("all dataNodes are busy, picking a random dataNode still",
-			zap.Any("all dataNodes", nodes),
-			zap.Int64("picking dataNode with ID", dnID))
-		s.cluster.Import(s.ctx, dnID, itr)
+		// No dataNode is available, reject the import request.
+		errMsg := "all dataNodes are busy working on data import, please try again later or add new dataNode instances"
+		log.Error(errMsg, zap.Int64("task ID", itr.GetImportTask().GetTaskId()))
+		resp.Status.Reason = errMsg
+		return resp, nil
 	}
 
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
