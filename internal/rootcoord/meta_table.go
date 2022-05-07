@@ -785,13 +785,15 @@ func (mt *MetaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) error {
 		return fmt.Errorf("index id = %d not found", segIdxInfo.IndexID)
 	}
 
+	if _, ok := mt.partID2SegID[segIdxInfo.PartitionID]; !ok {
+		segIDMap := map[typeutil.UniqueID]bool{segIdxInfo.SegmentID: true}
+		mt.partID2SegID[segIdxInfo.PartitionID] = segIDMap
+	}
+
 	segIdxMap, ok := mt.segID2IndexMeta[segIdxInfo.SegmentID]
 	if !ok {
 		idxMap := map[typeutil.UniqueID]pb.SegmentIndexInfo{segIdxInfo.IndexID: *segIdxInfo}
 		mt.segID2IndexMeta[segIdxInfo.SegmentID] = idxMap
-
-		segIDMap := map[typeutil.UniqueID]bool{segIdxInfo.SegmentID: true}
-		mt.partID2SegID[segIdxInfo.PartitionID] = segIDMap
 	} else {
 		tmpInfo, ok := segIdxMap[segIdxInfo.IndexID]
 		if ok {
@@ -884,8 +886,8 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	delete(mt.indexID2Meta, dropIdxID)
 
 	// update segID2IndexMeta
-	for partID := range collMeta.PartitionIDs {
-		if segIDMap, ok := mt.partID2SegID[typeutil.UniqueID(partID)]; ok {
+	for _, partID := range collMeta.PartitionIDs {
+		if segIDMap, ok := mt.partID2SegID[partID]; ok {
 			for segID := range segIDMap {
 				if segIndexInfos, ok := mt.segID2IndexMeta[segID]; ok {
 					delete(segIndexInfos, dropIdxID)
@@ -1086,7 +1088,8 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal collMeta fail key:%s, err:%w", k1, err)
 		}
 
-		k2 := path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
+		k2 := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collID, idx.IndexID)
+		//k2 := path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
 		v2, err := proto.Marshal(idxInfo)
 		if err != nil {
 			log.Error("MetaTable GetNotIndexedSegments Marshal idxInfo fail",
