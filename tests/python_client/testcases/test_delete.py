@@ -895,7 +895,7 @@ class TestDeleteOperation(TestcaseBase):
             log.debug(collection_w.num_entities)
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
-                           check_items={'exp_res': df_new.iloc[[0], [0, 2]].to_dict('records'), 'with_vec': True})
+                           check_items={'exp_res': df_new.iloc[[0], [0, 3]].to_dict('records'), 'with_vec': True})
 
         collection_w.delete(tmp_expr)
         if to_flush_delete:

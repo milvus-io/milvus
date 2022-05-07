@@ -254,9 +254,9 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
     int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
     bool_values = pd.Series(data=[np.bool(i) for i in range(start, start + nb)], dtype="bool")
-    string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
+    string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     float_vec_values = gen_vectors(nb, dim)
     df = pd.DataFrame({
         ct.default_int64_field_name: int64_values,
@@ -265,8 +265,8 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
         ct.default_int8_field_name: int8_values,
         ct.default_bool_field_name: bool_values,
         ct.default_float_field_name: float_values,
-        ct.default_string_field_name: string_values,
         ct.default_double_field_name: double_values,
+        ct.default_string_field_name: string_values,
         ct.default_float_vec_field_name: float_vec_values
     })
     return df
