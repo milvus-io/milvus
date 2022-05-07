@@ -45,6 +45,14 @@ const (
 	taskExpiredMsgPrefix = "task has expired after "
 )
 
+// CheckPendingTasksInterval is the default interval to check and send out pending tasks,
+// default 60*1000 milliseconds (1 minute).
+var checkPendingTasksInterval = 60 * 1000
+
+// ExpireOldTasksInterval is the default interval to loop through all in memory tasks and expire old ones.
+// default 10*60*1000 milliseconds (10 minutes)
+var expireOldTasksInterval = 10 * 60 * 1000
+
 // import task state
 type importTaskState struct {
 	stateCode    commonpb.ImportState // state code
@@ -103,6 +111,41 @@ func (m *importManager) init(ctx context.Context) {
 	})
 }
 
+// sendOutTasksLoop periodically calls `sendOutTasks` to process left over pending tasks.
+func (m *importManager) sendOutTasksLoop(wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(time.Duration(checkPendingTasksInterval) * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			log.Debug("import manager context done, exit check sendOutTasksLoop")
+			return
+		case <-ticker.C:
+			log.Debug("sending out tasks")
+			m.sendOutTasks(m.ctx)
+		}
+	}
+}
+
+// expireOldTasksLoop starts a loop that checks and expires old tasks every `ImportTaskExpiration` seconds.
+func (m *importManager) expireOldTasksLoop(wg *sync.WaitGroup) {
+	defer wg.Done()
+	ticker := time.NewTicker(time.Duration(expireOldTasksInterval) * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			log.Info("(in loop) import manager context done, exit expireOldTasksLoop")
+			return
+		case <-ticker.C:
+			log.Debug("(in loop) starting expiring old tasks...",
+				zap.Duration("cleaning up interval", time.Duration(expireOldTasksInterval)*time.Millisecond))
+			m.expireOldTasks()
+		}
+	}
+}
+
 // sendOutTasks pushes all pending tasks to DataCoord, gets DataCoord response and re-add these tasks as working tasks.
 func (m *importManager) sendOutTasks(ctx context.Context) error {
 	m.pendingLock.Lock()
@@ -113,10 +156,6 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 	// Trigger Import() action to DataCoord.
 	for len(m.pendingTasks) > 0 {
 		task := m.pendingTasks[0]
-		// Skip failed (mostly like expired) tasks.
-		if task.GetState().GetStateCode() == commonpb.ImportState_ImportFailed {
-			continue
-		}
 		// TODO: Use ImportTaskInfo directly.
 		it := &datapb.ImportTask{
 			CollectionId: task.GetCollectionId(),
@@ -133,31 +172,32 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			},
 		}
 
-		log.Debug("sending import task to DataCoord", zap.Int64("taskID", task.GetId()))
 		// Get all busy dataNodes for reference.
 		var busyNodeList []int64
 		for k := range m.busyNodes {
 			busyNodeList = append(busyNodeList, k)
 		}
 
-		// Call DataCoord.Import().
+		// Send import task to dataCoord, which will then distribute the import task to dataNode.
 		resp := m.callImportService(ctx, &datapb.ImportTaskRequest{
 			ImportTask:   it,
 			WorkingNodes: busyNodeList,
 		})
-		if resp.Status.ErrorCode == commonpb.ErrorCode_UnexpectedError {
-			log.Debug("import task is rejected", zap.Int64("task ID", it.GetTaskId()))
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Warn("import task is rejected",
+				zap.Int64("task ID", it.GetTaskId()),
+				zap.Any("error code", resp.GetStatus().GetErrorCode()),
+				zap.String("cause", resp.GetStatus().GetReason()))
 			break
 		}
+
+		// Successfully assigned dataNode for the import task. Add task to working task list and update task store.
 		task.DatanodeId = resp.GetDatanodeId()
-		log.Debug("import task successfully assigned to DataNode",
+		log.Debug("import task successfully assigned to dataNode",
 			zap.Int64("task ID", it.GetTaskId()),
 			zap.Int64("dataNode ID", task.GetDatanodeId()))
 		// Add new working dataNode to busyNodes.
 		m.busyNodes[resp.GetDatanodeId()] = true
-
-		// erase this task from head of pending list if the callImportService succeed
-		m.pendingTasks = append(m.pendingTasks[:0], m.pendingTasks[1:]...)
 
 		func() {
 			m.workingLock.Lock()
@@ -168,6 +208,9 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			m.workingTasks[task.GetId()] = task
 			m.updateImportTaskStore(task)
 		}()
+
+		// Erase this task from head of pending list.
+		m.pendingTasks = append(m.pendingTasks[:0], m.pendingTasks[1:]...)
 	}
 
 	return nil
@@ -501,25 +544,6 @@ func (m *importManager) updateImportTaskStore(ti *datapb.ImportTaskInfo) error {
 	}
 	log.Debug("task info successfully updated in Etcd", zap.Int64("Task ID", ti.GetId()))
 	return nil
-}
-
-// expireOldTasksLoop starts a loop that checks and expires old tasks every `ImportTaskExpiration` seconds.
-func (m *importManager) expireOldTasksLoop(wg *sync.WaitGroup) {
-	defer wg.Done()
-	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000) * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-m.ctx.Done():
-			log.Info("(in loop) import manager context done, exit expireOldTasksLoop")
-			return
-		case <-ticker.C:
-			log.Info("(in loop) starting expiring old tasks...",
-				zap.Duration("cleaning up interval",
-					time.Duration(Params.RootCoordCfg.ImportTaskExpiration*1000)*time.Millisecond))
-			m.expireOldTasks()
-		}
-	}
 }
 
 // expireOldTasks marks expires tasks as failed.

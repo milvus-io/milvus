@@ -2412,7 +2412,7 @@ func TestImport(t *testing.T) {
 			WorkingNodes: []int64{0},
 		})
 		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
 		etcd.StopEtcdServer()
 	})
 
