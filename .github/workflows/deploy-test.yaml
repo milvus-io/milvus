@@ -204,11 +204,9 @@ jobs:
 
       - name: Install dependency
         shell: bash
-        working-directory: tests/python_client/deploy
+        working-directory: tests/python_client
         run: |
-          pip install -r requirements.txt
-          # update pymilvus to latest version
-          pip install -i https://test.pypi.org/simple/ pymilvus==2.0.0rc10.dev2
+          pip install -r requirements.txt --trusted-host https://test.pypi.org
 
       - name: Modify chart value config
         timeout-minutes: 1
