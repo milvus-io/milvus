@@ -1074,22 +1074,7 @@ class TestCollectionOperation(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_collection_string_field(self):
-        """
-        target: test create with string field
-        method: create collection with string field
-        expected: Raise exception
-        """
-        self._connect()
-        string_field = self.field_schema_wrap.init_field_schema(name="string", dtype=DataType.STRING)[0]
-        int_field = cf.gen_int64_field(is_primary=True)
-        vec_field = cf.gen_float_vec_field()
-        schema = cf.gen_collection_schema(fields=[int_field, string_field, vec_field])
-        error = {ct.err_code: 0, ct.err_msg: "string data type not supported yet"}
-        self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
-                                             check_task=CheckTasks.err_res, check_items=error)
-
+    
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_load_partition(self):
         """
@@ -1442,7 +1427,7 @@ class TestCollectionDataframe(TestcaseBase):
 
 class TestCollectionCount(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
-    def test_collection_count_no_vectors(self, connect, collection):
+    def test_collection_count_no_vectors(self):
         """
         target: test collection rows_count is correct or not, if collection is empty
         method: create collection and no vectors in it,
@@ -2597,7 +2582,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_release_partition_dis_connect(self, connect, dis_connect, collection):
+    def test_release_partition_dis_connect(self):
         """
         target: test release collection, without connection
         method: release collection with correct params, with a disconnected instance
@@ -2621,7 +2606,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_partition_not_existed(self, connect, collection):
+    def test_load_partition_not_existed(self):
         """
         target: test load partition for invalid scenario
         method: load not existed partition
@@ -2661,7 +2646,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w.release()
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_load_release_after_drop(self, connect, collection):
+    def test_load_release_after_drop(self):
         """
         target: test load and release partition after drop
         method: drop partition and then load and release it
@@ -2683,7 +2668,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_release_partition_after_drop(self, connect, collection):
+    def test_release_partition_after_drop(self):
         """
         target: test release collection after drop
         method: insert and flush, then release collection after load and drop
@@ -2704,7 +2689,7 @@ class TestLoadPartition(TestcaseBase):
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_load_release_after_collection_drop(self, connect, collection):
+    def test_load_release_after_collection_drop(self):
         """
         target: test release collection after drop
         method: insert and flush, then release collection after load and drop
@@ -2725,3 +2710,114 @@ class TestLoadPartition(TestcaseBase):
         error = {ct.err_code: 0, ct.err_msg: "HasPartition failed: can\'t find collection: %s" % name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
+
+
+class TestCollectionString(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test about string 
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_string_field_is_primary(self):
+        """
+        target: test create collection with string field
+        method: 1. create collection with string field and vector field
+                2. set string fields is_primary=True
+        expected: Create collection successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_string_pk_default_collection_schema()
+        self.collection_wrap.init_collection(name=c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_with_muti_string_fields(self):
+        """
+        target: test create collection with muti string fields
+        method: 1. create collection with primary string field and not primary string field
+                2. string fields is_primary=True
+        expected: Create collection successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_field = cf.gen_int64_field()
+        vec_field = cf.gen_float_vec_field()
+        string_field_1 = cf.gen_string_field(is_primary=True)
+        string_field_2 = cf.gen_string_field(name=c_name)
+        schema = cf.gen_collection_schema(fields=[int_field, string_field_1, string_field_2, vec_field])
+        self.collection_wrap.init_collection(name=c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: c_name, exp_schema: schema})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_only_string_field(self):
+        """
+        target: test create collection with one string field
+        method: create collection with only string field
+        expected: Raise exception
+        """
+        self._connect()
+        string_field = cf.gen_string_field(is_primary=True)
+        schema = cf.gen_collection_schema([string_field])
+        error = {ct.err_code: 0, ct.err_msg: "No vector field is found"}
+        self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
+                                             check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_string_field_with_exceed_max_len(self):
+        """
+        target: test create collection with string field
+        method: 1. create collection with string field
+                2. String field max_length_per_row exceeds maximum
+        expected: Raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        max_length = 100000
+        string_field = cf.gen_string_field(max_length_per_row=max_length)
+        schema = cf.gen_collection_schema([int_field, string_field, vec_field])
+        error = {ct.err_code: 0, ct.err_msg: "invalid max_length_per_row: %s" %max_length}
+        self.collection_wrap.init_collection(name=c_name, schema=schema, 
+                                             check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_invalid_string_field_dtype(self):
+        """
+        target: test create collection with string field
+        method: create collection with string field, the string field datatype is invaild
+        expected: Raise exception
+        """
+        self._connect()
+        string_field = self.field_schema_wrap.init_field_schema(name="string", dtype=DataType.STRING)[0]
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        schema = cf.gen_collection_schema(fields=[int_field, string_field, vec_field])
+        error = {ct.err_code: 0, ct.err_msg: "string data type not supported yet, please use VarChar type instead"}
+        self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
+                                             check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_string_field_is_primary_and_auto_id(self):
+        """
+        target: test create collection with string field 
+        method: create collection with string field, the string field primary and auto id are true
+        expected: Raise exception
+        """
+        self._connect()
+        int_field = cf.gen_int64_field()
+        vec_field = cf.gen_float_vec_field()
+        string_field = cf.gen_string_field(is_primary=True, auto_id=True)
+        fields=[int_field, string_field, vec_field]
+        schema, _=self.collection_schema_wrap.init_collection_schema(fields=fields)
+        error = {ct.err_code: 0, ct.err_msg: "autoID is not supported when the VarChar field is the primary key"}
+        self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
+                                             check_task=CheckTasks.err_res, check_items=error)
+        
+        
+
+
+
