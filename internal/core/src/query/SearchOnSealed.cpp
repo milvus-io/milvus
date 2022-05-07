@@ -46,8 +46,8 @@ SearchOnSealed(const Schema& schema,
         auto ds = knowhere::GenDataset(num_queries, dim, query_data);
 
         auto conf = search_info.search_params_;
-        conf[knowhere::meta::TOPK] = search_info.topk_;
-        conf[knowhere::Metric::TYPE] = MetricTypeToName(field_indexing->metric_type_);
+        knowhere::SetMetaTopk(conf, search_info.topk_);
+        knowhere::SetMetaMetricType(conf, MetricTypeToName(field_indexing->metric_type_));
         auto index_type = field_indexing->indexing_->index_type();
         auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
         AssertInfo(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()),

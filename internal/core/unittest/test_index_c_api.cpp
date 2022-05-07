@@ -32,7 +32,7 @@ constexpr int NB = 10;
 
 TEST(FloatVecIndex, All) {
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
-    auto metric_type = knowhere::Metric::L2;
+    auto metric_type = knowhere::metric::L2;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
@@ -83,7 +83,7 @@ TEST(FloatVecIndex, All) {
 
 TEST(BinaryVecIndex, All) {
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
-    auto metric_type = knowhere::Metric::JACCARD;
+    auto metric_type = knowhere::metric::JACCARD;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
     std::tie(type_params, index_params) = generate_params(index_type, metric_type);
