@@ -42,6 +42,7 @@ const (
 
 // ChannelManager manages the allocation and the balance between channels and data nodes.
 type ChannelManager struct {
+	ctx              context.Context
 	mu               sync.RWMutex
 	h                Handler
 	store            RWChannelStore
@@ -89,6 +90,7 @@ func NewChannelManager(
 	options ...ChannelManagerOpt,
 ) (*ChannelManager, error) {
 	c := &ChannelManager{
+		ctx:        context.TODO(),
 		h:          h,
 		factory:    NewChannelPolicyFactoryV1(kv),
 		store:      NewChannelStore(kv),
@@ -113,6 +115,7 @@ func NewChannelManager(
 
 // Startup adjusts the channel store according to current cluster states.
 func (c *ChannelManager) Startup(ctx context.Context, nodes []int64) error {
+	c.ctx = ctx
 	channels := c.store.GetNodesChannels()
 	// Retrieve the current old nodes.
 	oNodes := make([]int64, 0, len(channels))
@@ -366,30 +369,10 @@ func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
 
 	nodeID := ncInfo.NodeID
 	for _, ch := range ncInfo.Channels {
-		subName := buildSubName(ch.CollectionID, nodeID)
-		err := c.unsubscribe(subName, ch.Name)
-		if err != nil {
-			log.Warn("failed to unsubscribe topic", zap.String("subscription name", subName), zap.String("channel name", ch.Name))
-		}
+		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName, nodeID, ch.CollectionID)
+		pchannelName := funcutil.ToPhysicalChannel(ch.Name)
+		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}
-}
-
-// buildSubName generates a subscription name by concatenating DataNodeSubName, node ID and collection ID.
-func buildSubName(collectionID int64, nodeID int64) string {
-	return fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName, nodeID, collectionID)
-}
-
-func (c *ChannelManager) unsubscribe(subName string, channel string) error {
-	msgStream, err := c.msgstreamFactory.NewMsgStream(context.TODO())
-	if err != nil {
-		return err
-	}
-
-	pchannelName := funcutil.ToPhysicalChannel(channel)
-
-	msgStream.AsConsumer([]string{pchannelName}, subName)
-	msgStream.Close()
-	return nil
 }
 
 // Watch tries to add the channel to cluster. Watch is a no op if the channel already exists.
@@ -624,11 +607,9 @@ func (c *ChannelManager) cleanUpAndDelete(nodeID UniqueID, channelName string) e
 	if c.msgstreamFactory == nil {
 		log.Warn("msgstream factory is not set, unable to clean up topics")
 	} else {
-		subName := buildSubName(chToCleanUp.CollectionID, nodeID)
-		err := c.unsubscribe(subName, channelName)
-		if err != nil {
-			log.Warn("failed to unsubscribe topic", zap.String("subcription", subName), zap.String("channel name", channelName), zap.Error(err))
-		}
+		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName, nodeID, chToCleanUp.CollectionID)
+		pchannelName := funcutil.ToPhysicalChannel(channelName)
+		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}
 
 	if !c.isMarkedDrop(channelName) {

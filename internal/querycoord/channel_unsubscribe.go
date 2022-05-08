@@ -134,13 +134,8 @@ func (csh *channelUnsubscribeHandler) handleChannelUnsubscribeLoop() {
 			for _, collectionChannels := range channelInfo.CollectionChannels {
 				collectionID := collectionChannels.CollectionID
 				subName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, nodeID)
-				err := unsubscribeChannels(csh.ctx, csh.factory, subName, collectionChannels.Channels)
-				if err != nil {
-					log.Error("unsubscribe channels failed", zap.Int64("nodeID", nodeID))
-					panic(err)
-				}
+				msgstream.UnsubscribeChannels(csh.ctx, csh.factory, subName, collectionChannels.Channels)
 			}
-
 			channelInfoKey := fmt.Sprintf("%s/%d", unsubscribeChannelInfoPrefix, nodeID)
 			err := csh.kvClient.Remove(channelInfoKey)
 			if err != nil {
@@ -160,16 +155,4 @@ func (csh *channelUnsubscribeHandler) start() {
 func (csh *channelUnsubscribeHandler) close() {
 	csh.cancel()
 	csh.wg.Wait()
-}
-
-// unsubscribeChannels create consumer fist, and unsubscribe channel through msgStream.close()
-func unsubscribeChannels(ctx context.Context, factory msgstream.Factory, subName string, channels []string) error {
-	msgStream, err := factory.NewMsgStream(ctx)
-	if err != nil {
-		return err
-	}
-
-	msgStream.AsConsumer(channels, subName)
-	msgStream.Close()
-	return nil
 }
