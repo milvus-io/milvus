@@ -1,7 +1,6 @@
 import random
 import threading
 import time
-from functools import reduce
 
 import pytest
 
@@ -22,6 +21,7 @@ nb = 5000
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 
 
+@pytest.mark.tags(CaseLabel.L3)
 class TestQueryNodeScale:
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -173,7 +173,7 @@ class TestQueryNodeScale:
             connections.connect("scale-replica", host=host, port=19530)
 
             collection_w = ApiCollectionWrapper()
-            collection_w.init_collection(name=cf.gen_unique_str("scale_out"), schema=cf.gen_default_collection_schema())
+            collection_w.init_collection(name=cf.gen_unique_str("scale_out"), schema=cf.gen_default_collection_schema(), using='scale-replica')
 
             # insert 10 sealed segments
             for i in range(5):
@@ -213,9 +213,11 @@ class TestQueryNodeScale:
             raise Exception(str(e))
 
         finally:
-            log.info(f'Test finished')
+            label = f"app.kubernetes.io/instance={release_name}"
+            log.info('Start to export milvus pod logs')
+            read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
+            mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16705")
     def test_scale_in_query_node_less_than_replicas(self):
         """
         target: test scale in cluster and querynode < replica
@@ -227,7 +229,6 @@ class TestQueryNodeScale:
         expected: Verify search successfully after scale out
         """
         release_name = "scale-in-query"
-        release_name = "mic-replica"
         image_tag = get_latest_tag()
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         query_config = {
@@ -250,7 +251,7 @@ class TestQueryNodeScale:
             connections.connect("scale-in", host=host, port=19530)
             utility_w = ApiUtilityWrapper()
             collection_w = ApiCollectionWrapper()
-            collection_w.init_collection(name=cf.gen_unique_str("scale_in"), schema=cf.gen_default_collection_schema())
+            collection_w.init_collection(name=cf.gen_unique_str("scale_in"), schema=cf.gen_default_collection_schema(), using="scale-in")
             collection_w.insert(cf.gen_default_dataframe_data())
             assert collection_w.num_entities == ct.default_nb
 
@@ -260,9 +261,9 @@ class TestQueryNodeScale:
                                                       ct.default_float_vec_field_name,
                                                       ct.default_search_params, ct.default_limit)
             assert len(search_res[0].ids) == ct.default_limit
-            log.info("Search successfullt after load with 2 replicas")
+            log.info("Search successfully after load with 2 replicas")
             log.debug(collection_w.get_replicas()[0])
-            log.debug(utility_w.get_query_segment_info(collection_w.name))
+            log.debug(utility_w.get_query_segment_info(collection_w.name, using="scale-in"))
 
             # scale in querynode from 2 to 1, less than replica number
             log.debug("Scale in querynode from 2 to 1")
@@ -275,7 +276,6 @@ class TestQueryNodeScale:
                                 ct.default_float_vec_field_name, ct.default_search_params,
                                 ct.default_limit, check_task=CheckTasks.check_nothing)
             log.debug(collection_w.get_replicas(check_task=CheckTasks.check_nothing)[0])
-            log.debug(utility_w.get_query_segment_info(collection_w.name, check_task=CheckTasks.check_nothing))
 
             # scale querynode from 1 back to 2
             mic.upgrade(release_name, {'spec.components.queryNode.replicas': 2}, constants.NAMESPACE)
@@ -291,11 +291,12 @@ class TestQueryNodeScale:
             for group in replicas.groups:
                 assert len(group.group_nodes) == 1
             # Verify loaded segment info is correct
-            seg_info = utility_w.get_query_segment_info(collection_w.name)[0]
-            seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
-            num_entities = list(map(lambda seg: seg.num_rows, seg_info))
-            assert reduce(lambda x, y: x ^ y, seg_ids) == 0
-            assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
+            seg_info = utility_w.get_query_segment_info(collection_w.name, using="scale-in")[0]
+            num_entities = 0
+            for seg in seg_info:
+                assert len(seg.nodeIds) == 2
+                num_entities += seg.num_rows
+            assert num_entities == ct.default_nb
 
         except Exception as e:
             raise Exception(str(e))

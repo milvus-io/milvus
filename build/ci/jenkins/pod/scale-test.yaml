@@ -7,8 +7,8 @@ metadata:
 spec:
   containers:
   - name: milvus-test
-#    image: registry.milvus.io/milvus/milvus-test-env:v0.5
-    image: dockerhub-mirror-sh.zilliz.cc/milvusdb/pytest:20211209-cef343f
+    image: milvusdb/pytest:20220525-de0ba6d
+#    image: dockerhub-mirror-sh.zilliz.cc/milvusdb/pytest:20211209-cef343f
     command:
     - cat
     tty: true
