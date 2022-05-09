@@ -59,9 +59,9 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 
 ### Install Milvus
 
-- [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.0/install_standalone-docker.md)
+- [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.x/install_standalone-docker.md)
 
-- [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.0/install_cluster-docker.md)
+- [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.x/install_cluster-docker.md)
 
 - [Advanced Deployment](https://github.com/milvus-io/milvus/wiki)
 
