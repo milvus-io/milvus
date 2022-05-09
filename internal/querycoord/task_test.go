@@ -19,9 +19,12 @@ package querycoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -785,6 +788,7 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+	defer node1.stop()
 
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
 	queryCoord.scheduler.Enqueue(loadCollectionTask)
@@ -793,6 +797,7 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	node2, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+	defer node2.stop()
 
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node2.queryNodeID)
 	parentTask := loadSegmentTask.parentTask
@@ -857,6 +862,7 @@ func Test_handoffSegmentFail(t *testing.T) {
 
 	waitTaskFinalState(handoffTask, taskFailed)
 
+	node1.stop()
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
@@ -1048,32 +1054,54 @@ func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
+	defer queryCoord.Stop()
 
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
 	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
-
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
+	segments := queryCoord.meta.getSegmentInfosByNode(node1.queryNodeID)
+	log.Debug("get segments by node",
+		zap.Int64("nodeID", node1.queryNodeID),
+		zap.Any("segments", segments))
+
+	rootCoord := queryCoord.rootCoordClient.(*rootCoordMock)
+	rootCoord.enableIndex = true
+
+	node1.stop()
 
 	node2, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
+	defer node2.stop()
 
-	rootCoord := queryCoord.rootCoordClient.(*rootCoordMock)
-	rootCoord.enableIndex = true
-	removeNodeSession(node1.queryNodeID)
 	for {
-		if len(queryCoord.meta.getSegmentInfosByNode(node1.queryNodeID)) == 0 {
+		segments := queryCoord.meta.getSegmentInfosByNode(node1.queryNodeID)
+		if len(segments) == 0 {
 			break
 		}
+		log.Debug("node still has segments",
+			zap.Int64("nodeID", node1.queryNodeID))
+		time.Sleep(200 * time.Millisecond)
 	}
 
-	node2.stop()
-	queryCoord.Stop()
+	for {
+		segments := queryCoord.meta.getSegmentInfosByNode(node2.queryNodeID)
+		if len(segments) != 0 {
+			log.Debug("get segments by node",
+				zap.Int64("nodeID", node2.queryNodeID),
+				zap.Any("segments", segments))
+			break
+		}
+		log.Debug("node hasn't segments",
+			zap.Int64("nodeID", node2.queryNodeID))
+		time.Sleep(200 * time.Millisecond)
+	}
+
 	err = removeAllSession()
 	assert.Nil(t, err)
 }

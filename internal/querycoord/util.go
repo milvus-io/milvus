@@ -199,3 +199,11 @@ func syncReplicaSegments(ctx context.Context, cluster Cluster, childTasks []task
 
 	return nil
 }
+
+func removeFromSlice(origin []UniqueID, del ...UniqueID) []UniqueID {
+	set := make(typeutil.UniqueSet, len(origin))
+	set.Insert(origin...)
+	set.Remove(del...)
+
+	return set.Collect()
+}

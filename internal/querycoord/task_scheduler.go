@@ -903,6 +903,7 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 		req := triggerTask.(*releaseCollectionTask).ReleaseCollectionRequest
 		collectionID := req.CollectionID
 		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
+
 	case commonpb.MsgType_ReleasePartitions:
 		// release all segmentInfo of the partitions when release partitions
 		req := triggerTask.(*releasePartitionTask).ReleasePartitionsRequest
@@ -917,6 +918,7 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 			}
 		}
 		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
+
 	default:
 		// save new segmentInfo when load segment
 		segments := make(map[UniqueID]*querypb.SegmentInfo)
@@ -929,8 +931,8 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 					collectionID := loadInfo.CollectionID
 					segmentID := loadInfo.SegmentID
 
-					segment, saved := segments[segmentID]
-					if !saved {
+					segment, err := meta.getSegmentInfoByID(segmentID)
+					if err != nil {
 						segment = &querypb.SegmentInfo{
 							SegmentID:      segmentID,
 							CollectionID:   loadInfo.CollectionID,
@@ -942,11 +944,15 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 							ReplicaIds:     []UniqueID{req.ReplicaID},
 							NodeIds:        []UniqueID{dstNodeID},
 						}
-						segments[segmentID] = segment
 					} else {
 						segment.ReplicaIds = append(segment.ReplicaIds, req.ReplicaID)
+						segment.ReplicaIds = removeFromSlice(segment.GetReplicaIds())
+
 						segment.NodeIds = append(segment.NodeIds, dstNodeID)
+						segment.NodeID = dstNodeID
 					}
+					_, saved := segments[segmentID]
+					segments[segmentID] = segment
 
 					if _, ok := segmentInfosToSave[collectionID]; !ok {
 						segmentInfosToSave[collectionID] = make([]*querypb.SegmentInfo, 0)
