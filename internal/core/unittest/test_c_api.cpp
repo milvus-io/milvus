@@ -29,6 +29,7 @@
 #include "segcore/reduce_c.h"
 #include "segcore/Reduce.h"
 #include "test_utils/DataGen.h"
+#include "arrow/c/bridge.h"
 
 namespace chrono = std::chrono;
 
@@ -216,15 +217,100 @@ TEST(CApiTest, DeleteTest) {
     auto segment = NewSegment(collection, Growing, -1);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+
+    ArrowArray array;
+    ArrowSchema schema;
+    arrow::ExportArray(*ids, &array, &schema);
     uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment, offset, 3, (void*)&array, (void*)&schema, delete_timestamps);
     assert(del_res.error_code == Success);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, DeleteVarcharTest) {
+    auto collection_schema = R"(name: "default-collection"
+                                fields: <
+                                  fieldID: 100
+                                  name: "fakevec"
+                                  data_type: FloatVector
+                                  type_params: <
+                                    key: "dim"
+                                    value: "16"
+                                  >
+                                  index_params: <
+                                    key: "metric_type"
+                                    value: "L2"
+                                  >
+                                >
+                                fields: <
+                                  fieldID: 101
+                                  name: "age"
+                                  data_type: VarChar
+                                  type_params: <
+                                    key: "max_length_per_row"
+                                    value: "100"
+                                  >
+                                  is_primary_key: true
+                                >)";
+    auto collection = NewCollection(collection_schema);
+    auto segment = NewSegment(collection, Growing, -1);
+    auto col = (milvus::segcore::Collection*)collection;
+
+    int N = 10;
+    auto dataset = DataGen(col->get_schema(), N);
+    auto insert_data = serialize(dataset.raw_);
+
+    auto src_data = dataset.get_col(FieldId(101))->scalars().string_data().data();
+    std::vector<std::string> id_col(src_data.size());
+    std::copy(src_data.begin(), src_data.end(), id_col.begin());
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+                      insert_data.size());
+    assert(res.error_code == Success);
+
+    std::vector<std::string> delete_pks = {id_col[1], id_col[2]};
+    auto ids_builder = arrow::StringBuilder();
+    ids_builder.AppendValues(delete_pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(2, dataset.timestamps_[N - 1]);
+    offset = PreDelete(segment, 2);
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    auto del_res = Delete(segment, offset, 2, (void*)&array, (void*)&id_schema, delete_timestamps.data());
+    assert(del_res.error_code == Success);
+
+    std::vector<std::string> retrive_pks = {id_col.at(2), id_col.at(3)};
+    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto term_expr = std::make_unique<query::TermExprImpl<std::string>>(FieldId(101), DataType::VARCHAR, retrive_pks);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->predicate_ = std::move(term_expr);
+    std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
+    plan->field_ids_ = target_field_ids;
+
+    CRetrieveResult retrieve_result;
+    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    ASSERT_TRUE(suc);
+    ASSERT_EQ(query_result->ids().str_id().data().size(), 1);
+
+    DeleteRetrievePlan(plan.release());
+    DeleteRetrieveResult(&retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -248,19 +334,24 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
     offset = PreDelete(segment, 1);
-    auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    auto del_res = Delete(segment, offset, 1, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks = {1}
-    std::vector<int64_t> retrive_pks = {1};
+    std::vector<int64_t> retrieve_pks = {1};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrieve_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
@@ -275,8 +366,8 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
     // retrieve pks = {2}
-    retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    retrieve_pks = {2};
+    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrieve_pks);
     plan->plan_node_->predicate_ = std::move(term_expr);
     res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
@@ -286,11 +377,14 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    delete_data = serialize(ids.get());
+    ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    ids = ids_builder.Finish().ValueOrDie();
     offset = PreDelete(segment, 1);
-    del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    del_res = Delete(segment, offset, 1, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {2}
@@ -350,14 +444,18 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
     auto offset = PreDelete(segment, 1);
-    auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
-    assert(del_res.error_code == Success);
 
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    auto del_res = Delete(segment, offset, 1, (void*)&array, (void*)&id_schema, delete_timestamps.data());
+    assert(del_res.error_code == Success);
     // retrieve pks = {1}
     std::vector<int64_t> retrive_pks = {1};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
@@ -388,11 +486,14 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    delete_data = serialize(ids.get());
+    ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    ids = ids_builder.Finish().ValueOrDie();
     offset = PreDelete(segment, 1);
-    del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    del_res = Delete(segment, offset, 1, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {2}
@@ -452,13 +553,16 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
     offset = PreDelete(segment, 3);
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment, offset, 3, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {1, 2, 3}
@@ -535,14 +639,18 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment, offset, 3, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {1, 2, 3}
@@ -580,15 +688,18 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     // delete data pks = {1, 2, 3}, timestamps = {9, 9, 9}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
 
     offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
-    assert(del_res.error_code == Success);
+    auto del_res = Delete(segment, offset, 3, (void*)&array, (void*)&id_schema, delete_timestamps.data());
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
     std::vector<int64_t> retrive_row_ids = {1, 2, 3};
@@ -674,14 +785,18 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[4]);
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment, offset, 3, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
@@ -897,14 +1012,19 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto segment = NewSegment(collection, Growing, -1);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+
+    ArrowArray array;
+    ArrowSchema schema;
+    arrow::ExportArray(*ids, &array, &schema);
     uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment, offset, 3, &array, &schema, delete_timestamps);
     assert(del_res.error_code == Success);
 
     // TODO: assert(deleted_count == len(delete_row_ids))
@@ -2774,7 +2894,6 @@ TEST(CApiTest, SealedSegmentTest) {
     for (auto& age : ages) {
         age = e() % 2000;
     }
-    auto blob = (void*)(&ages[0]);
     FieldMeta field_meta(FieldName("age"), FieldId(101), DataType::INT64);
     auto array = CreateScalarDataArrayFrom(ages.data(), N, field_meta);
     auto age_data = serialize(array.get());

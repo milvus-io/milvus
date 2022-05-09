@@ -13,14 +13,12 @@
 #include "ScalarIndex.h"
 
 namespace milvus::segcore {
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
 ScalarIndexVector::do_search_ids(const IdArray& ids) const {
-    auto res_ids = std::make_unique<IdArray>();
+    auto builder = arrow::Int64Builder();
+    //    auto res_ids = std::make_unique<IdArray>();
     // TODO: support string array
-    static_assert(std::is_same_v<T, int64_t>);
-    AssertInfo(ids.has_int_id(), "ids doesn't have int_id field");
-    auto src_ids = ids.int_id();
-    auto dst_ids = res_ids->mutable_int_id();
+    auto src_ids = arrow::Int64Array(ids.data());
     std::vector<SegOffset> dst_offsets;
 
     // TODO: a possible optimization:
@@ -28,7 +26,8 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
 
     // assume no repeated key now
     // TODO: support repeated key
-    for (auto id : src_ids.data()) {
+    for (auto id_iter = src_ids.begin(); id_iter < src_ids.end(); ++id_iter) {
+        auto id = src_ids.Value(id_iter.index());
         using Pair = std::pair<T, SegOffset>;
         auto [iter_beg, iter_end] =
             std::equal_range(mapping_.begin(), mapping_.end(), std::make_pair(id, SegOffset(0)),
@@ -36,11 +35,11 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
 
         for (auto& iter = iter_beg; iter != iter_end; iter++) {
             auto [entry_id, entry_offset] = *iter;
-            dst_ids->add_data(entry_id);
+            builder.Append(entry_id);
             dst_offsets.push_back(entry_offset);
         }
     }
-    return {std::move(res_ids), std::move(dst_offsets)};
+    return {std::move(builder.Finish().ValueOrDie()), std::move(dst_offsets)};
 }
 
 std::pair<std::vector<idx_t>, std::vector<SegOffset>>

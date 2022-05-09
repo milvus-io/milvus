@@ -77,8 +77,8 @@ typedef struct CLoadFieldDataInfo {
 
 typedef struct CLoadDeletedRecordInfo {
     void* timestamps;
-    const uint8_t* primary_keys;
-    const uint64_t primary_keys_size;
+    void* pks_array;
+    void* schema;
     int64_t row_count;
 } CLoadDeletedRecordInfo;
 

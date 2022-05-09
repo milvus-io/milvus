@@ -36,6 +36,11 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/apache/arrow/go/v8/arrow"
+	"github.com/apache/arrow/go/v8/arrow/array"
+	"github.com/apache/arrow/go/v8/arrow/cdata"
+	"github.com/apache/arrow/go/v8/arrow/memory"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -656,39 +661,32 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 	var cSize = C.int64_t(len(entityIDs))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 
-	ids := &schemapb.IDs{}
+	var ids arrow.Array
+	pool := memory.NewGoAllocator()
 	pkType := entityIDs[0].Type()
 	switch pkType {
 	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(entityIDs))
-		for index, entity := range entityIDs {
-			int64Pks[index] = entity.(*int64PrimaryKey).Value
+		builder := array.NewInt64Builder(pool)
+		for _, entity := range entityIDs {
+			builder.Append(entity.(*int64PrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Pks,
-			},
-		}
+		ids = builder.NewArray()
 	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(entityIDs))
-		for index, entity := range entityIDs {
-			varCharPks[index] = entity.(*varCharPrimaryKey).Value
+		builder := array.NewStringBuilder(pool)
+		for _, entity := range entityIDs {
+			builder.Append(entity.(*varCharPrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: varCharPks,
-			},
-		}
+		ids = builder.NewArray()
 	default:
 		return fmt.Errorf("invalid data type of primary keys")
 	}
 
-	dataBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return fmt.Errorf("failed to marshal ids: %s", err)
-	}
-
-	status := C.Delete(s.segmentPtr, cOffset, cSize, (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])), (C.uint64_t)(len(dataBlob)), cTimestampsPtr)
+	out := cdata.CArrowArray{}
+	outSchema := cdata.CArrowSchema{}
+	cdata.ExportArrowArray(ids, &out, &outSchema)
+	defer cdata.ReleaseCArrowArray(&out)
+	defer cdata.ReleaseCArrowSchema(&outSchema)
+	status := C.Delete(s.segmentPtr, cOffset, cSize, unsafe.Pointer(&out), unsafe.Pointer(&outSchema), cTimestampsPtr)
 	if err := HandleCStatus(&status, "Delete failed"); err != nil {
 		return err
 	}
@@ -748,42 +746,37 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 		return fmt.Errorf("empty pks to delete")
 	}
 	pkType := primaryKeys[0].Type()
-	ids := &schemapb.IDs{}
+
+	var ids arrow.Array
+	pool := memory.NewGoAllocator()
 	switch pkType {
 	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(primaryKeys))
-		for index, pk := range primaryKeys {
-			int64Pks[index] = pk.(*int64PrimaryKey).Value
+		builder := array.NewInt64Builder(pool)
+		for _, pk := range primaryKeys {
+			builder.Append(pk.(*int64PrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Pks,
-			},
-		}
+		ids = builder.NewArray()
 	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(primaryKeys))
-		for index, pk := range primaryKeys {
-			varCharPks[index] = pk.(*varCharPrimaryKey).Value
+		builder := array.NewStringBuilder(pool)
+		for _, pk := range primaryKeys {
+			builder.Append(pk.(*varCharPrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: varCharPks,
-			},
-		}
+		ids = builder.NewArray()
 	default:
 		return fmt.Errorf("invalid data type of primary keys")
 	}
 
-	idsBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return err
-	}
+	out := cdata.CArrowArray{}
+	outSchema := cdata.CArrowSchema{}
+	cdata.ExportArrowArray(ids, &out, &outSchema)
+	defer cdata.ReleaseCArrowArray(&out)
+	defer cdata.ReleaseCArrowSchema(&outSchema)
 
 	loadInfo := C.CLoadDeletedRecordInfo{
-		timestamps:        unsafe.Pointer(&timestamps[0]),
-		primary_keys:      (*C.uint8_t)(unsafe.Pointer(&idsBlob[0])),
-		primary_keys_size: C.uint64_t(len(idsBlob)),
-		row_count:         C.int64_t(rowCount),
+		timestamps: unsafe.Pointer(&timestamps[0]),
+		pks_array:  unsafe.Pointer(&out),
+		schema:     unsafe.Pointer(&outSchema),
+		row_count:  C.int64_t(rowCount),
 	}
 	/*
 		CStatus

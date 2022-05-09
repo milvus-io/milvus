@@ -154,7 +154,7 @@ class SegmentSealedImpl : public SegmentSealed {
         return deleted_record_;
     }
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>

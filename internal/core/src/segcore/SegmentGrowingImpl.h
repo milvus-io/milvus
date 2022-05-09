@@ -182,7 +182,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>

@@ -503,8 +503,9 @@ TEST(Sealed, Delete) {
 
     int64_t row_count = 5;
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
@@ -517,8 +518,9 @@ TEST(Sealed, Delete) {
 
     int64_t new_count = 3;
     std::vector<idx_t> new_pks{6, 7, 8};
-    auto new_ids = std::make_unique<IdArray>();
-    new_ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
+    auto new_ids_builder = arrow::Int64Builder();
+    new_ids_builder.AppendValues(new_pks);
+    auto new_ids = new_ids_builder.Finish().ValueOrDie();
     std::vector<idx_t> new_timestamps{10, 10, 10};
     auto reserved_offset = segment->PreDelete(new_count);
     ASSERT_EQ(reserved_offset, row_count);

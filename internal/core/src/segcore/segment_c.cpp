@@ -14,6 +14,8 @@
 #include "common/Types.h"
 #include "common/type_c.h"
 #include "log/Log.h"
+#include "arrow/c/bridge.h"
+#include "arrow/api.h"
 
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -167,19 +169,16 @@ CStatus
 Delete(CSegmentInterface c_segment,
        int64_t reserved_offset,
        int64_t size,
-       const uint8_t* ids,
-       const uint64_t ids_size,
+       void* array,
+       void* schema,
        const uint64_t* timestamps) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto pks = std::make_unique<milvus::proto::schema::IDs>();
-    auto suc = pks->ParseFromArray(ids, ids_size);
-    AssertInfo(suc, "failed to parse pks from ids");
-    try {
-        auto res = segment->Delete(reserved_offset, size, pks.get(), timestamps);
-        return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+    auto array_result = arrow::ImportArray((ArrowArray*)array, (ArrowSchema*)schema);
+    if (!array_result.ok()) {
+        return milvus::FailureCStatus(UnexpectedError, "input array data is invalid");
     }
+    auto res = segment->Delete(reserved_offset, size, array_result.ValueOrDie().get(), timestamps);
+    return milvus::SuccessCStatus();
 }
 
 int64_t
@@ -213,11 +212,12 @@ LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_re
     try {
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         AssertInfo(segment_interface != nullptr, "segment conversion failed");
-        auto pks = std::make_unique<milvus::proto::schema::IDs>();
-        auto suc = pks->ParseFromArray(deleted_record_info.primary_keys, deleted_record_info.primary_keys_size);
-        AssertInfo(suc, "unmarshal field data string failed");
-        auto load_info =
-            LoadDeletedRecordInfo{deleted_record_info.timestamps, pks.get(), deleted_record_info.row_count};
+        auto array_result =
+            arrow::ImportArray((ArrowArray*)deleted_record_info.pks_array, (ArrowSchema*)deleted_record_info.schema);
+        AssertInfo(array_result.ok(), "unmarshal field data failed");
+
+        auto load_info = LoadDeletedRecordInfo{deleted_record_info.timestamps, array_result.ValueOrDie().get(),
+                                               deleted_record_info.row_count};
         segment_interface->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

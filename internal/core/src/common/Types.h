@@ -28,6 +28,7 @@
 #include <NamedType/named_type.hpp>
 #include <variant>
 
+#include "arrow/api.h"
 #include "knowhere/common/MetricType.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
@@ -67,7 +68,7 @@ using ArithOpType = proto::plan::ArithOpType;
 using ScalarArray = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
 using VectorArray = proto::schema::VectorField;
-using IdArray = proto::schema::IDs;
+using IdArray = arrow::Array;
 using MetricType = faiss::MetricType;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;

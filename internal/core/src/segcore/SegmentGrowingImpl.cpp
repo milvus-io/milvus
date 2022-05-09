@@ -345,9 +345,8 @@ SegmentGrowingImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) co
     return res_offsets;
 }
 
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
 SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
-    AssertInfo(id_array.has_int_id(), "Id array doesn't have int_id element");
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -356,7 +355,7 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) con
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    auto res_id_arr = std::make_unique<IdArray>();
+    std::shared_ptr<arrow::Array> res_id_arr;
     std::vector<SegOffset> res_offsets;
     for (auto pk : pks) {
         auto [iter_b, iter_e] = pk2offset_.equal_range(pk);
@@ -365,11 +364,15 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) con
             if (insert_record_.timestamps_[offset.get()] <= timestamp) {
                 switch (data_type) {
                     case DataType::INT64: {
-                        res_id_arr->mutable_int_id()->add_data(std::get<int64_t>(pk));
+                        auto builder = arrow::Int64Builder();
+                        builder.Append(std::get<int64_t>(pk));
+                        res_id_arr = builder.Finish().ValueOrDie();
                         break;
                     }
                     case DataType::VARCHAR: {
-                        res_id_arr->mutable_str_id()->add_data(std::get<std::string>(pk));
+                        auto builder = arrow::StringBuilder();
+                        builder.Append(std::get<std::string>(pk));
+                        res_id_arr = builder.Finish().ValueOrDie();
                         break;
                     }
                     default: {

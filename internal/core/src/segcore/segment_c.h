@@ -12,6 +12,7 @@
 #pragma once
 
 #ifdef __cplusplus
+
 extern "C" {
 #endif
 
@@ -22,6 +23,7 @@ extern "C" {
 #include "common/type_c.h"
 #include "segcore/plan_c.h"
 #include "segcore/load_index_c.h"
+#include "arrow/c/abi.h"
 
 typedef void* CSegmentInterface;
 typedef void* CSearchResult;
@@ -94,8 +96,8 @@ CStatus
 Delete(CSegmentInterface c_segment,
        int64_t reserved_offset,
        int64_t size,
-       const uint8_t* ids,
-       const uint64_t ids_size,
+       void* array,
+       void* schema,
        const uint64_t* timestamps);
 
 int64_t

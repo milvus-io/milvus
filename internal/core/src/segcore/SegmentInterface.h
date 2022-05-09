@@ -27,6 +27,7 @@
 #include "common/LoadInfo.h"
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
+#include "arrow/api.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
@@ -157,7 +158,7 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const = 0;
 
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    virtual std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
  protected:

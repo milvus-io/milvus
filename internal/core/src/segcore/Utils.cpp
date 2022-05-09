@@ -37,13 +37,15 @@ void
 ParsePksFromIDs(std::vector<PkType>& pks, DataType data_type, const IdArray& data) {
     switch (data_type) {
         case DataType::INT64: {
-            auto source_data = reinterpret_cast<const int64_t*>(data.int_id().data().data());
-            std::copy_n(source_data, pks.size(), pks.data());
+            auto source_data = arrow::Int64Array(data.data());
+            std::copy_n(source_data.raw_values(), pks.size(), pks.data());
             break;
         }
         case DataType::VARCHAR: {
-            auto source_data = data.str_id().data();
-            std::copy(source_data.begin(), source_data.end(), pks.begin());
+            auto source_data = arrow::StringArray(data.data());
+            for (auto iter = source_data.begin(); iter != source_data.end(); iter++) {
+                pks[iter.index()] = source_data.GetString(iter.index());
+            }
             break;
         }
         default: {
@@ -54,15 +56,7 @@ ParsePksFromIDs(std::vector<PkType>& pks, DataType data_type, const IdArray& dat
 
 int64_t
 GetSizeOfIdArray(const IdArray& data) {
-    if (data.has_int_id()) {
-        return data.int_id().data_size();
-    }
-
-    if (data.has_str_id()) {
-        return data.str_id().data_size();
-    }
-
-    PanicInfo("unsupported id type");
+    return data.length();
 }
 
 // Note: this is temporary solution.

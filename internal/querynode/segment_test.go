@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -348,40 +349,44 @@ func TestSegment_segmentInsert(t *testing.T) {
 }
 
 func TestSegment_segmentDelete(t *testing.T) {
-	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
-	collection := newCollection(collectionID, schema)
-	assert.Equal(t, collection.ID(), collectionID)
+	for _, idType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
+		t.Run("test for PkType "+idType.String(), func(t *testing.T) {
+			collectionID := UniqueID(0)
+			pkType := idType
+			schema := genTestCollectionSchema(pkType)
+			collection := newCollection(collectionID, schema)
+			assert.Equal(t, collection.ID(), collectionID)
 
-	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
-	assert.Equal(t, segmentID, segment.segmentID)
-	assert.Nil(t, err)
+			segmentID := UniqueID(0)
+			segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+			assert.Equal(t, segmentID, segment.segmentID)
+			assert.Nil(t, err)
 
-	insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
-	assert.NoError(t, err)
-	insertRecord := &segcorepb.InsertRecord{
-		FieldsData: insertMsg.FieldsData,
-		NumRows:    int64(insertMsg.NumRows),
+			insertMsg, err := genSimpleInsertMsg(schema, defaultMsgLength)
+			assert.NoError(t, err)
+			insertRecord := &segcorepb.InsertRecord{
+				FieldsData: insertMsg.FieldsData,
+				NumRows:    int64(insertMsg.NumRows),
+			}
+
+			offsetInsert, err := segment.segmentPreInsert(defaultMsgLength)
+			assert.Nil(t, err)
+			assert.GreaterOrEqual(t, offsetInsert, int64(0))
+
+			err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
+			assert.NoError(t, err)
+
+			var offsetDelete = segment.segmentPreDelete(10)
+			assert.GreaterOrEqual(t, offsetDelete, int64(0))
+
+			pks, err := getPKs(insertMsg, schema)
+			assert.NoError(t, err)
+			err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
+			assert.NoError(t, err)
+
+			deleteCollection(collection)
+		})
 	}
-
-	offsetInsert, err := segment.segmentPreInsert(defaultMsgLength)
-	assert.Nil(t, err)
-	assert.GreaterOrEqual(t, offsetInsert, int64(0))
-
-	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
-	assert.NoError(t, err)
-
-	var offsetDelete = segment.segmentPreDelete(10)
-	assert.GreaterOrEqual(t, offsetDelete, int64(0))
-
-	pks, err := getPKs(insertMsg, schema)
-	assert.NoError(t, err)
-	err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
-	assert.NoError(t, err)
-
-	deleteCollection(collection)
 }
 
 func TestSegment_segmentSearch(t *testing.T) {
@@ -498,35 +503,43 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 }
 
 func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
-	fieldParam := constFieldParam{
-		id:       100,
-		dataType: schemapb.DataType_Int64,
-	}
-	field := genPKFieldSchema(fieldParam)
-	schema := &schemapb.CollectionSchema{
-		Name:   defaultCollectionName,
-		AutoID: false,
-		Fields: []*schemapb.FieldSchema{
-			field,
-		},
-	}
+	for _, idType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_VarChar} {
+		t.Run("test for PkType "+idType.String(), func(t *testing.T) {
+			fieldParam := constFieldParam{
+				id:       100,
+				dataType: idType,
+			}
+			field := genPKFieldSchema(fieldParam)
+			schema := &schemapb.CollectionSchema{
+				Name:   defaultCollectionName,
+				AutoID: false,
+				Fields: []*schemapb.FieldSchema{
+					field,
+				},
+			}
 
-	seg, err := newSegment(newCollection(defaultCollectionID, schema),
-		defaultSegmentID,
-		defaultPartitionID,
-		defaultCollectionID,
-		defaultDMLChannel,
-		segmentTypeSealed)
-	assert.Nil(t, err)
-	ids := []int64{1, 2, 3}
-	pks := make([]primaryKey, 0)
-	for _, id := range ids {
-		pks = append(pks, newInt64PrimaryKey(id))
+			seg, err := newSegment(newCollection(defaultCollectionID, schema),
+				defaultSegmentID,
+				defaultPartitionID,
+				defaultCollectionID,
+				defaultDMLChannel,
+				segmentTypeSealed)
+			assert.Nil(t, err)
+			ids := []int64{1, 2, 3}
+			pks := make([]primaryKey, 0)
+			for _, id := range ids {
+				if idType == schemapb.DataType_Int64 {
+					pks = append(pks, newInt64PrimaryKey(id))
+				} else {
+					pks = append(pks, newVarCharPrimaryKey(strconv.FormatInt(id, 10)))
+				}
+			}
+			timestamps := []Timestamp{10, 10, 10}
+			var rowCount int64 = 3
+			err = seg.segmentLoadDeletedRecord(pks, timestamps, rowCount)
+			assert.NoError(t, err)
+		})
 	}
-	timestamps := []Timestamp{10, 10, 10}
-	var rowCount int64 = 3
-	err = seg.segmentLoadDeletedRecord(pks, timestamps, rowCount)
-	assert.NoError(t, err)
 }
 
 func TestSegment_segmentLoadFieldData(t *testing.T) {

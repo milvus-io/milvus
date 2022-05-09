@@ -94,7 +94,10 @@ else
   make -j ${jobs}
 fi
 
-go env -w CGO_CFLAGS="-I${OUTPUT_LIB}/include"
+if [[ "$(go env CGO_CFLAGS)" != *"${OUTPUT_LIB}"* ]]; then
+  go env -w CGO_CFLAGS="$(go env CGO_CFLAGS) -I${OUTPUT_LIB}/include"
+fi
+
 ldflags=""
 if [ -f "${OUTPUT_LIB}/lib/librocksdb.a" ]; then
      case "${unameOut}" in
@@ -119,6 +122,6 @@ if [[ $(arch) == 'arm64' ]]; then
   go env -w GOARCH=arm64
 fi
 
-go env -w CGO_LDFLAGS="$ldflags" && GO111MODULE=on
-
-go get github.com/tecbot/gorocksdb
+if [[ "$(go env CGO_LDFLAGS)" != *"${ldflags}"* ]]; then
+  go env -w CGO_LDFLAGS="$(go env CGO_LDFLAGS) $ldflags" && GO111MODULE=on
+fi

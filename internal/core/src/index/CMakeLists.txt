@@ -23,7 +23,7 @@ if (MSYS)
 endif ()
 
 target_link_libraries(milvus_index
-        milvus_proto
+        milvus_common
         milvus_exceptions
         knowhere
         ${PLATFORM_LIBS}

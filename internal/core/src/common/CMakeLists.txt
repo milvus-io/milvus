@@ -25,8 +25,8 @@ if ( MSYS )
             milvus_utils
             milvus_config
             milvus_log
-            knowhere
             milvus_proto
+            knowhere
             yaml-cpp
             boost_bitset_ext
             arrow

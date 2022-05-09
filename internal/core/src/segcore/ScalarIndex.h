@@ -23,7 +23,7 @@ namespace milvus::segcore {
 
 class ScalarIndexBase {
  public:
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    virtual std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const = 0;
     virtual std::pair<std::vector<idx_t>, std::vector<SegOffset>>
     do_search_ids(const std::vector<idx_t>& ids) const = 0;
@@ -43,7 +43,7 @@ class ScalarIndexVector : public ScalarIndexBase {
     void
     build();
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const override;
 
     std::pair<std::vector<idx_t>, std::vector<SegOffset>>
