@@ -457,17 +457,19 @@ message ImportTaskState {
 }
 
 message ImportTaskInfo {
-  int64 id = 1;                       // Task ID.
-  int64 request_id = 2;               // Request ID of the import task.
-  int64 datanode_id = 3;              // ID of DataNode that processes the task.
-  int64 collection_id = 4;            // Collection ID for the import task.
-  int64 partition_id = 5;             // Partition ID for the import task.
-  repeated string channel_names = 6;  // Names of channels for the collection.
-  string bucket = 7;                  // Bucket for the import task.
-  bool row_based = 8;                 // Boolean indicating whether import files are row-based or column-based.
-  repeated string files = 9;          // A list of files to import.
-  int64 create_ts = 10;               // Timestamp when the import task is created.
-  ImportTaskState state = 11;         // State of the import task.
+  int64 id = 1;                                 // Task ID.
+  int64 request_id = 2;                         // Request ID of the import task.
+  int64 datanode_id = 3;                        // ID of DataNode that processes the task.
+  int64 collection_id = 4;                      // Collection ID for the import task.
+  int64 partition_id = 5;                       // Partition ID for the import task.
+  repeated string channel_names = 6;            // Names of channels for the collection.
+  string bucket = 7;                            // Bucket for the import task.
+  bool row_based = 8;                           // Boolean indicating whether import files are row-based or column-based.
+  repeated string files = 9;                    // A list of files to import.
+  int64 create_ts = 10;                         // Timestamp when the import task is created.
+  ImportTaskState state = 11;                   // State of the import task.
+  bool heuristic_data_queryable = 12;           // A flag indicating (heuristically) whether import data are queryable (i.e. loaded in query nodes)
+  bool heuristic_data_indexed = 13;             // A flag indicating (heuristically) whether import data are indexed.
 }
 
 message ImportTaskResponse {

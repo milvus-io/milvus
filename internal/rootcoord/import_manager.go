@@ -273,6 +273,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					State: &datapb.ImportTaskState{
 						StateCode: commonpb.ImportState_ImportPending,
 					},
+					HeuristicDataQueryable: false,
+					HeuristicDataIndexed:   false,
 				}
 				resp.Tasks = append(resp.Tasks, newTask.GetId())
 				taskList[i] = newTask.GetId()
@@ -301,6 +303,8 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				State: &datapb.ImportTaskState{
 					StateCode: commonpb.ImportState_ImportPending,
 				},
+				HeuristicDataQueryable: false,
+				HeuristicDataIndexed:   false,
 			}
 			resp.Tasks = append(resp.Tasks, newTask.GetId())
 			log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
@@ -322,12 +326,23 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 	return resp
 }
 
-// updateTaskStateCode updates a task's stateCode to `newState`.
-func (m *importManager) updateTaskStateCode(taskID int64, newState commonpb.ImportState) {
+// setTaskDataQueryable sets task's DataQueryable flag to true.
+func (m *importManager) setTaskDataQueryable(taskID int64) {
 	m.workingLock.Lock()
 	defer m.workingLock.Unlock()
 	if v, ok := m.workingTasks[taskID]; ok {
-		v.State.StateCode = newState
+		v.HeuristicDataQueryable = true
+	} else {
+		log.Error("task ID not found", zap.Int64("task ID", taskID))
+	}
+}
+
+// setTaskDataIndexed sets task's DataIndexed flag to true.
+func (m *importManager) setTaskDataIndexed(taskID int64) {
+	m.workingLock.Lock()
+	defer m.workingLock.Unlock()
+	if v, ok := m.workingTasks[taskID]; ok {
+		v.HeuristicDataIndexed = true
 	} else {
 		log.Error("task ID not found", zap.Int64("task ID", taskID))
 	}
@@ -397,6 +412,8 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 				resp.Id = tID
 				resp.State = commonpb.ImportState_ImportPending
 				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
+				resp.HeuristicDataQueryable = t.GetHeuristicDataQueryable()
+				resp.HeuristicDataIndexed = t.GetHeuristicDataIndexed()
 				found = true
 				break
 			}
@@ -423,6 +440,8 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 				Key:   FailedReason,
 				Value: v.GetState().GetErrorMessage(),
 			})
+			resp.HeuristicDataQueryable = v.GetHeuristicDataQueryable()
+			resp.HeuristicDataIndexed = v.GetHeuristicDataIndexed()
 		}
 	}()
 	if found {
@@ -566,9 +585,11 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				Infos: make([]*commonpb.KeyValuePair, 0),
-				Id:    t.GetId(),
-				State: commonpb.ImportState_ImportPending,
+				Infos:                  make([]*commonpb.KeyValuePair, 0),
+				Id:                     t.GetId(),
+				State:                  commonpb.ImportState_ImportPending,
+				HeuristicDataQueryable: t.GetHeuristicDataQueryable(),
+				HeuristicDataIndexed:   t.GetHeuristicDataIndexed(),
 			}
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
 			tasks = append(tasks, resp)
@@ -584,11 +605,13 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				Infos:    make([]*commonpb.KeyValuePair, 0),
-				Id:       v.GetId(),
-				State:    v.GetState().GetStateCode(),
-				RowCount: v.GetState().GetRowCount(),
-				IdList:   v.GetState().GetRowIds(),
+				Infos:                  make([]*commonpb.KeyValuePair, 0),
+				Id:                     v.GetId(),
+				State:                  v.GetState().GetStateCode(),
+				RowCount:               v.GetState().GetRowCount(),
+				IdList:                 v.GetState().GetRowIds(),
+				HeuristicDataQueryable: v.GetHeuristicDataQueryable(),
+				HeuristicDataIndexed:   v.GetHeuristicDataIndexed(),
 			}
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(v.GetFiles(), ",")})
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{
