@@ -197,7 +197,7 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Debug("Session Register Begin", zap.String("ServerName", s.ServerName))
+	log.Debug("DataNode begin to register to etcd", zap.String("serverName", s.ServerName))
 	registerFn := func() error {
 		resp, err := s.etcdCli.Grant(s.ctx, DefaultTTL)
 		if err != nil {
@@ -223,7 +223,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
 
 		if err != nil {
-			log.Warn("compare and swap error, maybe the key has ben registered", zap.Error(err))
+			log.Warn("compare and swap error, maybe the key has already been registered", zap.Error(err))
 			return err
 		}
 
@@ -235,10 +235,10 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		s.keepAliveCancel = keepAliveCancel
 		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
 		if err != nil {
-			fmt.Printf("keep alive error %s\n", err)
+			fmt.Printf("got error during keeping alive with etcd, err: %s\n", err)
 			return err
 		}
-		log.Debug("Session register successfully", zap.Int64("ServerID", s.ServerID))
+		log.Info("DataNode registered successfully", zap.Int64("serverID", s.ServerID))
 		return nil
 	}
 	err := retry.Do(s.ctx, registerFn, retry.Attempts(DefaultRetryTimes))
