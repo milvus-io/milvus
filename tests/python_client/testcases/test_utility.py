@@ -880,6 +880,41 @@ class TestUtilityBase(TestcaseBase):
         res = self.utility_wrap.loading_progress(collection_w.name, partition_names=[partition_w.name])[0]
         assert res[loading_progress] == '100%'
 
+    @pytest.mark.tags(CaseLabel.ClusterOnly)
+    def test_loading_progress_multi_replicas(self):
+        """
+        target: test loading progress with multi replicas
+        method: 1.Create collection and insert data
+                2.Load replicas and get loading progress
+                3.Create partitions and insert data
+                4.Get loading progress
+                5.Release and re-load replicas, get loading progress
+        expected: Verify loading progress result
+        """
+        collection_w = self.init_collection_wrap()
+        collection_w.insert(cf.gen_default_dataframe_data())
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.load(partition_names=[ct.default_partition_name], replica_number=2)
+        res_collection, _ = self.utility_wrap.loading_progress(collection_w.name)
+        assert res_collection == {loading_progress: '100%', num_loaded_partitions: 1, not_loaded_partitions: []}
+
+        # create partition and insert
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+        partition_w.insert(cf.gen_default_dataframe_data(start=ct.default_nb))
+        assert partition_w.num_entities == ct.default_nb
+        res_part_partition, _ = self.utility_wrap.loading_progress(collection_w.name)
+        assert res_part_partition == {'loading_progress': '50%', 'num_loaded_partitions': 1,
+                                      'not_loaded_partitions': [partition_w.name]}
+
+        res_part_partition, _ = self.utility_wrap.loading_progress(collection_w.name, partition_names=[partition_w.name])
+        assert res_part_partition == {'loading_progress': '0%', 'num_loaded_partitions': 0,
+                                      'not_loaded_partitions': [partition_w.name]}
+
+        collection_w.release()
+        collection_w.load(replica_number=2)
+        res_all_partitions, _ = self.utility_wrap.loading_progress(collection_w.name)
+        assert res_all_partitions == {'loading_progress': '100%', 'num_loaded_partitions': 2, 'not_loaded_partitions': []}
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_loading_collection_empty(self):
         """
@@ -1402,6 +1437,28 @@ class TestUtilityAdvanced(TestcaseBase):
                 segment_ids.append(r.segmentID)
                 cnt += r.num_rows
         assert cnt == nb
+
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16598")
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_get_growing_segment_info_after_load(self):
+        """
+        target: test get growing segment info
+        method: 1.create and load collection
+                2.insert data and no flush
+                3.get the growing segment
+        expected: Verify growing segment num entities
+        """
+        from pymilvus.grpc_gen.common_pb2 import SegmentState
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+
+        collection_w.load()
+        collection_w.insert(cf.gen_default_dataframe_data())
+        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        num_entities = 0
+        for seg in seg_info:
+            assert seg.state == SegmentState.Growing
+            num_entities += seg.num_rows
+        assert num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_get_sealed_query_segment_info(self):

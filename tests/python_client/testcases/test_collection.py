@@ -2228,6 +2228,8 @@ class TestLoadCollection(TestcaseBase):
 
         collection_w.load(replica_number=1)
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
+        loading_progress, _ = self.utility_wrap.loading_progress(collection_w.name)
+        assert loading_progress == {'loading_progress': '100%', 'num_loaded_partitions': 1, 'not_loaded_partitions': []}
 
         # verify load different replicas thrown an exception
         error = {ct.err_code: 5, ct.err_msg: f"Should release first then reload with the new number of replicas"}
@@ -2237,6 +2239,9 @@ class TestLoadCollection(TestcaseBase):
 
         collection_w.release()
         collection_w.load(replica_number=2)
+        # replicas is not yet reflected in loading progress
+        loading_progress, _ = self.utility_wrap.loading_progress(collection_w.name)
+        assert loading_progress == {'loading_progress': '100%', 'num_loaded_partitions': 1, 'not_loaded_partitions': []}
         two_replicas, _ = collection_w.get_replicas()
         assert len(two_replicas.groups) == 2
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
