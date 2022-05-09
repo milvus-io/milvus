@@ -76,6 +76,33 @@ func TestIndexCoord(t *testing.T) {
 	err = inm0.Stop()
 	assert.Nil(t, err)
 
+	t.Run("create index without indexnodes", func(t *testing.T) {
+		indexID := int64(rand.Int())
+		req := &indexpb.BuildIndexRequest{
+			IndexID:   indexID,
+			DataPaths: []string{"NoIndexNode-1", "NoIndexNode-2"},
+			NumRows:   10,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+			FieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+			},
+		}
+		resp, err := ic.BuildIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		time.Sleep(time.Second)
+		status, err := ic.DropIndex(ctx, &indexpb.DropIndexRequest{
+			IndexID: indexID,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
+
 	in, err := grpcindexnode.NewServer(ctx, factory)
 	assert.Nil(t, err)
 	assert.NotNil(t, in)
@@ -123,6 +150,24 @@ func TestIndexCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Equal(t, indexBuildID, resp2.IndexBuildID)
 		assert.Equal(t, "already have same index", resp2.Status.Reason)
+
+		req2 := &indexpb.BuildIndexRequest{
+			IndexID:   indexID,
+			DataPaths: []string{"DataPath-3", "DataPath-4"},
+			NumRows:   1000,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+			FieldSchema: &schemapb.FieldSchema{
+				DataType: schemapb.DataType_FloatVector,
+			},
+		}
+		resp3, err := ic.BuildIndex(ctx, req2)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp3.Status.ErrorCode)
 	})
 
 	t.Run("Get Index State", func(t *testing.T) {

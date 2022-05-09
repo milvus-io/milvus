@@ -30,11 +30,11 @@ func newPriorityQueue() *PriorityQueue {
 	ret := &PriorityQueue{
 		policy: PeekClientV0,
 	}
-	for i := 0; i < QueueLen; i++ {
+	for i := 1; i <= QueueLen; i++ {
 		item := &PQItem{
 			key:      UniqueID(i),
 			priority: i,
-			index:    i,
+			index:    i - 1,
 			totalMem: 1000,
 		}
 		ret.items = append(ret.items, item)
@@ -66,7 +66,7 @@ func TestPriorityQueue_Push(t *testing.T) {
 func TestPriorityQueue_Remove(t *testing.T) {
 	pq := newPriorityQueue()
 	cnt := 0
-	for i := 0; i < QueueLen; i++ {
+	for i := 1; i <= QueueLen; i++ {
 		if i%2 == 0 {
 			continue
 		}

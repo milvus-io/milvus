@@ -342,7 +342,7 @@ func getMockSystemInfoMetrics(
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
 				CPUCoreUsage: metricsinfo.GetCPUUsage(),
-				Memory:       metricsinfo.GetMemoryCount(),
+				Memory:       1000,
 				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
 				Disk:         metricsinfo.GetDiskCount(),
 				DiskUsage:    metricsinfo.GetDiskUsage(),
