@@ -1094,5 +1094,130 @@ class TestInsertInvalidBinary(TestcaseBase):
         error = {ct.err_code: 1, 'err_msg': "The types of schema and data do not match."}
         mutation_res, _ = collection_w.insert(data=df, partition_name=partition_name, check_task=CheckTasks.err_res, check_items=error)
 
-       
+class TestInsertString(TestcaseBase):
+    """
+      ******************************************************************
+      The following cases are used to test insert string
+      ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_string_field_is_primary(self):
+        """
+        target: test insert string is primary
+        method: 1.create a collection and string field is primary
+                2.insert string field data
+        expected: Insert Successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_data(ct.default_nb)
+        mutation_res, _ = collection_w.insert(data=data)
+        assert mutation_res.insert_count == ct.default_nb
+        assert mutation_res.primary_keys == data[2]
+
+    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.parametrize("string_fields", [[cf.gen_string_field(name="string_field1")],
+                                            [cf.gen_string_field(name="string_field2")],
+                                            [cf.gen_string_field(name="string_field3")]])
+    def test_insert_multi_string_fields(self, string_fields):
+        """
+        target: test insert multi string fields
+        method: 1.create a collection
+                2.Insert multi string fields
+        expected: Insert Successfully
+        """
+
+        schema = cf.gen_schema_multi_string_fields(string_fields)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_dataframe_multi_string_fields(string_fields=string_fields)
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_string_field_invalid_data(self):
+        """
+        target: test insert string field data is not match
+        method: 1.create a collection
+                2.Insert string field data is not match
+        expected: Raise exceptions
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        nb = 10
+        df = cf.gen_default_dataframe_data(nb)
+        new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
+        df.iloc[:, 2] = new_float_value
+        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_string_field_name_invalid(self):
+        """
+        target: test insert string field name is invaild
+        method: 1.create a collection  
+                2.Insert string field name is invalid
+        expected: Raise exceptions
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name) 
+        df = [cf.gen_int64_field(),cf.gen_string_field(name=ct.get_invalid_strs), cf.gen_float_vec_field()]
+        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_string_field_length_exceed(self):
+        """
+        target: test insert string field exceed the maximum length
+        method: 1.create a collection  
+                2.Insert string field length is exceeded maximum value of 65535
+        expected: Raise exceptions
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)  
+        nums = 70000  
+        field_one = cf.gen_int64_field()
+        field_two = cf.gen_float_field()
+        field_three = cf.gen_string_field(max_length_per_row=nums)
+        vec_field = cf.gen_float_vec_field()
+        df = [field_one, field_two, field_three, vec_field]
+        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error) 
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_string_field_dtype_invalid(self):
+        """
+        target: test insert string field with invaild dtype
+        method: 1.create a collection  
+                2.Insert string field dtype is invalid
+        expected: Raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)  
+        string_field = self.field_schema_wrap.init_field_schema(name="string", dtype=DataType.STRING)[0]
+        int_field = cf.gen_int64_field(is_primary=True)
+        vec_field = cf.gen_float_vec_field()
+        df = [string_field, int_field, vec_field]
+        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error) 
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_string_field_auto_id_is_true(self):
+        """
+        target: test create collection with string field 
+        method: 1.create a collection  
+                2.Insert string field with auto id is true
+        expected: Raise exception
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)  
+        int_field = cf.gen_int64_field()
+        vec_field = cf.gen_float_vec_field()
+        string_field = cf.gen_string_field(is_primary=True, auto_id=True)
+        df = [int_field, string_field, vec_field]
+        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error) 
+    
+        
 
