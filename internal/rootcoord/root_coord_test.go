@@ -1362,7 +1362,7 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("import w/ collection ID not found", func(t *testing.T) {
+	t.Run("import with collection ID not found", func(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.ImportRequest{
 			CollectionName: "bad name",

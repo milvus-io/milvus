@@ -1312,6 +1312,14 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.NotNil(t, err)
 	_, err = mt.GetPartitionByName(2, partName2, tsoStart)
 	assert.NotNil(t, err)
+
+	var cID UniqueID
+	cID, err = mt.GetCollectionIDByName(collName1)
+	assert.NoError(t, err)
+	assert.Equal(t, collID1, cID)
+
+	_, err = mt.GetCollectionIDByName("badname")
+	assert.Error(t, err)
 }
 
 func TestFixIssue10540(t *testing.T) {

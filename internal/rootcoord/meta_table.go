@@ -408,6 +408,19 @@ func (mt *MetaTable) HasCollection(collID typeutil.UniqueID, ts typeutil.Timesta
 	return err == nil
 }
 
+// GetCollectionIDByName returns the collection ID according to its name.
+// Returns an error if no matching ID is found.
+func (mt *MetaTable) GetCollectionIDByName(cName string) (typeutil.UniqueID, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	var cID UniqueID
+	var ok bool
+	if cID, ok = mt.collName2ID[cName]; !ok {
+		return 0, fmt.Errorf("collection ID not found for collection name %s", cName)
+	}
+	return cID, nil
+}
+
 // GetCollectionByID return collection meta by collection id
 func (mt *MetaTable) GetCollectionByID(collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()
