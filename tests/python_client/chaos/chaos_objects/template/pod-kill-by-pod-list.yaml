@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: test-querynode-pod-kill
+  namespace: chaos-testing
+spec:
+  selector:
+    pods:
+      chaos-testing:
+        - milvus-multi-querynode-querynode-bcdc595d9-7vmcj
+        - milvus-multi-querynode-querynode-bcdc595d9-ccxls
+        - milvus-multi-querynode-querynode-bcdc595d9-dpwgp
+
+  mode: all
+  action: pod-kill
+  duration: 2m
+  gracePeriod: 0
