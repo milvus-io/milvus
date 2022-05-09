@@ -1991,11 +1991,6 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// only support default index name for now. @2021.02.18
-	if dit.IndexName == "" {
-		dit.IndexName = Params.CommonCfg.DefaultIndexName
-	}
-
 	collID, _ := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
 	dit.collectionID = collID
 	return nil
