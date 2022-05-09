@@ -1,6 +1,8 @@
 import multiprocessing
 
 import pytest
+from pymilvus import MilvusException
+
 from customize.milvus_operator import MilvusOperator
 from common import common_func as cf
 from common.common_type import CaseLabel
@@ -9,20 +11,20 @@ from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
 
-prefix = "proxy_scale"
+
+def e2e_milvus_parallel(process_num, host, c_name):
+    """ e2e milvus """
+    process_list = []
+    for i in range(process_num):
+        p = multiprocessing.Process(target=sc.e2e_milvus, args=(host, c_name))
+        p.start()
+        process_list.append(p)
+
+    for p in process_list:
+        p.join()
 
 
 class TestProxyScale:
-
-    def e2e_milvus_parallel(self, process_num, host, c_name):
-        process_list = []
-        for i in range(process_num):
-            p = multiprocessing.Process(target=sc.e2e_milvus, args=(host, c_name))
-            p.start()
-            process_list.append(p)
-
-        for p in process_list:
-            p.join()
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_scale_proxy(self):
@@ -52,16 +54,14 @@ class TestProxyScale:
         }
         mic = MilvusOperator()
         mic.install(data_config)
-        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1200):
+        if mic.wait_for_healthy(release_name, constants.NAMESPACE, timeout=1800):
             host = mic.endpoint(release_name, constants.NAMESPACE).split(':')[0]
         else:
-            # log.warning(f'Deploy {release_name} timeout and ready to uninstall')
-            # mic.uninstall(release_name, namespace=constants.NAMESPACE)
-            raise MilvusException(message=f'Milvus healthy timeout 1200s')
+            raise MilvusException(message=f'Milvus healthy timeout 1800s')
 
         try:
-            c_name = cf.gen_unique_str(prefix)
-            self.e2e_milvus_parallel(5, host, c_name)
+            c_name = cf.gen_unique_str("proxy_scale")
+            e2e_milvus_parallel(5, host, c_name)
             log.info('Milvus test before expand')
 
             # expand proxy replicas from 1 to 5
@@ -69,7 +69,7 @@ class TestProxyScale:
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
-            self.e2e_milvus_parallel(5, host, c_name)
+            e2e_milvus_parallel(5, host, c_name)
             log.info('Milvus test after expand')
 
             # expand proxy replicas from 5 to 2
@@ -77,7 +77,7 @@ class TestProxyScale:
             mic.wait_for_healthy(release_name, constants.NAMESPACE)
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
-            self.e2e_milvus_parallel(2, host, c_name)
+            e2e_milvus_parallel(2, host, c_name)
             log.info('Milvus test after shrink')
 
         except Exception as e:

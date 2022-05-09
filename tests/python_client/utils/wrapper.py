@@ -5,6 +5,7 @@ from utils.util_log import test_log as log
 
 DEFAULT_FMT = '[{start_time}][{end_time}][{elapsed:0.8f}s] {collection_name} {func_name} ({arg_str}) -> {result!r}'
 
+
 def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
     def decorate(func):
         @functools.wraps(func)
@@ -31,19 +32,39 @@ def trace(fmt=DEFAULT_FMT, prefix='test', flag=True):
             else:
                 result = func(*args, **kwargs)
                 return result
+
         return inner_wrapper
+
     return decorate
 
 
+def counter(func):
+    """ count func succ rate """
+    def inner_wrapper(*args, **kwargs):
+        """ inner wrapper """
+        result, is_succ = func(*args, **kwargs)
+        inner_wrapper.total += 1
+        if is_succ:
+            inner_wrapper.succ += 1
+        else:
+            inner_wrapper.fail += 1
+        return result, is_succ
+
+    inner_wrapper.name = func.__name__
+    inner_wrapper.total = 0
+    inner_wrapper.succ = 0
+    inner_wrapper.fail = 0
+    return inner_wrapper
+
 
 if __name__ == '__main__':
-
     @trace()
     def snooze(seconds, name='snooze'):
         time.sleep(seconds)
         return name
         # print(f"name: {name}")
 
+
     for i in range(3):
         res = snooze(.123, name=i)
-        print("res:",res)
+        print("res:", res)
