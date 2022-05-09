@@ -33,9 +33,9 @@ class BoolIndexTest : public ::testing::Test {
 
     void
     TearDown() override {
-        delete[](char*)(all_true_ds->Get<const void*>(knowhere::meta::TENSOR));
-        delete[](char*) all_false_ds->Get<const void*>(knowhere::meta::TENSOR);
-        delete[](char*) half_ds->Get<const void*>(knowhere::meta::TENSOR);
+        delete[](char*)(knowhere::GetDatasetTensor(all_true_ds));
+        delete[](char*)(knowhere::GetDatasetTensor(all_false_ds));
+        delete[](char*)(knowhere::GetDatasetTensor(half_ds));
     }
 
  protected:

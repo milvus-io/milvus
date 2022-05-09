@@ -55,7 +55,7 @@ build_index(const ScalarIndexCreatorPtr& creator, const std::vector<bool>& arr) 
 
     creator->Build(ds);
 
-    delete[](char*) ds->Get<const void*>(knowhere::meta::TENSOR);
+    delete[](char*) knowhere::GetDatasetTensor(ds);
 }
 
 template <>
@@ -67,7 +67,7 @@ build_index(const ScalarIndexCreatorPtr& creator, const std::vector<std::string>
 
     creator->Build(ds);
 
-    delete[](char*) ds->Get<const void*>(knowhere::meta::TENSOR);
+    delete[](char*) knowhere::GetDatasetTensor(ds);
 }
 
 }  // namespace

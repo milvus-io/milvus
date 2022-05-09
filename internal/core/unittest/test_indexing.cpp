@@ -161,8 +161,8 @@ TEST(Indexing, Naive) {
     BitsetView view = bitmap;
     auto query_ds = knowhere::GenDataset(1, DIM, raw_data.data());
     auto final = index->Query(query_ds, conf, view);
-    auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
-    auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(final);
+    auto distances = knowhere::GetDatasetDistance(final);
     for (int i = 0; i < TOPK; ++i) {
         if (ids[i] < N / 2) {
             std::cout << "WRONG: ";
@@ -206,8 +206,8 @@ TEST(Indexing, IVFFlat) {
     auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(result);
+    auto dis = knowhere::GetDatasetDistance(result);
     for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
         std::cout << ids[i] << "->" << dis[i] << std::endl;
     }
@@ -257,8 +257,8 @@ TEST(Indexing, IVFFlatNM) {
     auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(result);
+    auto dis = knowhere::GetDatasetDistance(result);
     for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
         std::cout << ids[i] << "->" << dis[i] << std::endl;
     }

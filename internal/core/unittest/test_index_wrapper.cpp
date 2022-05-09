@@ -231,8 +231,8 @@ TEST(BinIVFFlat, Build_and_Query) {
     auto xq_dataset = knowhere::GenDataset(nq, dim, xq_data.data());
     auto result = index->Query(xq_dataset, conf, nullptr);
 
-    auto hit_ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto distances = result->Get<float*>(knowhere::meta::DISTANCE);
+    auto hit_ids = knowhere::GetDatasetIDs(result);
+    auto distances = knowhere::GetDatasetDistance(result);
 
     auto query_res = std::make_unique<milvus::indexbuilder::VecIndexCreator::QueryResult>();
     query_res->nq = nq;

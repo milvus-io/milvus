@@ -20,6 +20,7 @@
 #include "knowhere/common/Utils.h"
 #include "knowhere/index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "pb/index_cgo_msg.pb.h"
 
@@ -142,7 +143,7 @@ template <typename T>
 std::optional<T>
 VecIndexCreator::get_config_by_name(std::string_view name) {
     if (config_.contains(name)) {
-        return knowhere::GetValueFromConfig<T>(config_, std::string(name));
+        return knowhere::GetValueFromConfig<T>(config_, name);
     }
     return std::nullopt;
 }
@@ -158,7 +159,7 @@ void
 VecIndexCreator::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
     auto index_mode = get_index_mode();
-    knowhere::SetMetaRows(config_, dataset->Get<int64_t>(knowhere::meta::ROWS));
+    knowhere::SetMetaRows(config_, knowhere::GetDatasetRows(dataset));
     if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         if (!config_.contains(knowhere::indexparam::NBITS)) {
             knowhere::SetIndexParamNbits(config_, 8);
@@ -195,7 +196,7 @@ VecIndexCreator::BuildWithIds(const knowhere::DatasetPtr& dataset) {
                "[VecIndexCreator]Can't find ids field in dataset");
     auto index_type = get_index_type();
     auto index_mode = get_index_mode();
-    knowhere::SetMetaRows(config_, dataset->Get<int64_t>(knowhere::meta::ROWS));
+    knowhere::SetMetaRows(config_, knowhere::GetDatasetRows(dataset));
     if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         if (!config_.contains(knowhere::indexparam::NBITS)) {
             knowhere::SetIndexParamNbits(config_, 8);
@@ -216,9 +217,9 @@ void
 VecIndexCreator::StoreRawData(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
     if (is_in_nm_list(index_type)) {
-        auto tensor = dataset->Get<const void*>(knowhere::meta::TENSOR);
-        auto row_num = dataset->Get<int64_t>(knowhere::meta::ROWS);
-        auto dim = dataset->Get<int64_t>(knowhere::meta::DIM);
+        auto tensor = knowhere::GetDatasetTensor(dataset);
+        auto row_num = knowhere::GetDatasetRows(dataset);
+        auto dim = knowhere::GetDatasetDim(dataset);
         int64_t data_size;
         if (is_in_bin_list(index_type)) {
             data_size = dim / 8 * row_num;
@@ -326,9 +327,9 @@ VecIndexCreator::QueryImpl(const knowhere::DatasetPtr& dataset, const knowhere::
     }
 
     auto res = index_->Query(dataset, conf, nullptr);
-    auto ids = res->Get<int64_t*>(knowhere::meta::IDS);
-    auto distances = res->Get<float*>(knowhere::meta::DISTANCE);
-    auto nq = dataset->Get<int64_t>(knowhere::meta::ROWS);
+    auto ids = knowhere::GetDatasetIDs(res);
+    auto distances = knowhere::GetDatasetDistance(res);
+    auto nq = knowhere::GetDatasetRows(dataset);
     auto k = knowhere::GetMetaTopk(config_);
 
     auto query_res = std::make_unique<VecIndexCreator::QueryResult>();

@@ -159,8 +159,7 @@ TEST(CBoolIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = BuildScalarIndex(index, half_ds->Get<int64_t>(knowhere::meta::ROWS),
-                                      half_ds->Get<const void*>(knowhere::meta::TENSOR));
+            status = BuildScalarIndex(index, knowhere::GetDatasetRows(half_ds), knowhere::GetDatasetTensor(half_ds));
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -185,7 +184,7 @@ TEST(CBoolIndexTest, All) {
         }
     }
 
-    delete[](char*) half_ds->Get<const void*>(knowhere::meta::TENSOR);
+    delete[](char*) knowhere::GetDatasetTensor(half_ds);
 }
 
 // TODO: more scalar type.
@@ -262,8 +261,7 @@ TEST(CStringIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = BuildScalarIndex(index, str_ds->Get<int64_t>(knowhere::meta::ROWS),
-                                      str_ds->Get<const void*>(knowhere::meta::TENSOR));
+            status = BuildScalarIndex(index, knowhere::GetDatasetRows(str_ds), knowhere::GetDatasetTensor(str_ds));
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -288,6 +286,6 @@ TEST(CStringIndexTest, All) {
         }
     }
 
-    delete[](char*) str_ds->Get<const void*>(knowhere::meta::TENSOR);
+    delete[](char*) knowhere::GetDatasetTensor(str_ds);
 }
 #endif

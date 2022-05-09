@@ -22,8 +22,8 @@ class BoolIndex : public ScalarIndexSort<bool> {
  public:
     void
     BuildWithDataset(const DatasetPtr& dataset) override {
-        auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
-        auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
+        auto size = knowhere::GetDatasetRows(dataset);
+        auto data = knowhere::GetDatasetTensor(dataset);
         proto::schema::BoolArray arr;
         arr.ParseFromArray(data, size);
         Build(arr.data().size(), arr.data().data());

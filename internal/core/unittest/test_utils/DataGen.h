@@ -403,10 +403,12 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset, const LoadIndexInf
 inline knowhere::VecIndexPtr
 GenIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
-    auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
-                                 {knowhere::indexparam::NLIST, 1024},
-                                 {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                                 {knowhere::meta::DEVICE_ID, 0}};
+    auto conf = knowhere::Config{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::meta::DIM, dim},
+        {knowhere::indexparam::NLIST, 1024},
+        {knowhere::meta::DEVICE_ID, 0}
+    };
     auto database = knowhere::GenDataset(N, dim, vec);
     auto indexing = std::make_shared<knowhere::IVF>();
     indexing->Train(database, conf);

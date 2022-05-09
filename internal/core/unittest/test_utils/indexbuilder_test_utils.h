@@ -332,9 +332,9 @@ CheckDistances(const QueryResultPtr& result,
                const knowhere::DatasetPtr& query_dataset,
                const knowhere::MetricType& metric,
                const float threshold = 1.0e-5) {
-    auto base_vecs = base_dataset->Get<float*>(knowhere::meta::TENSOR);
-    auto query_vecs = query_dataset->Get<float*>(knowhere::meta::TENSOR);
-    auto dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
+    auto base_vecs = (float*)knowhere::GetDatasetTensor(base_dataset);
+    auto query_vecs = (float*)knowhere::GetDatasetTensor(query_dataset);
+    auto dim = knowhere::GetDatasetDim(base_dataset);
     auto nq = result->nq;
     auto k = result->topk;
     for (auto i = 0; i < nq; i++) {

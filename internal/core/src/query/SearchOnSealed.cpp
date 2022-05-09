@@ -55,8 +55,8 @@ SearchOnSealed(const Schema& schema,
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
 
-    auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
-    auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(final);
+    float* distances = (float*)knowhere::GetDatasetDistance(final);
 
     auto total_num = num_queries * topk;
 

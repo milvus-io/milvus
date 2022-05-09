@@ -98,8 +98,8 @@ TEST(Sealed, without_predicate) {
 
     auto result = indexing->Query(query_dataset, conf, nullptr);
 
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);     // for comparison
-    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);  // for comparison
+    auto ids = knowhere::GetDatasetIDs(result);     // for comparison
+    auto dis = knowhere::GetDatasetDistance(result);  // for comparison
     std::vector<int64_t> vec_ids(ids, ids + topK * num_queries);
     std::vector<float> vec_dis(dis, dis + topK * num_queries);
 
