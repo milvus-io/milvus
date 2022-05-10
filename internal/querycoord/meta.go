@@ -1121,6 +1121,7 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 	// 1. find all the search/dmChannel/deltaChannel the node has watched
 	colID2DmChannels := make(map[UniqueID][]string)
 	colID2DeltaChannels := make(map[UniqueID][]string)
+	// TODO remove colID2QueryChannel since it's not used
 	colID2QueryChannel := make(map[UniqueID]string)
 	dmChannelInfos := m.getDmChannelInfosByNodeID(nodeID)
 	// get dmChannel/search channel the node has watched
@@ -1137,9 +1138,13 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 		}
 	}
 	segmentInfos := m.getSegmentInfosByNode(nodeID)
-	// get delta/search channel the node has watched
+	colIDs := make(map[UniqueID]bool)
+	// iterate through segments to find unique collection ids
 	for _, segmentInfo := range segmentInfos {
-		collectionID := segmentInfo.CollectionID
+		colIDs[segmentInfo.CollectionID] = true
+	}
+	// get delta/search channel the node has watched
+	for collectionID := range colIDs {
 		if _, ok := colID2DeltaChannels[collectionID]; !ok {
 			deltaChanelInfos, err := m.getDeltaChannelsByCollectionID(collectionID)
 			if err != nil {

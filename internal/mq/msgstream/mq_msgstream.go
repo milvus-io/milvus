@@ -167,11 +167,13 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 			ms.consumerChannels = append(ms.consumerChannels, channel)
 			return nil
 		}
-		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		// TODO if know the former subscribe is invalid, should we use pulsarctl to accelerate recovery speed
+		err := retry.Do(context.TODO(), fn, retry.Attempts(50), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
 		}
+		log.Info("Successfully create consumer", zap.String("channel", channel), zap.String("subname", subName))
 	}
 }
 

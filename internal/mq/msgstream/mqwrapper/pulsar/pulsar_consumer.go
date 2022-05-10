@@ -115,6 +115,12 @@ func (pc *Consumer) Close() {
 		// Unsubscribe for the consumer
 		fn := func() error {
 			err := pc.c.Unsubscribe()
+			if isPulsarError(err, pulsar.SubscriptionNotFound) || isPulsarError(err, pulsar.ConsumerNotFound) {
+				log.Warn("failed to find consumer, skip unsubscribe",
+					zap.String("subscription", pc.Subscription()),
+					zap.Error(err))
+				return nil
+			}
 			if err != nil {
 				return err
 			}
