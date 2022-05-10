@@ -110,7 +110,7 @@ rootCoord:
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
   port: 19530
-
+  internalPort: 19529
   http:
     enabled: true # Whether to enable the http server
     debug_mode: false # Whether to enable http server debug mode
@@ -234,6 +234,13 @@ grpc:
     keepAliveTime:    10000
     keepAliveTimeout: 3000
 
+# Configure the proxy tls enable.
+tls:
+  serverPemPath: configs/cert/server.pem
+  serverKeyPath: configs/cert/server.key
+  caPemPath: configs/cert/ca.pem
+
+
 common:
   # Channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
@@ -277,3 +284,4 @@ common:
 
   security:
     authorizationEnabled: false
+    tlsEnabled: false
