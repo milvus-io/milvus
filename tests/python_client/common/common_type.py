@@ -186,6 +186,13 @@ class CheckTasks:
     check_merge_compact = "check_merge_compact"
 
 
+class BulkLoadStates:
+    BulkLoadPersisted = "BulkLoadPersisted"
+    BulkLoadFailed = "BulkLoadFailed"
+    BulkLoadDataQueryable = "BulkLoadDataQueryable"
+    BulkLoadDataIndexed = "BulkLoadDataIndexed"
+
+
 class CaseLabel:
     """
     Testcase Levels

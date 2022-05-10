@@ -6,9 +6,9 @@ import random
 from base.client_base import TestcaseBase
 from common import common_func as cf
 from common import common_type as ct
-from common.common_type import CaseLabel, CheckTasks
+from common.common_type import CaseLabel, CheckTasks, BulkLoadStates
 from utils.util_log import test_log as log
-# from minio import Minio
+from bulk_load_data import parpar_bulk_load_data, gen_json_file_name
 
 
 vec_field = "vectors"
@@ -17,6 +17,16 @@ float_field = "float_scalar"
 int_field = "int_scalar"
 bool_field = "bool_scalar"
 string_field = "string_scalar"
+
+
+def entity_suffix(entities):
+    if entities // 1000000 > 0:
+        suffix = f"{entities // 1000000}m"
+    elif entities // 1000 > 0:
+        suffix = f"{entities // 1000}k"
+    else:
+        suffix = f"{entities}"
+    return suffix
 
 
 def gen_file_prefix(row_based=True, auto_id=True, prefix=""):
@@ -47,8 +57,8 @@ class TestImport(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize("dim", [8, 128])     # 8, 128
-    @pytest.mark.parametrize("entities", [100, 1000])    # 100, 1000
+    @pytest.mark.parametrize("dim", [8])     # 8, 128
+    @pytest.mark.parametrize("entities", [100])    # 100, 1000
     def test_float_vector_only(self, row_based, auto_id, dim, entities):
         """
         collection: auto_id, customized_id
@@ -61,10 +71,16 @@ class TestImport(TestcaseBase):
         5. verify search successfully
         6. verify query successfully
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = [f"{prefix}_float_vectors_only_{dim}d_{entities}.json"]
+        parpar_bulk_load_data(json_file=True, row_based=row_based, rows=entities, dim=dim,
+                              auto_id=auto_id, str_pk=False, float_vector=True,
+                              multi_scalars=False, file_nums=1)
+        # TODO: file names shall be return by gen_json_files
+        file_name = gen_json_file_name(row_based=row_based, rows=entities,
+                                       dim=dim, auto_id=auto_id, str_pk=False,
+                                       float_vector=True, multi_scalars=False, file_num=0)
+        files = [file_name]
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str("bulkload")
         fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
@@ -82,9 +98,62 @@ class TestImport(TestcaseBase):
         log.info(f"bulk load state:{completed} in {tt}")
         assert completed
 
-        # TODO: assert num entities
-        log.info(f" collection entities: {self.collection_wrap.num_entities}")
-        assert self.collection_wrap.num_entities == entities
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+
+        # verify imported data is available for search
+        self.collection_wrap.load()
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
+        res, _ = self.collection_wrap.search(search_data, vec_field,
+                                             param=search_params, limit=1,
+                                             check_task=CheckTasks.check_search_results,
+                                             check_items={"nq": 1,
+                                                          "limit": 1})
+        # self.collection_wrap.query(expr=f"id in {ids}")
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("row_based", [True, False])
+    @pytest.mark.parametrize("dim", [8])  # 8
+    @pytest.mark.parametrize("entities", [100])  # 100
+    @pytest.mark.xfail(reason="milvus crash issue #16858")
+    def test_str_pk_float_vector_only(self, row_based, dim, entities):
+        """
+        collection schema: [str_pk, float_vector]
+        Steps:
+        1. create collection
+        2. import data
+        3. verify the data entities equal the import data
+        4. load the collection
+        5. verify search successfully
+        6. verify query successfully
+        """
+        auto_id = False      # no auto id for string_pk schema
+        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
+        files = [f"{prefix}_str_pk_float_vectors_only_{dim}d_{entities}.json"]
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_string_field(name=pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        # import data
+        t0 = time.time()
+        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                  row_based=row_based,
+                                                  files=files)
+        logging.info(f"bulk load task ids:{task_ids}")
+        completed, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+                                                                            timeout=30)
+        tt = time.time() - t0
+        log.info(f"bulk load state:{completed} in {tt}")
+        assert completed
+
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
 
         # verify imported data is available for search
         self.collection_wrap.load()
@@ -139,8 +208,10 @@ class TestImport(TestcaseBase):
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        success, _ = self.utility_wrap.\
+            wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+                                               target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                               timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         assert success
@@ -148,9 +219,6 @@ class TestImport(TestcaseBase):
         assert m_partition.num_entities == entities
         assert self.collection_wrap.num_entities == entities
 
-        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
-        # sleep 10s for issue #16607
-        sleep(10)
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
         search_data = cf.gen_vectors(1, dim)
@@ -196,21 +264,23 @@ class TestImport(TestcaseBase):
         # import data
         t0 = time.time()
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        completed, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids, timeout=30)
+        success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+                                    task_ids=task_ids,
+                                    target_state=BulkLoadStates.BulkLoadDataIndexed,
+                                    timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{completed} in {tt}")
-        assert completed
+        log.info(f"bulk load state:{success} in {tt}")
+        assert success
 
         # verify build index status
-        sleep(3)
+        # sleep(3)
         # TODO: verify build index after index_building_progress() refactor
-        # res, _ = self.utility_wrap.index_building_progress(c_name)
-        # exp_res = {'total_rows': entities, 'indexed_rows': entities}
-        # assert res == exp_res
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        exp_res = {'total_rows': entities, 'indexed_rows': entities}
+        assert res == exp_res
 
         # TODO: verify num entities
         assert self.collection_wrap.num_entities == entities
@@ -230,7 +300,7 @@ class TestImport(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize("fields_num_in_file", ["more", "equal", "less"])   # "equal", "more", "less"
+    @pytest.mark.parametrize("fields_num_in_file", ["equal", "more", "less"])   # "equal", "more", "less"
     @pytest.mark.parametrize("dim", [1024])    # 1024
     @pytest.mark.parametrize("entities", [5000])    # 5000
     def test_float_vector_multi_scalars(self, row_based, auto_id, fields_num_in_file, dim, entities):
@@ -256,11 +326,9 @@ class TestImport(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name="int_scalar"),
-                  # TODO: string is not supported, exception when collection.load
-                  # cf.gen_string_field(name="string_scalar")
-                  cf.gen_bool_field(name="bool_scalar")
-                  ]
+                  cf.gen_int32_field(name=int_field),
+                  cf.gen_string_field(name=string_field),
+                  cf.gen_bool_field(name=bool_field)]
         if fields_num_in_file == "more":
             fields.pop()
         elif fields_num_in_file == "less":
@@ -272,12 +340,13 @@ class TestImport(TestcaseBase):
         # import data
         t0 = time.time()
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                          timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+                                                task_ids=task_ids,
+                                                target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                                timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         if fields_num_in_file == "less":
@@ -332,11 +401,114 @@ class TestImport(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
-    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("fields_num_in_file", ["equal"])  # "equal", "more", "less"
+    @pytest.mark.parametrize("dim", [4])  # 1024
+    @pytest.mark.parametrize("entities", [10])  # 5000
+    @pytest.mark.xfail(reason="milvus crash issue #16858")
+    def test_string_pk_float_vector_multi_scalars(self, row_based, fields_num_in_file, dim, entities):
+        """
+        collection schema: [str_pk, float_vector,
+                        float_scalar, int_scalar, string_scalar, bool_scalar]
+        Steps:
+        1. create collection with string primary key
+        2. load collection
+        3. import data
+        4. verify the data entities
+        5. verify index status
+        6. verify search and query
+        6. build index
+        7. release collection and reload
+        7. verify search successfully
+        6. verify query successfully
+        """
+        prefix = gen_file_prefix(row_based=row_based, auto_id=False)
+        files = [f"{prefix}_str_pk_float_vectors_multi_scalars_{dim}d_{entities}.json"]
+        additional_field = "int_scalar_add"
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_string_field(name=pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=vec_field, dim=dim),
+                  cf.gen_int32_field(name=int_field),
+                  cf.gen_string_field(name=string_field),
+                  cf.gen_bool_field(name=bool_field)]
+        if fields_num_in_file == "more":
+            fields.pop()
+        elif fields_num_in_file == "less":
+            fields.append(cf.gen_int32_field(name=additional_field))
+        schema = cf.gen_collection_schema(fields=fields, auto_id=False)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        # load collection
+        self.collection_wrap.load()
+        # import data
+        t0 = time.time()
+        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                  row_based=row_based,
+                                                  files=files)
+        logging.info(f"bulk load task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+                                                task_ids=task_ids,
+                                                target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                                timeout=30)
+        tt = time.time() - t0
+        log.info(f"bulk load state:{success} in {tt}")
+        if fields_num_in_file == "less":
+            assert not success  # TODO: check error msg
+            if row_based:
+                failed_reason = f"JSON row validator: field {additional_field} missed at the row 0"
+            else:
+                failed_reason = "is not equal to other fields"
+            for state in states.values():
+                assert state.state_name == "BulkLoadFailed"
+                assert failed_reason in state.infos.get("failed_reason", "")
+        else:
+            assert success
+
+            # TODO: assert num entities
+            log.info(f" collection entities: {self.collection_wrap.num_entities}")
+            assert self.collection_wrap.num_entities == entities
+
+            # verify no index
+            res, _ = self.collection_wrap.has_index()
+            assert res is False
+            # verify search and query
+            search_data = cf.gen_vectors(1, dim)
+            search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
+            res, _ = self.collection_wrap.search(search_data, vec_field,
+                                                 param=search_params, limit=1,
+                                                 check_task=CheckTasks.check_search_results,
+                                                 check_items={"nq": 1,
+                                                              "limit": 1})
+
+            # self.collection_wrap.query(expr=f"id in {ids}")
+
+            # build index
+            index_params = {"index_type": "HNSW", "params": {"M": 8, "efConstruction": 100}, "metric_type": "IP"}
+            self.collection_wrap.create_index(field_name=vec_field, index_params=index_params)
+
+            # release collection and reload
+            self.collection_wrap.release()
+            self.collection_wrap.load()
+
+            # verify index built
+            res, _ = self.collection_wrap.has_index()
+            assert res is True
+
+            # search and query
+            search_params = {"params": {"ef": 64}, "metric_type": "IP"}
+            res, _ = self.collection_wrap.search(search_data, vec_field,
+                                                 param=search_params, limit=1,
+                                                 check_task=CheckTasks.check_search_results,
+                                                 check_items={"nq": 1,
+                                                              "limit": 1})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("row_based", [True])      # True, False
+    @pytest.mark.parametrize("auto_id", [True])        # True, False
     @pytest.mark.parametrize("dim", [16])    # 16
     @pytest.mark.parametrize("entities", [3000])    # 3000
     @pytest.mark.parametrize("file_nums", [10])    # 10, max task nums 32? need improve
-    @pytest.mark.parametrize("multi_folder", [True, False])
+    @pytest.mark.parametrize("multi_folder", [False])    # True, False
+    @pytest.mark.xfail(reason="BulkloadIndexed cannot be reached for issue ##16848")
     def test_float_vector_from_multi_files(self, row_based, auto_id, dim, entities, file_nums, multi_folder):
         """
         collection: auto_id
@@ -364,10 +536,9 @@ class TestImport(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name="int_scalar"),
-                  # TODO: string is not supported, exception when collection.load
-                  # cf.gen_string_field(name="string_scalar")
-                  cf.gen_bool_field(name="bool_scalar")
+                  cf.gen_int32_field(name=int_field),
+                  cf.gen_string_field(name=string_field),
+                  cf.gen_bool_field(name=bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -383,13 +554,15 @@ class TestImport(TestcaseBase):
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                          timeout=300)
+        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+                                    task_ids=task_ids,
+                                    target_state=BulkLoadStates.BulkLoadDataIndexed,
+                                    timeout=300)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         if not row_based:
             assert not success
-            failed_reason = "is duplicated"  #  "the field xxx is duplicated"
+            failed_reason = "is duplicated"  # "the field xxx is duplicated"
             for state in states.values():
                 assert state.state_name == "BulkLoadFailed"
                 assert failed_reason in state.infos.get("failed_reason", "")
@@ -399,10 +572,9 @@ class TestImport(TestcaseBase):
             assert self.collection_wrap.num_entities == entities * file_nums
 
             # verify index built
-            sleep(10)    # TODO: need improve to smart wait for building completed
-            # res, _ = self.utility_wrap.index_building_progress(c_name)
-            # exp_res = {'total_rows': entities * file_nums, 'indexed_rows': entities * file_nums}
-            # assert res == exp_res
+            res, _ = self.utility_wrap.index_building_progress(c_name)
+            exp_res = {'total_rows': entities * file_nums, 'indexed_rows': entities * file_nums}
+            assert res == exp_res
 
             # verify search and query
             search_data = cf.gen_vectors(1, dim)
@@ -421,6 +593,7 @@ class TestImport(TestcaseBase):
     @pytest.mark.parametrize("multi_fields", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
+    # TODO: string data shall be re-generated
     def test_float_vector_from_npy_file(self, row_based, auto_id, multi_fields, dim, entities):
         """
         collection schema 1: [pk, float_vector]
@@ -443,10 +616,9 @@ class TestImport(TestcaseBase):
         else:
             fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
                       cf.gen_float_vec_field(name=vec_field, dim=dim),
-                      cf.gen_int32_field(name="int_scalar"),
-                      # TODO: string is not supported, exception when collection.load
-                      # cf.gen_string_field(name="string_scalar")
-                      cf.gen_bool_field(name="bool_scalar")
+                      cf.gen_int32_field(name=int_field),
+                      cf.gen_string_field(name=string_field),
+                      cf.gen_bool_field(name=bool_field)
                       ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -524,8 +696,7 @@ class TestImport(TestcaseBase):
         fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=vec_field, dim=dim),
                   cf.gen_int32_field(name=int_field),
-                  # TODO: string is not supported, exception when collection.load
-                  # cf.gen_string_field(name="string_scalar")
+                  cf.gen_string_field(name=string_field),
                   cf.gen_bool_field(name=bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
@@ -573,8 +744,7 @@ class TestImport(TestcaseBase):
                   cf.gen_float_vec_field(name=vec_field, dim=dim),
                   cf.gen_int32_field(name=int_field),
                   cf.gen_float_field(name=float_field),
-                  # TODO: string is not supported, exception when collection.load
-                  # cf.gen_string_field(name=string_field)
+                  cf.gen_string_field(name=string_field),
                   cf.gen_bool_field(name=bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
@@ -1203,10 +1373,9 @@ class TestImportInvalidParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name="int_scalar"),
-                  # TODO: string is not supported, exception when collection.load
-                  # cf.gen_string_field(name="string_scalar")
-                  cf.gen_bool_field(name="bool_scalar")
+                  cf.gen_int32_field(name=int_field),
+                  cf.gen_string_field(name=string_field),
+                  cf.gen_bool_field(name=bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -1285,14 +1454,11 @@ class TestImportInvalidParams(TestcaseBase):
     def test_wrong_dim_in_numpy(self, auto_id, dim, entities):
         """
         collection schema 1: [pk, float_vector]
-        data file: .npy file
+        data file: .npy file with wrong dim
         Steps:
         1. create collection
         2. import data
-        3. if row_based: verify import failed
-        4. if column_based:
-          4.1 verify the data entities equal the import data
-          4.2 verify search and query successfully
+        3. verify failed with errors
         """
         vec_field = f"vectors_{dim}d_{entities}"
         self._connect()
@@ -1392,8 +1558,7 @@ class TestImportInvalidParams(TestcaseBase):
         fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=vec_field, dim=dim),
                   cf.gen_int32_field(name=int_field),
-                  # TODO: string is not supported, exception when collection.load
-                  # cf.gen_string_field(name="string_scalar")
+                  cf.gen_string_field(name=string_field),
                   cf.gen_bool_field(name=bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
@@ -1438,8 +1603,7 @@ class TestImportInvalidParams(TestcaseBase):
                   cf.gen_float_vec_field(name=vec_field, dim=dim),
                   cf.gen_int32_field(name=int_field),
                   cf.gen_float_field(name=float_field),
-                  # TODO: string is not supported, exception when collection.load
-                  # cf.gen_string_field(name=string_field)
+                  cf.gen_string_field(name=string_field),
                   cf.gen_bool_field(name=bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
@@ -1476,18 +1640,80 @@ class TestImportInvalidParams(TestcaseBase):
     # TODO: string data on float field
 
 
-# class TestImportAdvanced(TestcaseBase):
-#
-#     def setup_class(self):
-#         log.info("[setup_import] Start setup class...")
-#         log.info("copy data files to minio")
-#
-#     def teardown_class(self):
-#         log.info("[teardown_import] Start teardown class...")
-#         log.info("clean up data files in minio")
-#
-#     """Validate data consistency and availability during import"""
-#     @pytest.mark.tags(CaseLabel.L3)
-#     def test_default(self):
-#         pass
+class TestImportAdvanced(TestcaseBase):
+
+    def setup_class(self):
+        log.info("[setup_import] Start setup class...")
+        log.info("copy data files to minio")
+
+    def teardown_class(self):
+        log.info("[teardown_import] Start teardown class...")
+        log.info("clean up data files in minio")
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [50000])  # 1m*3; 50k*20; 2m*3, 500k*4
+    @pytest.mark.xfail(reason="search fail for issue #16784")
+    def test_float_vector_from_multi_npy_files(self, auto_id, dim, entities):
+        """
+        collection schema 1: [pk, float_vector]
+        data file: .npy files
+        Steps:
+        1. create collection
+        2. import data
+        3. if column_based:
+          4.1 verify the data entities equal the import data
+          4.2 verify search and query successfully
+        """
+        suffix = entity_suffix(entities)
+        vec_field = f"vectors_{dim}d_{suffix}"
+        self._connect()
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        # import data
+        file_nums = 3
+        for i in range(file_nums):
+            files = [f"{dim}d_{suffix}_{i}/{vec_field}.npy"]  # npy file name shall be the vector field name
+            if not auto_id:
+                files.append(f"{dim}d_{suffix}_{i}/{pk_field}.npy")
+            t0 = time.time()
+            task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                      row_based=False,
+                                                      files=files)
+            logging.info(f"bulk load task ids:{task_ids}")
+            success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+                                                                                   timeout=180)
+            tt = time.time() - t0
+            log.info(f"auto_id:{auto_id}, bulk load{suffix}-{i} state:{success} in {tt}")
+            assert success
+
+        # TODO: assert num entities
+        t0 = time.time()
+        num_entities = self.collection_wrap.num_entities
+        tt = time.time() - t0
+        log.info(f" collection entities: {num_entities} in {tt}")
+        assert num_entities == entities * file_nums
+
+        # verify imported data is available for search
+        self.collection_wrap.load()
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
+        res, _ = self.collection_wrap.search(search_data, vec_field,
+                                             param=search_params, limit=1,
+                                             check_task=CheckTasks.check_search_results,
+                                             check_items={"nq": 1,
+                                                          "limit": 1})
+        # self.collection_wrap.query(expr=f"id in {ids}")
+
+    """Validate data consistency and availability during import"""
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_default(self):
+        pass
+
 

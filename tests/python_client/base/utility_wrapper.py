@@ -6,6 +6,7 @@ import sys
 sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
+from common.common_type import BulkLoadStates
 
 
 TIMEOUT = 20
@@ -16,13 +17,11 @@ class ApiUtilityWrapper:
 
     ut = utility
 
-    def bulk_load(self, collection_name,  partition_name="",
-                  channels="", row_based=True, files="", timeout=None,
+    def bulk_load(self, collection_name,  partition_name="", row_based=True, files="", timeout=None,
                   using="default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.ut.bulk_load, collection_name, partition_name,
-                                    channels, row_based,files, timeout,
-                                    using], **kwargs)
+        res, is_succ = api_request([self.ut.bulk_load, collection_name, partition_name, row_based,
+                                    files, timeout, using], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        collection_name=collection_name, using=using).run()
         return res, check_result
@@ -34,7 +33,8 @@ class ApiUtilityWrapper:
                                        task_id=task_id, using=using).run()
         return res, check_result
 
-    def wait_for_bulk_load_tasks_completed(self, task_ids, timeout=None, using="default", **kwargs):
+    def wait_for_bulk_load_tasks_completed(self, task_ids, target_state=BulkLoadStates.BulkLoadPersisted,
+                                           timeout=None, using="default", **kwargs):
         start = time.time()
         successes = {}
         fails = {}
@@ -42,17 +42,17 @@ class ApiUtilityWrapper:
             task_timeout = timeout / len(task_ids)
         else:
             task_timeout = TIMEOUT
-        while True and (len(successes) + len(fails)) < len(task_ids):
+        while (len(successes) + len(fails)) < len(task_ids):
             in_progress = {}
-            time.sleep(0.5)
+            time.sleep(0.1)
             for task_id in task_ids:
                 if successes.get(task_id, None) is not None or fails.get(task_id, None) is not None:
                     continue
                 else:
                     state, _ = self.get_bulk_load_state(task_id, task_timeout, using, **kwargs)
-                    if state.state_name == "BulkLoadPersisted":     # "BulkLoadCompleted"
+                    if state.state_name == target_state:
                         successes[task_id] = state
-                    elif state.state_name == "BulkLoadFailed":
+                    elif state.state_name == BulkLoadStates.BulkLoadFailed:
                         fails[task_id] = state
                     else:
                         in_progress[task_id] = state
