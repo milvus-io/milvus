@@ -555,3 +555,7 @@ func ValidatePassword(password string) error {
 	}
 	return nil
 }
+
+func ReplaceID2Name(oldStr string, id int64, name string) string {
+	return strings.ReplaceAll(oldStr, strconv.FormatInt(id, 10), name)
+}

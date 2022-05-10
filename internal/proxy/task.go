@@ -1311,7 +1311,12 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(resp.Status.Reason)
+			// update collectionID to collection name, and return new error info to sdk
+			newErrorReason := resp.Status.Reason
+			for _, collectionID := range collectionIDs {
+				newErrorReason = ReplaceID2Name(newErrorReason, collectionID, IDs2Names[collectionID])
+			}
+			return errors.New(newErrorReason)
 		}
 
 		sct.result = &milvuspb.ShowCollectionsResponse{

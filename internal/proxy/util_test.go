@@ -610,3 +610,9 @@ func TestValidatePassword(t *testing.T) {
 	res = ValidatePassword("aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffgggggggggghhhhhhhhhhiiiiiiiiiijjjjjjjjjjkkkkkkkkkkllllllllllmmmmmmmmmnnnnnnnnnnnooooooooooppppppppppqqqqqqqqqqrrrrrrrrrrsssssssssstttttttttttuuuuuuuuuuuvvvvvvvvvvwwwwwwwwwwwxxxxxxxxxxyyyyyyyyyzzzzzzzzzzz")
 	assert.Error(t, res)
 }
+
+func TestReplaceID2Name(t *testing.T) {
+	srcStr := "collection 432682805904801793 has not been loaded to memory or load failed"
+	dstStr := "collection default_collection has not been loaded to memory or load failed"
+	assert.Equal(t, dstStr, ReplaceID2Name(srcStr, int64(432682805904801793), "default_collection"))
+}
