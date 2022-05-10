@@ -274,7 +274,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
 
 def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int_values = pd.Series(data=[i for i in range(start, start + nb)])
-    float_values = pd.Series(data=[float(i) for i in range(start, start + nb)], dtype="float32")
+    float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     binary_raw_values, binary_vec_values = gen_binary_vectors(nb, dim)
     df = pd.DataFrame({

@@ -121,7 +121,7 @@ class TestcaseBase(Base):
 
     def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
-                                auto_id=False, dim=ct.default_dim, is_index=False):
+                                auto_id=False, dim=ct.default_dim, is_index=False, primary_field=ct.default_int64_field_name):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -139,11 +139,11 @@ class TestcaseBase(Base):
         insert_ids = []
         time_stamp = 0
         # 1 create collection
-        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim)
+        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field)
         if is_binary:
-            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
+            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field)
         if is_all_data_type:
-            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim)
+            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim, primary_field=primary_field)
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name,
                                                  schema=default_schema)
