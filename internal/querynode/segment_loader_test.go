@@ -427,6 +427,9 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
+	deltaLogs, err := saveDeltaLog(defaultCollectionID, defaultPartitionID, defaultSegmentID)
+	assert.NoError(t, err)
+
 	t.Run("test load growing and sealed segments", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
@@ -448,6 +451,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 					PartitionID:  defaultPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					Deltalogs:    deltaLogs,
 				},
 			},
 		}
@@ -483,6 +487,30 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, segment1.getRowCount(), segment2.getRowCount())
+
+		// Loading growing segments with delta log, expect to fail (this is a bug).
+		// See: https://github.com/milvus-io/milvus/issues/16821
+		segmentID3 := UniqueID(102)
+		req3 := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			DstNodeID: 0,
+			Schema:    schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    segmentID3,
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+					BinlogPaths:  fieldBinlog,
+					Deltalogs:    deltaLogs,
+				},
+			},
+		}
+
+		err = loader.loadSegment(req3, segmentTypeGrowing)
+		assert.Error(t, err)
 	})
 }
 

@@ -575,13 +575,13 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
-		for _, log := range deltaLog.GetBinlogs() {
-			value, err := loader.cm.Read(log.GetLogPath())
+		for _, bLog := range deltaLog.GetBinlogs() {
+			value, err := loader.cm.Read(bLog.GetLogPath())
 			if err != nil {
 				return err
 			}
 			blob := &storage.Blob{
-				Key:   log.GetLogPath(),
+				Key:   bLog.GetLogPath(),
 				Value: value,
 			}
 			blobs = append(blobs, blob)

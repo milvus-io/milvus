@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -1028,6 +1029,51 @@ func saveBinLog(ctx context.Context,
 	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
 	err = cm.MultiWrite(kvs)
 	return fieldBinlog, err
+}
+
+// saveDeltaLog saves delta logs into MinIO for testing purpose.
+func saveDeltaLog(collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID) ([]*datapb.FieldBinlog, error) {
+
+	binlogWriter := storage.NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
+	eventWriter, _ := binlogWriter.NextDeleteEventWriter()
+	dData := &storage.DeleteData{
+		Pks:      []storage.PrimaryKey{&storage.Int64PrimaryKey{Value: 1}, &storage.Int64PrimaryKey{Value: 2}},
+		Tss:      []Timestamp{100, 200},
+		RowCount: 2,
+	}
+
+	sizeTotal := 0
+	for i := int64(0); i < dData.RowCount; i++ {
+		int64PkValue := dData.Pks[i].(*storage.Int64PrimaryKey).Value
+		ts := dData.Tss[i]
+		eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts))
+		sizeTotal += binary.Size(int64PkValue)
+		sizeTotal += binary.Size(ts)
+	}
+	eventWriter.SetEventTimestamp(100, 200)
+	binlogWriter.SetEventTimeStamp(100, 200)
+	binlogWriter.AddExtra("original_size", fmt.Sprintf("%v", sizeTotal))
+
+	binlogWriter.Finish()
+	buffer, _ := binlogWriter.GetBuffer()
+	blob := &storage.Blob{Key: "deltaLogPath1", Value: buffer}
+
+	kvs := make(map[string][]byte, 1)
+
+	// write insert binlog
+	fieldBinlog := make([]*datapb.FieldBinlog, 0)
+	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", 999))
+	key := JoinIDPath(collectionID, partitionID, segmentID, 999)
+	kvs[key] = blob.Value[:]
+	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
+		FieldID: 999,
+		Binlogs: []*datapb.Binlog{{LogPath: key}},
+	})
+	log.Debug("[query node unittest] save delta log file to MinIO/S3")
+
+	return fieldBinlog, storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage)).MultiWrite(kvs)
 }
 
 func genSimpleTimestampFieldData(numRows int) []Timestamp {
