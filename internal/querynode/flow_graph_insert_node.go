@@ -19,7 +19,6 @@ package querynode
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -369,8 +368,8 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 // getPrimaryKeys would get primary keys by insert messages
 func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) ([]primaryKey, error) {
 	if err := msg.CheckAligned(); err != nil {
-		log.Warn("misaligned messages detected")
-		return nil, errors.New("misaligned messages detected")
+		log.Warn("misaligned messages detected", zap.Error(err))
+		return nil, err
 	}
 	collectionID := msg.GetCollectionID()
 
