@@ -1200,6 +1200,16 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 		shardLeaderLists = append(shardLeaderLists, shard)
 	}
 
+	// all replicas are not available
+	if len(shardLeaderLists) == 0 {
+		return &querypb.GetShardLeadersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "no replica available",
+			},
+		}, nil
+	}
+
 	log.Info("GetShardLeaders finished",
 		zap.String("role", typeutil.QueryCoordRole),
 		zap.Int64("collectionID", req.CollectionID),

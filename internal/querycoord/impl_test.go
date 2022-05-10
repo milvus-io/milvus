@@ -1683,6 +1683,14 @@ func TestGetShardLeaders(t *testing.T) {
 	}
 	assert.Equal(t, 0, totalLeaders%3)
 
+	// mock replica all down, without triggering load balance
+	queryCoord.cluster.stopNode(node1.queryNodeID)
+	queryCoord.cluster.stopNode(node2.queryNodeID)
+	queryCoord.cluster.stopNode(node3.queryNodeID)
+	resp, err = queryCoord.GetShardLeaders(ctx, getShardLeadersReq)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+
 	// TODO(yah01): Disable the unit test case for now,
 	// restore it after the rebalance between replicas feature is implemented
 
