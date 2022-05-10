@@ -9,8 +9,8 @@ import (
 
 // workload setting for benchmark
 const (
-	numElements = 1000
-	vectorDim   = 8
+	numElements = 10000
+	vectorDim   = 512
 )
 
 func BenchmarkPayloadReader_Bool(b *testing.B) {
