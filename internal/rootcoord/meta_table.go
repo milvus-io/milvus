@@ -1036,13 +1036,77 @@ func (mt *MetaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema
 	return exist
 }
 
+func (mt *MetaTable) unlockGetCollectionInfo(collName string) (pb.CollectionInfo, error) {
+	collID, ok := mt.collName2ID[collName]
+	if !ok {
+		collID, ok = mt.collAlias2ID[collName]
+		if !ok {
+			return pb.CollectionInfo{}, fmt.Errorf("collection not found: %s", collName)
+		}
+	}
+	collMeta, ok := mt.collID2Meta[collID]
+	if !ok {
+		return pb.CollectionInfo{}, fmt.Errorf("collection not found: %s", collName)
+	}
+	return collMeta, nil
+}
+
+func (mt *MetaTable) checkFieldCanBeIndexed(collMeta pb.CollectionInfo, fieldSchema schemapb.FieldSchema, idxInfo *pb.IndexInfo) error {
+	for _, f := range collMeta.FieldIndexes {
+		if f.GetFiledID() == fieldSchema.GetFieldID() {
+			if info, ok := mt.indexID2Meta[f.GetIndexID()]; ok {
+				if idxInfo.GetIndexName() != info.GetIndexName() {
+					return fmt.Errorf(
+						"creating multiple indexes on same field is not supported, "+
+							"collection: %s, field: %s, index name: %s, new index name: %s",
+						collMeta.GetSchema().GetName(), fieldSchema.GetName(),
+						info.GetIndexName(), idxInfo.GetIndexName())
+				}
+			} else {
+				// TODO: unexpected: what if index id not exist? Meta incomplete.
+				log.Warn("index meta was incomplete, index id missing in indexID2Meta",
+					zap.String("collection", collMeta.GetSchema().GetName()),
+					zap.String("field", fieldSchema.GetName()),
+					zap.Int64("collection id", collMeta.GetID()),
+					zap.Int64("field id", fieldSchema.GetFieldID()),
+					zap.Int64("index id", f.GetIndexID()))
+			}
+		}
+	}
+	return nil
+}
+
+func (mt *MetaTable) checkFieldIndexDuplicate(collMeta pb.CollectionInfo, fieldSchema schemapb.FieldSchema, idxInfo *pb.IndexInfo) (duplicate bool, err error) {
+	for _, f := range collMeta.FieldIndexes {
+		if info, ok := mt.indexID2Meta[f.IndexID]; ok {
+			if info.IndexName == idxInfo.IndexName {
+				// the index name must be different for different indexes
+				if f.FiledID != fieldSchema.FieldID || !EqualKeyPairArray(info.IndexParams, idxInfo.IndexParams) {
+					return false, fmt.Errorf("index already exists, collection: %s, field: %s, index: %s", collMeta.GetSchema().GetName(), fieldSchema.GetName(), idxInfo.GetIndexName())
+				}
+
+				// same index name, index params, and fieldId
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // GetNotIndexedSegments return segment ids which have no index
 func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *pb.IndexInfo, segIDs []typeutil.UniqueID) ([]typeutil.UniqueID, schemapb.FieldSchema, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	collMeta, err := mt.unlockGetCollectionInfo(collName)
+	if err != nil {
+		// error here if collection not found.
+		return nil, schemapb.FieldSchema{}, err
+	}
+
 	fieldSchema, err := mt.unlockGetFieldSchema(collName, fieldName)
 	if err != nil {
+		// error here if field not found.
 		return nil, fieldSchema, err
 	}
 
@@ -1059,31 +1123,15 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 	if idxInfo.IndexParams == nil {
 		return nil, schemapb.FieldSchema{}, fmt.Errorf("index param is nil")
 	}
-	collID, ok := mt.collName2ID[collName]
-	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
-		}
-	}
-	collMeta, ok := mt.collID2Meta[collID]
-	if !ok {
-		return nil, schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
+
+	if err := mt.checkFieldCanBeIndexed(collMeta, fieldSchema, idxInfo); err != nil {
+		return nil, schemapb.FieldSchema{}, err
 	}
 
-	dupIdx := false
-	for _, f := range collMeta.FieldIndexes {
-		if info, ok := mt.indexID2Meta[f.IndexID]; ok {
-			if info.IndexName == idxInfo.IndexName {
-				// the index name must be different for different indexes
-				if !EqualKeyPairArray(info.IndexParams, idxInfo.IndexParams) || f.FiledID != fieldSchema.FieldID {
-					return nil, schemapb.FieldSchema{}, fmt.Errorf("index name(%s) has been exist in collectio(%s), field(%s)", info.IndexName, collName, fieldName)
-				}
-
-				// same index name, index params, and fieldId
-				dupIdx = true
-			}
-		}
+	dupIdx, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
+	if err != nil {
+		// error here if index already exists.
+		return nil, fieldSchema, err
 	}
 
 	// if no same index exist, save new index info to etcd
@@ -1101,7 +1149,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 			return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal collMeta fail key:%s, err:%w", k1, err)
 		}
 
-		k2 := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collID, idx.IndexID)
+		k2 := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, idx.IndexID)
 		//k2 := path.Join(IndexMetaPrefix, strconv.FormatInt(idx.IndexID, 10))
 		v2, err := proto.Marshal(idxInfo)
 		if err != nil {
