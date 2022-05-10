@@ -11,8 +11,8 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 #-------------------------------------------------------------------------------
 
-set( KNOWHERE_VERSION v1.1.5 )
-set( KNOWHERE_SOURCE_MD5 "5baa7ecaea0e9e5c9f3f440cf8757d3c")
+set( KNOWHERE_VERSION v1.1.6 )
+set( KNOWHERE_SOURCE_MD5 "14dca47b9f4820ca10894bbc755b3a53")
 
 if ( DEFINED ENV{MILVUS_KNOWHERE_URL} )
     set( KNOWHERE_SOURCE_URL "$ENV{MILVUS_KNOWHERE_URL}" )
@@ -32,10 +32,10 @@ macro(build_knowhere)
             )
 
     externalproject_add(knowhere_ep
-            GIT_REPOSITORY  "https://github.com/milvus-io/knowhere.git"
-            GIT_TAG         main
-            #URL             ${KNOWHERE_SOURCE_URL}
-            #URL_MD5         ${KNOWHERE_SOURCE_MD5}
+            #GIT_REPOSITORY  "https://github.com/milvus-io/knowhere.git"
+            #GIT_TAG         main
+            URL             ${KNOWHERE_SOURCE_URL}
+            URL_MD5         ${KNOWHERE_SOURCE_MD5}
             CMAKE_ARGS      ${KNOWHERE_CMAKE_ARGS}
             BUILD_COMMAND   ${MAKE} ${MAKE_BUILD_ARGS}
             PREFIX          ${CMAKE_BINARY_DIR}/3rdparty_download/knowhere-subbuild
