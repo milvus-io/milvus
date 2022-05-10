@@ -723,6 +723,9 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 }
 
 func (r *releaseCollectionTask) releaseReplica(replica ReplicaInterface, replicaType ReplicaType) error {
+	// block search/query operation
+	replica.queryLock()
+
 	collection, err := replica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		return err
@@ -730,6 +733,7 @@ func (r *releaseCollectionTask) releaseReplica(replica ReplicaInterface, replica
 	// set release time
 	log.Info("set release time", zap.Any("collectionID", r.req.CollectionID))
 	collection.setReleaseTime(r.req.Base.Timestamp)
+	replica.queryUnlock()
 
 	// remove all flow graphs of the target collection
 	var channels []Channel
