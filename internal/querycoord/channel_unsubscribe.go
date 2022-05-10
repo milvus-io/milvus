@@ -21,21 +21,19 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+
+	"go.uber.org/zap"
 )
 
 const (
-	unsubscribeChannelInfoPrefix    = "queryCoord-unsubscribeChannelInfo"
-	unsubscribeChannelCheckInterval = time.Second
+	unsubscribeChannelInfoPrefix = "queryCoord-unsubscribeChannelInfo"
 )
 
 type channelUnsubscribeHandler struct {
@@ -133,11 +131,7 @@ func (csh *channelUnsubscribeHandler) handleChannelUnsubscribeLoop() {
 			for _, collectionChannels := range channelInfo.CollectionChannels {
 				collectionID := collectionChannels.CollectionID
 				subName := funcutil.GenChannelSubName(Params.MsgChannelCfg.QueryNodeSubName, collectionID, nodeID)
-				err := unsubscribeChannels(csh.ctx, csh.factory, subName, collectionChannels.Channels)
-				if err != nil {
-					log.Debug("unsubscribe channels failed", zap.Int64("nodeID", nodeID))
-					panic(err)
-				}
+				unsubscribeChannels(csh.ctx, csh.factory, subName, collectionChannels.Channels)
 			}
 
 			channelInfoKey := fmt.Sprintf("%s/%d", unsubscribeChannelInfoPrefix, nodeID)
@@ -162,13 +156,13 @@ func (csh *channelUnsubscribeHandler) close() {
 }
 
 // unsubscribeChannels create consumer fist, and unsubscribe channel through msgStream.close()
-func unsubscribeChannels(ctx context.Context, factory msgstream.Factory, subName string, channels []string) error {
+func unsubscribeChannels(ctx context.Context, factory msgstream.Factory, subName string, channels []string) {
+	log.Info("unsubscribe channel", zap.String("subname", subName), zap.Any("channels", channels))
 	msgStream, err := factory.NewMsgStream(ctx)
 	if err != nil {
-		return err
+		log.Error("unsubscribe channels failed", zap.String("subname", subName), zap.Any("channels", channels))
+		panic(err)
 	}
-
 	msgStream.AsConsumer(channels, subName)
 	msgStream.Close()
-	return nil
 }

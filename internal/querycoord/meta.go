@@ -965,9 +965,13 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 		}
 	}
 	segmentInfos := m.getSegmentInfosByNode(nodeID)
-	// get delta/search channel the node has watched
+	colIDs := make(map[UniqueID]bool)
+	// iterate through segments to find unique ids
 	for _, segmentInfo := range segmentInfos {
-		collectionID := segmentInfo.CollectionID
+		colIDs[segmentInfo.CollectionID] = true
+	}
+	// get delta/search channel the node has watched
+	for collectionID := range colIDs {
 		if _, ok := colID2DeltaChannels[collectionID]; !ok {
 			deltaChanelInfos, err := m.getDeltaChannelsByCollectionID(collectionID)
 			if err != nil {
@@ -995,6 +999,7 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 	for collectionID, channels := range colID2DeltaChannels {
 		colID2Channels[collectionID] = append(colID2Channels[collectionID], channels...)
 	}
+	// TODO, something is wrong here, because it's possible that the server loaded query channel but with not segment or dml chanel
 	for collectionID, channel := range colID2QueryChannel {
 		colID2Channels[collectionID] = append(colID2Channels[collectionID], channel)
 	}
@@ -1010,7 +1015,6 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 				Channels:     channels,
 			})
 	}
-
 	return unsubscribeChannelInfo
 }
 
