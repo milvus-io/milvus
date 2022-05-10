@@ -2235,12 +2235,12 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 	// then the queryCoord will panic, and the nodeInfo should not be removed immediately
 	// after queryCoord recovery, the balanceTask will redo
 	if lbt.triggerCondition == querypb.TriggerCondition_NodeDown && lbt.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
-		for _, id := range lbt.SourceNodeIDs {
-			err := lbt.cluster.removeNodeInfo(id)
+		for _, offlineNodeID := range lbt.SourceNodeIDs {
+			err := lbt.cluster.removeNodeInfo(offlineNodeID)
 			if err != nil {
 				//TODO:: clear node info after removeNodeInfo failed
 				log.Warn("loadBalanceTask: occur error when removing node info from cluster",
-					zap.Int64("nodeID", id),
+					zap.Int64("nodeID", offlineNodeID),
 					zap.Error(err))
 				continue
 			}
@@ -2263,21 +2263,27 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 				offlineNodes.Insert(nodeID)
 			}
 			replicas := make(map[UniqueID]*milvuspb.ReplicaInfo)
+			segments := make(map[UniqueID]*querypb.SegmentInfo)
 
 			for _, id := range lbt.SourceNodeIDs {
-				replica, err := lbt.getReplica(id, lbt.CollectionID)
-				if err != nil {
-					log.Warn("failed to get replica for removing offline querynode from it",
-						zap.Int64("querynodeID", id),
-						zap.Int64("collectionID", lbt.CollectionID),
-						zap.Error(err))
-					continue
+				for _, segment := range lbt.meta.getSegmentInfosByNode(id) {
+					segments[segment.SegmentID] = segment
 				}
-				replicas[replica.ReplicaID] = replica
+
+				nodeReplicas, err := lbt.meta.getReplicasByNodeID(id)
+				if err != nil {
+					log.Warn("failed to get replicas for removing offline querynode from it",
+						zap.Int64("querynodeID", id),
+						zap.Error(err))
+				}
+				for _, replica := range nodeReplicas {
+					replicas[replica.ReplicaID] = replica
+				}
 			}
 
-			log.Debug("removing offline nodes from replicas...",
-				zap.Int("len(replicas)", len(replicas)))
+			log.Debug("removing offline nodes from replicas and segments...",
+				zap.Int("len(replicas)", len(replicas)),
+				zap.Int("len(segments)", len(segments)))
 			wg := sync.WaitGroup{}
 			for _, replica := range replicas {
 				wg.Add(1)
@@ -2299,6 +2305,26 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 							zap.Error(err))
 					}
 				}(replica)
+			}
+
+			for _, segment := range segments {
+				wg.Add(1)
+				go func(segment *querypb.SegmentInfo) {
+					defer wg.Done()
+
+					segment.NodeID = -1
+					segment.NodeIds = removeFromSlice(segment.NodeIds, lbt.SourceNodeIDs...)
+					if len(segment.NodeIds) > 0 {
+						segment.NodeID = segment.NodeIds[0]
+					}
+
+					err := lbt.meta.saveSegmentInfo(segment)
+					if err != nil {
+						log.Warn("failed to remove offline nodes from segment info",
+							zap.Int64("segmentID", segment.SegmentID),
+							zap.Error(err))
+					}
+				}(segment)
 			}
 			wg.Wait()
 		}

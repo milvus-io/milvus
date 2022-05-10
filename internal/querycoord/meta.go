@@ -76,6 +76,7 @@ type Meta interface {
 	getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error)
 	getSegmentInfosByNode(nodeID int64) []*querypb.SegmentInfo
 	getSegmentInfosByNodeAndCollection(nodeID, collectionID int64) []*querypb.SegmentInfo
+	saveSegmentInfo(segment *querypb.SegmentInfo) error
 
 	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
 
@@ -878,6 +879,10 @@ func (m *MetaReplica) getSegmentInfosByNodeAndCollection(nodeID, collectionID in
 		}
 	}
 	return res
+}
+
+func (m *MetaReplica) saveSegmentInfo(segment *querypb.SegmentInfo) error {
+	return m.segmentsInfo.saveSegment(segment)
 }
 
 func (m *MetaReplica) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {

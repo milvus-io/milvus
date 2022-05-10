@@ -107,7 +107,7 @@ func (s *segmentsInfo) removeSegment(segment *querypb.SegmentInfo) error {
 func (s *segmentsInfo) getSegment(ID int64) *querypb.SegmentInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.segmentIDMap[ID]
+	return proto.Clone(s.segmentIDMap[ID]).(*querypb.SegmentInfo)
 }
 
 func (s *segmentsInfo) getSegments() []*querypb.SegmentInfo {
@@ -115,7 +115,7 @@ func (s *segmentsInfo) getSegments() []*querypb.SegmentInfo {
 	defer s.mu.RUnlock()
 	res := make([]*querypb.SegmentInfo, 0, len(s.segmentIDMap))
 	for _, segment := range s.segmentIDMap {
-		res = append(res, segment)
+		res = append(res, proto.Clone(segment).(*querypb.SegmentInfo))
 	}
 	return res
 }
