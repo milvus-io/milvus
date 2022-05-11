@@ -97,7 +97,7 @@ func (sd *etcdShardSegmentDetector) watchSegments(collectionID int64, replicaID 
 				eventType:   segmentAdd,
 				segmentID:   info.GetSegmentID(),
 				partitionID: info.GetPartitionID(),
-				nodeID:      info.GetNodeID(),
+				nodeIDs:     info.GetNodeIds(),
 				state:       segmentStateLoaded,
 			})
 		}
@@ -158,7 +158,7 @@ func (sd *etcdShardSegmentDetector) handlePutEvent(e *clientv3.Event, collection
 		eventType:   segmentAdd,
 		segmentID:   info.GetSegmentID(),
 		partitionID: info.GetPartitionID(),
-		nodeID:      info.GetNodeID(),
+		nodeIDs:     info.GetNodeIds(),
 		state:       segmentStateLoaded,
 	}
 }
@@ -182,7 +182,7 @@ func (sd *etcdShardSegmentDetector) handleDelEvent(e *clientv3.Event, collection
 		eventType:   segmentDel,
 		segmentID:   info.GetSegmentID(),
 		partitionID: info.GetPartitionID(),
-		nodeID:      info.GetNodeID(),
+		nodeIDs:     info.GetNodeIds(),
 		state:       segmentStateOffline,
 	}
 }
