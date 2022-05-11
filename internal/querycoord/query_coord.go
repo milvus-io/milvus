@@ -169,7 +169,6 @@ func (qc *QueryCoord) Init() error {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
 			return
 		}
-		qc.groupBalancer = newReplicaBalancer(qc.meta)
 
 		// init channelUnsubscribeHandler
 		qc.handler, initError = newChannelUnsubscribeHandler(qc.loopCtx, qc.kvClient, qc.factory)
@@ -184,6 +183,8 @@ func (qc *QueryCoord) Init() error {
 			log.Error("query coordinator init cluster failed", zap.Error(initError))
 			return
 		}
+
+		qc.groupBalancer = newReplicaBalancer(qc.meta, qc.cluster)
 
 		// NOTE: ignore the returned error
 		// we only try best to reload the leader addresses
