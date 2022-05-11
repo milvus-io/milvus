@@ -73,7 +73,7 @@ type segmentEvent struct {
 	eventType   segmentEventType
 	segmentID   int64
 	partitionID int64
-	nodeID      int64
+	nodeIDs     []int64 // nodes from events
 	state       segmentState
 }
 
@@ -222,7 +222,7 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 }
 
 // updateSegment apply segment change to shard cluster
-func (sc *ShardCluster) updateSegment(evt segmentEvent) {
+func (sc *ShardCluster) updateSegment(evt shardSegmentInfo) {
 	log.Info("ShardCluster update segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
 	// notify handoff wait online if any
 	defer func() {
@@ -273,8 +273,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 				continue
 			}
 
-			sc.transferSegment(old, segmentEvent{
-				eventType:   segmentAdd,
+			sc.transferSegment(old, shardSegmentInfo{
 				nodeID:      line.GetNodeId(),
 				partitionID: line.GetPartitionId(),
 				segmentID:   segmentID,
@@ -289,7 +288,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 // Offline | OK		 | OK	   | OK
 // Loading | OK		 | OK	   | NodeID check
 // Loaded  | OK      | OK	   | legacy pending
-func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt segmentEvent) {
+func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt shardSegmentInfo) {
 	switch old.state {
 	case segmentStateOffline: // safe to update nodeID and state
 		old.nodeID = evt.nodeID
@@ -330,7 +329,7 @@ func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt segmentEvent)
 
 // removeSegment removes segment from cluster
 // should only applied in hand-off or load balance procedure
-func (sc *ShardCluster) removeSegment(evt segmentEvent) {
+func (sc *ShardCluster) removeSegment(evt shardSegmentInfo) {
 	log.Info("ShardCluster remove segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
 
 	sc.mut.Lock()
@@ -362,11 +361,30 @@ func (sc *ShardCluster) init() {
 	// list segments
 	segments, segmentEvtCh := sc.segmentDetector.watchSegments(sc.collectionID, sc.replicaID, sc.vchannelName)
 	for _, segment := range segments {
-		sc.updateSegment(segment)
+		info, ok := sc.pickNode(segment)
+		if ok {
+			sc.updateSegment(info)
+		}
 	}
 	go sc.watchSegments(segmentEvtCh)
 
 	sc.healthCheck()
+}
+
+// pickNode selects node id in cluster
+func (sc *ShardCluster) pickNode(evt segmentEvent) (shardSegmentInfo, bool) {
+	for _, nodeID := range evt.nodeIDs {
+		_, has := sc.getNode(nodeID)
+		if has { // assume one segment shall exist once in one replica
+			return shardSegmentInfo{
+				segmentID:   evt.segmentID,
+				partitionID: evt.partitionID,
+				nodeID:      nodeID,
+				state:       evt.state,
+			}, true
+		}
+	}
+	return shardSegmentInfo{}, false
 }
 
 // healthCheck iterate all segments to to check cluster could provide service.
@@ -411,11 +429,15 @@ func (sc *ShardCluster) watchSegments(evtCh <-chan segmentEvent) {
 				log.Warn("ShardCluster segment channel closed", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID))
 				return
 			}
+			info, ok := sc.pickNode(evt)
+			if !ok {
+				continue
+			}
 			switch evt.eventType {
 			case segmentAdd:
-				sc.updateSegment(evt)
+				sc.updateSegment(info)
 			case segmentDel:
-				sc.removeSegment(evt)
+				sc.removeSegment(info)
 			}
 		case <-sc.closeCh:
 			log.Info("ShardCluster watchSegments quit", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID), zap.String("vchannelName", sc.vchannelName))
@@ -565,7 +587,7 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		if seg.GetCollectionID() != sc.collectionID || seg.GetDmChannel() != sc.vchannelName {
 			continue
 		}
-		sc.removeSegment(segmentEvent{segmentID: seg.GetSegmentID(), nodeID: seg.GetNodeID()})
+		sc.removeSegment(shardSegmentInfo{segmentID: seg.GetSegmentID(), nodeID: seg.GetNodeID()})
 
 		removes[seg.GetNodeID()] = append(removes[seg.GetNodeID()], seg.SegmentID)
 	}

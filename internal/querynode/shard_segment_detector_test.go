@@ -57,7 +57,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentAdd,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateLoaded,
 				},
 			},
@@ -105,7 +105,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentAdd,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateLoaded,
 				},
 			},
@@ -119,7 +119,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				"segment_1": {
 					CollectionID: 1,
 					SegmentID:    1,
-					NodeID:       1,
+					NodeIds:      []int64{1},
 					DmChannel:    "dml_1_1_v0",
 					ReplicaIds:   []int64{1, 2},
 				},
@@ -131,7 +131,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentAdd,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateLoaded,
 				},
 			},
@@ -145,14 +145,14 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				"segment_1": {
 					CollectionID: 1,
 					SegmentID:    1,
-					NodeID:       1,
+					NodeIds:      []int64{1},
 					DmChannel:    "dml_1_1_v0",
 					ReplicaIds:   []int64{1, 2},
 				},
 				"segment_2": {
 					CollectionID: 1,
 					SegmentID:    2,
-					NodeID:       2,
+					NodeIds:      []int64{2},
 					DmChannel:    "dml_2_1_v1",
 					ReplicaIds:   []int64{2},
 				},
@@ -164,7 +164,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentAdd,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateLoaded,
 				},
 			},
@@ -178,7 +178,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				"segment_1": {
 					CollectionID: 1,
 					SegmentID:    1,
-					NodeID:       1,
+					NodeIds:      []int64{1},
 					DmChannel:    "dml_1_1_v0",
 					ReplicaIds:   []int64{1, 2},
 				},
@@ -190,7 +190,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentAdd,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateLoaded,
 				},
 			},
@@ -201,7 +201,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentDel,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateOffline,
 				},
 			},
@@ -215,14 +215,14 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				"segment_1": {
 					CollectionID: 1,
 					SegmentID:    1,
-					NodeID:       1,
+					NodeIds:      []int64{1},
 					DmChannel:    "dml_1_1_v0",
 					ReplicaIds:   []int64{1, 2},
 				},
 				"segment_2": {
 					CollectionID: 1,
 					SegmentID:    2,
-					NodeID:       2,
+					NodeIds:      []int64{2},
 					DmChannel:    "dml_2_1_v1",
 					ReplicaIds:   []int64{2},
 				},
@@ -231,7 +231,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentAdd,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateLoaded,
 				},
 			},
@@ -242,7 +242,7 @@ func TestEtcdShardSegmentDetector_watch(t *testing.T) {
 				{
 					eventType: segmentDel,
 					segmentID: 1,
-					nodeID:    1,
+					nodeIDs:   []int64{1},
 					state:     segmentStateOffline,
 				},
 			},
