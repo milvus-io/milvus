@@ -577,20 +577,9 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		}, nil
 	}
 
-	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
-		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0) // TODO: add replicaID in request or remove it in query shard
-		if err != nil {
-			return &internalpb.SearchResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-	}
-
 	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
 	if err != nil {
+		log.Warn("Search failed, failed to get query shard", zap.String("dml channel", req.GetDmlChannel()), zap.Error(err))
 		return &internalpb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -635,20 +624,9 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		}, nil
 	}
 
-	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
-		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0) // TODO: add replicaID in request or remove it in query shard
-		if err != nil {
-			return &internalpb.RetrieveResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-	}
-
 	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
 	if err != nil {
+		log.Warn("Query failed, failed to get query shard", zap.String("dml channel", req.GetDmlChannel()), zap.Error(err))
 		return &internalpb.RetrieveResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
