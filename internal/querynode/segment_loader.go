@@ -25,6 +25,9 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/panjf2000/ants/v2"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -41,8 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/panjf2000/ants/v2"
-	"go.uber.org/zap"
 )
 
 // segmentLoader is only responsible for loading the field data from binlog
@@ -97,10 +98,8 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 	switch segmentType {
 	case segmentTypeGrowing:
 		metaReplica = loader.streamingReplica
-
 	case segmentTypeSealed:
 		metaReplica = loader.historicalReplica
-
 	default:
 		err := fmt.Errorf("illegal segment type when load segment, collectionID = %d", req.CollectionID)
 		log.Error("load segment failed, illegal segment type",

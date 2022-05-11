@@ -1062,13 +1062,15 @@ func saveDeltaLog(collectionID UniqueID,
 
 	kvs := make(map[string][]byte, 1)
 
-	// write insert binlog
+	// write delta log
+	pkFieldID := UniqueID(106)
 	fieldBinlog := make([]*datapb.FieldBinlog, 0)
-	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", 999))
-	key := JoinIDPath(collectionID, partitionID, segmentID, 999)
+	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
+	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
+	key += "delta" // append suffix 'delta' to avoid conflicts against binlog
 	kvs[key] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
-		FieldID: 999,
+		FieldID: pkFieldID,
 		Binlogs: []*datapb.Binlog{{LogPath: key}},
 	})
 	log.Debug("[query node unittest] save delta log file to MinIO/S3")

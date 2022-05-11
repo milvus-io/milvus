@@ -24,6 +24,7 @@
 #include "common/Span.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
+#include "common/LoadInfo.h"
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
 #include "knowhere/index/vector_index/VecIndex.h"
@@ -66,6 +67,9 @@ class SegmentInterface {
 
     virtual Status
     Delete(int64_t reserved_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) = 0;
+
+    virtual void
+    LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
 };
 
 // internal API for DSL calculation

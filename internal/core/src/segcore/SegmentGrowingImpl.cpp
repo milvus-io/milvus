@@ -194,6 +194,28 @@ SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     return total_bytes;
 }
 
+void
+SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
+    AssertInfo(info.row_count > 0, "The row count of deleted record is 0");
+    AssertInfo(info.primary_keys, "Deleted primary keys is null");
+    AssertInfo(info.timestamps, "Deleted timestamps is null");
+    // step 1: get pks and timestamps
+    auto field_id = schema_->get_primary_field_id().value_or(FieldId(INVALID_FIELD_ID));
+    AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key has invalid field id");
+    auto& field_meta = schema_->operator[](field_id);
+    int64_t size = info.row_count;
+    std::vector<PkType> pks(size);
+    ParsePksFromIDs(pks, field_meta.get_data_type(), *info.primary_keys);
+    auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
+
+    // step 2: fill pks and timestamps
+    deleted_record_.pks_.set_data_raw(0, pks.data(), size);
+    deleted_record_.timestamps_.set_data_raw(0, timestamps, size);
+    deleted_record_.ack_responder_.AddSegment(0, size);
+    deleted_record_.reserved.fetch_add(size);
+    deleted_record_.record_size_ = size;
+}
+
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     auto vec = get_insert_record().get_field_data_base(field_id);
