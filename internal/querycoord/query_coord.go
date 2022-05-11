@@ -107,8 +107,7 @@ type QueryCoord struct {
 
 // Register register query service at etcd
 func (qc *QueryCoord) Register() error {
-	qc.session.Register()
-	go qc.session.LivenessCheck(qc.loopCtx, func() {
+	qc.session.Register(func() {
 		log.Error("Query Coord disconnected from etcd, process will exit", zap.Int64("Server Id", qc.session.ServerID))
 		if err := qc.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))

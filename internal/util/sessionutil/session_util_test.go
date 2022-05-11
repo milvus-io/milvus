@@ -96,7 +96,7 @@ func TestInit(t *testing.T) {
 	s.Init("inittest", "testAddr", false, false)
 	assert.NotEqual(t, int64(0), s.leaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
-	s.Register()
+	s.Register(nil)
 	sessions, _, err := s.GetSessions("inittest")
 	assert.Nil(t, err)
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
@@ -138,7 +138,7 @@ func TestUpdateSessions(t *testing.T) {
 		require.NoError(t, err)
 		singleS := NewSession(ctx, metaRoot, etcdCli)
 		singleS.Init("test", "testAddr", false, false)
-		singleS.Register()
+		singleS.Register(nil)
 		muList.Lock()
 		sList = append(sList, singleS)
 		muList.Unlock()
@@ -181,43 +181,6 @@ func TestUpdateSessions(t *testing.T) {
 	assert.Equal(t, len(sessionEvents), 20)
 	assert.Equal(t, addEventLen, 10)
 	assert.Equal(t, delEventLen, 10)
-}
-
-func TestSessionLivenessCheck(t *testing.T) {
-	s := &Session{}
-	ctx := context.Background()
-	ch := make(chan bool)
-	s.liveCh = ch
-	signal := make(chan struct{}, 1)
-
-	flag := false
-
-	go s.LivenessCheck(ctx, func() {
-		flag = true
-		signal <- struct{}{}
-	})
-
-	assert.False(t, flag)
-	ch <- true
-
-	assert.False(t, flag)
-	close(ch)
-
-	<-signal
-	assert.True(t, flag)
-
-	ctx, cancel := context.WithCancel(ctx)
-	cancel()
-	ch = make(chan bool)
-	s.liveCh = ch
-	flag = false
-
-	go s.LivenessCheck(ctx, func() {
-		flag = true
-		signal <- struct{}{}
-	})
-
-	assert.False(t, flag)
 }
 
 func TestWatcherHandleWatchResp(t *testing.T) {

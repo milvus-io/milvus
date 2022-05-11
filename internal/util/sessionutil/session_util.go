@@ -123,12 +123,12 @@ func (s *Session) String() string {
 }
 
 // Register will process keepAliveResponse to keep alive with etcd.
-func (s *Session) Register() {
+func (s *Session) Register(callback func()) {
 	ch, err := s.registerService()
 	if err != nil {
 		panic(err)
 	}
-	s.liveCh = s.processKeepAliveResponse(ch)
+	s.processKeepAliveResponse(ch, callback)
 	s.UpdateRegistered(true)
 }
 
@@ -250,8 +250,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
-func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
-	failCh := make(chan bool)
+func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse, callback func()) {
 	go func() {
 		for {
 			select {
@@ -260,23 +259,29 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 				if s.keepAliveCancel != nil {
 					s.keepAliveCancel()
 				}
+				if callback != nil {
+					go callback()
+				}
 				return
 			case resp, ok := <-ch:
 				if !ok {
 					log.Warn("session keepalive channel closed")
-					close(failCh)
+					if callback != nil {
+						go callback()
+					}
 					return
 				}
 				if resp == nil {
 					log.Warn("session keepalive response failed")
-					close(failCh)
+					if callback != nil {
+						go callback()
+					}
 					return
 				}
 				//failCh <- true
 			}
 		}
 	}()
-	return failCh
 }
 
 // GetSessions will get all sessions registered in etcd.
@@ -428,35 +433,6 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 
 	w.rch = w.s.etcdCli.Watch(w.s.ctx, path.Join(w.s.metaRoot, DefaultServiceRoot, w.prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
 	return nil
-}
-
-// LivenessCheck performs liveness check with provided context and channel
-// ctx controls the liveness check loop
-// ch is the liveness signal channel, ch is closed only when the session is expired
-// callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
-func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
-	for {
-		select {
-		case _, ok := <-s.liveCh:
-			// ok, still alive
-			if ok {
-				continue
-			}
-			// not ok, connection lost
-			log.Warn("connection lost detected, shuting down")
-			if callback != nil {
-				go callback()
-			}
-			return
-		case <-ctx.Done():
-			log.Debug("liveness exits due to context done")
-			// cancel the etcd keepAlive context
-			if s.keepAliveCancel != nil {
-				s.keepAliveCancel()
-			}
-			return
-		}
-	}
 }
 
 // Revoke revokes the internal leaseID for the session key

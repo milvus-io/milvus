@@ -177,10 +177,7 @@ func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
-	node.session.Register()
-
-	// Start liveness check
-	go node.session.LivenessCheck(node.ctx, func() {
+	node.session.Register(func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))

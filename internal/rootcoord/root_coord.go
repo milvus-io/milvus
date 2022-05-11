@@ -981,8 +981,7 @@ func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, ts typeu
 
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
-	c.session.Register()
-	go c.session.LivenessCheck(c.ctx, func() {
+	c.session.Register(func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))

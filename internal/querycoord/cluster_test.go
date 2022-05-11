@@ -338,7 +338,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 		clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-		clusterSession.Register()
+		clusterSession.Register(nil)
 		cluster := &queryNodeCluster{
 			ctx:       baseCtx,
 			client:    kv,
@@ -366,7 +366,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 		clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-		clusterSession.Register()
+		clusterSession.Register(nil)
 		factory := dependency.NewDefaultFactory(true)
 		handler, err := newChannelUnsubscribeHandler(ctx, kv, factory)
 		assert.Nil(t, err)
@@ -418,7 +418,7 @@ func TestGrpcRequest(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-	clusterSession.Register()
+	clusterSession.Register(nil)
 	factory := dependency.NewDefaultFactory(true)
 	assert.Nil(t, err)
 	idAllocator := func() (UniqueID, error) {
@@ -608,7 +608,7 @@ func TestSetNodeState(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-	clusterSession.Register()
+	clusterSession.Register(nil)
 	factory := dependency.NewDefaultFactory(true)
 	idAllocator := func() (UniqueID, error) {
 		return 0, nil

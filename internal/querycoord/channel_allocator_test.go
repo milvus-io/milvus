@@ -42,7 +42,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	clusterSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
-	clusterSession.Register()
+	clusterSession.Register(nil)
 	id := UniqueID(rand.Int31())
 	idAllocator := func() (UniqueID, error) {
 		newID := atomic.AddInt64(&id, 1)

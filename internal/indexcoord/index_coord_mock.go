@@ -75,7 +75,7 @@ func (icm *Mock) Register() error {
 	}
 	session := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, icm.etcdCli)
 	session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true, false)
-	session.Register()
+	session.Register(nil)
 	return err
 }
 
