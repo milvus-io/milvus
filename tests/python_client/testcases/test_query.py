@@ -16,6 +16,9 @@ import utils.util_pymilvus as ut
 prefix = "query"
 exp_res = "exp_res"
 default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
+default_mix_expr = "int64 >= 0 && varchar >= \"0\""
+default_invaild_expr = "varchar >= 0"
+default_string_term_expr = f'{ct.default_string_field_name} in [\"0\", \"1\"]'
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
 
@@ -23,6 +26,7 @@ default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 default_pos = 5
 default_int_field_name = "int64"
 default_float_field_name = "float"
+default_string_field_name = "varchar"
 
 
 class TestQueryParams(TestcaseBase):
@@ -237,8 +241,9 @@ class TestQueryParams(TestcaseBase):
             ct.default_int64_field_name: pd.Series(data=[i for i in range(ct.default_nb)]),
             ct.default_int32_field_name: pd.Series(data=[np.int32(i) for i in range(ct.default_nb)], dtype="int32"),
             ct.default_int16_field_name: pd.Series(data=[np.int16(i) for i in range(ct.default_nb)], dtype="int16"),
-            ct.default_float_field_name: pd.Series(data=[float(i) for i in range(ct.default_nb)], dtype="float32"),
+            ct.default_float_field_name: pd.Series(data=[np.float32(i) for i in range(ct.default_nb)], dtype="float32"),
             ct.default_double_field_name: pd.Series(data=[np.double(i) for i in range(ct.default_nb)], dtype="double"),
+            ct.default_string_field_name: pd.Series(data=[str(i) for i in range(ct.default_nb)], dtype="string"),
             ct.default_float_vec_field_name: cf.gen_vectors(ct.default_nb, ct.default_dim)
         })
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
@@ -248,7 +253,7 @@ class TestQueryParams(TestcaseBase):
 
         # query by non_primary non_vector scalar field
         non_primary_field = [ct.default_int32_field_name, ct.default_int16_field_name,
-                             ct.default_float_field_name, ct.default_double_field_name]
+                             ct.default_float_field_name, ct.default_double_field_name, ct.default_string_field_name]
 
         # exp res: first two rows and all fields expect last vec field
         res = df.iloc[:2, :-1].to_dict('records')
@@ -1190,3 +1195,84 @@ class TestQueryOperation(TestcaseBase):
         collection_w.query(f'{ct.default_int64_field_name} in [1]',
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
+
+class  TestqueryString(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test query with string
+    ******************************************************************
+    """
+      
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_is_not_primary(self):
+        """
+        target: test query data with string field is not primary
+        method: create collection and insert data
+                collection.load()
+                query with string expr in string field is not primary
+        expected: query successfully
+        """
+     
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        res = vectors[0].iloc[:2, :3].to_dict('records')
+        output_fields = [default_float_field_name, default_string_field_name]
+        collection_w.query(default_string_term_expr, output_fields=output_fields, 
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(default_string_field_name))
+    def test_query_string_is_primary(self, expression):
+        """
+        target: test query with output field only primary field
+        method: specify string primary field as output field
+        expected: return string primary field
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0:2]
+        res, _ = collection_w.query(expression, output_fields=[ct.default_string_field_name])
+        assert list(res[0].keys()) == [ct.default_string_field_name]
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_with_mix_expr(self):
+        """
+        target: test query data
+        method: create collection and insert data
+                query with mix expr in string field and int field
+        expected: query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0:2]
+        res = vectors[0].iloc[:, 1:3].to_dict('records')
+        output_fields = [default_float_field_name, default_string_field_name]
+        collection_w.query(default_mix_expr, output_fields=output_fields, 
+                                   check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_invaild_string_expressions())
+    def test_query_with_invalid_string_expr(self, expression):
+        """
+        target: test query data
+        method: create collection and insert data
+                query with invalid expr
+        expected: Raise exception
+        """
+        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
+        collection_w.query(expression, check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: "type mismatch"})
+       
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_binary(self):
+        """
+        target: test query string expr with binary
+        method: query string expr with binary 
+        expected: verify query successfully
+        """
+        collection_w, vectors= self.init_collection_general(prefix, insert_data=True, is_binary=True, is_index=True)[0:2]
+        collection_w.create_index(ct.default_binary_vec_field_name, binary_index_params)
+        collection_w.load()
+        assert collection_w.has_index()[0]
+        res, _ = collection_w.query(default_string_term_expr, output_fields=[ct.default_binary_vec_field_name])
+        assert len(res) == 2
+
+   

@@ -14,7 +14,7 @@ from pymilvus.orm.types import CONSISTENCY_STRONG
 from common.common_func import param_info
 
 TIMEOUT = 20
-
+INDEX_NAME = "_default_idx"
 
 # keep small timeout for stability tests
 # TIMEOUT = 5
@@ -218,9 +218,11 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def create_index(self, field_name, index_params, check_task=None, check_items=None, **kwargs):
+    def create_index(self, field_name, index_params, index_name=None, check_task=None, check_items=None, **kwargs):
         timeout = kwargs.get("timeout", TIMEOUT * 2)
-        kwargs.update({"timeout": timeout})
+        index_name =  INDEX_NAME if index_name is None else index_name
+        index_name =  kwargs.get("index_name", index_name) 
+        kwargs.update({"timeout": timeout, "index_name": index_name})
 
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.create_index, field_name, index_params], **kwargs)
@@ -229,17 +231,23 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def has_index(self, check_task=None, check_items=None):
+    def has_index(self, index_name=None, check_task=None, check_items=None, **kwargs):
+        index_name =  INDEX_NAME if index_name is None else index_name
+        index_name =  kwargs.get("index_name", index_name)
+        kwargs.update({"index_name": index_name})
+
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.has_index])
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check).run()
+        res, check = api_request([self.collection.has_index], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
 
     @trace()
-    def drop_index(self, check_task=None, check_items=None, **kwargs):
+    def drop_index(self, index_name=None, check_task=None, check_items=None, **kwargs):
         timeout = kwargs.get("timeout", TIMEOUT)
-        kwargs.update({"timeout": timeout})
-
+        index_name =  INDEX_NAME if index_name is None else index_name
+        index_name =  kwargs.get("index_name", index_name)
+        kwargs.update({"timeout": timeout, "index_name": index_name})
+        
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.drop_index], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
