@@ -279,7 +279,6 @@ TEST(Indexing, IVFFlatNM) {
     indexing->AddWithoutIds(database, conf);
     std::cout << "insert ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    indexing->SetIndexSize(NQ * DIM * sizeof(float));
     knowhere::BinarySet bs = indexing->Serialize(conf);
 
     knowhere::BinaryPtr bptr = std::make_shared<knowhere::Binary>();

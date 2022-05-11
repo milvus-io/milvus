@@ -153,8 +153,7 @@ TEST(IVFFLATNM, Query) {
     auto xq_dataset = knowhere::GenDataset(NQ, DIM, xq_data.data());
     auto result = index->Query(xq_dataset, conf, nullptr);
 
-    index->UpdateIndexSize();
-    ASSERT_GT(index->IndexSize(), 0);
+    ASSERT_GT(index->Size(), 0);
 
     auto stats = index->GetStatistics();
     ASSERT_TRUE(stats != nullptr);
@@ -244,8 +243,7 @@ TEST(BinIVFFlat, Build_and_Query) {
 
     print_query_result(query_res);
 
-    index->UpdateIndexSize();
-    ASSERT_GT(index->IndexSize(), 0);
+    ASSERT_GT(index->Size(), 0);
 
     auto stats = index->GetStatistics();
     ASSERT_TRUE(stats != nullptr);

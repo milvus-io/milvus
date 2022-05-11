@@ -50,8 +50,11 @@ SearchOnSealed(const Schema& schema,
         knowhere::SetMetaMetricType(conf, MetricTypeToName(field_indexing->metric_type_));
         auto index_type = field_indexing->indexing_->index_type();
         auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-        AssertInfo(adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode()),
-                   "[SearchOnSealed]Search params check failed");
+        try {
+            adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode());
+        } catch (std::exception& e) {
+            AssertInfo(false, e.what());
+        }
         return field_indexing->indexing_->Query(ds, conf, bitset);
     }();
 
