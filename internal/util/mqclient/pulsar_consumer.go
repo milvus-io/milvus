@@ -110,12 +110,25 @@ func (pc *PulsarConsumer) Ack(message Message) {
 // Close the consumer and stop the broker to push more messages
 func (pc *PulsarConsumer) Close() {
 	pc.closeOnce.Do(func() {
-		defer pc.c.Close()
 		// Unsubscribe for the consumer
-		err := retry.Do(context.Background(), func() error {
-			//TODO need to check error retryable
-			return pc.c.Unsubscribe()
-		}, retry.MaxSleepTime(50*time.Millisecond), retry.Attempts(6))
+		fn := func() error {
+			err := pc.c.Unsubscribe()
+			if isPulsarError(err, pulsar.ConsumerNotFound) || isPulsarError(err, pulsar.SubscriptionNotFound) {
+				log.Warn("failed to find consumer, skip unsubcribe",
+					zap.String("subscription", pc.Subscription()),
+					zap.Error(err))
+				return nil
+			}
+			if err != nil {
+				log.Info("failed to unsubscribe ", zap.String("subscription", pc.Subscription()))
+				return err
+			}
+			// only close if unsubscribe successfully
+			pc.c.Close()
+			return nil
+		}
+
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			log.Error("failed to unsubscribe", zap.String("subscription", pc.Subscription()), zap.Error(err))
 			panic(err)
