@@ -364,9 +364,9 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/weishuo2"><img src="https://avatars.githubusercontent.com/u/27938020?v=4" width="30px" /></a>
 <a href="https://github.com/wh201906"><img src="https://avatars.githubusercontent.com/u/62299611?v=4" width="30px" /></a>
 <a href="https://github.com/wscxyey"><img src="https://avatars.githubusercontent.com/u/48882296?v=4" width="30px" /></a>
+<a href="https://github.com/wxyucs"><img src="https://avatars.githubusercontent.com/u/12595343?v=4" width="30px" /></a>
 <a href="https://github.com/wxywb"><img src="https://avatars.githubusercontent.com/u/5432721?v=4" width="30px" /></a>
 <a href="https://github.com/xaxys"><img src="https://avatars.githubusercontent.com/u/28949072?v=4" width="30px" /></a>
-<a href="https://github.com/xiangyu1006"><img src="https://avatars.githubusercontent.com/u/12595343?v=4" width="30px" /></a>
 <a href="https://github.com/xiangzhouguo"><img src="https://avatars.githubusercontent.com/u/93316470?v=4" width="30px" /></a>
 <a href="https://github.com/xiaocai2333"><img src="https://avatars.githubusercontent.com/u/46207236?v=4" width="30px" /></a>
 <a href="https://github.com/xiaofan-luan"><img src="https://avatars.githubusercontent.com/u/83447078?v=4" width="30px" /></a>
