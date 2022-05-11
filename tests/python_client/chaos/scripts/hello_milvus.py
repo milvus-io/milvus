@@ -35,6 +35,7 @@ def hello_milvus(host="127.0.0.1"):
     default_fields = [
         FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="float", dtype=DataType.FLOAT),
+        FieldSchema(name="varchar", dtype=DataType.VARCHAR, max_length_per_row=65535),
         FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
@@ -53,6 +54,7 @@ def hello_milvus(host="127.0.0.1"):
         [
             [i for i in range(nb)],
             [np.float32(i) for i in range(nb)],
+            [str(i) for i in range(nb)],
             vectors
         ]
     )
@@ -66,7 +68,7 @@ def hello_milvus(host="127.0.0.1"):
     print(f"\nGet collection entities cost {t1 - t0:.4f} seconds")
 
     # create index and load table
-    default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+    default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
     print(f"\nCreate index...")
     t0 = time.time()
     collection.create_index(field_name="float_vector", index_params=default_index)
