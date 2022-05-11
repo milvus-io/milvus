@@ -152,6 +152,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
     auto indexing_barrier = segment_.num_chunk_index(field_id);
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
+    auto data_chunk_beg = segment_.at_least_data_chunks(indexing_barrier - 1);
     std::deque<BitsetType> results;
 
     using Index = scalar::ScalarIndex<T>;
@@ -163,7 +164,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
         AssertInfo(data->size() == size_per_chunk, "[ExecExprVisitor]Data size not equal to size_per_chunk");
         results.emplace_back(std::move(*data));
     }
-    for (auto chunk_id = indexing_barrier; chunk_id < num_chunk; ++chunk_id) {
+    for (auto chunk_id = data_chunk_beg; chunk_id < num_chunk; ++chunk_id) {
         auto this_size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
         BitsetType result(this_size);
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);

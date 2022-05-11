@@ -13,13 +13,14 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "common/Types.h"
+#include "common/Utils.h"
 #include "exceptions/EasyAssert.h"
 #include "utils/Json.h"
 
 namespace milvus::segcore {
-
 struct SmallIndexConf {
     std::string index_type;
     nlohmann::json build_params;
@@ -65,6 +66,17 @@ class SegcoreConfig {
         chunk_rows_ = chunk_rows;
     }
 
+    int64_t
+    get_index_chunk_rows() const {
+        return index_chunk_rows_;
+    }
+
+    void
+    set_index_chunk_rows(int64_t index_chunk_rows) {
+        AssertInfo(index_chunk_rows % chunk_rows_ == 0, "index_chunk_rows must be divisible by b");
+        index_chunk_rows_ = index_chunk_rows;
+    }
+
     void
     set_nlist(int64_t nlist) {
         nlist_ = nlist;
@@ -80,8 +92,31 @@ class SegcoreConfig {
         table_[metric_type] = small_index_conf;
     }
 
+    int64_t
+    index_to_num_data_chunks() const {
+        return lower_div(index_chunk_rows_, chunk_rows_);
+    }
+
+    std::vector<int64_t>
+    index_to_data_chunks(int64_t index_chunk_id) const {
+        std::vector<int64_t> ret;
+        auto num_data_chunks = index_to_num_data_chunks();
+        auto data_chunk_beg = num_data_chunks * index_chunk_id;
+        for (int64_t i = 0; i < num_data_chunks; i++) {
+            ret.push_back(data_chunk_beg + i);
+        }
+        return ret;
+    }
+
+    int64_t
+    at_least_data_chunks(int64_t index_chunk_id) const {
+        auto num_data_chunks = index_to_num_data_chunks();
+        return (index_chunk_id + 1) * num_data_chunks;
+    }
+
  private:
     int64_t chunk_rows_ = 32 * 1024;
+    int64_t index_chunk_rows_ = 32 * 1024;
     int64_t nlist_ = 100;
     int64_t nprobe_ = 4;
     std::map<MetricType, SmallIndexConf> table_;

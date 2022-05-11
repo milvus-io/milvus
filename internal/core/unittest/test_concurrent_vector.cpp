@@ -18,6 +18,7 @@
 #include "segcore/ConcurrentVector.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/AckResponder.h"
+#include "common/Utils.h"
 
 using namespace milvus::segcore;
 using std::vector;
@@ -111,4 +112,87 @@ TEST(ConcurrentVector, TestAckSingle) {
         EXPECT_GE(seg + 100, b);
     }
     EXPECT_EQ(ack.GetAck(), N);
+}
+
+template <typename T>
+bool
+eq(const boost::container::vector<T>& v1, const boost::container::vector<T>& v2)  {
+    if (v1.size() != v2.size()) {
+        return false;
+    }
+    auto l = v1.size();
+    for (int i = 0; i < l; i++) {
+        if (v1[i] != v2[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+TEST(ConcurrentVectorImpl, getChunks) {
+    auto size_per_chunk = 8;
+    auto size_per_index_chunk = size_per_chunk * 2;
+
+    auto dim = 4;
+    auto n = size_per_index_chunk * 2;
+
+    auto num_chunk = milvus::upper_div(n, size_per_chunk);
+    std::vector<int64_t> chunks(num_chunk);
+    for (auto i = 0; i < num_chunk; i++) {
+        chunks[i] = i;
+    }
+
+    std::default_random_engine e(42);
+
+    boost::container::vector<int64_t> int64_raw_data(n);
+    boost::container::vector<float> fvec_raw_data(dim * n);
+    boost::container::vector<std::string> str_raw_data(n);
+
+    for (auto x = n - 1; x >= 0; x--) {
+        int64_raw_data[x] = x;
+        str_raw_data[x] = std::to_string(x);
+    }
+
+    for (int i = 0; i < n * dim; i++) {
+        fvec_raw_data[i] = e();
+    }
+
+    {
+        // POD.
+        ConcurrentVector<int64_t> vec(size_per_chunk);
+        vec.grow_to_at_least(n);
+        for (int i = 0; i < num_chunk; i++) {
+            auto offset = i * size_per_chunk;
+            vec.set_data_raw(offset, int64_raw_data.data() + offset, size_per_chunk);
+        }
+        auto big_chunk = vec.get_chunks(chunks);
+
+        ASSERT_TRUE(eq(int64_raw_data, big_chunk));
+    }
+
+    {
+        // Float Vector.
+        ConcurrentVector<milvus::FloatVector> vec(dim, size_per_chunk);
+        vec.grow_to_at_least(n);
+        for (int i = 0; i < num_chunk; i++) {
+            auto offset = i * size_per_chunk;
+            vec.set_data_raw(offset, fvec_raw_data.data() + offset * dim, size_per_chunk);
+        }
+        auto big_chunk = vec.get_chunks(chunks);
+
+        ASSERT_TRUE(eq(fvec_raw_data, big_chunk));
+    }
+
+    {
+        // string.
+        ConcurrentVector<std::string> vec(size_per_chunk);
+        vec.grow_to_at_least(n);
+        for (int i = 0; i < num_chunk; i++) {
+            auto offset = i * size_per_chunk;
+            vec.set_data_raw(offset, str_raw_data.data() + offset, size_per_chunk);
+        }
+        auto big_chunk = vec.get_chunks(chunks);
+
+        ASSERT_TRUE(eq(str_raw_data, big_chunk));
+    }
 }

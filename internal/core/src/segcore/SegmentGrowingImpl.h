@@ -105,6 +105,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return segcore_config_.get_chunk_rows();
     }
 
+    int64_t
+    size_per_index_chunk() const final {
+        return segcore_config_.get_index_chunk_rows();
+    }
+
  public:
     // only for debug
     void

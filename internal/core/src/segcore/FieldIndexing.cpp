@@ -29,14 +29,16 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
     auto source = dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
     AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
     auto num_chunk = source->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "ack_end is bigger than num_chunk");
+    auto needed_data_chunks = segcore_config_.at_least_data_chunks(ack_end);
+    AssertInfo(needed_data_chunks <= num_chunk, "needed_data_chunks is bigger than num_chunk");
     auto conf = get_build_params();
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk = source->get_chunk(chunk_id);
+        auto data_chunks = segcore_config_.index_to_data_chunks(chunk_id);
+        auto chunks = source->get_chunks(data_chunks);
         // build index for chunk
         auto indexing = std::make_unique<knowhere::IVF>();
-        auto dataset = knowhere::GenDataset(source->get_size_per_chunk(), dim, chunk.data());
+        auto dataset = knowhere::GenDataset(source->get_size_per_chunk(), dim, chunks.data());
         indexing->Train(dataset, conf);
         indexing->AddWithoutIds(dataset, conf);
         data_[chunk_id] = std::move(indexing);
@@ -106,19 +108,21 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const 
     auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
     AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
     auto num_chunk = source->num_chunk();
-    AssertInfo(ack_end <= num_chunk, "Ack_end is bigger than num_chunk");
+    auto needed_data_chunks = segcore_config_.at_least_data_chunks(ack_end);
+    AssertInfo(needed_data_chunks <= num_chunk, "needed_data_chunks is bigger than num_chunk");
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
-        const auto& chunk = source->get_chunk(chunk_id);
+        auto data_chunks = segcore_config_.index_to_data_chunks(chunk_id);
+        auto chunks = source->get_chunks(data_chunks);
         // build index for chunk
         // TODO
         if constexpr (std::is_same_v<T, std::string>) {
             auto indexing = scalar::CreateStringIndexSort();
-            indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
+            indexing->Build(vec_base->get_size_per_chunk(), chunks.data());
             data_[chunk_id] = std::move(indexing);
         } else {
             auto indexing = scalar::CreateScalarIndexSort<T>();
-            indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
+            indexing->Build(vec_base->get_size_per_chunk(), chunks.data());
             data_[chunk_id] = std::move(indexing);
         }
     }

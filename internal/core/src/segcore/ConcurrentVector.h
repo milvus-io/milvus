@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <deque>
@@ -227,6 +228,27 @@ class ConcurrentVectorImpl : public VectorBase {
     const void*
     get_chunk_data(ssize_t chunk_index) const override {
         return chunks_[chunk_index].data();
+    }
+
+    // Heavy and expensive, keep this not frequently.
+    // This function should only be called when small index will be created.
+    // An index chunk corresponds to many data chunks, so multiple data chunks will be assembled into an index chunk.
+    Chunk
+    get_chunks(const std::vector<ssize_t>& chunk_ids) const {
+        std::vector<ssize_t> prefix_sums(1, 0);
+        auto n = chunk_ids.size();
+        for (int i = 0; i < n; i++) {
+            auto chunk_id = chunk_ids[i];
+            auto& chunk = get_chunk(chunk_id);
+            prefix_sums.push_back(prefix_sums[i] + chunk.size());
+        }
+        Chunk ret(prefix_sums[n]);
+        for (int i = 0; i < n; i++) {
+            auto chunk_id = chunk_ids[i];
+            auto& chunk = get_chunk(chunk_id);
+            std::copy(chunk.begin(), chunk.end(), ret.begin() + prefix_sums[i]);
+        }
+        return ret;
     }
 
     // just for fun, don't use it directly

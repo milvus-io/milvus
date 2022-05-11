@@ -72,6 +72,9 @@ class SegmentSealedImpl : public SegmentSealed {
     int64_t
     size_per_chunk() const override;
 
+    int64_t
+    size_per_index_chunk() const override;
+
     std::string
     debug() const override;
 

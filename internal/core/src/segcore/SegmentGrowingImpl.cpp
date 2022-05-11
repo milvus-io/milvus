@@ -148,7 +148,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 5: update small indexes
     insert_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + size);
     if (enable_small_index_) {
-        int64_t chunk_rows = segcore_config_.get_chunk_rows();
+        int64_t chunk_rows = segcore_config_.get_index_chunk_rows();
         indexing_record_.UpdateResourceAck(insert_record_.ack_responder_.GetAck() / chunk_rows, insert_record_);
     }
 }

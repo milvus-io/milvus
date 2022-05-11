@@ -54,3 +54,14 @@ TEST(Util, StringMatch) {
     ASSERT_FALSE(PrefixMatch("dontmatch", "prefix"));
     ASSERT_FALSE(PostfixMatch("dontmatch", "postfix"));
 }
+
+TEST(Util, LowerDiv) {
+    using namespace milvus;
+
+    // divisor is less than 0.
+    ASSERT_ANY_THROW(lower_div(100, -1));
+
+    ASSERT_EQ(lower_div(100, 10), 10);
+    ASSERT_EQ(lower_div(101, 10), 10);
+    ASSERT_EQ(lower_div(99, 10), 9);
+}

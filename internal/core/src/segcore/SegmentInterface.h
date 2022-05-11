@@ -136,9 +136,18 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     num_chunk() const = 0;
 
+    int64_t
+    at_least_data_chunks(int64_t index_chunk_id) const {
+        auto num_data_chunks = lower_div(size_per_index_chunk(), size_per_chunk());
+        return (index_chunk_id + 1) * num_data_chunks;
+    }
+
     // element size in each chunk
     virtual int64_t
     size_per_chunk() const = 0;
+
+    virtual int64_t
+    size_per_index_chunk() const = 0;
 
     virtual int64_t
     get_active_count(Timestamp ts) const = 0;

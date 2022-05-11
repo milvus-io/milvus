@@ -61,4 +61,11 @@ upper_div(int64_t value, int64_t align) {
     return groups;
 }
 
+// necessary?
+inline int64_t
+lower_div(int64_t value, int64_t align) {
+    Assert(align > 0);
+    return value / align;
+}
+
 }  // namespace milvus
