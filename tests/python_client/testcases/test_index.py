@@ -23,6 +23,13 @@ uid = "test_index"
 # BUILD_TIMEOUT = 300
 field_name = default_float_vec_field_name
 binary_field_name = default_binary_vec_field_name
+default_string_field_name =ct.default_string_field_name
+index_name1=cf.gen_unique_str("float")
+index_name2=cf.gen_unique_str("varhar")
+index_name3=cf.gen_unique_str("binary")
+default_string_index_params ={}
+default_binary_schema = cf.gen_default_binary_collection_schema()
+default_binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
 # query = gen_search_vectors_params(field_name, default_entities, default_top_k, 1)
 default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 
@@ -615,8 +622,6 @@ class TestIndexBase:
         index = connect.describe_index(collection, "")
         assert not index  # FLAT is the last index_type, drop all indexes in server
 
-    @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.timeout(BUILD_TIMEOUT)
     def test_create_different_index_repeatedly_B(self, connect, collection):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -1310,3 +1315,188 @@ class TestIndexAsync:
         res = future.result()
         # TODO:
         log.info(res)
+
+
+class  TestIndexString(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test create index about string 
+    ******************************************************************
+    """   
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_with_string_field(self):
+        """
+        target: test create index with string field is not primary
+        method: 1.create collection and insert data 
+                2.only create an index with string field is not primary
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name, default_string_index_params)
+        cf.assert_equal_index(index, collection_w.indexes[0])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_with_string_before_load(self):
+        """
+        target: test create index with string field before load
+        method: 1.create collection and insert data 
+                2.create an index with string field before load
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data(ct.default_nb)
+        collection_w.insert(data=data)
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name, default_string_index_params)
+        cf.assert_equal_index(index, collection_w.collection.indexes[0])
+        collection_w.load()
+        assert collection_w.num_entities==default_nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_load_after_create_index_with_string(self):
+        """
+        target: test load after create index with string field 
+        method: 1.create collection and insert data 
+                2.collection load after create index with string field 
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data(ct.default_nb)
+        collection_w.insert(data=data)
+        collection_w.load()
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name, default_string_index_params)
+        cf.assert_equal_index(index, collection_w.collection.indexes[0])
+        assert collection_w.num_entities==default_nb
+        
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_with_string_field_is_primary(self):
+        """
+        target: test create index with string field is primary
+        method: 1.create collection  
+                2.insert data 
+                3.only create an index with string field is primary
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name, default_string_index_params)
+        cf.assert_equal_index(index, collection_w.collection.indexes[0])
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_or_not_with_string_field(self):
+        """
+        target: test create index, half of the string fields are indexed and half are not
+        method: 1.create collection  
+                2.insert data 
+                3.half of the indexes are created and half are not in the string fields
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        string_fields = [cf.gen_string_field(name="test_string")]
+        schema = cf.gen_schema_multi_string_fields(string_fields)
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        df = cf.gen_dataframe_multi_string_fields(string_fields=string_fields)
+        collection_w.insert(df)
+        self.index_wrap.init_index(collection_w.collection, default_string_field_name, default_string_index_params)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_with_same_index_name(self):
+        """
+        target: test create index with different fields use same index name
+        method: 1.create collection  
+                2.insert data 
+                3.only create index with different fields use same index name
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
+        collection_w.create_index(default_float_vec_field_name, default_index_params, 
+                                  index_name=index_name2,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1, ct.err_msg: "CreateIndex failed"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_different_index_fields(self):
+        """
+        target: test create index with different fields
+        method: 1.create collection  
+                2.insert data
+                3.create different indexes with string and float vector field 
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        collection_w.create_index(default_float_vec_field_name, default_index_params, index_name=index_name1)
+        assert collection_w.has_index(index_name=index_name1)[0]==True
+        collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
+        assert collection_w.has_index(index_name=index_name2)[0]==True
+        assert len(collection_w.collection.indexes)==2
+        
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_different_index_binary_fields(self):
+        """
+        target: testing the creation of indexes with string and binary fields
+        method: 1.create collection  
+                2.insert data
+                3.create different indexes with string and binary vector field 
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        df, _ = cf.gen_default_binary_dataframe_data()
+        collection_w.insert(data=df)
+        collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
+        assert collection_w.has_index(index_name=index_name2)[0]==True
+        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params, index_name=index_name3)
+        assert collection_w.has_index(index_name=index_name3)[0]==True
+        assert len(collection_w.collection.indexes)==2
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_drop_index_with_string_field(self):
+        """
+        target: test drop index with string field
+        method: 1.create collection and insert data
+                2.create index and use index.drop() drop index
+        expected: drop index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        index, _  = self.index_wrap.init_index(collection_w.collection, default_string_field_name, default_string_index_params)
+        cf.assert_equal_index(index, collection_w.collection.indexes[0])
+        self.index_wrap.drop()
+        assert len(collection_w.collection.indexes) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_collection_drop_index_with_string(self):
+        """
+        target: test drop index with string field
+        method: 1.create collection and insert data
+                2.create index and uses collection.drop_index () drop index
+        expected: drop index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
+        collection_w.drop_index(index_name=index_name2)
+        assert len(collection_w.collection.indexes) == 0
+
+
+
+
+  
