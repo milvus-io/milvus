@@ -12,6 +12,7 @@ default_top_k = 10
 default_nq = 2
 default_limit = 10
 default_search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
+default_search_ip_params = {"metric_type": "IP", "params": {"nprobe": 10}}
 default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 default_binary_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
 max_top_k = 16384
