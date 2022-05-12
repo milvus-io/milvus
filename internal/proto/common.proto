@@ -42,6 +42,7 @@ enum ErrorCode {
     DeleteCredentialFailure = 31;
     GetCredentialFailure = 32;
     ListCredUsersFailure = 33;
+    NotShardLeader = 34;
 
     // internal error code.
     DDRequestRace = 1000;

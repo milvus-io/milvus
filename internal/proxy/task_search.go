@@ -403,7 +403,7 @@ func (t *searchTask) searchShard(ctx context.Context, leaders *querypb.ShardLead
 		}
 
 		result, err := qn.Search(ctx, req)
-		if err != nil {
+		if err != nil || result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 			log.Warn("QueryNode search returns error", zap.Int64("nodeID", nodeID),
 				zap.Error(err))
 			return errInvalidShardLeaders
