@@ -3165,7 +3165,7 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 	// delete request only support expr "id in [a, b]"
 	termExpr, ok := plan.Node.(*planpb.PlanNode_Predicates).Predicates.Expr.(*planpb.Expr_TermExpr)
 	if !ok {
-		return res, 0, fmt.Errorf("invalid plan node type")
+		return res, 0, fmt.Errorf("invalid plan node type, only pk in [1, 2] supported")
 	}
 
 	res = &schemapb.IDs{}

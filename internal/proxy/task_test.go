@@ -1844,6 +1844,42 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		assert.NoError(t, task.PreExecute(ctx))
 		assert.NoError(t, task.Execute(ctx))
 		assert.NoError(t, task.PostExecute(ctx))
+
+		task2 := &deleteTask{
+			Condition: NewTaskCondition(ctx),
+			BaseDeleteTask: msgstream.DeleteMsg{
+				BaseMsg: msgstream.BaseMsg{},
+				DeleteRequest: internalpb.DeleteRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Delete,
+						MsgID:     0,
+						Timestamp: 0,
+						SourceID:  Params.ProxyCfg.GetNodeID(),
+					},
+					CollectionName: collectionName,
+					PartitionName:  partitionName,
+				},
+			},
+			deleteExpr: "int64 not in [0, 1]",
+			ctx:        ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			chMgr:    chMgr,
+			chTicker: ticker,
+		}
+		assert.Error(t, task2.PreExecute(ctx))
 	})
 }
 
@@ -2064,6 +2100,42 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		assert.NoError(t, task.PreExecute(ctx))
 		assert.NoError(t, task.Execute(ctx))
 		assert.NoError(t, task.PostExecute(ctx))
+
+		task2 := &deleteTask{
+			Condition: NewTaskCondition(ctx),
+			BaseDeleteTask: msgstream.DeleteMsg{
+				BaseMsg: msgstream.BaseMsg{},
+				DeleteRequest: internalpb.DeleteRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   commonpb.MsgType_Delete,
+						MsgID:     0,
+						Timestamp: 0,
+						SourceID:  Params.ProxyCfg.GetNodeID(),
+					},
+					CollectionName: collectionName,
+					PartitionName:  partitionName,
+				},
+			},
+			deleteExpr: "varChar not in [\"milvus\", \"test\"]",
+			ctx:        ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			chMgr:    chMgr,
+			chTicker: ticker,
+		}
+		assert.Error(t, task2.PreExecute(ctx))
 	})
 }
 
