@@ -67,7 +67,8 @@ Insert(CSegmentInterface c_segment,
        int64_t size,
        const int64_t* row_ids,
        const uint64_t* timestamps,
-       const char* data_info);
+       const uint8_t* data_info,
+       const uint64_t data_info_len);
 
 CStatus
 PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset);
@@ -90,7 +91,12 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
 
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
-Delete(CSegmentInterface c_segment, int64_t reserved_offset, int64_t size, const char* ids, const uint64_t* timestamps);
+Delete(CSegmentInterface c_segment,
+       int64_t reserved_offset,
+       int64_t size,
+       const uint8_t* ids,
+       const uint64_t ids_size,
+       const uint64_t* timestamps);
 
 int64_t
 PreDelete(CSegmentInterface c_segment, int64_t size);

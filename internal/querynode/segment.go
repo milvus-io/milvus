@@ -609,17 +609,6 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 }
 
 func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps []Timestamp, record *segcorepb.InsertRecord) error {
-	/*
-		CStatus
-		Insert(CSegmentInterface c_segment,
-		           long int reserved_offset,
-		           signed long int size,
-		           const long* primary_keys,
-		           const unsigned long* timestamps,
-		           void* raw_data,
-		           int sizeof_per_row,
-		           signed long int count);
-	*/
 	s.segPtrMu.RLock()
 	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentType != segmentTypeGrowing {
@@ -630,10 +619,10 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 		return errors.New("null seg core pointer")
 	}
 
-	insertRecordBlob := proto.MarshalTextString(record)
-
-	cInsertRecordBlob := C.CString(insertRecordBlob)
-	defer C.free(unsafe.Pointer(cInsertRecordBlob))
+	insertRecordBlob, err := proto.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("failed to marshal insert record: %s", err)
+	}
 
 	var numOfRow = len(entityIDs)
 	var cOffset = C.int64_t(offset)
@@ -646,7 +635,8 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 		cNumOfRows,
 		cEntityIdsPtr,
 		cTimestampsPtr,
-		cInsertRecordBlob)
+		(*C.uint8_t)(unsafe.Pointer(&insertRecordBlob[0])),
+		(C.uint64_t)(len(insertRecordBlob)))
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
@@ -709,11 +699,12 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 		return fmt.Errorf("invalid data type of primary keys")
 	}
 
-	dataBlob := proto.MarshalTextString(ids)
-	cDataBlob := C.CString(dataBlob)
-	defer C.free(unsafe.Pointer(cDataBlob))
+	dataBlob, err := proto.Marshal(ids)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ids: %s", err)
+	}
 
-	status := C.Delete(s.segmentPtr, cOffset, cSize, cDataBlob, cTimestampsPtr)
+	status := C.Delete(s.segmentPtr, cOffset, cSize, (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])), (C.uint64_t)(len(dataBlob)), cTimestampsPtr)
 	if err := HandleCStatus(&status, "Delete failed"); err != nil {
 		return err
 	}
@@ -737,21 +728,15 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *sche
 		return errors.New(errMsg)
 	}
 
-	dataBlob := proto.MarshalTextString(data)
+	dataBlob, err := proto.Marshal(data)
+	if err != nil {
+		return err
+	}
 
-	cDataBlob := C.CString(dataBlob)
-	defer C.free(unsafe.Pointer(cDataBlob))
-
-	/*
-		typedef struct CLoadFieldDataInfo {
-		    int64_t field_id;
-		    void* blob;
-		    int64_t row_count;
-		} CLoadFieldDataInfo;
-	*/
 	loadInfo := C.CLoadFieldDataInfo{
 		field_id:  C.int64_t(fieldID),
-		blob:      cDataBlob,
+		blob:      (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
+		blob_size: C.uint64_t(len(dataBlob)),
 		row_count: C.int64_t(rowCount),
 	}
 
@@ -805,15 +790,16 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 		return fmt.Errorf("invalid data type of primary keys")
 	}
 
-	idsBlob := proto.MarshalTextString(ids)
-
-	cIdsBlob := C.CString(idsBlob)
-	defer C.free(unsafe.Pointer(cIdsBlob))
+	idsBlob, err := proto.Marshal(ids)
+	if err != nil {
+		return err
+	}
 
 	loadInfo := C.CLoadDeletedRecordInfo{
-		timestamps:   unsafe.Pointer(&timestamps[0]),
-		primary_keys: cIdsBlob,
-		row_count:    C.int64_t(rowCount),
+		timestamps:        unsafe.Pointer(&timestamps[0]),
+		primary_keys:      (*C.uint8_t)(unsafe.Pointer(&idsBlob[0])),
+		primary_keys_size: C.uint64_t(len(idsBlob)),
+		row_count:         C.int64_t(rowCount),
 	}
 	/*
 		CStatus
