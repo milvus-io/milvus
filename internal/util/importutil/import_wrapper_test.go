@@ -308,6 +308,73 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
+func Test_ImportColumnBased_StringKey(t *testing.T) {
+	f := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+	cm, err := f.NewVectorStorageChunkManager(ctx)
+	assert.NoError(t, err)
+	defer cm.RemoveWithPrefix("")
+
+	idAllocator := newIDAllocator(ctx, t)
+
+	content := []byte(`{
+		"uid": ["Dm4aWrbNzhmjwCTEnCJ9LDPO2N09sqysxgVfbH9Zmn3nBzmwsmk0eZN6x7wSAoPQ", "RP50U0d2napRjXu94a8oGikWgklvVsXFurp8RR4tHGw7N0gk1b7opm59k3FCpyPb", "oxhFkQitWPPw0Bjmj7UQcn4iwvS0CU7RLAC81uQFFQjWtOdiB329CPyWkfGSeYfE", "sxoEL4Mpk1LdsyXhbNm059UWJ3CvxURLCQczaVI5xtBD4QcVWTDFUW7dBdye6nbn", "g33Rqq2UQSHPRHw5FvuXxf5uGEhIAetxE6UuXXCJj0hafG8WuJr1ueZftsySCqAd"],
+		"int_scalar": [9070353, 8505288, 4392660, 7927425, 9288807],
+		"float_scalar": [0.9798043638085004, 0.937913432198687, 0.32381232630490264, 0.31074026464844895, 0.4953578200336135],
+		"string_scalar": ["ShQ44OX0z8kGpRPhaXmfSsdH7JHq5DsZzu0e2umS1hrWG0uONH2RIIAdOECaaXir", "Ld4b0avxathBdNvCrtm3QsWO1pYktUVR7WgAtrtozIwrA8vpeactNhJ85CFGQnK5", "EmAlB0xdQcxeBtwlZJQnLgKodiuRinynoQtg0eXrjkq24dQohzSm7Bx3zquHd3kO", "fdY2beCvs1wSws0Gb9ySD92xwfEfJpX5DQgsWoISylBAoYOcXpRaqIJoXYS4g269", "6f8Iv1zQAGksj5XxMbbI5evTrYrB8fSFQ58jl0oU7Z4BpA81VsD2tlWqkhfoBNa7"],
+		"bool_scalar": [true, false, true, false, false],
+		"vectors": [
+			[0.5040062902126952, 0.8297619818664708, 0.20248342801564806, 0.12834786423659314],
+			[0.528232122836893, 0.6916116750653186, 0.41443762522548705, 0.26624344144792056],
+			[0.7978693027281338, 0.12394906726785092, 0.42431962903815285, 0.4098707807351914],
+			[0.3716157812069954, 0.006981281113265229, 0.9007003458552365, 0.22492634316191004],
+			[0.5921374209648096, 0.04234832587925662, 0.7803878096531548, 0.1964045837884633]
+		]
+	}`)
+
+	filePath := TempFilesPath + "columns_2.json"
+	err = cm.Write(filePath, content)
+	assert.NoError(t, err)
+
+	rowCount := 0
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
+		count := 0
+		for _, data := range fields {
+			assert.Less(t, 0, data.RowNum())
+			if count == 0 {
+				count = data.RowNum()
+			} else {
+				assert.Equal(t, count, data.RowNum())
+			}
+		}
+		rowCount += count
+		return nil
+	}
+
+	// success case
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper := NewImportWrapper(ctx, strKeySchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
+	files := make([]string, 0)
+	files = append(files, filePath)
+	err = wrapper.Import(files, false, false)
+	assert.Nil(t, err)
+	assert.Equal(t, 5, rowCount)
+	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
+}
+
 func Test_ImportColumnBased_numpy(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()

@@ -934,14 +934,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			Data:    tsFieldData,
 			NumRows: []int64{int64(rowNum)},
 		}
-		var pkFieldID int64
-		for _, field := range schema.Fields {
-			if field.IsPrimaryKey {
-				pkFieldID = field.GetFieldID()
-				break
-			}
-		}
-		fields[common.RowIDField] = fields[pkFieldID]
+
 		if status, _ := node.dataCoord.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
 			Stats: []*datapb.SegmentStats{{
 				SegmentID: segmentID,
