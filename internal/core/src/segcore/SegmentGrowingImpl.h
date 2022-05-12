@@ -59,6 +59,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     int64_t
     GetMemoryUsageInBytes() const override;
 
+    void
+    LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
+
     std::string
     debug() const override;
 

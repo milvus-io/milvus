@@ -210,8 +210,7 @@ CStatus
 LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info) {
     try {
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
-        auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
-        AssertInfo(segment != nullptr, "segment conversion failed");
+        AssertInfo(segment_interface != nullptr, "segment conversion failed");
         auto proto = std::string(deleted_record_info.primary_keys);
         Assert(!proto.empty());
         auto pks = std::make_unique<milvus::proto::schema::IDs>();
@@ -219,7 +218,7 @@ LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_re
         AssertInfo(suc, "unmarshal field data string failed");
         auto load_info =
             LoadDeletedRecordInfo{deleted_record_info.timestamps, pks.get(), deleted_record_info.row_count};
-        segment->LoadDeletedRecord(load_info);
+        segment_interface->LoadDeletedRecord(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(UnexpectedError, e.what());

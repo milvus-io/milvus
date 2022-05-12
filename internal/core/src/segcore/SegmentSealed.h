@@ -29,8 +29,6 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     LoadFieldData(const LoadFieldDataInfo& info) = 0;
     virtual void
-    LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
-    virtual void
     DropIndex(const FieldId field_id) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;

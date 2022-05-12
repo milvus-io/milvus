@@ -774,10 +774,6 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
-	if s.segmentType != segmentTypeSealed {
-		errMsg := fmt.Sprintln("segmentLoadFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
 
 	if len(primaryKeys) <= 0 {
 		return fmt.Errorf("empty pks to delete")
