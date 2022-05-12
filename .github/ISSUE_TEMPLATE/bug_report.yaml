@@ -63,7 +63,7 @@ body:
 - type: textarea
   attributes:
     label: Milvus Log
-    description: Detailed error log information is helpful for finding Milvus problems.
+    description: Detailed error log information is helpful for finding Milvus problems.  You can use this <a href="https://github.com/milvus-io/milvus/tree/master/deployments/export-log" target="_blank">script</a> to export Milvus logs.
     render: markdown
   validations:
     required: false
