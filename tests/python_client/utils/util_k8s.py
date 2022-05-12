@@ -2,6 +2,7 @@ import os.path
 import time
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
 
 
@@ -102,6 +103,36 @@ def get_pod_ip_name_pairs(namespace, label_selector):
         name = item.metadata.name
         m[ip] = name
     return m
+
+
+def get_querynode_id_pod_pairs(namespace, label_selector):
+    """
+    get milvus node id and corresponding pod name pairs with label selector
+
+    :param namespace: the namespace where the release
+    :type namespace: str
+
+    :param label_selector: labels to restrict which pods to list
+    :type label_selector: str
+
+    :example:
+            >>> querynode_id_pod_pair = get_querynode_id_pod_pairs("chaos-testing", "app.kubernetes.io/instance=milvus-multi-querynode, component=querynode")
+            {
+             5: 'milvus-multi-querynode-querynode-7b8f4b5c5-4pn42',
+             9: 'milvus-multi-querynode-querynode-7b8f4b5c5-99tx7',
+             1: 'milvus-multi-querynode-querynode-7b8f4b5c5-w9sk8',
+             3: 'milvus-multi-querynode-querynode-7b8f4b5c5-xx84j',
+             6: 'milvus-multi-querynode-querynode-7b8f4b5c5-x95dp'
+            }
+    """
+    # TODO: extend this function to other worker nodes, not only querynode
+    querynode_ip_pod_pair = get_pod_ip_name_pairs(namespace, label_selector)
+    querynode_id_pod_pair = {}
+    ms = MilvusSys()
+    for node in ms.query_nodes:
+        ip = node["infos"]['hardware_infos']["ip"].split(":")[0]
+        querynode_id_pod_pair[node["identifier"]] = querynode_ip_pod_pair[ip]
+    return querynode_id_pod_pair
 
 
 def export_pod_logs(namespace, label_selector, release_name=None):
