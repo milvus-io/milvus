@@ -69,4 +69,6 @@ def get_chaos_yamls():
 
 def reconnect(connections, alias='default'):
     """trying to connect by connection alias"""
-    return connections.connect(alias=alias)
+    res = connections.get_connection_addr(alias)
+    connections.remove_connection(alias)
+    return connections.connect(alias, host=res["host"], port=res["port"])
