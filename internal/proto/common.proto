@@ -222,7 +222,5 @@ enum ImportState {
     ImportDownloaded = 3;
     ImportParsed = 4;
     ImportPersisted = 5;
-    DataQueryable = 6;
-    DataIndexed = 7;
-    ImportCompleted = 8;
+    ImportCompleted = 6;
 }

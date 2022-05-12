@@ -2516,13 +2516,13 @@ func (c *Core) checkSegmentLoadedLoop(ctx context.Context, taskID int64, colID i
 					zap.Int64("task ID", taskID),
 					zap.Int64("collection ID", colID),
 					zap.Int64s("segment IDs", segIDs))
-			} else if len(resp.GetInfos()) == len(segIDs) {
+			} else if heuristicSegmentsReady(len(resp.GetInfos()), len(segIDs)) {
 				// Check if all segment info are loaded in queryNodes.
 				log.Info("(in check segment loaded loop) all import data segments loaded in queryNodes",
 					zap.Int64("task ID", taskID),
 					zap.Int64("collection ID", colID),
 					zap.Int64s("segment IDs", segIDs))
-				c.importManager.updateTaskStateCode(taskID, commonpb.ImportState_DataQueryable)
+				c.importManager.setTaskDataQueryable(taskID)
 				return
 			}
 		case <-expireTicker.C:
@@ -2548,10 +2548,10 @@ func (c *Core) checkCompleteIndexLoop(ctx context.Context, taskID int64, colID i
 			log.Info("(in check complete index loop) context done, exiting checkCompleteIndexLoop")
 			return
 		case <-ticker.C:
-			if ct, err := c.CountCompleteIndex(ctx, colName, colID, segIDs); err == nil && ct == len(segIDs) {
+			if ct, err := c.CountCompleteIndex(ctx, colName, colID, segIDs); err == nil && heuristicSegmentsReady(ct, len(segIDs)) {
 				log.Info("(in check complete index loop) all segment indices are ready!",
 					zap.Int64("task ID", taskID))
-				c.importManager.updateTaskStateCode(taskID, commonpb.ImportState_DataIndexed)
+				c.importManager.setTaskDataIndexed(taskID)
 				return
 			}
 		case <-expireTicker.C:
@@ -2752,4 +2752,11 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 		Status:    succStatus(),
 		Usernames: credInfo.Usernames,
 	}, nil
+}
+
+// heuristicSegmentsReady checks and returns if segments are ready based on count in a heuristic way.
+// We do this to avoid accidentally compacted segments.
+// This is just a temporary solution.
+func heuristicSegmentsReady(currCount int, expectedCount int) bool {
+	return currCount >= expectedCount-2 || float64(currCount)/float64(expectedCount) >= 0.8
 }

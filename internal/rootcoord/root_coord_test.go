@@ -1486,8 +1486,21 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("report import bring wait for index", func(t *testing.T) {
+	t.Run("report import wait for index", func(t *testing.T) {
 		defer wg.Done()
+		core.CallGetSegmentInfoService = func(ctx context.Context, collectionID int64,
+			segIDs []int64) (*querypb.GetSegmentInfoResponse, error) {
+			return &querypb.GetSegmentInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Infos: []*querypb.SegmentInfo{
+					{SegmentID: 1000},
+					{SegmentID: 1001},
+					{SegmentID: 1002},
+				},
+			}, nil
+		}
 		req := &rootcoordpb.ImportResult{
 			TaskId:   1,
 			RowCount: 100,
