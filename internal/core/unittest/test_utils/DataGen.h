@@ -123,11 +123,11 @@ struct GeneratedData {
  private:
     GeneratedData() = default;
     friend GeneratedData
-    DataGen(SchemaPtr schema, int64_t N, uint64_t seed, uint64_t ts_offset);
+    DataGen(SchemaPtr schema, int64_t N, uint64_t seed, uint64_t ts_offset, int repeat_count);
 };
 
 inline GeneratedData
-DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0) {
+DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0, int repeat_count = 1) {
     using std::vector;
     std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
@@ -181,19 +181,8 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
             }
             case DataType::INT64: {
                 vector<int64_t> data(N);
-                // begin with counter
-                if (starts_with(field_meta.get_name().get(), "counter")) {
-                    int64_t index = 0;
-                    for (auto& x : data) {
-                        x = index++;
-                    }
-                } else {
-                    int i = 0;
-                    for (auto& x : data) {
-                        x = er() % (2 * N);
-                        x = i;
-                        i++;
-                    }
+                for (int i = 0; i < N; i++) {
+                    data[i] = i / repeat_count;
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -240,8 +229,11 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0)
             }
             case DataType::VARCHAR: {
                 vector<std::string> data(N);
-                for (auto& x : data) {
-                    x = std::to_string(er());
+                for (int i = 0; i < N / repeat_count; i++) {
+                    auto str = std::to_string(er());
+                    for (int j = 0; j < repeat_count; j++) {
+                        data[i * repeat_count + j] = str;
+                    }
                 }
                 insert_cols(data, N, field_meta);
                 break;

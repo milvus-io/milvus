@@ -38,65 +38,14 @@ SegmentGrowingImpl::PreDelete(int64_t size) {
     return reserved_begin;
 }
 
-std::shared_ptr<DeletedRecord::TmpBitmap>
-SegmentGrowingImpl::get_deleted_bitmap(int64_t del_barrier,
-                                       Timestamp query_timestamp,
-                                       int64_t insert_barrier,
-                                       bool force) const {
-    auto old = deleted_record_.get_lru_entry();
-    if (old->bitmap_ptr->size() == insert_barrier) {
-        if (old->del_barrier == del_barrier) {
-            return old;
-        }
-    }
-
-    auto current = old->clone(insert_barrier);
-    current->del_barrier = del_barrier;
-
-    auto bitmap = current->bitmap_ptr;
-
-    int64_t start, end;
-    if (del_barrier < old->del_barrier) {
-        start = del_barrier;
-        end = old->del_barrier;
-    } else {
-        start = old->del_barrier;
-        end = del_barrier;
-    }
-    for (auto del_index = start; del_index < end; ++del_index) {
-        // get uid in delete logs
-        auto uid = deleted_record_.pks_[del_index];
-
-        // map uid to corresponding offsets, select the max one, which should be the target
-        // the max one should be closest to query_timestamp, so the delete log should refer to it
-        int64_t the_offset = -1;
-        auto [iter_b, iter_e] = pk2offset_.equal_range(uid);
-
-        for (auto iter = iter_b; iter != iter_e; ++iter) {
-            auto offset = iter->second;
-            AssertInfo(offset < insert_barrier, "Timestamp offset is larger than insert barrier");
-            the_offset = std::max(the_offset, offset);
-            if (the_offset == -1) {
-                continue;
-            }
-            if (insert_record_.timestamps_[the_offset] >= query_timestamp) {
-                bitmap->reset(the_offset);
-            } else {
-                bitmap->set(the_offset);
-            }
-        }
-    }
-    this->deleted_record_.insert_lru_entry(current);
-    return current;
-}
-
 void
 SegmentGrowingImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
     if (del_barrier == 0) {
         return;
     }
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    auto bitmap_holder =
+        get_deleted_bitmap(del_barrier, ins_barrier, deleted_record_, insert_record_, pk2offset_, timestamp);
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
     }

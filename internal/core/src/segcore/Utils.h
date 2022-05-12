@@ -18,6 +18,8 @@
 #include <stdexcept>
 #include <knowhere/common/MetricType.h>
 #include "common/QueryResult.h"
+#include "DeletedRecord.h"
+#include "InsertRecord.h"
 
 namespace milvus::segcore {
 
@@ -78,5 +80,13 @@ CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_
 // TODO remove merge dataArray, instead fill target entity when get data slice
 std::unique_ptr<DataArray>
 MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets, const FieldMeta& field_meta);
+
+std::shared_ptr<DeletedRecord::TmpBitmap>
+get_deleted_bitmap(int64_t del_barrier,
+                   int64_t insert_barrier,
+                   DeletedRecord& delete_record,
+                   const InsertRecord& insert_record,
+                   const Pk2OffsetType& pk2offset,
+                   Timestamp query_timestamp);
 
 }  // namespace milvus::segcore

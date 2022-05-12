@@ -195,12 +195,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
  protected:
-    std::shared_ptr<DeletedRecord::TmpBitmap>
-    get_deleted_bitmap(int64_t del_barrier,
-                       Timestamp query_timestamp,
-                       int64_t insert_barrier,
-                       bool force = false) const;
-
     int64_t
     num_chunk() const override;
 
@@ -227,7 +221,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable DeletedRecord deleted_record_;
 
     // pks to row offset
-    tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>> pk2offset_;
+    Pk2OffsetType pk2offset_;
     int64_t id_;
 
  private:

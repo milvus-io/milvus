@@ -279,67 +279,14 @@ SegmentSealedImpl::get_schema() const {
     return *schema_;
 }
 
-std::shared_ptr<DeletedRecord::TmpBitmap>
-SegmentSealedImpl::get_deleted_bitmap(int64_t del_barrier,
-                                      Timestamp query_timestamp,
-                                      int64_t insert_barrier,
-                                      bool force) const {
-    auto old = deleted_record_.get_lru_entry();
-    auto current = old->clone(insert_barrier);
-    current->del_barrier = del_barrier;
-    auto bitmap = current->bitmap_ptr;
-    // Sealed segment only has one chunk with chunk_id 0
-    auto delete_pks_data = deleted_record_.pks_.get_chunk_data(0);
-    auto delete_pks = reinterpret_cast<const PkType*>(delete_pks_data);
-    auto del_size = deleted_record_.reserved.load();
-
-    std::vector<SegOffset> seg_offsets;
-    std::vector<PkType> pks;
-    for (int i = 0; i < del_size; ++i) {
-        auto [iter_b, iter_e] = pk2offset_.equal_range(delete_pks[i]);
-        for (auto iter = iter_b; iter != iter_e; ++iter) {
-            auto [entry_pk, entry_offset] = *iter;
-            pks.emplace_back(entry_pk);
-            seg_offsets.emplace_back(SegOffset(entry_offset));
-        }
-    }
-
-    for (int i = 0; i < pks.size(); ++i) {
-        bitmap->set(seg_offsets[i].get());
-    }
-    if (pks.size() == 0 || seg_offsets.size() == 0) {
-        return current;
-    }
-
-    int64_t start, end;
-    if (del_barrier < old->del_barrier) {
-        start = del_barrier;
-        end = old->del_barrier;
-    } else {
-        start = old->del_barrier;
-        end = del_barrier;
-    }
-
-    for (auto del_index = start; del_index < end; ++del_index) {
-        int64_t the_offset = seg_offsets[del_index].get();
-        AssertInfo(the_offset >= 0, "Seg offset is invalid");
-        if (deleted_record_.timestamps_[del_index] >= query_timestamp) {
-            bitmap->reset(the_offset);
-        } else {
-            bitmap->set(the_offset);
-        }
-    }
-    this->deleted_record_.insert_lru_entry(current);
-    return current;
-}
-
 void
 SegmentSealedImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
     if (del_barrier == 0) {
         return;
     }
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, timestamp, ins_barrier);
+    auto bitmap_holder =
+        get_deleted_bitmap(del_barrier, ins_barrier, deleted_record_, insert_record_, pk2offset_, timestamp);
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
     }
@@ -463,7 +410,6 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
     : schema_(schema),
-      //      fields_data_(schema->size()),
       insert_record_(*schema, MAX_ROW_COUNT),
       field_data_ready_bitset_(schema->size()),
       vecindex_ready_bitset_(schema->size()),

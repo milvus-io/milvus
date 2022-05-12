@@ -255,4 +255,68 @@ MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_of
 
     return data_array;
 }
+
+// insert_barrier means num row of insert data in a segment
+// del_barrier means that if the pk of the insert data is in delete record[0 : del_barrier]
+// then the data corresponding to this pk may be ignored when searching/querying
+// and refer to func get_barrier, all ts in delete record[0 : del_barrier] < query_timestamp
+// assert old insert record pks = [5, 2, 4, 1, 3, 8, 7, 6]
+// assert old delete record pks = [2, 4, 3, 8, 5], old delete record ts = [100, 100, 150, 200, 400, 500, 500, 500]
+// if delete_barrier = 3, query time = 180, then insert records with pks in [2, 4, 3] will be deleted
+// then the old bitmap = [0, 1, 1, 0, 1, 0, 0, 0]
+std::shared_ptr<DeletedRecord::TmpBitmap>
+get_deleted_bitmap(int64_t del_barrier,
+                   int64_t insert_barrier,
+                   DeletedRecord& delete_record,
+                   const InsertRecord& insert_record,
+                   const Pk2OffsetType& pk2offset,
+                   Timestamp query_timestamp) {
+    auto old = delete_record.get_lru_entry();
+    // if insert_barrier and del_barrier have not changed, use cache data directly
+    if (old->bitmap_ptr->size() == insert_barrier) {
+        if (old->del_barrier == del_barrier) {
+            return old;
+        }
+    }
+
+    auto current = old->clone(insert_barrier);
+    current->del_barrier = del_barrier;
+
+    auto bitmap = current->bitmap_ptr;
+
+    int64_t start, end;
+    if (del_barrier < old->del_barrier) {
+        // in this case, ts of delete record[current_del_barrier : old_del_barrier] > query_timestamp
+        // so these deletion records do not take effect in query/search
+        // so bitmap corresponding to those pks in delete record[current_del_barrier:old_del_barrier] wil be reset to 0
+        // for example, current_del_barrier = 2, query_time = 120, the bitmap will be reset to [0, 1, 1, 0, 0, 0, 0, 0]
+        start = del_barrier;
+        end = old->del_barrier;
+    } else {
+        // the cache is not enough, so update bitmap using new pks in delete record[old_del_barrier:current_del_barrier]
+        // for example, current_del_barrier = 4, query_time = 300, bitmap will be updated to [0, 1, 1, 0, 1, 1, 0, 0]
+        start = old->del_barrier;
+        end = del_barrier;
+    }
+    for (auto del_index = start; del_index < end; ++del_index) {
+        // get pk in delete logs
+        auto pk = delete_record.pks_[del_index];
+        // find insert data which has same pk
+        auto [iter_b, iter_e] = pk2offset.equal_range(pk);
+        for (auto iter = iter_b; iter != iter_e; ++iter) {
+            auto insert_row_offset = iter->second;
+            AssertInfo(insert_row_offset < insert_barrier, "Timestamp offset is larger than insert barrier");
+            if (delete_record.timestamps_[del_index] > query_timestamp) {
+                // the deletion record do not take effect in search/query, and reset bitmap to 0
+                bitmap->reset(insert_row_offset);
+            } else {
+                // insert data corresponding to the insert_row_offset will be ignored in search/query
+                bitmap->set(insert_row_offset);
+            }
+        }
+    }
+    delete_record.insert_lru_entry(current);
+    return current;
+}
+
 }  // namespace milvus::segcore

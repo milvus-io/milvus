@@ -21,7 +21,7 @@ get_barrier(const RecordType& record, Timestamp timestamp) {
     int64_t end = record.ack_responder_.GetAck();
     while (beg < end) {
         auto mid = (beg + end) / 2;
-        if (vec[mid] < timestamp) {
+        if (vec[mid] <= timestamp) {
             beg = mid + 1;
         } else {
             end = mid;

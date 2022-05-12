@@ -23,18 +23,6 @@
 
 namespace milvus::segcore {
 
-using SearchResult = milvus::SearchResult;
-struct RowBasedRawData {
-    void* raw_data;      // schema
-    int sizeof_per_row;  // alignment
-    int64_t count;
-};
-
-struct ColumnBasedRawData {
-    std::vector<aligned_vector<uint8_t>> columns_;
-    int64_t count;
-};
-
 class SegmentGrowing : public SegmentInternalInterface {
  public:
     virtual void
