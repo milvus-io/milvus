@@ -28,4 +28,4 @@ StandardError=inherit
 Restart=always
 
 # Start main service
-ExecStart=/usr/bin/milvus-minio server /etc/milvus/minio-data
+ExecStart=/usr/bin/milvus-minio server /var/lib/milvus/minio-data
