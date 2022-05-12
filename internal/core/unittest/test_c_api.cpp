@@ -240,6 +240,168 @@ TEST(CApiTest, DeleteTest) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, Growing, -1);
+    auto col = (milvus::segcore::Collection*)collection;
+
+    int N = 10;
+    auto dataset = DataGen(col->get_schema(), N);
+
+    std::string insert_data;
+    auto marshal = google::protobuf::TextFormat::PrintToString(*dataset.raw_, &insert_data);
+    assert(marshal == true);
+
+    // first insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.c_str());
+    assert(res.error_code == Success);
+
+    // second insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+    PreInsert(segment, N, &offset);
+    res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.c_str());
+    assert(res.error_code == Success);
+
+    // create retrieve plan pks in {1, 2, 3}
+    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_row_ids);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->predicate_ = std::move(term_expr);
+    std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
+    plan->field_ids_ = target_field_ids;
+
+    CRetrieveResult retrieve_result;
+    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    ASSERT_TRUE(suc);
+    ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
+
+    // delete data pks = {1, 2, 3}
+    std::vector<int64_t> delete_row_ids = {1, 2, 3};
+    auto ids = std::make_unique<IdArray>();
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    std::string delete_data;
+    marshal = google::protobuf::TextFormat::PrintToString(*ids.get(), &delete_data);
+    assert(marshal == true);
+    std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
+
+    offset = PreDelete(segment, 3);
+    auto del_res = Delete(segment, offset, 3, delete_data.c_str(), delete_timestamps.data());
+    assert(del_res.error_code == Success);
+
+    // retrieve pks in {1, 2, 3}
+    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    ASSERT_TRUE(suc);
+    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+
+    DeleteRetrievePlan(plan.release());
+    DeleteRetrieveResult(&retrieve_result);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, Sealed, -1);
+    auto col = (milvus::segcore::Collection*)collection;
+
+    int N = 20;
+    auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
+
+    for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
+        auto array = dataset.get_col(field_id);
+        std::string data;
+        auto marshal = google::protobuf::TextFormat::PrintToString(*array.get(), &data);
+        assert(marshal == true);
+
+        auto load_info = CLoadFieldDataInfo{field_id.get(), data.c_str(), N};
+
+        auto res = LoadFieldData(segment, load_info);
+        assert(res.error_code == Success);
+        auto count = GetRowCount(segment);
+        assert(count == N);
+    }
+
+    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
+    std::string ts_data;
+    auto marshal = google::protobuf::TextFormat::PrintToString(*ts_array.get(), &ts_data);
+    assert(marshal == true);
+    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.c_str(), N};
+    auto res = LoadFieldData(segment, load_info);
+    assert(res.error_code == Success);
+    auto count = GetRowCount(segment);
+    assert(count == N);
+
+    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    std::string row_is_data;
+    marshal = google::protobuf::TextFormat::PrintToString(*row_id_array.get(), &row_is_data);
+    assert(marshal == true);
+    load_info = CLoadFieldDataInfo{RowFieldID.get(), ts_data.c_str(), N};
+    res = LoadFieldData(segment, load_info);
+    assert(res.error_code == Success);
+    count = GetRowCount(segment);
+    assert(count == N);
+
+    // create retrieve plan pks in {1, 2, 3}
+    std::vector<int64_t> retrive_row_ids = {1, 2, 3};
+    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_row_ids);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->predicate_ = std::move(term_expr);
+    std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
+    plan->field_ids_ = target_field_ids;
+
+    CRetrieveResult retrieve_result;
+    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    ASSERT_TRUE(suc);
+    ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
+
+    // delete data pks = {1, 2, 3}
+    std::vector<int64_t> delete_row_ids = {1, 2, 3};
+    auto ids = std::make_unique<IdArray>();
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    std::string delete_data;
+    marshal = google::protobuf::TextFormat::PrintToString(*ids.get(), &delete_data);
+    assert(marshal == true);
+    std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
+
+    auto offset = PreDelete(segment, 3);
+
+    auto del_res = Delete(segment, offset, 3, delete_data.c_str(), delete_timestamps.data());
+    assert(del_res.error_code == Success);
+
+    // retrieve pks in {1, 2, 3}
+    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    ASSERT_TRUE(suc);
+    ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+
+    DeleteRetrievePlan(plan.release());
+    DeleteRetrieveResult(&retrieve_result);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
 TEST(CApiTest, SearchTest) {
     auto c_collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(c_collection, Growing, -1);
@@ -388,7 +550,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    auto res = Retrieve(segment, plan.release(), dataset.timestamps_[0], &retrieve_result);
+    auto res = Retrieve(segment, plan.get(), dataset.timestamps_[0], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteRetrievePlan(plan.release());

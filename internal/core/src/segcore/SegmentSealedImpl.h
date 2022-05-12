@@ -19,7 +19,6 @@
 #include <utility>
 #include <vector>
 #include <tbb/concurrent_priority_queue.h>
-#include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
 
 #include "ConcurrentVector.h"
@@ -105,12 +104,6 @@ class SegmentSealedImpl : public SegmentSealed {
     int64_t
     get_active_count(Timestamp ts) const override;
 
-    std::shared_ptr<DeletedRecord::TmpBitmap>
-    get_deleted_bitmap(int64_t del_barrier,
-                       Timestamp query_timestamp,
-                       int64_t insert_barrier,
-                       bool force = false) const;
-
  private:
     template <typename T>
     static void
@@ -194,7 +187,7 @@ class SegmentSealedImpl : public SegmentSealed {
     mutable DeletedRecord deleted_record_;
 
     // pks to row offset
-    tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>> pk2offset_;
+    Pk2OffsetType pk2offset_;
     //    std::unique_ptr<ScalarIndexBase> primary_key_index_;
 
     SchemaPtr schema_;
