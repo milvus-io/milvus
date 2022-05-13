@@ -18,7 +18,9 @@ package querynode
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"strconv"
@@ -66,6 +68,8 @@ const (
 	defaultDMLChannel   = "query-node-unittest-DML-0"
 	defaultDeltaChannel = "query-node-unittest-delta-channel-0"
 	defaultSubName      = "query-node-unittest-sub-name-0"
+
+	defaultLocalStorage = "/tmp/milvus_test/querynode"
 )
 
 const (
@@ -1454,4 +1458,58 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 	}
 
 	return fieldData
+}
+
+// saveDeltaLog saves delta logs into MinIO for testing purpose.
+func saveDeltaLog(ctx context.Context,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID) ([]*datapb.FieldBinlog, error) {
+
+	binlogWriter := storage.NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID)
+	eventWriter, _ := binlogWriter.NextDeleteEventWriter()
+	dData := &storage.DeleteData{
+		Pks:      []int64{1, 2},
+		Tss:      []Timestamp{100, 200},
+		RowCount: 2,
+	}
+
+	sizeTotal := 0
+	for i := int64(0); i < dData.RowCount; i++ {
+		int64PkValue := dData.Pks[i]
+		ts := dData.Tss[i]
+		eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts))
+		sizeTotal += binary.Size(int64PkValue)
+		sizeTotal += binary.Size(ts)
+	}
+	eventWriter.SetEventTimestamp(100, 200)
+	binlogWriter.SetEventTimeStamp(100, 200)
+	binlogWriter.AddExtra("original_size", fmt.Sprintf("%v", sizeTotal))
+
+	binlogWriter.Finish()
+	buffer, _ := binlogWriter.GetBuffer()
+	blob := &storage.Blob{Key: "deltaLogPath1", Value: buffer}
+
+	kvs := make(map[string][]byte, 1)
+
+	// write delta log
+	pkFieldID := UniqueID(102)
+	fieldBinlog := make([]*datapb.FieldBinlog, 0)
+	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
+	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
+	key += "delta" // append suffix 'delta' to avoid conflicts against binlog
+	kvs[key] = blob.Value[:]
+	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
+		FieldID: pkFieldID,
+		Binlogs: []*datapb.Binlog{{LogPath: key}},
+	})
+	log.Debug("[query node unittest] save delta log file to MinIO/S3")
+
+	kv, err := genMinioKV(ctx)
+	if err != nil {
+		return nil, err
+	}
+	err = kv.MultiSaveBytes(kvs)
+
+	return fieldBinlog, err
 }

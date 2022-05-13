@@ -243,6 +243,22 @@ SegmentGrowingImpl::GetMemoryUsageInBytes() const {
     return total_bytes;
 }
 
+void
+SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
+    AssertInfo(info.row_count > 0, "The row count of deleted record is 0");
+    AssertInfo(info.primary_keys, "Deleted primary keys is null");
+    AssertInfo(info.timestamps, "Deleted timestamps is null");
+    auto primary_keys = reinterpret_cast<const idx_t*>(info.primary_keys);
+    auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
+    int64_t size = info.row_count;
+
+    deleted_record_.uids_.set_data(0, primary_keys, size);
+    deleted_record_.timestamps_.set_data(0, timestamps, size);
+    deleted_record_.ack_responder_.AddSegment(0, size);
+    deleted_record_.reserved.fetch_add(size);
+    deleted_record_.record_size_ = size;
+}
+
 SpanBase
 SegmentGrowingImpl::chunk_data_impl(FieldOffset field_offset, int64_t chunk_id) const {
     auto vec = get_insert_record().get_field_data_base(field_offset);

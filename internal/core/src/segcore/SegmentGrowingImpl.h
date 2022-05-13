@@ -63,6 +63,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     Status
     Delete(int64_t reserverd_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) override;
 
+    void
+    LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
+
     int64_t
     GetMemoryUsageInBytes() const override;
 

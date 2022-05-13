@@ -652,10 +652,10 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []IntPrimaryKey, timestam
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
-	if s.segmentType != segmentTypeSealed {
-		errMsg := fmt.Sprintln("segmentLoadFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
-		return errors.New(errMsg)
-	}
+	// if s.segmentType != segmentTypeSealed {
+	// 	errMsg := fmt.Sprintln("segmentLoadFieldData failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
+	// 	return errors.New(errMsg)
+	// }
 	loadInfo := C.CLoadDeletedRecordInfo{
 		timestamps:   unsafe.Pointer(&timestamps[0]),
 		primary_keys: unsafe.Pointer(&primaryKeys[0]),
