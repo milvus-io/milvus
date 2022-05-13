@@ -81,7 +81,7 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 	if _, ok := q.queryShards[channel]; ok {
 		return errors.New(fmt.Sprintln("query shard(channel) ", channel, " already exists"))
 	}
-	qs := newQueryShard(
+	qs, err := newQueryShard(
 		q.ctx,
 		collectionID,
 		channel,
@@ -93,6 +93,9 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 		q.remoteChunkManager,
 		q.localCacheEnabled,
 	)
+	if err != nil {
+		return err
+	}
 	q.queryShards[channel] = qs
 	log.Info("Successfully add query shard", zap.Int64("collection", collectionID), zap.Int64("replica", replicaID), zap.String("channel", channel))
 	return nil
@@ -155,14 +158,15 @@ func (q *queryShardService) releaseCollection(collectionID int64) {
 	qc, ok := q.queryChannels[collectionID]
 	if ok && qc != nil {
 		qc.Stop()
+		delete(q.queryChannels, collectionID)
 	}
 	q.queryChannelMu.Unlock()
 
 	q.queryShardsMu.Lock()
-	for _, queryShard := range q.queryShards {
+	for channel, queryShard := range q.queryShards {
 		if queryShard.collectionID == collectionID {
 			queryShard.Close()
-			delete(q.queryShards, queryShard.channel)
+			delete(q.queryShards, channel)
 		}
 	}
 	q.queryShardsMu.Unlock()
