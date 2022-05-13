@@ -21,6 +21,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -206,4 +207,14 @@ func removeFromSlice(origin []UniqueID, del ...UniqueID) []UniqueID {
 	set.Remove(del...)
 
 	return set.Collect()
+}
+
+func getReplicaAvailableMemory(cluster Cluster, replica *milvuspb.ReplicaInfo) uint64 {
+	availableMemory := uint64(0)
+	nodes := getNodeInfos(cluster, replica.NodeIds)
+	for _, node := range nodes {
+		availableMemory += node.totalMem - node.memUsage
+	}
+
+	return availableMemory
 }

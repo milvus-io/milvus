@@ -720,10 +720,7 @@ func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas [
 		return fmt.Errorf("no enough nodes to create replicas, node_num=%d replica_num=%d", len(nodeIds), len(replicas))
 	}
 
-	nodeInfos, err := getNodeInfos(c, nodeIds)
-	if err != nil {
-		return err
-	}
+	nodeInfos := getNodeInfos(c, nodeIds)
 	if len(nodeInfos) < len(replicas) {
 		return fmt.Errorf("no enough nodes to create replicas, node_num=%d replica_num=%d", len(nodeInfos), len(replicas))
 	}
@@ -758,7 +755,7 @@ func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas [
 
 // It's a helper method to concurrently get nodes' info
 // Remove nodes that it can't connect to
-func getNodeInfos(cluster *queryNodeCluster, nodeIds []UniqueID) ([]*queryNode, error) {
+func getNodeInfos(cluster Cluster, nodeIds []UniqueID) []*queryNode {
 	nodeCh := make(chan *queryNode, len(nodeIds))
 
 	wg := sync.WaitGroup{}
@@ -781,5 +778,5 @@ func getNodeInfos(cluster *queryNodeCluster, nodeIds []UniqueID) ([]*queryNode, 
 		nodes = append(nodes, node)
 	}
 
-	return nodes, nil
+	return nodes
 }
