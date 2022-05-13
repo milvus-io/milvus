@@ -58,8 +58,6 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	// default max message size 5M
 	newConf.SetKey("message.max.bytes", 10485760)
 	newConf.SetKey("compression.codec", "zstd")
-	newConf.SetKey("go.events.channel.size", 0)
-	newConf.SetKey("go.produce.channel.size", 0)
 	newConf.SetKey("linger.ms", 20)
 	return newConf
 }
