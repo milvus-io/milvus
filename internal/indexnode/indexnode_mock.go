@@ -190,7 +190,7 @@ func (inm *Mock) Register() error {
 	}
 	session := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, inm.etcdCli)
 	session.Init(typeutil.IndexNodeRole, "localhost:21121", false, false)
-	session.Register()
+	session.Register(nil)
 	return nil
 }
 

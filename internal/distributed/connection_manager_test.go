@@ -64,7 +64,7 @@ func TestConnectionManager(t *testing.T) {
 		rootcoordpb.RegisterRootCoordServer(grpcServer, rootCoord)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.RootCoordRole, lis.Addr().String(), true, false)
-		session.Register()
+		session.Register(nil)
 		assert.Eventually(t, func() bool {
 			rootCoord, ok := cm.GetRootCoordClient()
 			return rootCoord != nil && ok
@@ -81,7 +81,7 @@ func TestConnectionManager(t *testing.T) {
 		querypb.RegisterQueryCoordServer(grpcServer, queryCoord)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.QueryCoordRole, lis.Addr().String(), true, false)
-		session.Register()
+		session.Register(nil)
 		assert.Eventually(t, func() bool {
 			queryCoord, ok := cm.GetQueryCoordClient()
 			return queryCoord != nil && ok
@@ -98,7 +98,7 @@ func TestConnectionManager(t *testing.T) {
 		datapb.RegisterDataCoordServer(grpcServer, dataCoord)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.DataCoordRole, lis.Addr().String(), true, false)
-		session.Register()
+		session.Register(nil)
 		assert.Eventually(t, func() bool {
 			dataCoord, ok := cm.GetDataCoordClient()
 			return dataCoord != nil && ok
@@ -115,7 +115,7 @@ func TestConnectionManager(t *testing.T) {
 		indexpb.RegisterIndexCoordServer(grpcServer, indexCoord)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.IndexCoordRole, lis.Addr().String(), true, false)
-		session.Register()
+		session.Register(nil)
 		assert.Eventually(t, func() bool {
 			indexCoord, ok := cm.GetIndexCoordClient()
 			return indexCoord != nil && ok
@@ -132,7 +132,7 @@ func TestConnectionManager(t *testing.T) {
 		querypb.RegisterQueryNodeServer(grpcServer, queryNode)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.QueryNodeRole, lis.Addr().String(), true, false)
-		session.Register()
+		session.Register(nil)
 		assert.Eventually(t, func() bool {
 			queryNodes, ok := cm.GetQueryNodeClients()
 			return len(queryNodes) == 1 && ok
@@ -149,7 +149,7 @@ func TestConnectionManager(t *testing.T) {
 		datapb.RegisterDataNodeServer(grpcServer, dataNode)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.DataNodeRole, lis.Addr().String(), true, false)
-		session.Register()
+		session.Register(nil)
 		assert.Eventually(t, func() bool {
 			dataNodes, ok := cm.GetDataNodeClients()
 			return len(dataNodes) == 1 && ok
@@ -166,7 +166,7 @@ func TestConnectionManager(t *testing.T) {
 		indexpb.RegisterIndexNodeServer(grpcServer, indexNode)
 		go grpcServer.Serve(lis)
 		session.Init(typeutil.IndexNodeRole, lis.Addr().String(), true, false)
-		session.Register()
+		session.Register(nil)
 		assert.Eventually(t, func() bool {
 			indexNodes, ok := cm.GetIndexNodeClients()
 			return len(indexNodes) == 1 && ok

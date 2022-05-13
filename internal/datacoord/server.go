@@ -219,8 +219,7 @@ func (s *Server) QuitSignal() <-chan struct{} {
 
 // Register registers data service at etcd
 func (s *Server) Register() error {
-	s.session.Register()
-	go s.session.LivenessCheck(s.serverLoopCtx, func() {
+	s.session.Register(func() {
 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))

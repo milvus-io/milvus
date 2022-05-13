@@ -128,10 +128,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, 
 
 // Register register index node at etcd.
 func (i *IndexNode) Register() error {
-	i.session.Register()
-
-	//start liveness check
-	go i.session.LivenessCheck(i.loopCtx, func() {
+	i.session.Register(func() {
 		log.Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		if err := i.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
