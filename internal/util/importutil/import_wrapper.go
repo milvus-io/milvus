@@ -505,12 +505,19 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 		return errors.New("import error: primary key field is not provided")
 	}
 
-	// generate auto id for primary key
+	// generate auto id for primary key and rowid field
+	var rowIDBegin typeutil.UniqueID
+	var rowIDEnd typeutil.UniqueID
+	rowIDBegin, rowIDEnd, _ = p.rowIDAllocator.Alloc(uint32(rowCount))
+
+	rowIDField := fieldsData[common.RowIDField]
+	rowIDFieldArr := rowIDField.(*storage.Int64FieldData)
+	for i := rowIDBegin; i < rowIDEnd; i++ {
+		rowIDFieldArr.Data = append(rowIDFieldArr.Data, rowIDBegin+i)
+	}
+
 	if primaryKey.GetAutoID() {
 		log.Info("import wrapper: generating auto-id", zap.Any("rowCount", rowCount))
-		var rowIDBegin typeutil.UniqueID
-		var rowIDEnd typeutil.UniqueID
-		rowIDBegin, rowIDEnd, _ = p.rowIDAllocator.Alloc(uint32(rowCount))
 
 		primaryDataArr := primaryData.(*storage.Int64FieldData)
 		for i := rowIDBegin; i < rowIDEnd; i++ {
@@ -547,11 +554,27 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 
 	// split data into segments
 	for i := 0; i < rowCount; i++ {
-		id := primaryData.GetRow(i).(int64)
 		// hash to a shard number
-		hash, _ := typeutil.Hash32Int64(id)
-		shard := hash % uint32(p.shardNum)
+		var shard uint32
+		pk := primaryData.GetRow(i)
+		strPK, ok := interface{}(pk).(string)
+		if ok {
+			hash := typeutil.HashString2Uint32(strPK)
+			shard = hash % uint32(p.shardNum)
+		} else {
+			intPK, ok := interface{}(pk).(int64)
+			if !ok {
+				return errors.New("import error: primary key field must be int64 or varchar")
+			}
+			hash, _ := typeutil.Hash32Int64(intPK)
+			shard = hash % uint32(p.shardNum)
+		}
 
+		// set rowID field
+		rowIDField := segmentsData[shard][common.RowIDField].(*storage.Int64FieldData)
+		rowIDField.Data = append(rowIDField.Data, rowIDFieldArr.GetRow(i).(int64))
+
+		// append row to shard
 		for k := 0; k < len(p.collectionSchema.Fields); k++ {
 			schema := p.collectionSchema.Fields[k]
 			srcData := fieldsData[schema.GetFieldID()]

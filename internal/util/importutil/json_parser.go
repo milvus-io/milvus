@@ -60,13 +60,14 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 
 	t, err := dec.Token()
 	if err != nil {
-		return p.logError("JSON parse: " + err.Error())
+		return p.logError("JSON parse: row count is 0")
 	}
 	if t != json.Delim('{') {
 		return p.logError("JSON parse: invalid JSON format, the content should be started with'{'")
 	}
 
 	// read the first level
+	isEmpty := true
 	for dec.More() {
 		// read the key
 		t, err := dec.Token()
@@ -114,6 +115,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 
 			buf = append(buf, row)
 			if len(buf) >= int(p.bufSize) {
+				isEmpty = false
 				if err = handler.Handle(buf); err != nil {
 					return p.logError(err.Error())
 				}
@@ -125,6 +127,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 
 		// some rows in buffer not parsed, parse them
 		if len(buf) > 0 {
+			isEmpty = false
 			if err = handler.Handle(buf); err != nil {
 				return p.logError(err.Error())
 			}
@@ -153,6 +156,10 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		break
 	}
 
+	if isEmpty {
+		return p.logError("JSON parse: row count is 0")
+	}
+
 	// send nil to notify the handler all have done
 	return handler.Handle(nil)
 }
@@ -166,13 +173,14 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 
 	t, err := dec.Token()
 	if err != nil {
-		return p.logError("JSON parse: " + err.Error())
+		return p.logError("JSON parse: row count is 0")
 	}
 	if t != json.Delim('{') {
 		return p.logError("JSON parse: invalid JSON format, the content should be started with'{'")
 	}
 
 	// read the first level
+	isEmpty := true
 	for dec.More() {
 		// read the key
 		t, err := dec.Token()
@@ -210,6 +218,7 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 
 			buf[id] = append(buf[id], value)
 			if len(buf[id]) >= int(p.bufSize) {
+				isEmpty = false
 				if err = handler.Handle(buf); err != nil {
 					return p.logError(err.Error())
 				}
@@ -221,6 +230,7 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 
 		// some values in buffer not parsed, parse them
 		if len(buf[id]) > 0 {
+			isEmpty = false
 			if err = handler.Handle(buf); err != nil {
 				return p.logError(err.Error())
 			}
@@ -243,6 +253,10 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 		default:
 			break
 		}
+	}
+
+	if isEmpty {
+		return p.logError("JSON parse: row count is 0")
 	}
 
 	// send nil to notify the handler all have done
