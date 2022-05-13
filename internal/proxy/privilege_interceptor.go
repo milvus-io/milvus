@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+
 	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/casbin/casbin/v2"
@@ -87,17 +89,24 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		return ctx, err
 	}
 	roleNames = append(roleNames, util.RolePublic)
-	resourceType := privilegeExt.ObjectType.String()
-	resourceNameIndex := privilegeExt.ObjectNameIndex
-	resourceName := funcutil.GetResourceName(req, privilegeExt.ObjectNameIndex)
-	resourcePrivilege := privilegeExt.ObjectPrivilege.String()
+	objectType := privilegeExt.ObjectType.String()
+	objectNameIndex := privilegeExt.ObjectNameIndex
+	objectName := funcutil.GetObjectName(req, objectNameIndex)
+	if isCurUserObject(objectType, username, objectName) {
+		return ctx, nil
+	}
+	objectNameIndexs := privilegeExt.ObjectNameIndexs
+	objectNames := funcutil.GetObjectNames(req, objectNameIndexs)
+	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 	policyInfo := strings.Join(globalMetaCache.GetPrivilegeInfo(ctx), ",")
 
 	log.Debug("current request info", zap.String("username", username), zap.Strings("role_names", roleNames),
-		zap.String("resource_type", resourceType), zap.String("resource_privilege", resourcePrivilege), zap.Int32("resource_index", resourceNameIndex), zap.String("resource_name", resourceName),
+		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
+		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
+		zap.Strings("object_names", objectNames),
 		zap.String("policy_info", policyInfo))
 
-	policy := fmt.Sprintf("[%s]", strings.Join(globalMetaCache.GetPrivilegeInfo(ctx), ","))
+	policy := fmt.Sprintf("[%s]", policyInfo)
 	b := []byte(policy)
 	a := jsonadapter.NewAdapter(&b)
 	policyModel, err := initPolicyModel()
@@ -112,12 +121,38 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		return ctx, err
 	}
 	for _, roleName := range roleNames {
-		isPermit, err := e.Enforce(roleName, funcutil.PolicyForResource(resourceType, resourceName), privilegeExt.ObjectPrivilege.String())
+		permitFunc := func(resName string) (bool, error) {
+			object := funcutil.PolicyForResource(objectType, objectName)
+			isPermit, err := e.Enforce(roleName, object, objectPrivilege)
+			if err != nil {
+				log.Error("Enforce fail", zap.String("role", roleName), zap.String("object", object), zap.String("privilege", objectPrivilege), zap.Error(err))
+				return false, err
+			}
+			return isPermit, nil
+		}
+
+		// handle the api which refers one resource
+		permitObject, err := permitFunc(objectName)
 		if err != nil {
-			log.Error("Enforce fail", zap.String("policy", policy), zap.String("role", roleName), zap.Error(err))
 			return ctx, err
 		}
-		if isPermit {
+		if permitObject {
+			return ctx, nil
+		}
+
+		// handle the api which refers many resources
+		permitObjects := true
+		for _, name := range objectNames {
+			p, err := permitFunc(name)
+			if err != nil {
+				return ctx, err
+			}
+			if !p {
+				permitObjects = false
+				break
+			}
+		}
+		if permitObjects && len(objectNames) != 0 {
 			return ctx, nil
 		}
 	}
@@ -128,6 +163,16 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 
 type ErrPermissionDenied struct{}
 
-func (e ErrPermissionDenied) Error() string {
+func (e *ErrPermissionDenied) Error() string {
 	return "permission deny"
+}
+
+// isCurUserObject Determine whether it is an Object of type User that operates on its own user information,
+// like updating password or viewing your own role information.
+// make users operate their own user information when the related privileges are not granted.
+func isCurUserObject(objectType string, curUser string, object string) bool {
+	if objectType != commonpb.ObjectType_User.String() {
+		return false
+	}
+	return curUser == object
 }

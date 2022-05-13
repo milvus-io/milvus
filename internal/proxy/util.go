@@ -696,21 +696,3 @@ func GetRole(username string) ([]string, error) {
 	}
 	return globalMetaCache.GetUserRole(username), nil
 }
-
-func ValidateAdminPermission(ctx context.Context) error {
-	curUser, err := GetCurUserFromContext(ctx)
-	if err != nil {
-		return fmt.Errorf("fail to get current user info from the context, err: %w", err)
-	}
-	roles, err := GetRole(curUser)
-	if err != nil {
-		return fmt.Errorf("fail to get role for the current user info, currtent user:%s, err: %w", curUser, err)
-	}
-	for _, role := range roles {
-		if role == util.RoleAdmin {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("the current user doesn't have privileges of the admin role, can't execute this api")
-}

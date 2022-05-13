@@ -276,6 +276,7 @@ enum ImportState {
 enum ObjectType {
     Collection = 0;
     Global = 1;
+    User = 2;
 }
 
 enum ObjectPrivilege {
@@ -289,12 +290,29 @@ enum ObjectPrivilege {
     PrivilegeCompaction = 7;
     PrivilegeInsert = 8;
     PrivilegeDelete = 9;
+
+    PrivilegeGetStatistics = 10;
+    PrivilegeCreateIndex = 11;
+    PrivilegeIndexDetail = 12;
+    PrivilegeDropIndex = 13;
+    PrivilegeSearch = 14;
+    PrivilegeFlush = 15;
+    PrivilegeQuery = 16;
+    PrivilegeLoadBalance = 17;
+    PrivilegeImport = 18;
+    PrivilegeCreateOwnership = 19;
+    PrivilegeUpdateUser = 20;
+    PrivilegeDropOwnership = 21;
+    PrivilegeSelectOwnership = 22;
+    PrivilegeManageOwnership = 23;
+    PrivilegeSelectUser = 24;
 }
 
 message PrivilegeExt {
     ObjectType object_type = 1;
     ObjectPrivilege object_privilege = 2;
     int32 object_name_index = 3;
+    int32 object_name_indexs = 4;
 }
 
 extend google.protobuf.MessageOptions {

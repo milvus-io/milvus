@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	GlobalResourceName = "*"
+	AnyObjectName = "*"
 )
 
 func GetVersion(m proto.GeneratedMessage) (string, error) {
@@ -53,13 +53,42 @@ func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error)
 	}, nil
 }
 
-func GetResourceName(m proto.GeneratedMessage, index int32) string {
+// GetObjectName get object name from the grpc message according to the filed index. The filed is a string.
+func GetObjectName(m proto.GeneratedMessage, index int32) string {
 	if index <= 0 {
-		return GlobalResourceName
+		return AnyObjectName
 	}
 	msg := proto.MessageReflect(proto.MessageV1(m))
 	msgDesc := msg.Descriptor()
-	return msg.Get(msgDesc.Fields().ByNumber(protoreflect.FieldNumber(index))).String()
+	value := msg.Get(msgDesc.Fields().ByNumber(protoreflect.FieldNumber(index)))
+	user, ok := value.Interface().(protoreflect.Message)
+	if ok {
+		userDesc := user.Descriptor()
+		value = user.Get(userDesc.Fields().ByNumber(protoreflect.FieldNumber(1)))
+		if value.String() == "" {
+			return AnyObjectName
+		}
+	}
+	return value.String()
+}
+
+// GetObjectNames get object names from the grpc message according to the filed index. The filed is an array.
+func GetObjectNames(m proto.GeneratedMessage, index int32) []string {
+	if index <= 0 {
+		return []string{}
+	}
+	msg := proto.MessageReflect(proto.MessageV1(m))
+	msgDesc := msg.Descriptor()
+	value := msg.Get(msgDesc.Fields().ByNumber(protoreflect.FieldNumber(index)))
+	names, ok := value.Interface().(protoreflect.List)
+	if !ok {
+		return []string{}
+	}
+	res := make([]string, names.Len())
+	for i := 0; i < names.Len(); i++ {
+		res[i] = names.Get(i).String()
+	}
+	return res
 }
 
 func PolicyForPrivilege(roleName string, objectType string, objectName string, privilege string) string {

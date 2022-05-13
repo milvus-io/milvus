@@ -263,6 +263,11 @@ message ReleaseCollectionRequest {
 * WARNING: This API is experimental and not useful for now.
 */
 message GetStatisticsRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeGetStatistics
+    object_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -290,6 +295,11 @@ message GetStatisticsResponse {
 * Get collection statistics like row_count.
 */
 message GetCollectionStatisticsRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeGetStatistics
+    object_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -518,6 +528,11 @@ message ShowSegmentsResponse {
 * Create index for vector datas
 */
 message CreateIndexRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeCreateIndex
+    object_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -537,6 +552,11 @@ message CreateIndexRequest {
 * Current release of Milvus only supports showing latest built index.
 */
 message DescribeIndexRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeIndexDetail
+    object_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -577,6 +597,11 @@ message DescribeIndexResponse {
 *  Get index building progress
 */
 message GetIndexBuildProgressRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeIndexDetail
+    object_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -596,6 +621,11 @@ message GetIndexBuildProgressResponse {
 }
 
 message GetIndexStateRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeIndexDetail
+    object_name_index: 3
+  };
   common.MsgBase base = 1; // must
   string db_name = 2 ;
   string collection_name = 3; // must
@@ -610,6 +640,11 @@ message GetIndexStateResponse {
 }
 
 message DropIndexRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeDropIndex
+    object_name_index: 3
+  };
   common.MsgBase base = 1; // must
   string db_name = 2;
   string collection_name = 3; // must
@@ -660,6 +695,11 @@ message DeleteRequest {
 
 
 message SearchRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeSearch
+    object_name_index: 3
+  };
   common.MsgBase base = 1; // must
   string db_name = 2;
   string collection_name = 3; // must
@@ -688,6 +728,11 @@ message SearchResults {
 }
 
 message FlushRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeFlush
+    object_name_indexs: 3
+  };
   common.MsgBase base = 1;
   string db_name = 2;
   repeated string collection_names = 3;
@@ -700,6 +745,11 @@ message FlushResponse{
 }
 
 message QueryRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeQuery
+    object_name_index: 3
+  };
   common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
@@ -821,6 +871,11 @@ message GetMetricsResponse {
 * Do load balancing operation from src_nodeID to dst_nodeID.
 */
 message LoadBalanceRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeLoadBalance
+    object_name_index: 5
+  };
   common.MsgBase base = 1;
   int64 src_nodeID = 2;
   repeated int64 dst_nodeIDs = 3;
@@ -880,6 +935,11 @@ message GetFlushStateResponse {
 }
 
 message ImportRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Collection
+    object_privilege: PrivilegeImport
+    object_name_index: 1
+  };
   string collection_name = 1;                // target collection
   string partition_name = 2;                 // target partition
   repeated string channel_names = 3;         // channel names for the collection
@@ -951,6 +1011,11 @@ service ProxyService {
 // https://wiki.lfaidata.foundation/display/MIL/MEP+27+--+Support+Basic+Authentication
 
 message CreateCredentialRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeCreateOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // username
@@ -964,6 +1029,11 @@ message CreateCredentialRequest {
 }
 
 message UpdateCredentialRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: User
+    object_privilege: PrivilegeUpdateUser
+    object_name_index: 2
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // username
@@ -979,6 +1049,11 @@ message UpdateCredentialRequest {
 }
 
 message DeleteCredentialRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeDropOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -993,6 +1068,11 @@ message ListCredUsersResponse {
 }
 
 message ListCredUsersRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeSelectOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
 }
@@ -1007,6 +1087,11 @@ message UserEntity {
 }
 
 message CreateRoleRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeCreateOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // role
@@ -1014,6 +1099,11 @@ message CreateRoleRequest {
 }
 
 message DropRoleRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeDropOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // role name
@@ -1026,6 +1116,11 @@ enum OperateUserRoleType {
 }
 
 message OperateUserRoleRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeManageOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // username
@@ -1037,6 +1132,11 @@ message OperateUserRoleRequest {
 }
 
 message SelectRoleRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeSelectOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // role
@@ -1058,6 +1158,11 @@ message SelectRoleResponse {
 }
 
 message SelectUserRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: User
+    object_privilege: PrivilegeSelectUser
+    object_name_index: 2
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // user
@@ -1107,6 +1212,11 @@ message GrantEntity {
 }
 
 message SelectGrantRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeSelectOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // grant
@@ -1126,6 +1236,11 @@ enum OperatePrivilegeType {
 }
 
 message OperatePrivilegeRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeManageOwnership
+    object_name_index: -1
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // grant

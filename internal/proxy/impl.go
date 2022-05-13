@@ -3873,10 +3873,6 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	if !node.checkHealthy() {
 		return unhealthyStatus(), errorutil.UnhealthyError()
 	}
-	// validate root permission
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return status, errorutil.PermissionDenyError()
-	}
 	// validate params
 	username := req.Username
 	if err := ValidateUsername(username); err != nil {
@@ -3999,10 +3995,6 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 	if !node.checkHealthy() {
 		return unhealthyStatus(), errorutil.UnhealthyError()
 	}
-	// validate root permission
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return status, errorutil.PermissionDenyError()
-	}
 
 	if req.Username == util.UserRoot {
 		return &commonpb.Status{
@@ -4064,18 +4056,6 @@ func (node *Proxy) SendRetrieveResult(ctx context.Context, req *internalpb.Retri
 	}, nil
 }
 
-func (node *Proxy) validateAdminPermission(ctx context.Context) (bool, *commonpb.Status) {
-	err := ValidateAdminPermission(ctx)
-	if err != nil {
-		logger.Error("fail to validate admin permission", zap.Error(err))
-		return false, &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_PermissionDenied,
-			Reason:    err.Error(),
-		}
-	}
-	return true, nil
-}
-
 func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
 	logger.Debug("CreateRole", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
@@ -4091,10 +4071,6 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    err.Error(),
 		}, err
-	}
-
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return status, errorutil.PermissionDenyError()
 	}
 
 	result, err := node.rootCoord.CreateRole(ctx, req)
@@ -4118,9 +4094,6 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    err.Error(),
 		}, err
-	}
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return status, errorutil.PermissionDenyError()
 	}
 	result, err := node.rootCoord.DropRole(ctx, req)
 	if err != nil {
@@ -4150,9 +4123,6 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 			Reason:    err.Error(),
 		}, err
 	}
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return status, errorutil.PermissionDenyError()
-	}
 
 	result, err := node.rootCoord.OperateUserRole(ctx, req)
 	if err != nil {
@@ -4180,11 +4150,6 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 				},
 			}, err
 		}
-	}
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return &milvuspb.SelectRoleResponse{
-			Status: status,
-		}, errorutil.PermissionDenyError()
 	}
 
 	result, err := node.rootCoord.SelectRole(ctx, req)
@@ -4215,21 +4180,6 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 				},
 			}, err
 		}
-	}
-	curUser, err := GetCurUserFromContext(ctx)
-	if err != nil {
-		return &milvuspb.SelectUserResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, err
-	}
-	isSelf := req.User != nil && req.User.Name == curUser
-	if isValid, status := node.validateAdminPermission(ctx); !isValid && !isSelf {
-		return &milvuspb.SelectUserResponse{
-			Status: status,
-		}, errorutil.PermissionDenyError()
 	}
 
 	result, err := node.rootCoord.SelectUser(ctx, req)
@@ -4281,9 +4231,6 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	logger.Debug("OperatePrivilege", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
-	}
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return status, errorutil.PermissionDenyError()
 	}
 	if err := node.validPrivilegeParams(req); err != nil {
 		return &commonpb.Status{
@@ -4340,12 +4287,6 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 	logger.Debug("SelectGrant", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return &milvuspb.SelectGrantResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
-	}
-
-	if isValid, status := node.validateAdminPermission(ctx); !isValid {
-		return &milvuspb.SelectGrantResponse{
-			Status: status,
-		}, errorutil.PermissionDenyError()
 	}
 
 	if err := node.validGrantParams(req); err != nil {

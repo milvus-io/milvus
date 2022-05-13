@@ -16,7 +16,11 @@
 
 package util
 
-import "github.com/milvus-io/milvus/internal/proto/commonpb"
+import (
+	"strings"
+
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+)
 
 // Meta Prefix consts
 const (
@@ -34,79 +38,9 @@ const (
 	DefaultTenant       = ""
 	RoleAdmin           = "admin"
 	RolePublic          = "public"
+
+	PrivilegeWord = "Privilege"
 )
-
-// ObjectPrivilegeAPI privilege name for using api
-type ObjectPrivilegeAPI int32
-
-func (o ObjectPrivilegeAPI) String() string {
-	switch o {
-	case All:
-		return "All"
-	case CreateCollection:
-		return "CreateCollection"
-	case DropCollection:
-		return "DropCollection"
-	case DescribeCollection:
-		return "DescribeCollection"
-	case ShowCollections:
-		return "ShowCollections"
-	case Load:
-		return "Load"
-	case Release:
-		return "Release"
-	case Compact:
-		return "Compact"
-	case Insert:
-		return "Insert"
-	case Delete:
-		return "Delete"
-	default:
-		return ""
-	}
-}
-
-const (
-	All ObjectPrivilegeAPI = iota
-	CreateCollection
-	DropCollection
-	DescribeCollection
-	ShowCollections
-	Load
-	Release
-	Compact
-	Insert
-	Delete
-
-	None = 999
-)
-
-func GetObjectPrivilegeFromName(name string) ObjectPrivilegeAPI {
-	switch name {
-	case All.String():
-		return All
-	case CreateCollection.String():
-		return CreateCollection
-	case DropCollection.String():
-		return DropCollection
-	case DescribeCollection.String():
-		return DescribeCollection
-	case ShowCollections.String():
-		return ShowCollections
-	case Load.String():
-		return Load
-	case Release.String():
-		return Release
-	case Compact.String():
-		return Compact
-	case Insert.String():
-		return Insert
-	case Delete.String():
-		return Delete
-	default:
-		return None
-	}
-}
 
 // StringSet convert array to map for conveniently check if the array contains an element
 func StringSet(strings []string) map[string]struct{} {
@@ -129,34 +63,60 @@ func StringList(stringMap map[string]struct{}) []string {
 func GetObjectPrivileges() map[string][]string {
 	return map[string][]string{
 		commonpb.ObjectType_Collection.String(): {
-			Load.String(),
-			Release.String(),
-			Compact.String(),
-			Insert.String(),
-			Delete.String(),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRelease.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCompaction.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeInsert.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDelete.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetStatistics.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateIndex.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeIndexDetail.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropIndex.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSearch.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeFlush.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeQuery.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoadBalance.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeImport.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
-			All.String(),
-			CreateCollection.String(),
-			DropCollection.String(),
-			DescribeCollection.String(),
-			ShowCollections.String(),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateCollection.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropCollection.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeShowCollections.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateOwnership.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropOwnership.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectOwnership.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeManageOwnership.String()),
+		},
+		commonpb.ObjectType_User.String(): {
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateUser.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectUser.String()),
 		},
 	}
+}
+
+// MetaStore2API convert meta-store's privilege name to api's
+// example: PrivilegeAll -> All
+func MetaStore2API(name string) string {
+	return name[strings.Index(name, PrivilegeWord)+len(PrivilegeWord):]
 }
 
 func PrivilegeNameForAPI(name string) string {
-	index, ok := commonpb.ObjectPrivilege_value[name]
+	_, ok := commonpb.ObjectPrivilege_value[name]
 	if !ok {
 		return ""
 	}
-	return ObjectPrivilegeAPI(index).String()
+	return MetaStore2API(name)
 }
 
-func PrivilegeNameForDb(name string) string {
-	o := GetObjectPrivilegeFromName(name)
-	if o == None {
+func PrivilegeNameForMetastore(name string) string {
+	dbPrivilege := PrivilegeWord + name
+	_, ok := commonpb.ObjectPrivilege_value[dbPrivilege]
+	if !ok {
 		return ""
 	}
-	return commonpb.ObjectPrivilege_name[int32(o)]
+	return dbPrivilege
 }

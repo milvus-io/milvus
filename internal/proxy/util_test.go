@@ -714,29 +714,3 @@ func TestGetRole(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(roles))
 }
-
-func TestValidateAdminPermission(t *testing.T) {
-	root := "root"
-	password := "123456"
-
-	err := ValidateAdminPermission(context.Background())
-	assert.NotNil(t, err)
-
-	globalMetaCache = nil
-	err = ValidateAdminPermission(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
-	assert.NotNil(t, err)
-
-	globalMetaCache = &mockCache{
-		getUserRoleFunc: func(username string) []string {
-			if username == "root" {
-				return []string{"role1", "admin", "role2"}
-			}
-			return []string{"role1"}
-		},
-	}
-	err = ValidateAdminPermission(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
-	assert.Nil(t, err)
-
-	err = ValidateAdminPermission(GetContext(context.Background(), fmt.Sprintf("%s%s%s", "test", util.CredentialSeperator, password)))
-	assert.NotNil(t, err)
-}

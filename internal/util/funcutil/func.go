@@ -394,9 +394,12 @@ func EncodeUserRoleCache(user string, role string) string {
 	return fmt.Sprintf("%s/%s", user, role)
 }
 
-func DecodeUserRoleCache(cache string) (string, string) {
+func DecodeUserRoleCache(cache string) (string, string, error) {
 	index := strings.LastIndex(cache, "/")
+	if index == -1 {
+		return "", "", fmt.Errorf("invalid param, cache: [%s]", cache)
+	}
 	user := cache[:index]
 	role := cache[index+1:]
-	return user, role
+	return user, role, nil
 }
