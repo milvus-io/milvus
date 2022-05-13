@@ -15,14 +15,14 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 
 type client struct {
-	server          RocksMQ
+	server          PebbleMQ
 	producerOptions []ProducerOptions
 	consumerOptions []ConsumerOptions
 	wg              *sync.WaitGroup
@@ -45,7 +45,7 @@ func newClient(options Options) (*client, error) {
 	return c, nil
 }
 
-// CreateProducer create a rocksmq producer
+// CreateProducer create a pebblemq producer
 func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	// Create a producer
 	producer, err := newProducer(c, options)
@@ -57,7 +57,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	if reflect.ValueOf(c.server).IsNil() {
 		return nil, newError(0, "Rmq server is nil")
 	}
-	// Create a topic in rocksmq, ignore if topic exists
+	// Create a topic in pebblemq, ignore if topic exists
 	err = c.server.CreateTopic(options.Topic)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func (c *client) CreateProducer(options ProducerOptions) (Producer, error) {
 	return producer, nil
 }
 
-// Subscribe create a rocksmq consumer and start consume in a goroutine
+// Subscribe create a pebblemq consumer and start consume in a goroutine
 func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	// Create a consumer
 	if reflect.ValueOf(c.server).IsNil() {
@@ -96,7 +96,7 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 
-	// Create a consumergroup in rocksmq, raise error if consumergroup exists
+	// Create a consumergroup in pebblemq, raise error if consumergroup exists
 	err = c.server.CreateConsumerGroup(options.Topic, options.SubscriptionName)
 	if err != nil {
 		return nil, err
@@ -108,7 +108,7 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 			return nil, err
 		}
 	}
-	// Register self in rocksmq server
+	// Register self in pebblemq server
 	cons := &server.Consumer{
 		Topic:     consumer.topic,
 		GroupName: consumer.consumerName,
@@ -116,7 +116,7 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 	}
 	c.server.RegisterConsumer(cons)
 
-	// Take messages from RocksDB and put it into consumer.Chan(),
+	// Take messages from Pebble and put it into consumer.Chan(),
 	// trigger by consumer.MsgMutex which trigger by producer
 	c.consumerOptions = append(c.consumerOptions, options)
 
@@ -182,7 +182,7 @@ func (c *client) CreateReader(readerOptions ReaderOptions) (Reader, error) {
 	return reader, err
 }
 
-// Close close the channel to notify rocksmq to stop operation and close rocksmq server
+// Close close the channel to notify pebblemq to stop operation and close pebblemq server
 func (c *client) Close() {
 	c.closeOnce.Do(func() {
 		close(c.closeCh)

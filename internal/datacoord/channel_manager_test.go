@@ -68,7 +68,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	}()
 
 	p := "/tmp/milvus_ut/rdb_data"
-	os.Setenv("ROCKSMQ_PATH", p)
+	os.Setenv("PEBBLEMQ_PATH", p)
 
 	prefix := Params.DataCoordCfg.ChannelWatchSubPath
 

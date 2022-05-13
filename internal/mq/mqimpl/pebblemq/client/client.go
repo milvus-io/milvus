@@ -12,13 +12,13 @@
 package client
 
 import (
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 )
 
-// RocksMQ is the type server.RocksMQ
-type RocksMQ = server.RocksMQ
+// PebbleMQ is the type server.PebbleMQ
+type PebbleMQ = server.PebbleMQ
 
-// NewClient returns a rocksmq client
+// NewClient returns a pebblemq client
 func NewClient(options Options) (Client, error) {
 	if options.Server == nil {
 		options.Server = server.Rmq
@@ -28,10 +28,10 @@ func NewClient(options Options) (Client, error) {
 
 // ClientOptions is the options of a client
 type Options struct {
-	Server RocksMQ
+	Server PebbleMQ
 }
 
-// Client is the interface rocksmq client
+// Client is the interface pebblemq client
 type Client interface {
 	// Create a producer instance
 	CreateProducer(options ProducerOptions) (Producer, error)

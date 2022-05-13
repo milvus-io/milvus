@@ -13,12 +13,12 @@ package server
 
 import "context"
 
-// ProducerMessage that will be written to rocksdb
+// ProducerMessage that will be written to pebble
 type ProducerMessage struct {
 	Payload []byte
 }
 
-// Consumer is rocksmq consumer
+// Consumer is pebblemq consumer
 type Consumer struct {
 	Topic     string
 	GroupName string
@@ -26,15 +26,15 @@ type Consumer struct {
 	beginID   UniqueID
 }
 
-// ConsumerMessage that consumed from rocksdb
+// ConsumerMessage that consumed from pebble
 type ConsumerMessage struct {
 	MsgID   UniqueID
 	Payload []byte
 }
 
-// RocksMQ is an interface thatmay be implemented by the application
-// to do message queue operations based on rocksdb
-type RocksMQ interface {
+// PebbleMQ is an interface thatmay be implemented by the application
+// to do message queue operations based on pebble
+type PebbleMQ interface {
 	CreateTopic(topicName string) error
 	DestroyTopic(topicName string) error
 	CreateConsumerGroup(topicName string, groupName string) error

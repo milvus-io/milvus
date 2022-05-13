@@ -34,7 +34,7 @@ type Config struct {
 	Etcd                      Etcd             `toml:"etcd" json:"etcd"`
 	Minio                     Minio            `toml:"minio" json:"minio"`
 	Pulsar                    Pulsar           `toml:"pulsar" json:"pulsar"`
-	RocksMq                   RocksMq          `toml:"rocksmq" json:"rocksmq"`
+	PebbleMQ                  PebbleMQ         `toml:"pebblemq" json:"pebblemq"`
 	Grpc                      Grpc             `toml:"grpc" json:"grpc"`
 	FlowGraph                 FlowGraph        `toml:"flowgraph" json:"flowgrph"`
 	RootCoord                 RootCoord        `toml:"rootcoord" json:"rootcoord"`
@@ -86,7 +86,7 @@ type Pulsar struct {
 	MaxMessageSize uint64 `toml:"max-message-size" json:"max-message-size"`
 }
 
-type RocksMq struct {
+type PebbleMQ struct {
 	Path              string `toml:"path" json:"path"`
 	PageSize          uint32 `toml:"page-size" json:"page-size"`
 	RetentionDuration uint32 `toml:"retention-duration" json:"retention-duration"`
@@ -206,7 +206,7 @@ var defaultCfg = Config{
 		Port:           6650,
 		MaxMessageSize: 5242880,
 	},
-	RocksMq: RocksMq{
+	PebbleMQ: PebbleMQ{
 		Path:              "/var/lib/milvus/rdb_data",
 		PageSize:          2147483648,
 		RetentionDuration: 10080,

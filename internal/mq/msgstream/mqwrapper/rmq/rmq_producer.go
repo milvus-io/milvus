@@ -14,14 +14,14 @@ package rmq
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/client"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
 
 var _ mqwrapper.Producer = (*rmqProducer)(nil)
 
-// rmqProducer contains a rocksmq producer
+// rmqProducer contains a pebblemq producer
 type rmqProducer struct {
 	p client.Producer
 }
@@ -31,7 +31,7 @@ func (rp *rmqProducer) Topic() string {
 	return rp.p.Topic()
 }
 
-// Send send the producer messages to rocksmq
+// Send send the producer messages to pebblemq
 func (rp *rmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
 	pm := &client.ProducerMessage{Payload: message.Payload}
 	id, err := rp.p.Send(pm)

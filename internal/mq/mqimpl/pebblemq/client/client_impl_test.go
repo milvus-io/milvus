@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var rmqPath = "/tmp/rocksmq_client"
+var rmqPath = "/tmp/pebblemq_client"
 
 func TestClient(t *testing.T) {
 	client, err := NewClient(Options{})
@@ -35,7 +35,7 @@ func TestClient_CreateProducer(t *testing.T) {
 
 	/////////////////////////////////////////////////
 	client, err := NewClient(Options{
-		Server: newMockRocksMQ(),
+		Server: newMockPebbleMQ(),
 	})
 	assert.NoError(t, err)
 
@@ -48,7 +48,7 @@ func TestClient_CreateProducer(t *testing.T) {
 	/////////////////////////////////////////////////
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_client1"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmq := newPebbleMQ(t, rmqPathTest)
 	defer removePath(rmqPath)
 	client1, err := NewClient(Options{
 		Server: rmq,
@@ -73,7 +73,7 @@ func TestClient_CreateProducer(t *testing.T) {
 
 func TestClient_Subscribe(t *testing.T) {
 	client, err := NewClient(Options{
-		Server: newMockRocksMQ(),
+		Server: newMockPebbleMQ(),
 	})
 	assert.NoError(t, err)
 
@@ -88,7 +88,7 @@ func TestClient_Subscribe(t *testing.T) {
 	/////////////////////////////////////////////////
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_client2"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmq := newPebbleMQ(t, rmqPathTest)
 	defer removePath(rmqPath)
 	client1, err := NewClient(Options{
 		Server: rmq,
@@ -129,7 +129,7 @@ func TestClient_Subscribe(t *testing.T) {
 func TestClient_SeekLatest(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/seekLatest"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmq := newPebbleMQ(t, rmqPathTest)
 	defer removePath(rmqPath)
 	client, err := NewClient(Options{
 		Server: rmq,
@@ -200,7 +200,7 @@ func TestClient_SeekLatest(t *testing.T) {
 func TestClient_consume(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_client3"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmq := newPebbleMQ(t, rmqPathTest)
 	defer removePath(rmqPath)
 	client, err := NewClient(Options{
 		Server: rmq,

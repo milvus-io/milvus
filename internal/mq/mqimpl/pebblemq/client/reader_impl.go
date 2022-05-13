@@ -15,7 +15,7 @@ import (
 	"context"
 )
 
-// reader contains main options for rocksmq, and can only be set when newReader
+// reader contains main options for pebblemq, and can only be set when newReader
 type reader struct {
 	c                       *client
 	topic                   string
@@ -25,7 +25,7 @@ type reader struct {
 	subscriptionRolePrefix  string
 }
 
-// newReader create a rocksmq reader from reader options
+// newReader create a pebblemq reader from reader options
 func newReader(c *client, readerOptions *ReaderOptions) (*reader, error) {
 	if c == nil {
 		return nil, newError(InvalidConfiguration, "client is nil")

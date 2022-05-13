@@ -12,7 +12,7 @@
 package client
 
 import (
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 )
 
 // SubscriptionInitialPosition is the initial subscription position

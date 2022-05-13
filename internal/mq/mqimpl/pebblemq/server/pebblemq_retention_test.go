@@ -39,17 +39,17 @@ func TestRmqRetention_Basic(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&PebbleMQRetentionSizeInMB, 0)
+	atomic.StoreInt64(&PebbleMQRetentionTimeInSecs, 0)
+	atomic.StoreInt64(&PebbleMQPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
-	rocksdbPath := retentionPath
-	defer os.RemoveAll(rocksdbPath)
+	pebblePath := retentionPath
+	defer os.RemoveAll(pebblePath)
 	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, nil)
+	rmq, err := NewPebbleMQ(pebblePath, nil)
 	defer rmq.Close()
 	assert.Nil(t, err)
 	defer rmq.stopRetention()
@@ -131,17 +131,17 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&PebbleMQRetentionSizeInMB, 0)
+	atomic.StoreInt64(&PebbleMQRetentionTimeInSecs, 0)
+	atomic.StoreInt64(&PebbleMQPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
-	rocksdbPath := retentionPath
-	defer os.RemoveAll(rocksdbPath)
+	pebblePath := retentionPath
+	defer os.RemoveAll(pebblePath)
 	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, nil)
+	rmq, err := NewPebbleMQ(pebblePath, nil)
 	defer rmq.Close()
 	assert.Nil(t, err)
 	defer rmq.stopRetention()
@@ -235,21 +235,21 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	}
 	defer os.RemoveAll(retentionPath)
 	// no retention by size
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
+	atomic.StoreInt64(&PebbleMQRetentionSizeInMB, -1)
 	// retention by secs
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 1)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&PebbleMQRetentionTimeInSecs, 1)
+	atomic.StoreInt64(&PebbleMQPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_multi_topic"
 	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := retentionPath + "db_multi_topic"
-	os.RemoveAll(rocksdbPath)
+	pebblePath := retentionPath + "db_multi_topic"
+	os.RemoveAll(pebblePath)
 	metaPath := retentionPath + "meta_multi_topic"
 	os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -400,13 +400,13 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := retentionPath + suffix
-	defer os.RemoveAll(rocksdbPath)
+	pebblePath := retentionPath + suffix
+	defer os.RemoveAll(pebblePath)
 	metaPath := retentionPath + metaPathSuffix + suffix
 
 	defer os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	assert.NotNil(t, rmq)
 
@@ -416,7 +416,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 
 	rmq.Close()
 
-	rmq, err = NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err = NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	assert.NotNil(t, rmq)
 
@@ -451,21 +451,21 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	}
 	defer os.RemoveAll(retentionPath)
 	// no retention by size
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
+	atomic.StoreInt64(&PebbleMQRetentionSizeInMB, -1)
 	// retention by secs
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 5)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&PebbleMQRetentionTimeInSecs, 5)
+	atomic.StoreInt64(&PebbleMQPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_com1"
 	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := retentionPath + "db_com1"
-	os.RemoveAll(rocksdbPath)
+	pebblePath := retentionPath + "db_com1"
+	os.RemoveAll(pebblePath)
 	metaPath := retentionPath + "meta_kv_com1"
 	os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -571,20 +571,20 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 1)
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, -1)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&PebbleMQRetentionSizeInMB, 1)
+	atomic.StoreInt64(&PebbleMQRetentionTimeInSecs, -1)
+	atomic.StoreInt64(&PebbleMQPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_com2"
 	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := retentionPath + "db_com2"
-	os.RemoveAll(rocksdbPath)
+	pebblePath := retentionPath + "db_com2"
+	os.RemoveAll(pebblePath)
 	metaPath := retentionPath + "meta_kv_com2"
 	os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 

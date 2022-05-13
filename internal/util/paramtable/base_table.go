@@ -445,18 +445,18 @@ func (gp *BaseTable) loadPulsarConfig() {
 	gp.Save("_PulsarAddress", pulsarAddress)
 }
 
-func (gp *BaseTable) loadRocksMQConfig() {
-	rocksmqPath := os.Getenv("ROCKSMQ_PATH")
-	if rocksmqPath == "" {
-		rocksmqPath = gp.Get("rocksmq.path")
+func (gp *BaseTable) loadPebbleMQConfig() {
+	pebblemqPath := os.Getenv("PEBBLEMQ_PATH")
+	if pebblemqPath == "" {
+		pebblemqPath = gp.Get("pebblemq.path")
 	}
-	gp.Save("_RocksmqPath", rocksmqPath)
+	gp.Save("_PebbleMQPath", pebblemqPath)
 }
 
 func (gp *BaseTable) loadMQConfig() {
 	gp.loadPulsarConfig()
 	gp.loadKafkaConfig()
-	gp.loadRocksMQConfig()
+	gp.loadPebbleMQConfig()
 }
 
 func (gp *BaseTable) loadEtcdConfig() {

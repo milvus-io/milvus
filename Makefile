@@ -22,17 +22,6 @@ mode = Release
 
 all: build-cpp build-go
 
-pre-proc:
-	@echo "Running pre-processing"
-ifeq ($(OS),Darwin) # MacOS X
-	@echo "MacOS system identified. Switching to customized gorocksdb fork..."
-	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@v0.0.1
-endif
-ifeq ($(MSYSTEM), MINGW64) # MSYS
-	@echo "MSYS. Switching to customized gorocksdb fork..."
-	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@v0.0.1
-endif
-
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
@@ -141,29 +130,25 @@ embd-milvus: build-cpp-embd print-build-info
 
 build-go: milvus
 
-build-cpp: pre-proc
+build-cpp:
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-embd: pre-proc
+build-cpp-embd:
 	@echo "Building **Embedded** Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-with-unittest: pre-proc
+build-cpp-with-unittest:
 	@echo "Building Milvus cpp library with unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-with-coverage: pre-proc
+build-cpp-with-coverage:
 	@echo "Building Milvus cpp library with coverage and unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
 	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
 
 # Run the tests.
@@ -235,7 +220,6 @@ clean:
 	@rm -rf lib/
 	@rm -rf $(GOPATH)/bin/milvus
 	@rm -rf cmake_build
-	@rm -rf cwrapper_rocksdb_build
 	@rm -rf cwrapper_build
 
 milvus-tools: print-build-info

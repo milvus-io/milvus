@@ -39,7 +39,7 @@ func TestPmsFactory(t *testing.T) {
 }
 
 func TestRmsFactory(t *testing.T) {
-	defer os.Unsetenv("ROCKSMQ_PATH")
+	defer os.Unsetenv("PEBBLEMQ_PATH")
 
 	dir := t.TempDir()
 

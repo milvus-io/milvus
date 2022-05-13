@@ -27,7 +27,7 @@ import (
 	"syscall"
 	"time"
 
-	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	mqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"go.uber.org/zap"
@@ -66,8 +66,8 @@ func init() {
 	Registry.MustRegister(prometheus.NewGoCollector())
 }
 
-func stopRocksmq() {
-	rocksmqimpl.CloseRocksMQ()
+func stopPebbleMQ() {
+	mqimpl.ClosePebbleMQ()
 }
 
 // MilvusRoles decides which components are brought up with Milvus.
@@ -356,13 +356,13 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 		Params.Init()
 
-		if Params.RocksmqEnable() {
-			path, _ := Params.Load("_RocksmqPath")
-			err := rocksmqimpl.InitRocksMQ(path)
+		if Params.PebbleMQEnable() {
+			path, _ := Params.Load("_PebbleMQPath")
+			err := mqimpl.InitPebbleMQ(path)
 			if err != nil {
 				panic(err)
 			}
-			defer stopRocksmq()
+			defer stopPebbleMQ()
 		}
 
 		if Params.EtcdCfg.UseEmbedEtcd {

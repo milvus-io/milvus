@@ -17,40 +17,37 @@ import (
 	"fmt"
 	"math"
 	"path"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/pebble"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	pebblekv "github.com/milvus-io/milvus/internal/kv/pebble"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
-	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 )
 
 // UniqueID is the type of message ID
 type UniqueID = typeutil.UniqueID
 
-// RmqState Rocksmq state
+// RmqState PebbleMQ state
 type RmqState = int64
 
-// RocksmqPageSize is the size of a message page, default 256MB
-var RocksmqPageSize int64 = 256 << 20
+// PebbleMQPageSize is the size of a message page, default 256MB
+var PebbleMQPageSize int64 = 256 << 20
 
-// Const variable that will be used in rocksmqs
+// Const variable that will be used in pebblemqs
 const (
 	DefaultMessageID = -1
-
-	// TODO make it configable
-	RocksDBLRUCacheCapacity = 1 << 30
 
 	kvSuffix = "_meta_kv"
 
@@ -58,7 +55,7 @@ const (
 	// topic begin id record a topic is valid, create when topic is created, cleaned up on destroy topic
 	TopicIDTitle = "topic_id/"
 
-	// message_size/topicName record the current page message size, once current message size > RocksMq size, reset this value and open a new page
+	// message_size/topicName record the current page message size, once current message size > PebbleMQ size, reset this value and open a new page
 	// TODO should be cached
 	MessageSizeTitle = "message_size/"
 
@@ -76,13 +73,13 @@ const (
 
 	ReaderNamePrefix = "reader-"
 
-	RmqNotServingErrMsg = "Rocksmq is not serving"
+	RmqNotServingErrMsg = "PebbleMQ is not serving"
 )
 
 const (
-	// RmqStateStopped state stands for just created or stopped `Rocksmq` instance
+	// RmqStateStopped state stands for just created or stopped `PebbleMQ` instance
 	RmqStateStopped RmqState = 0
-	// RmqStateHealthy state stands for healthy `Rocksmq` instance
+	// RmqStateHealthy state stands for healthy `PebbleMQ` instance
 	RmqStateHealthy RmqState = 1
 )
 
@@ -110,7 +107,7 @@ func parsePageID(key string) (int64, error) {
 }
 
 func checkRetention() bool {
-	return RocksmqRetentionTimeInSecs != -1 || RocksmqRetentionSizeInMB != -1
+	return PebbleMQRetentionTimeInSecs != -1 || PebbleMQRetentionSizeInMB != -1
 }
 
 func getNowTs(idAllocator allocator.GIDAllocator) (int64, error) {
@@ -128,8 +125,8 @@ func getNowTs(idAllocator allocator.GIDAllocator) (int64, error) {
 
 var topicMu = sync.Map{}
 
-type rocksmq struct {
-	store       *gorocksdb.DB
+type pebblemq struct {
+	store       *pebble.DB
 	kv          kv.BaseKV
 	idAllocator allocator.GIDAllocator
 	storeMu     *sync.Mutex
@@ -141,50 +138,18 @@ type rocksmq struct {
 	state         RmqState
 }
 
-// NewRocksMQ step:
-// 1. New rocksmq instance based on rocksdb with name and rocksdbkv with kvname
+// NewPebbleMQ step:
+// 1. New pebblemq instance based on pebble with name and pebblekv with kvname
 // 2. Init retention info, load retention info to memory
 // 3. Start retention goroutine
-func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
-	// TODO we should use same rocksdb instance with different cfs
-	maxProcs := runtime.GOMAXPROCS(0)
-	parallelism := 1
-	if maxProcs > 32 {
-		parallelism = 4
-	} else if maxProcs > 8 {
-		parallelism = 2
-	}
-	log.Debug("Start rocksmq ", zap.Int("max proc", maxProcs), zap.Int("parallism", parallelism))
-	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
-	optsKV := gorocksdb.NewDefaultOptions()
-	optsKV.SetBlockBasedTableFactory(bbto)
-	optsKV.SetCreateIfMissing(true)
-	// by default there are only 1 thread for flush compaction, which may block each other.
-	// increase to a reasonable thread numbers
-	optsKV.IncreaseParallelism(parallelism)
-	// enable back ground flush
-	optsKV.SetMaxBackgroundFlushes(1)
-
-	// finish rocks KV
+func NewPebbleMQ(name string, idAllocator allocator.GIDAllocator) (*pebblemq, error) {
 	kvName := name + kvSuffix
-	kv, err := rocksdbkv.NewRocksdbKVWithOpts(kvName, optsKV)
+	kv, err := pebblekv.NewPebbleKV(kvName)
 	if err != nil {
 		return nil, err
 	}
 
-	// finish rocks mq store initialization, rocks mq store has to set the prefix extractor
-	optsStore := gorocksdb.NewDefaultOptions()
-	// share block cache with kv
-	optsStore.SetBlockBasedTableFactory(bbto)
-	optsStore.SetCreateIfMissing(true)
-	// by default there are only 1 thread for flush compaction, which may block each other.
-	// increase to a reasonable thread numbers
-	optsStore.IncreaseParallelism(parallelism)
-	// enable back ground flush
-	optsStore.SetMaxBackgroundFlushes(1)
-
-	db, err := gorocksdb.OpenDb(optsStore, name)
+	db, err := pebble.Open(name, kv.Opts)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +167,7 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 		mqIDAllocator = idAllocator
 	}
 
-	rmq := &rocksmq{
+	rmq := &pebblemq{
 		store:       db,
 		kv:          kv,
 		idAllocator: mqIDAllocator,
@@ -225,19 +190,19 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	go func() {
 		for {
 			time.Sleep(5 * time.Minute)
-			log.Info("Rocksmq stats",
-				zap.String("cache", kv.DB.GetProperty("rocksdb.block-cache-usage")),
-				zap.String("rockskv memtable ", kv.DB.GetProperty("rocksdb.size-all-mem-tables")),
-				zap.String("rockskv table readers", kv.DB.GetProperty("rocksdb.estimate-table-readers-mem")),
-				zap.String("rockskv pinned", kv.DB.GetProperty("rocksdb.block-cache-pinned-usage")),
-				zap.String("store memtable ", db.GetProperty("rocksdb.size-all-mem-tables")),
-				zap.String("store table readers", db.GetProperty("rocksdb.estimate-table-readers-mem")),
-				zap.String("store pinned", db.GetProperty("rocksdb.block-cache-pinned-usage")),
-				zap.String("store l0 file num", db.GetProperty("rocksdb.num-files-at-level0")),
-				zap.String("store l1 file num", db.GetProperty("rocksdb.num-files-at-level1")),
-				zap.String("store l2 file num", db.GetProperty("rocksdb.num-files-at-level2")),
-				zap.String("store l3 file num", db.GetProperty("rocksdb.num-files-at-level3")),
-				zap.String("store l4 file num", db.GetProperty("rocksdb.num-files-at-level4")),
+			log.Info("PebbleMQ stats",
+				zap.String("cache", strconv.FormatInt(kv.DB.Metrics().BlockCache.Count, 10)),
+				zap.String("pebblekv memtable ", strconv.FormatInt(kv.DB.Metrics().MemTable.Count, 10)),
+				zap.String("pebblekv table readers", strconv.FormatInt(kv.DB.Metrics().TableIters, 10)),
+				zap.String("pebblekv pinned", strconv.FormatInt(kv.DB.Metrics().TableCache.Count, 10)),
+				zap.String("store memtable ", strconv.FormatInt(db.Metrics().MemTable.Count, 10)),
+				zap.String("store table readers", strconv.FormatInt(db.Metrics().TableIters, 10)),
+				zap.String("store pinned", strconv.FormatInt(db.Metrics().TableCache.Count, 10)),
+				zap.String("store l0 file num", strconv.FormatInt(db.Metrics().Levels[0].NumFiles, 10)),
+				zap.String("store l1 file num", strconv.FormatInt(db.Metrics().Levels[1].NumFiles, 10)),
+				zap.String("store l2 file num", strconv.FormatInt(db.Metrics().Levels[2].NumFiles, 10)),
+				zap.String("store l3 file num", strconv.FormatInt(db.Metrics().Levels[3].NumFiles, 10)),
+				zap.String("store l4 file num", strconv.FormatInt(db.Metrics().Levels[4].NumFiles, 10)),
 			)
 		}
 	}()
@@ -245,24 +210,24 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	return rmq, nil
 }
 
-func (rmq *rocksmq) isClosed() bool {
+func (rmq *pebblemq) isClosed() bool {
 	return atomic.LoadInt64(&rmq.state) != RmqStateHealthy
 }
 
 // Close step:
 // 1. Stop retention
 // 2. Destroy all consumer groups and topics
-// 3. Close rocksdb instance
-func (rmq *rocksmq) Close() {
+// 3. Close pebble instance
+func (rmq *pebblemq) Close() {
 	atomic.StoreInt64(&rmq.state, RmqStateStopped)
 	rmq.stopRetention()
 	rmq.consumers.Range(func(k, v interface{}) bool {
-		// TODO what happened if the server crashed? who handled the destroy consumer group? should we just handled it when rocksmq created?
+		// TODO what happened if the server crashed? who handled the destroy consumer group? should we just handled it when pebblemq created?
 		// or we should not even make consumer info persistent?
 		for _, consumer := range v.([]*Consumer) {
 			err := rmq.destroyConsumerGroupInternal(consumer.Topic, consumer.GroupName)
 			if err != nil {
-				log.Warn("Failed to destroy consumer group in rocksmq!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName), zap.Any("error", err))
+				log.Warn("Failed to destroy consumer group in pebblemq!", zap.Any("topic", consumer.Topic), zap.Any("groupName", consumer.GroupName), zap.Any("error", err))
 			}
 		}
 		return true
@@ -271,17 +236,17 @@ func (rmq *rocksmq) Close() {
 	defer rmq.storeMu.Unlock()
 	rmq.kv.Close()
 	rmq.store.Close()
-	log.Info("Successfully close rocksmq")
+	log.Info("Successfully close pebblemq")
 }
 
-func (rmq *rocksmq) stopRetention() {
+func (rmq *pebblemq) stopRetention() {
 	if rmq.retentionInfo != nil {
 		rmq.retentionInfo.Stop()
 	}
 }
 
-// CreateTopic writes initialized messages for topic in rocksdb
-func (rmq *rocksmq) CreateTopic(topicName string) error {
+// CreateTopic writes initialized messages for topic in pebble
+func (rmq *pebblemq) CreateTopic(topicName string) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
@@ -289,7 +254,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 
 	// Check if topicName contains "/"
 	if strings.Contains(topicName, "/") {
-		log.Error("rocksmq failed to create topic for topic name contains \"/\"", zap.String("topic", topicName))
+		log.Error("pebblemq failed to create topic for topic name contains \"/\"", zap.String("topic", topicName))
 		return retry.Unrecoverable(fmt.Errorf("topic name = %s contains \"/\"", topicName))
 	}
 
@@ -300,7 +265,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 		return err
 	}
 	if val != "" {
-		log.Debug("rocksmq topic already exists ", zap.String("topic", topicName))
+		log.Debug("pebblemq topic already exists ", zap.String("topic", topicName))
 		return nil
 	}
 
@@ -326,12 +291,12 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
 	rmq.retentionInfo.topicRetetionTime.Store(topicName, time.Now().Unix())
-	log.Debug("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	log.Debug("PebbleMQ create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
-// DestroyTopic removes messages for topic in rocksmq
-func (rmq *rocksmq) DestroyTopic(topicName string) error {
+// DestroyTopic removes messages for topic in pebblemq
+func (rmq *pebblemq) DestroyTopic(topicName string) error {
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
@@ -392,16 +357,16 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 
 	// clean up reader
 	if val, ok := rmq.readers.LoadAndDelete(topicName); ok {
-		for _, reader := range val.([]*rocksmqReader) {
+		for _, reader := range val.([]*pebbleReader) {
 			reader.Close()
 		}
 	}
-	log.Debug("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	log.Debug("PebbleMQ destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
 // ExistConsumerGroup check if a consumer exists and return the existed consumer
-func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer, error) {
+func (rmq *pebblemq) ExistConsumerGroup(topicName, groupName string) (bool, *Consumer, error) {
 	key := constructCurrentID(topicName, groupName)
 	_, ok := rmq.consumersID.Load(key)
 	if ok {
@@ -417,7 +382,7 @@ func (rmq *rocksmq) ExistConsumerGroup(topicName, groupName string) (bool, *Cons
 }
 
 // CreateConsumerGroup creates an nonexistent consumer group for topic
-func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
+func (rmq *pebblemq) CreateConsumerGroup(topicName, groupName string) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
@@ -428,14 +393,14 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 		return fmt.Errorf("RMQ CreateConsumerGroup key already exists, key = %s", key)
 	}
 	rmq.consumersID.Store(key, DefaultMessageID)
-	log.Debug("Rocksmq create consumer group successfully ", zap.String("topic", topicName),
+	log.Debug("PebbleMQ create consumer group successfully ", zap.String("topic", topicName),
 		zap.String("group", groupName),
 		zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
-// RegisterConsumer registers a consumer in rocksmq consumers
-func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
+// RegisterConsumer registers a consumer in pebblemq consumers
+func (rmq *pebblemq) RegisterConsumer(consumer *Consumer) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
@@ -454,11 +419,11 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 		consumers[0] = consumer
 		rmq.consumers.Store(consumer.Topic, consumers)
 	}
-	log.Debug("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	log.Debug("PebbleMQ register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
-func (rmq *rocksmq) GetLatestMsg(topicName string) (int64, error) {
+func (rmq *pebblemq) GetLatestMsg(topicName string) (int64, error) {
 	if rmq.isClosed() {
 		return DefaultMessageID, errors.New(RmqNotServingErrMsg)
 	}
@@ -470,16 +435,16 @@ func (rmq *rocksmq) GetLatestMsg(topicName string) (int64, error) {
 	return msgID, nil
 }
 
-// DestroyConsumerGroup removes a consumer group from rocksdb_kv
-func (rmq *rocksmq) DestroyConsumerGroup(topicName, groupName string) error {
+// DestroyConsumerGroup removes a consumer group from pebble_kv
+func (rmq *pebblemq) DestroyConsumerGroup(topicName, groupName string) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
 	return rmq.destroyConsumerGroupInternal(topicName, groupName)
 }
 
-// DestroyConsumerGroup removes a consumer group from rocksdb_kv
-func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) error {
+// DestroyConsumerGroup removes a consumer group from pebble_kv
+func (rmq *pebblemq) destroyConsumerGroupInternal(topicName, groupName string) error {
 	start := time.Now()
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
@@ -504,14 +469,14 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 			}
 		}
 	}
-	log.Debug("Rocksmq destroy consumer group successfully ", zap.String("topic", topicName),
+	log.Debug("PebbleMQ destroy consumer group successfully ", zap.String("topic", topicName),
 		zap.String("group", groupName),
 		zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
 // Produce produces messages for topic and updates page infos for retention
-func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
+func (rmq *pebblemq) Produce(topicName string, messages []ProducerMessage) ([]UniqueID, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
@@ -533,7 +498,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	idStart, idEnd, err := rmq.idAllocator.Alloc(uint32(msgLen))
 
 	if err != nil {
-		log.Error("RocksMQ: alloc id failed.", zap.Error(err))
+		log.Error("PebbleMQ: alloc id failed.", zap.Error(err))
 		return []UniqueID{}, err
 	}
 	allocTime := time.Since(start).Milliseconds()
@@ -542,23 +507,21 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	}
 
 	// Insert data to store system
-	batch := gorocksdb.NewWriteBatch()
-	defer batch.Destroy()
+	writeOptions := pebble.WriteOptions{}
+	batch := rmq.store.NewBatch()
 	msgSizes := make(map[UniqueID]int64)
 	msgIDs := make([]UniqueID, msgLen)
 	for i := 0; i < msgLen && idStart+UniqueID(i) < idEnd; i++ {
 		msgID := idStart + UniqueID(i)
 		key := path.Join(topicName, strconv.FormatInt(msgID, 10))
-		batch.Put([]byte(key), messages[i].Payload)
+		batch.Set([]byte(key), messages[i].Payload, &writeOptions)
 		msgIDs[i] = msgID
 		msgSizes[msgID] = int64(len(messages[i].Payload))
 	}
 
-	opts := gorocksdb.NewDefaultWriteOptions()
-	defer opts.Destroy()
-	err = rmq.store.Write(opts, batch)
+	err = batch.Commit(&writeOptions)
 	if err != nil {
-		log.Debug("RocksMQ: write batch failed")
+		log.Debug("PebbleMQ: write batch failed")
 		return []UniqueID{}, err
 	}
 	writeTime := time.Since(start).Milliseconds()
@@ -575,7 +538,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 
 	// Notify reader
 	if val, ok := rmq.readers.Load(topicName); ok {
-		for _, reader := range val.([]*rocksmqReader) {
+		for _, reader := range val.([]*pebbleReader) {
 			select {
 			case reader.readerMutex <- struct{}{}:
 			default:
@@ -592,7 +555,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	// TODO add this to monitor metrics
 	getProduceTime := time.Since(start).Milliseconds()
 	if getProduceTime > 200 {
-		log.Warn("rocksmq produce too slowly", zap.String("topic", topicName),
+		log.Warn("pebblemq produce too slowly", zap.String("topic", topicName),
 			zap.Int64("get lock elapse", getLockTime),
 			zap.Int64("alloc elapse", allocTime-getLockTime),
 			zap.Int64("write elapse", writeTime-allocTime),
@@ -603,7 +566,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	return msgIDs, nil
 }
 
-func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
+func (rmq *pebblemq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
 	msgSizeKey := MessageSizeTitle + topicName
 	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
 	if err != nil {
@@ -619,7 +582,7 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 	mutateBuffer := make(map[string]string)
 	for _, id := range msgIDs {
 		msgSize := msgSizes[id]
-		if curMsgSize+msgSize > RocksmqPageSize {
+		if curMsgSize+msgSize > PebbleMQPageSize {
 			// Current page is full
 			newPageSize := curMsgSize + msgSize
 			pageEndID := id
@@ -639,10 +602,10 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 }
 
 // Consume steps:
-// 1. Consume n messages from rocksdb
+// 1. Consume n messages from pebble
 // 2. Update current_id to the last consumed message
-// 3. Update ack informations in rocksdb
-func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error) {
+// 3. Update ack informations in pebble
+func (rmq *pebblemq) Consume(topicName string, groupName string, n int) ([]ConsumerMessage, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
@@ -665,10 +628,10 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		return nil, fmt.Errorf("currentID of topicName=%s, groupName=%s not exist", topicName, groupName)
 	}
 
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	defer readOpts.Destroy()
+	readOpts := pebble.IterOptions{}
 	prefix := topicName + "/"
-	iter := rocksdbkv.NewRocksIteratorWithUpperBound(rmq.store, typeutil.AddOne(prefix), readOpts)
+	readOpts.UpperBound = []byte(typeutil.AddOne(prefix))
+	iter := pebblekv.NewPebbleIteratorWithUpperBound(rmq.store, &readOpts)
 	defer iter.Close()
 
 	var dataKey string
@@ -683,28 +646,24 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	for ; iter.Valid() && offset < n; iter.Next() {
 		key := iter.Key()
 		val := iter.Value()
-		strKey := string(key.Data())
-		key.Free()
+		strKey := string(key)
 		offset++
 		msgID, err := strconv.ParseInt(strKey[len(topicName)+1:], 10, 64)
 		if err != nil {
-			log.Warn("RocksMQ: parse int " + strKey[len(topicName)+1:] + " failed")
-			val.Free()
+			log.Warn("PebbleMQ: parse int " + strKey[len(topicName)+1:] + " failed")
 			return nil, err
 		}
 		msg := ConsumerMessage{
 			MsgID: msgID,
 		}
-		origData := val.Data()
-		dataLen := len(origData)
+		dataLen := len(val)
 		if dataLen == 0 {
 			msg.Payload = nil
 		} else {
 			msg.Payload = make([]byte, dataLen)
-			copy(msg.Payload, origData)
+			copy(msg.Payload, val)
 		}
 		consumerMessage = append(consumerMessage, msg)
-		val.Free()
 	}
 	// if iterate fail
 	if err := iter.Err(); err != nil {
@@ -714,7 +673,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 
 	// When already consume to last mes, an empty slice will be returned
 	if len(consumerMessage) == 0 {
-		// log.Debug("RocksMQ: consumerMessage is empty")
+		// log.Debug("PebbleMQ: consumerMessage is empty")
 		return consumerMessage, nil
 	}
 
@@ -735,7 +694,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 	// TODO add this to monitor metrics
 	getConsumeTime := time.Since(start).Milliseconds()
 	if getConsumeTime > 200 {
-		log.Warn("rocksmq consume too slowly", zap.String("topic", topicName),
+		log.Warn("pebblemq consume too slowly", zap.String("topic", topicName),
 			zap.Int64("get lock elapse", getLockTime),
 			zap.Int64("iterator elapse", iterTime-getLockTime),
 			zap.Int64("updateAckedInfo elapse", updateAckedTime-iterTime),
@@ -745,27 +704,27 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 }
 
 // seek is used for internal call without the topicMu
-func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) error {
+func (rmq *pebblemq) seek(topicName string, groupName string, msgID UniqueID) error {
 	rmq.storeMu.Lock()
 	defer rmq.storeMu.Unlock()
 	key := constructCurrentID(topicName, groupName)
 	_, ok := rmq.consumersID.Load(key)
 	if !ok {
-		log.Warn("RocksMQ: channel " + key + " not exists")
+		log.Warn("PebbleMQ: channel " + key + " not exists")
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
 	storeKey := path.Join(topicName, strconv.FormatInt(msgID, 10))
-	opts := gorocksdb.NewDefaultReadOptions()
-	defer opts.Destroy()
-	val, err := rmq.store.Get(opts, []byte(storeKey))
-	if err != nil {
-		log.Warn("RocksMQ: get " + storeKey + " failed")
+	val, closer, err := rmq.store.Get([]byte(storeKey))
+	if err != nil && err != pebble.ErrNotFound {
+		log.Warn("PebbleMQ: get " + storeKey + " failed")
 		return err
 	}
-	defer val.Free()
-	if !val.Exists() {
-		log.Warn("RocksMQ: trying to seek to no exist position, reset current id",
+	if closer != nil {
+		defer closer.Close()
+	}
+	if val == nil {
+		log.Warn("PebbleMQ: trying to seek to no exist position, reset current id",
 			zap.String("topic", topicName), zap.String("group", groupName), zap.Int64("msgId", msgID))
 		rmq.moveConsumePos(topicName, groupName, DefaultMessageID)
 		//skip seek if key is not found, this is the behavior as pulsar
@@ -776,13 +735,13 @@ func (rmq *rocksmq) seek(topicName string, groupName string, msgID UniqueID) err
 	return nil
 }
 
-func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID UniqueID) {
+func (rmq *pebblemq) moveConsumePos(topicName string, groupName string, msgID UniqueID) {
 	key := constructCurrentID(topicName, groupName)
 	rmq.consumersID.Store(key, msgID)
 }
 
 // Seek updates the current id to the given msgID
-func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) error {
+func (rmq *pebblemq) Seek(topicName string, groupName string, msgID UniqueID) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
@@ -808,7 +767,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 }
 
 // SeekToLatest updates current id to the msg id of latest message + 1
-func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
+func (rmq *pebblemq) SeekToLatest(topicName, groupName string) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
@@ -817,7 +776,7 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	key := constructCurrentID(topicName, groupName)
 	_, ok := rmq.consumersID.Load(key)
 	if !ok {
-		log.Warn("RocksMQ: channel " + key + " not exists")
+		log.Warn("PebbleMQ: channel " + key + " not exists")
 		return fmt.Errorf("ConsumerGroup %s, channel %s not exists", groupName, topicName)
 	}
 
@@ -833,10 +792,9 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 	return nil
 }
 
-func (rmq *rocksmq) getLatestMsg(topicName string) (int64, error) {
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	defer readOpts.Destroy()
-	iter := rocksdbkv.NewRocksIterator(rmq.store, readOpts)
+func (rmq *pebblemq) getLatestMsg(topicName string) (int64, error) {
+	readOpts := pebble.IterOptions{}
+	iter := pebblekv.NewPebbleIterator(rmq.store, &readOpts)
 	defer iter.Close()
 
 	prefix := topicName + "/"
@@ -854,10 +812,7 @@ func (rmq *rocksmq) getLatestMsg(topicName string) (int64, error) {
 	}
 
 	iKey := iter.Key()
-	seekMsgID := string(iKey.Data())
-	if iKey != nil {
-		iKey.Free()
-	}
+	seekMsgID := string(iKey)
 
 	// if find message is not belong to current channel, start from 0
 	if !strings.Contains(seekMsgID, prefix) {
@@ -873,7 +828,7 @@ func (rmq *rocksmq) getLatestMsg(topicName string) (int64, error) {
 }
 
 // Notify sends a mutex in MsgMutex channel to tell consumers to consume
-func (rmq *rocksmq) Notify(topicName, groupName string) {
+func (rmq *pebblemq) Notify(topicName, groupName string) {
 	if vals, ok := rmq.consumers.Load(topicName); ok {
 		for _, v := range vals.([]*Consumer) {
 			if v.GroupName == groupName {
@@ -889,7 +844,7 @@ func (rmq *rocksmq) Notify(topicName, groupName string) {
 }
 
 // updateAckedInfo update acked informations for retention after consume
-func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID) error {
+func (rmq *pebblemq) updateAckedInfo(topicName, groupName string, ids []UniqueID) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -898,20 +853,16 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 
 	// 1. Try to get the page id between first ID and last ID of ids
 	pageMsgPrefix := constructKey(PageMsgSizeTitle, topicName) + "/"
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	defer readOpts.Destroy()
 	pageMsgFirstKey := pageMsgPrefix + strconv.FormatInt(firstID, 10)
+	readOpts := pebble.IterOptions{UpperBound: []byte(typeutil.AddOne(pageMsgFirstKey))}
 
-	iter := rocksdbkv.NewRocksIteratorWithUpperBound(rmq.kv.(*rocksdbkv.RocksdbKV).DB, typeutil.AddOne(pageMsgPrefix), readOpts)
+	iter := pebblekv.NewPebbleIteratorWithUpperBound(rmq.kv.(*pebblekv.PebbleKV).DB, &readOpts)
 	defer iter.Close()
 	var pageIDs []UniqueID
 
 	for iter.Seek([]byte(pageMsgFirstKey)); iter.Valid(); iter.Next() {
 		key := iter.Key()
-		pageID, err := parsePageID(string(key.Data()))
-		if key != nil {
-			key.Free()
-		}
+		pageID, err := parsePageID(string(key))
 		if err != nil {
 			return err
 		}
@@ -970,16 +921,15 @@ func (rmq *rocksmq) updateAckedInfo(topicName, groupName string, ids []UniqueID)
 }
 
 // CreateReader create a reader for topic and generate reader name
-func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool, subscriptionRolePrefix string) (string, error) {
+func (rmq *pebblemq) CreateReader(topicName string, startMsgID UniqueID, messageIDInclusive bool, subscriptionRolePrefix string) (string, error) {
 	if rmq.isClosed() {
 		return "", errors.New(RmqNotServingErrMsg)
 	}
 	if _, ok := topicMu.Load(topicName); !ok {
 		return "", fmt.Errorf("topic=%s not exist", topicName)
 	}
-	readOpts := gorocksdb.NewDefaultReadOptions()
-	readOpts.SetPrefixSameAsStart(true)
-	iter := rocksdbkv.NewRocksIteratorWithUpperBound(rmq.store, typeutil.AddOne(topicName+"/"), readOpts)
+	readOpts := pebble.IterOptions{UpperBound: []byte(typeutil.AddOne(topicName + "/"))}
+	iter := pebblekv.NewPebbleIteratorWithUpperBound(rmq.store, &readOpts)
 	dataKey := path.Join(topicName, strconv.FormatInt(startMsgID, 10))
 	iter.Seek([]byte(dataKey))
 	// if iterate fail
@@ -989,35 +939,35 @@ func (rmq *rocksmq) CreateReader(topicName string, startMsgID UniqueID, messageI
 
 	nowTs, err := getNowTs(rmq.idAllocator)
 	if err != nil {
-		return "", errors.New("Can't get current ts from rocksmq idAllocator")
+		return "", errors.New("Can't get current ts from pebblemq idAllocator")
 	}
 	readerName := subscriptionRolePrefix + ReaderNamePrefix + strconv.FormatInt(nowTs, 10)
 
-	reader := &rocksmqReader{
+	reader := &pebbleReader{
 		store:              rmq.store,
 		topic:              topicName,
 		readerName:         readerName,
-		readOpts:           readOpts,
+		readOpts:           &readOpts,
 		iter:               iter,
 		currentID:          startMsgID,
 		messageIDInclusive: messageIDInclusive,
 		readerMutex:        make(chan struct{}, 1),
 	}
 	if vals, ok := rmq.readers.Load(topicName); ok {
-		readers := vals.([]*rocksmqReader)
+		readers := vals.([]*pebbleReader)
 		readers = append(readers, reader)
 		rmq.readers.Store(topicName, readers)
 	} else {
-		readers := make([]*rocksmqReader, 1)
+		readers := make([]*pebbleReader, 1)
 		readers[0] = reader
 		rmq.readers.Store(topicName, readers)
 	}
 	return readerName, nil
 }
 
-func (rmq *rocksmq) getReader(topicName, readerName string) *rocksmqReader {
+func (rmq *pebblemq) getReader(topicName, readerName string) *pebbleReader {
 	if vals, ok := rmq.readers.Load(topicName); ok {
-		for _, v := range vals.([]*rocksmqReader) {
+		for _, v := range vals.([]*pebbleReader) {
 			if v.readerName == readerName {
 				return v
 			}
@@ -1026,10 +976,10 @@ func (rmq *rocksmq) getReader(topicName, readerName string) *rocksmqReader {
 	return nil
 }
 
-func (rmq *rocksmq) getAndDeleteReader(topicName, readerName string) *rocksmqReader {
+func (rmq *pebblemq) getAndDeleteReader(topicName, readerName string) *pebbleReader {
 	if vals, ok := rmq.readers.Load(topicName); ok {
-		readers := vals.([]*rocksmqReader)
-		for i, v := range vals.([]*rocksmqReader) {
+		readers := vals.([]*pebbleReader)
+		for i, v := range vals.([]*pebbleReader) {
 			if v.readerName == readerName {
 				readers[i] = readers[len(readers)-1]
 				rmq.readers.Store(topicName, readers[:len(readers)-1])
@@ -1041,7 +991,7 @@ func (rmq *rocksmq) getAndDeleteReader(topicName, readerName string) *rocksmqRea
 }
 
 // ReaderSeek seek a reader to the pointed position
-func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID UniqueID) error {
+func (rmq *pebblemq) ReaderSeek(topicName string, readerName string, msgID UniqueID) error {
 	if rmq.isClosed() {
 		return errors.New(RmqNotServingErrMsg)
 	}
@@ -1055,7 +1005,7 @@ func (rmq *rocksmq) ReaderSeek(topicName string, readerName string, msgID Unique
 }
 
 // Next get the next message of reader
-func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName string) (*ConsumerMessage, error) {
+func (rmq *pebblemq) Next(ctx context.Context, topicName string, readerName string) (*ConsumerMessage, error) {
 	if rmq.isClosed() {
 		return nil, errors.New(RmqNotServingErrMsg)
 	}
@@ -1067,7 +1017,7 @@ func (rmq *rocksmq) Next(ctx context.Context, topicName string, readerName strin
 }
 
 // HasNext judge whether reader has next message
-func (rmq *rocksmq) HasNext(topicName string, readerName string) bool {
+func (rmq *pebblemq) HasNext(topicName string, readerName string) bool {
 	if rmq.isClosed() {
 		return false
 	}
@@ -1080,7 +1030,7 @@ func (rmq *rocksmq) HasNext(topicName string, readerName string) bool {
 }
 
 // CloseReader close a reader
-func (rmq *rocksmq) CloseReader(topicName string, readerName string) {
+func (rmq *pebblemq) CloseReader(topicName string, readerName string) {
 	if rmq.isClosed() {
 		return
 	}

@@ -401,8 +401,8 @@ func TestProxy(t *testing.T) {
 	var err error
 	var wg sync.WaitGroup
 
-	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
-	err = os.Setenv("ROCKSMQ_PATH", path)
+	path := "/tmp/milvus/pebblemq" + funcutil.GenRandomStr()
+	err = os.Setenv("PEBBLEMQ_PATH", path)
 	defer os.RemoveAll(path)
 	assert.NoError(t, err)
 

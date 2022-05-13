@@ -80,8 +80,8 @@ func (p *ComponentParam) SetLogConfig(role string) {
 	p.BaseTable.SetLogConfig()
 }
 
-func (p *ComponentParam) RocksmqEnable() bool {
-	return p.RocksmqCfg.Path != ""
+func (p *ComponentParam) PebbleMQEnable() bool {
+	return p.PebbleMQCfg.Path != ""
 }
 
 func (p *ComponentParam) PulsarEnable() bool {

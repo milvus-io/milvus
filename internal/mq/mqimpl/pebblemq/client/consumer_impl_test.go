@@ -50,7 +50,7 @@ func TestConsumer_newConsumer(t *testing.T) {
 	/////////////////////////////////////////////////
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_consumer1"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmq := newPebbleMQ(t, rmqPathTest)
 	defer removePath(rmqPath)
 	client, err := newClient(Options{
 		Server: rmq,
@@ -121,7 +121,7 @@ func TestConsumer_Subscription(t *testing.T) {
 func TestConsumer_Seek(t *testing.T) {
 	os.MkdirAll(rmqPath, os.ModePerm)
 	rmqPathTest := rmqPath + "/test_consumer2"
-	rmq := newRocksMQ(t, rmqPathTest)
+	rmq := newPebbleMQ(t, rmqPathTest)
 	defer removePath(rmqPath)
 	client, err := newClient(Options{
 		Server: rmq,

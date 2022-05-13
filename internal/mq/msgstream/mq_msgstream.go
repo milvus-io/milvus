@@ -658,7 +658,7 @@ func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName strin
 	}
 }
 
-// Start will start a goroutine which keep carrying msg from pulsar/rocksmq to golang chan
+// Start will start a goroutine which keep carrying msg from pulsar/pebblemq to golang chan
 func (ms *MqTtMsgStream) Start() {}
 
 // Close will stop goroutine and free internal producers and consumers

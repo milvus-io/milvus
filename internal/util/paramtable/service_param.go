@@ -40,7 +40,7 @@ type ServiceParam struct {
 	EtcdCfg         EtcdConfig
 	PulsarCfg       PulsarConfig
 	KafkaCfg        KafkaConfig
-	RocksmqCfg      RocksmqConfig
+	PebbleMQCfg     PebbleMQConfig
 	MinioCfg        MinioConfig
 }
 
@@ -51,7 +51,7 @@ func (p *ServiceParam) Init() {
 	p.EtcdCfg.init(&p.BaseTable)
 	p.PulsarCfg.init(&p.BaseTable)
 	p.KafkaCfg.init(&p.BaseTable)
-	p.RocksmqCfg.init(&p.BaseTable)
+	p.PebbleMQCfg.init(&p.BaseTable)
 	p.MinioCfg.init(&p.BaseTable)
 }
 
@@ -222,21 +222,21 @@ func (k *KafkaConfig) initAddress() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// --- rocksmq ---
-type RocksmqConfig struct {
+// --- pebblemq ---
+type PebbleMQConfig struct {
 	Base *BaseTable
 
 	Path string
 }
 
-func (p *RocksmqConfig) init(base *BaseTable) {
+func (p *PebbleMQConfig) init(base *BaseTable) {
 	p.Base = base
 
 	p.initPath()
 }
 
-func (p *RocksmqConfig) initPath() {
-	path, err := p.Base.Load("_RocksmqPath")
+func (p *PebbleMQConfig) initPath() {
+	path, err := p.Base.Load("_PebbleMQPath")
 	if err != nil {
 		panic(err)
 	}

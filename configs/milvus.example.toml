@@ -55,7 +55,7 @@ address = "localhost"
 port = 6650
 max-message-size = 5242880 
 
-[rocksmq]
+[pebblemq]
 path = "/var/lib/milvus/rdb_data"
 page-size = 2147483648
 retention-duration = 10080

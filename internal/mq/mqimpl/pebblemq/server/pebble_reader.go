@@ -18,27 +18,26 @@ import (
 	"path"
 	"strconv"
 
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
+	"github.com/cockroachdb/pebble"
+	pebblekv "github.com/milvus-io/milvus/internal/kv/pebble"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/tecbot/gorocksdb"
 )
 
-type rocksmqReader struct {
-	store      *gorocksdb.DB
+type pebbleReader struct {
+	store      *pebble.DB
 	topic      string
 	readerName string
 
-	readOpts *gorocksdb.ReadOptions
-	iter     *rocksdbkv.RocksIterator
+	readOpts *pebble.IterOptions
+	iter     *pebblekv.PebbleIterator
 
 	currentID          UniqueID
 	messageIDInclusive bool
 	readerMutex        chan struct{}
 }
 
-//Seek seek the rocksmq reader to the pointed position
-func (rr *rocksmqReader) Seek(msgID UniqueID) { //nolint:govet
+//Seek seek the pebblemq reader to the pointed position
+func (rr *pebbleReader) Seek(msgID UniqueID) { //nolint:govet
 	rr.currentID = msgID
 	dataKey := path.Join(rr.topic, strconv.FormatInt(msgID, 10))
 	rr.iter.Seek([]byte(dataKey))
@@ -48,7 +47,7 @@ func (rr *rocksmqReader) Seek(msgID UniqueID) { //nolint:govet
 	}
 }
 
-func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
+func (rr *pebbleReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 	var err error
 	iter := rr.iter
 
@@ -56,24 +55,17 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 	getMsg := func() {
 		key := iter.Key()
 		val := iter.Value()
-		tmpKey := string(key.Data())
-		if key != nil {
-			key.Free()
-		}
+		tmpKey := string(key)
 
 		var msgID UniqueID
 		msgID, err = strconv.ParseInt(tmpKey[len(rr.topic)+1:], 10, 64)
 		msg = &ConsumerMessage{
 			MsgID: msgID,
 		}
-		origData := val.Data()
-		dataLen := len(origData)
+		dataLen := len(val)
 		if dataLen > 0 {
 			msg.Payload = make([]byte, dataLen)
-			copy(msg.Payload, origData)
-		}
-		if val != nil {
-			val.Free()
+			copy(msg.Payload, val)
 		}
 		iter.Next()
 		rr.currentID = msgID
@@ -93,7 +85,7 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 			return nil, fmt.Errorf("reader Mutex closed")
 		}
 		rr.iter.Close()
-		rr.iter = rocksdbkv.NewRocksIteratorWithUpperBound(rr.store, typeutil.AddOne(rr.topic+"/"), rr.readOpts)
+		rr.iter = pebblekv.NewPebbleIteratorWithUpperBound(rr.store, rr.readOpts)
 		dataKey := path.Join(rr.topic, strconv.FormatInt(rr.currentID+1, 10))
 		iter = rr.iter
 		iter.Seek([]byte(dataKey))
@@ -105,7 +97,7 @@ func (rr *rocksmqReader) Next(ctx context.Context) (*ConsumerMessage, error) {
 	}
 }
 
-func (rr *rocksmqReader) HasNext() bool {
+func (rr *pebbleReader) HasNext() bool {
 	if rr.iter.Valid() {
 		return true
 	}
@@ -116,7 +108,7 @@ func (rr *rocksmqReader) HasNext() bool {
 			return false
 		}
 		rr.iter.Close()
-		rr.iter = rocksdbkv.NewRocksIteratorWithUpperBound(rr.store, typeutil.AddOne(rr.topic+"/"), rr.readOpts)
+		rr.iter = pebblekv.NewPebbleIteratorWithUpperBound(rr.store, rr.readOpts)
 		dataKey := path.Join(rr.topic, strconv.FormatInt(rr.currentID+1, 10))
 		rr.iter.Seek([]byte(dataKey))
 		return rr.iter.Valid()
@@ -125,8 +117,7 @@ func (rr *rocksmqReader) HasNext() bool {
 	}
 }
 
-func (rr *rocksmqReader) Close() {
+func (rr *pebbleReader) Close() {
 	close(rr.readerMutex)
 	rr.iter.Close()
-	rr.readOpts.Destroy()
 }

@@ -20,12 +20,12 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/client"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
 
-// Consumer is a client that used to consume messages from rocksmq
+// Consumer is a client that used to consume messages from pebblemq
 type Consumer struct {
 	c          client.Consumer
 	msgChannel chan mqwrapper.Message
@@ -40,7 +40,7 @@ func (rc *Consumer) Subscription() string {
 	return rc.c.Subscription()
 }
 
-// Chan returns a channel to read messages from rocksmq
+// Chan returns a channel to read messages from pebblemq
 func (rc *Consumer) Chan() <-chan mqwrapper.Message {
 	if rc.msgChannel == nil {
 		rc.once.Do(func() {
@@ -72,7 +72,7 @@ func (rc *Consumer) Chan() <-chan mqwrapper.Message {
 	return rc.msgChannel
 }
 
-// Seek is used to seek the position in rocksmq topic
+// Seek is used to seek the position in pebblemq topic
 func (rc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
 	msgID := id.(*rmqID).messageID
 	// skip the first message when consume
@@ -82,7 +82,7 @@ func (rc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
 	return rc.c.Seek(msgID)
 }
 
-// Ack is used to ask a rocksmq message
+// Ack is used to ask a pebblemq message
 func (rc *Consumer) Ack(message mqwrapper.Message) {
 }
 

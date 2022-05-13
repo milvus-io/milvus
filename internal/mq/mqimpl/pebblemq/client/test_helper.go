@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/stretchr/testify/assert"
@@ -33,31 +33,31 @@ func newConsumerName() string {
 	return fmt.Sprintf("my-consumer-%v", time.Now().Nanosecond())
 }
 
-func newMockRocksMQ() server.RocksMQ {
-	var rocksmq server.RocksMQ
-	return rocksmq
+func newMockPebbleMQ() server.PebbleMQ {
+	var pebblemq server.PebbleMQ
+	return pebblemq
 }
 
 func newMockClient() *client {
 	client, _ := newClient(Options{
-		Server: newMockRocksMQ(),
+		Server: newMockPebbleMQ(),
 	})
 	return client
 }
 
-func newRocksMQ(t *testing.T, rmqPath string) server.RocksMQ {
-	rocksdbPath := rmqPath
-	rmq, err := server.NewRocksMQ(rocksdbPath, nil)
+func newPebbleMQ(t *testing.T, rmqPath string) server.PebbleMQ {
+	pebblePath := rmqPath
+	rmq, err := server.NewPebbleMQ(pebblePath, nil)
 	assert.NoError(t, err)
 	return rmq
 }
 
 func removePath(rmqPath string) {
-	// remove path rocksmq created
-	rocksdbPath := rmqPath
-	err := os.RemoveAll(rocksdbPath)
+	// remove path pebblemq created
+	pebblePath := rmqPath
+	err := os.RemoveAll(pebblePath)
 	if err != nil {
-		log.Error("Failed to call os.removeAll.", zap.Any("path", rocksdbPath))
+		log.Error("Failed to call os.removeAll.", zap.Any("path", pebblePath))
 	}
 	metaPath := rmqPath + "_meta_kv"
 	err = os.RemoveAll(metaPath)

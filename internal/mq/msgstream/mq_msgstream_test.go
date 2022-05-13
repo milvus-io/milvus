@@ -29,7 +29,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	pulsarwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
@@ -70,7 +70,7 @@ func (f *fixture) setup() []parameters {
 	pulsarClient, err := pulsarwrapper.NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(f.t, err)
 
-	rocksdbName := "/tmp/rocksmq_unittest_" + f.t.Name()
+	pebbleName := "/tmp/pebblemq_unittest_" + f.t.Name()
 	endpoints := os.Getenv("ETCD_ENDPOINTS")
 	if endpoints == "" {
 		endpoints = "localhost:2379"
@@ -84,7 +84,7 @@ func (f *fixture) setup() []parameters {
 	f.etcdKV = etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", f.etcdKV)
 	_ = idAllocator.Initialize()
-	err = server.InitRmq(rocksdbName, idAllocator)
+	err = server.InitRmq(pebbleName, idAllocator)
 	if err != nil {
 		log.Fatalf("InitRmq error = %v", err)
 	}
@@ -99,12 +99,12 @@ func (f *fixture) setup() []parameters {
 }
 
 func (f *fixture) teardown() {
-	rocksdbName := "/tmp/rocksmq_unittest_" + f.t.Name()
+	pebbleName := "/tmp/pebblemq_unittest_" + f.t.Name()
 
-	server.CloseRocksMQ()
+	server.ClosePebbleMQ()
 	f.etcdKV.Close()
-	_ = os.RemoveAll(rocksdbName)
-	_ = os.RemoveAll(rocksdbName + "_meta_kv")
+	_ = os.RemoveAll(pebbleName)
+	_ = os.RemoveAll(pebbleName + "_meta_kv")
 }
 
 func Test_NewMqMsgStream(t *testing.T) {
@@ -367,7 +367,7 @@ func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 	}
 }
 
-/* ========================== Pulsar & RocksMQ Tests ========================== */
+/* ========================== Pulsar & PebbleMQ Tests ========================== */
 func TestStream_PulsarMsgStream_Insert(t *testing.T) {
 	pulsarAddress, _ := Params.Load("_PulsarAddress")
 	c1, c2 := funcutil.RandomString(8), funcutil.RandomString(8)
@@ -1288,8 +1288,8 @@ func TestStream_MqMsgStream_SeekInvalidMessage(t *testing.T) {
 }
 
 func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
-	rocksdbName := "/tmp/rocksmq_tt_msg_seekInvalid"
-	etcdKV := initRmq(rocksdbName)
+	pebbleName := "/tmp/pebblemq_tt_msg_seekInvalid"
+	etcdKV := initRmq(pebbleName)
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -1344,7 +1344,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 	result := consumer(ctx, outputStream2)
 	assert.Equal(t, result.Msgs[0].ID(), int64(1))
 
-	Close(rocksdbName, inputStream, outputStream2, etcdKV)
+	Close(pebbleName, inputStream, outputStream2, etcdKV)
 
 }
 
@@ -1414,13 +1414,13 @@ func initRmq(name string) *etcdkv.EtcdKV {
 	return etcdKV
 }
 
-func Close(rocksdbName string, intputStream, outputStream MsgStream, etcdKV *etcdkv.EtcdKV) {
-	server.CloseRocksMQ()
+func Close(pebbleName string, intputStream, outputStream MsgStream, etcdKV *etcdkv.EtcdKV) {
+	server.ClosePebbleMQ()
 	intputStream.Close()
 	outputStream.Close()
 	etcdKV.Close()
-	err := os.RemoveAll(rocksdbName)
-	_ = os.RemoveAll(rocksdbName + "_meta_kv")
+	err := os.RemoveAll(pebbleName)
+	_ = os.RemoveAll(pebbleName + "_meta_kv")
 	log.Println(err)
 }
 
@@ -1483,15 +1483,15 @@ func TestStream_RmqMsgStream_Insert(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 3))
 
-	rocksdbName := "/tmp/rocksmq_insert"
-	etcdKV := initRmq(rocksdbName)
+	pebbleName := "/tmp/pebblemq_insert"
+	etcdKV := initRmq(pebbleName)
 	ctx := context.Background()
 	inputStream, outputStream := initRmqStream(ctx, producerChannels, consumerChannels, consumerGroupName)
 	err := inputStream.Produce(&msgPack)
 	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(pebbleName, inputStream, outputStream, etcdKV)
 }
 
 func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
@@ -1509,8 +1509,8 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	msgPack2 := MsgPack{}
 	msgPack2.Msgs = append(msgPack2.Msgs, getTimeTickMsg(5))
 
-	rocksdbName := "/tmp/rocksmq_insert_tt"
-	etcdKV := initRmq(rocksdbName)
+	pebbleName := "/tmp/pebblemq_insert_tt"
+	etcdKV := initRmq(pebbleName)
 	ctx := context.Background()
 	inputStream, outputStream := initRmqTtStream(ctx, producerChannels, consumerChannels, consumerSubName)
 
@@ -1524,12 +1524,12 @@ func TestStream_RmqTtMsgStream_Insert(t *testing.T) {
 	require.NoErrorf(t, err, fmt.Sprintf("broadcast error = %v", err))
 
 	receiveMsg(ctx, outputStream, len(msgPack1.Msgs))
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(pebbleName, inputStream, outputStream, etcdKV)
 }
 
 func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
-	rocksdbName := "/tmp/rocksmq_tt_msg_seek"
-	etcdKV := initRmq(rocksdbName)
+	pebbleName := "/tmp/pebblemq_tt_msg_seek"
+	etcdKV := initRmq(pebbleName)
 
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
@@ -1637,7 +1637,7 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 		assert.Equal(t, msg.BeginTs(), uint64(19))
 	}
 
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(pebbleName, inputStream, outputStream, etcdKV)
 }
 
 func TestStream_BroadcastMark(t *testing.T) {
@@ -2071,8 +2071,8 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	consumerChannels := []string{"insert1"}
 	consumerSubName := "subInsert"
 
-	rocksdbName := "/tmp/rocksmq_asconsumer_withpos"
-	etcdKV := initRmq(rocksdbName)
+	pebbleName := "/tmp/pebblemq_asconsumer_withpos"
+	etcdKV := initRmq(pebbleName)
 	factory := ProtoUDFactory{}
 
 	rmqClient, _ := rmq.NewClientWithDefaultOptions()
@@ -2101,7 +2101,7 @@ func TestStream_RmqTtMsgStream_AsConsumerWithPosition(t *testing.T) {
 	assert.Equal(t, 1, len(pack.Msgs))
 	assert.EqualValues(t, 1000, pack.Msgs[0].BeginTs())
 
-	Close(rocksdbName, inputStream, outputStream, etcdKV)
+	Close(pebbleName, inputStream, outputStream, etcdKV)
 }
 
 func patchMessageID(mid *pulsar.MessageID, entryID int64) {

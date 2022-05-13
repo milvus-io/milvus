@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	rocksmqimplclient "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-	rocksmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	mqimplclient "github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/client"
+	mqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 
@@ -39,9 +39,9 @@ var Params paramtable.BaseTable
 func TestMain(m *testing.M) {
 	path := "/tmp/milvus/rdb_data"
 	defer os.RemoveAll(path)
-	_ = rocksmqimplserver.InitRocksMQ(path)
+	_ = mqimplserver.InitPebbleMQ(path)
 	exitCode := m.Run()
-	defer rocksmqimplserver.CloseRocksMQ()
+	defer mqimplserver.ClosePebbleMQ()
 	os.Exit(exitCode)
 }
 
@@ -53,7 +53,7 @@ func Test_NewRmqClient(t *testing.T) {
 }
 
 func TestRmqClient_CreateProducer(t *testing.T) {
-	opts := rocksmqimplclient.Options{}
+	opts := mqimplclient.Options{}
 	client, err := NewClient(opts)
 	defer client.Close()
 	assert.Nil(t, err)
@@ -234,6 +234,6 @@ func TestRmqClient_BytesToMsgID(t *testing.T) {
 }
 
 func createRmqClient() (*rmqClient, error) {
-	opts := rocksmqimplclient.Options{}
+	opts := mqimplclient.Options{}
 	return NewClient(opts)
 }

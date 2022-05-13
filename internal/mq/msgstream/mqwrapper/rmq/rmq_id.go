@@ -18,11 +18,11 @@ package rmq
 
 import (
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
 
-// rmqID wraps message ID for rocksmq
+// rmqID wraps message ID for pebblemq
 type rmqID struct {
 	messageID server.UniqueID
 }

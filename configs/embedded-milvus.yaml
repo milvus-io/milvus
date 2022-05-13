@@ -52,10 +52,10 @@ minio:
   bucketName: "a-bucket" # Bucket name in MinIO/S3
   rootPath: files # The root path where the message is stored in MinIO/S3
 
-# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
+# Milvus supports three MQ: pebblemq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
 # There is a note about enabling priority if we config multiple mq in this file
 # 1. standalone(local) mode: rockskmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
+# 2. cluster mode:  Pulsar(default) > Kafka (pebblemq is unsupported)
 
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
@@ -69,10 +69,10 @@ pulsar:
 
 rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
-  path: /tmp/milvus/rdb_data # The path where the message is stored in rocksmq
-  rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
-  retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes, The retention time of the message in rocksmq.
-  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
+  path: /tmp/milvus/rdb_data # The path where the message is stored in pebblemq
+  pageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in pebblemq
+  retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes, The retention time of the message in pebblemq.
+  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in pebblemq.
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:

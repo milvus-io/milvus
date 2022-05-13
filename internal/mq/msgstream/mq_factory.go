@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
-	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	kafkawrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/kafka"
@@ -72,7 +72,7 @@ func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return f.NewMsgStream(ctx)
 }
 
-// RmsFactory is a rocksmq msgstream factory that implemented Factory interface(msgstream.go)
+// RmsFactory is a pebblemq msgstream factory that implemented Factory interface(msgstream.go)
 type RmsFactory struct {
 	dispatcherFactory ProtoUDFactory
 	// the following members must be public, so that mapstructure.Decode() can access them
@@ -115,7 +115,7 @@ func NewRmsFactory(path string) *RmsFactory {
 		RmqBufSize:        1024,
 	}
 
-	err := rmqimplserver.InitRocksMQ(path)
+	err := rmqimplserver.InitPebbleMQ(path)
 	if err != nil {
 		log.Error("init rmq error", zap.Error(err))
 	}

@@ -53,11 +53,11 @@ func TestServiceParam(t *testing.T) {
 		assert.Equal(t, Params.MaxMessageSize, SuggestPulsarMaxMessageSize)
 	})
 
-	t.Run("test rocksmqConfig", func(t *testing.T) {
-		Params := SParams.RocksmqCfg
+	t.Run("test pebbleConfig", func(t *testing.T) {
+		Params := SParams.PebbleMQCfg
 
 		assert.NotEqual(t, Params.Path, "")
-		t.Logf("rocksmq path = %s", Params.Path)
+		t.Logf("pebblemq path = %s", Params.Path)
 	})
 
 	t.Run("test minioConfig", func(t *testing.T) {

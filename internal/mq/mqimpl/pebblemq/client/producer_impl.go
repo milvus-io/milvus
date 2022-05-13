@@ -13,7 +13,7 @@ package client
 
 import (
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +27,7 @@ type producer struct {
 	topic string
 }
 
-// newProducer creates a rocksmq producer from options
+// newProducer creates a pebblemq producer from options
 func newProducer(c *client, options ProducerOptions) (*producer, error) {
 	if c == nil {
 		return nil, newError(InvalidConfiguration, "client is nil")
@@ -48,7 +48,7 @@ func (p *producer) Topic() string {
 	return p.topic
 }
 
-// Send produce message in rocksmq
+// Send produce message in pebblemq
 func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
 	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
 		{
@@ -61,7 +61,7 @@ func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
 	return ids[0], nil
 }
 
-// Close destroy the topic of this producer in rocksmq
+// Close destroy the topic of this producer in pebblemq
 func (p *producer) Close() {
 	err := p.c.server.DestroyTopic(p.topic)
 	if err != nil {

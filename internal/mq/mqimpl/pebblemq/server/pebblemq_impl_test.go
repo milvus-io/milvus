@@ -24,25 +24,23 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
+	pebblekv "github.com/milvus-io/milvus/internal/kv/pebble"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
 )
 
 var Params paramtable.BaseTable
-var rmqPath = "/tmp/rocksmq"
+var rmqPath = "/tmp/pebblemq"
 var kvPathSuffix = "_kv"
 var metaPathSuffix = "_meta"
 
 func InitIDAllocator(kvPath string) *allocator.GlobalIDAllocator {
-	rocksdbKV, err := rocksdbkv.NewRocksdbKV(kvPath)
+	pebbleKV, err := pebblekv.NewPebbleKV(kvPath)
 	if err != nil {
 		panic(err)
 	}
-	idAllocator := allocator.NewGlobalIDAllocator("rmq_id", rocksdbKV)
+	idAllocator := allocator.NewGlobalIDAllocator("rmq_id", pebbleKV)
 	_ = idAllocator.Initialize()
 	return idAllocator
 }
@@ -64,17 +62,17 @@ func etcdEndpoints() []string {
 	return etcdEndpoints
 }
 
-func TestRocksmq_RegisterConsumer(t *testing.T) {
+func TestPebbleMQ_RegisterConsumer(t *testing.T) {
 	suffix := "_register"
 	kvPath := rmqPath + kvPathSuffix + suffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + suffix
-	defer os.RemoveAll(rocksdbPath + kvSuffix)
-	defer os.RemoveAll(rocksdbPath)
+	pebblePath := rmqPath + suffix
+	defer os.RemoveAll(pebblePath + kvSuffix)
+	defer os.RemoveAll(pebblePath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.NoError(t, err)
 	defer rmq.stopRetention()
 
@@ -128,21 +126,21 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	rmq.RegisterConsumer(consumer2)
 }
 
-func TestRocksmq_Basic(t *testing.T) {
+func TestPebbleMQ_Basic(t *testing.T) {
 	suffix := "_rmq"
 
 	kvPath := rmqPath + kvPathSuffix + suffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + suffix
-	defer os.RemoveAll(rocksdbPath + kvSuffix)
-	defer os.RemoveAll(rocksdbPath)
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	pebblePath := rmqPath + suffix
+	defer os.RemoveAll(pebblePath + kvSuffix)
+	defer os.RemoveAll(pebblePath)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
-	channelName := "channel_rocks"
+	channelName := "channel_pebble"
 	err = rmq.CreateTopic(channelName)
 	assert.Nil(t, err)
 	defer rmq.DestroyTopic(channelName)
@@ -184,21 +182,21 @@ func TestRocksmq_Basic(t *testing.T) {
 	assert.Equal(t, string(cMsgs[1].Payload), "c_message")
 }
 
-func TestRocksmq_Dummy(t *testing.T) {
+func TestPebbleMQ_Dummy(t *testing.T) {
 	suffix := "_dummy"
 	kvPath := rmqPath + kvPathSuffix + suffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + suffix
-	defer os.RemoveAll(rocksdbPath + kvSuffix)
-	defer os.RemoveAll(rocksdbPath)
+	pebblePath := rmqPath + suffix
+	defer os.RemoveAll(pebblePath + kvSuffix)
+	defer os.RemoveAll(pebblePath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
-	_, err = NewRocksMQ("", idAllocator)
+	_, err = NewPebbleMQ("", idAllocator)
 	assert.Error(t, err)
 
 	channelName := "channel_a"
@@ -254,21 +252,21 @@ func TestRocksmq_Dummy(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestRocksmq_Seek(t *testing.T) {
+func TestPebbleMQ_Seek(t *testing.T) {
 	suffix := "_seek"
 	kvPath := rmqPath + kvPathSuffix + suffix
 	defer os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
 
-	rocksdbPath := rmqPath + suffix
-	defer os.RemoveAll(rocksdbPath + kvSuffix)
-	defer os.RemoveAll(rocksdbPath)
+	pebblePath := rmqPath + suffix
+	defer os.RemoveAll(pebblePath + kvSuffix)
+	defer os.RemoveAll(pebblePath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err := NewPebbleMQ(pebblePath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
-	_, err = NewRocksMQ("", idAllocator)
+	_, err = NewPebbleMQ("", idAllocator)
 	assert.Error(t, err)
 	defer os.RemoveAll("_meta_kv")
 
@@ -313,24 +311,21 @@ func TestRocksmq_Seek(t *testing.T) {
 
 }
 
-func TestRocksmq_Loop(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+func TestPebbleMQ_Loop(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
+	assert.NoError(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_1"
+	name := "/tmp/PebbleMQ_1"
 	_ = os.RemoveAll(name)
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -384,23 +379,20 @@ func TestRocksmq_Loop(t *testing.T) {
 	assert.Equal(t, len(cMsgs), 0)
 }
 
-func TestRocksmq_Goroutines(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+func TestPebbleMQ_Goroutines(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
+	assert.NoError(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_2"
+	name := "/tmp/PebbleMQ_2"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -415,7 +407,7 @@ func TestRocksmq_Goroutines(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < loopNum; i += 2 {
 		wg.Add(2)
-		go func(i int, mq RocksMQ) {
+		go func(i int, mq PebbleMQ) {
 			msg0 := "message_" + strconv.Itoa(i)
 			msg1 := "message_" + strconv.Itoa(i+1)
 			pMsg0 := ProducerMessage{Payload: []byte(msg0)}
@@ -438,7 +430,7 @@ func TestRocksmq_Goroutines(t *testing.T) {
 	assert.Nil(t, err)
 	// Consume one message in each goroutine
 	for i := 0; i < loopNum; i++ {
-		go func(group *sync.WaitGroup, mq RocksMQ) {
+		go func(group *sync.WaitGroup, mq PebbleMQ) {
 			defer group.Done()
 			<-msgChan
 			cMsgs, err := mq.Consume(channelName, groupName, 1)
@@ -450,7 +442,7 @@ func TestRocksmq_Goroutines(t *testing.T) {
 }
 
 /**
-	This test is aim to measure RocksMq throughout.
+	This test is aim to measure PebbleMQ throughout.
 	Hardware:
 		CPU   Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz
         Disk  SSD
@@ -459,23 +451,20 @@ func TestRocksmq_Goroutines(t *testing.T) {
 	  	Produce: 190000 message / s
 		Consume: 90000 message / s
 */
-func TestRocksmq_Throughout(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+func TestPebble_Throughout(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_3"
+	name := "/tmp/PebbleMQ_3"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -517,23 +506,20 @@ func TestRocksmq_Throughout(t *testing.T) {
 	log.Printf("Total consume %d item, cost %v ms, throughout %v / s", entityNum, cDuration, int64(entityNum)*1000/cDuration)
 }
 
-func TestRocksmq_MultiChan(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+func TestPebbleMQ_MultiChan(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
+	assert.NoError(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_multichan"
+	name := "/tmp/PebbleMQ_multichan"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -569,23 +555,20 @@ func TestRocksmq_MultiChan(t *testing.T) {
 	assert.Equal(t, string(cMsgs[0].Payload), "for_chann1_"+strconv.Itoa(0))
 }
 
-func TestRocksmq_CopyData(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+func TestPebbleMQ_CopyData(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
+	assert.NoError(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_copydata"
+	name := "/tmp/PebbleMQ_copydata"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -635,23 +618,20 @@ func TestRocksmq_CopyData(t *testing.T) {
 	assert.Equal(t, emptyTargetData, cMsgs1[0].Payload)
 }
 
-func TestRocksmq_SeekToLatest(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+func TestPebbleMQ_SeekToLatest(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
+	assert.NoError(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_seektolatest"
+	name := "/tmp/PebbleMQ_seektolatest"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -726,23 +706,20 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 	}
 }
 
-func TestRocksmq_Reader(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+func TestPebbleMQ_Reader(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
+	assert.NoError(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_reader"
+	name := "/tmp/PebbleMQ_reader"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -790,21 +767,19 @@ func TestRocksmq_Reader(t *testing.T) {
 }
 
 func TestReader_CornerCase(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdKV, err := NewEmbeddedEtcd()
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_reader_cornercase"
+	name := "/tmp/PebbleMQ_reader_cornercase"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -848,23 +823,20 @@ func TestReader_CornerCase(t *testing.T) {
 	assert.Equal(t, string(msg.Payload), "extra_message")
 }
 
-func TestRocksmq_GetLatestMsg(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+func TestPebbleMQ_GetLatestMsg(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_data"
+	name := "/tmp/PebbleMQ_data"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 
 	channelName := newChanName()
@@ -922,23 +894,20 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func TestRocksmq_Close(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+func TestPebbleMQ_Close(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
 	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_close"
+	name := "/tmp/PebbleMQ_close"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -962,21 +931,20 @@ func TestRocksmq_Close(t *testing.T) {
 	rmq.CloseReader("", "")
 }
 
-func TestRocksmq_SeekWithNoConsumerError(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+func TestPebbleMQ_SeekWithNoConsumerError(t *testing.T) {
+	etcdKV, err := NewEmbeddedEtcd()
+	defer os.RemoveAll("etcd.test.data.dir")
 	defer etcdKV.Close()
+	assert.Nil(t, err)
 	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
 	_ = idAllocator.Initialize()
 
-	name := "/tmp/rocksmq_seekerror"
+	name := "/tmp/PebbleMQ_seekerror"
 	defer os.RemoveAll(name)
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
+	rmq, err := NewPebbleMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 

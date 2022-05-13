@@ -17,7 +17,7 @@ type DefaultFactory struct {
 func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:       standAlone,
-		msgStreamFactory: msgstream.NewRmsFactory("/tmp/milvus/rocksmq/"),
+		msgStreamFactory: msgstream.NewRmsFactory("/tmp/milvus/pebblemq/"),
 		chunkManagerFactory: storage.NewChunkManagerFactory("local", "local",
 			storage.RootPath("/tmp/milvus")),
 	}
@@ -29,7 +29,7 @@ func NewFactory(standAlone bool) *DefaultFactory {
 
 // Init create a msg factory(TODO only support one mq at the same time.)
 // In order to guarantee backward compatibility of config file, we still support multiple mq configs.
-// 1. Rocksmq only run on local mode, and it has the highest priority
+// 1. PebbleMQ only run on local mode, and it has the highest priority
 // 2. Pulsar has higher priority than Kafka within remote msg
 func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 	// skip if using default factory
@@ -58,7 +58,7 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 		if f.msgStreamFactory == nil {
 			f.msgStreamFactory = f.initMQRemoteService(params)
 			if f.msgStreamFactory == nil {
-				panic("no available mq configuration, must config rocksmq, Pulsar or Kafka at least one of these!")
+				panic("no available mq configuration, must config pebblemq, Pulsar or Kafka at least one of these!")
 			}
 		}
 		return
@@ -71,8 +71,8 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 }
 
 func (f *DefaultFactory) initMQLocalService(params *paramtable.ComponentParam) msgstream.Factory {
-	if params.RocksmqEnable() {
-		path, _ := params.Load("_RocksmqPath")
+	if params.PebbleMQEnable() {
+		path, _ := params.Load("_PebbleMQPath")
 		return msgstream.NewRmsFactory(path)
 	}
 	return nil

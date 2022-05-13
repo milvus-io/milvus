@@ -24,8 +24,7 @@ pacman -S --noconfirm --needed \
 
 # workaround for install older packages
 pacman -U --noconfirm \
-    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-go-1.17-1-any.pkg.tar.zst \
-    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rocksdb-6.26.1-1-any.pkg.tar.zst
+    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-go-1.17-1-any.pkg.tar.zst
 
 
 # dummy empty dl, TODO: remove later

@@ -63,7 +63,7 @@ func BigEndianBytesToUint64(b []byte) (uint64, error) {
 		return 0, fmt.Errorf("failed to convert []byte to uint64: invalid data, must 8 bytes, but %d", len(b))
 	}
 
-	// do not use little or common endian for compatibility issues(the msgid used in rocksmq is using this)
+	// do not use little or common endian for compatibility issues(the msgid used in pebblemq is using this)
 	return binary.BigEndian.Uint64(b), nil
 }
 

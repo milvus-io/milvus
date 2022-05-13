@@ -116,7 +116,7 @@ func (c *consumer) Chan() <-chan Message {
 	return c.messageCh
 }
 
-// Seek seek rocksmq position to id and notify consumer to consume
+// Seek seek pebblemq position to id and notify consumer to consume
 func (c *consumer) Seek(id UniqueID) error { //nolint:govet
 	err := c.client.server.Seek(c.topic, c.consumerName, id)
 	if err != nil {
@@ -126,7 +126,7 @@ func (c *consumer) Seek(id UniqueID) error { //nolint:govet
 	return nil
 }
 
-// Close destroy current consumer in rocksmq
+// Close destroy current consumer in pebblemq
 func (c *consumer) Close() {
 	err := c.client.server.DestroyConsumerGroup(c.topic, c.consumerName)
 	if err != nil {

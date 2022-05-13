@@ -59,7 +59,7 @@ type ctxKey struct{}
 func TestMain(t *testing.M) {
 	rand.Seed(time.Now().Unix())
 	path := "/tmp/milvus_ut/rdb_data"
-	os.Setenv("ROCKSMQ_PATH", path)
+	os.Setenv("PEBBLEMQ_PATH", path)
 	defer os.RemoveAll(path)
 
 	Params.DataNodeCfg.InitAlias("datanode-alias-1")

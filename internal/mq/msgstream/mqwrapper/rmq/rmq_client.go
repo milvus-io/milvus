@@ -19,16 +19,16 @@ package rmq
 import (
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/server"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/client"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 )
 
-// rmqClient contains a rocksmq client
+// rmqClient contains a pebblemq client
 type rmqClient struct {
 	client client.Client
 }
@@ -48,7 +48,7 @@ func NewClient(opts client.Options) (*rmqClient, error) {
 	return &rmqClient{client: c}, nil
 }
 
-// CreateProducer creates a producer for rocksmq client
+// CreateProducer creates a producer for pebblemq client
 func (rc *rmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
 	rmqOpts := client.ProducerOptions{Topic: options.Topic}
 	pp, err := rc.client.CreateProducer(rmqOpts)

@@ -19,18 +19,19 @@ import (
 	"sync/atomic"
 	"time"
 
-	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/tecbot/gorocksdb"
+
+	"github.com/cockroachdb/pebble"
+	pebblekv "github.com/milvus-io/milvus/internal/kv/pebble"
+	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 
-// RocksmqRetentionTimeInMinutes is the time of retention
-var RocksmqRetentionTimeInSecs int64 = 10080 * 60
+// PebbleMQRetentionTimeInSecs is the time of retention
+var PebbleMQRetentionTimeInSecs int64 = 10080 * 60
 
-// RocksmqRetentionSizeInMB is the size of retention
-var RocksmqRetentionSizeInMB int64 = 8192
+// PebbleMQRetentionSizeInMB is the size of retention
+var PebbleMQRetentionSizeInMB int64 = 8192
 
 // Const value that used to convert unit
 const (
@@ -45,15 +46,15 @@ type retentionInfo struct {
 	topicRetetionTime sync.Map
 	mutex             sync.RWMutex
 
-	kv *rocksdbkv.RocksdbKV
-	db *gorocksdb.DB
+	kv *pebblekv.PebbleKV
+	db *pebble.DB
 
 	closeCh   chan struct{}
 	closeWg   sync.WaitGroup
 	closeOnce sync.Once
 }
 
-func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
+func initRetentionInfo(kv *pebblekv.PebbleKV, db *pebble.DB) (*retentionInfo, error) {
 	ri := &retentionInfo{
 		topicRetetionTime: sync.Map{},
 		mutex:             sync.RWMutex{},
@@ -75,7 +76,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	return ri, nil
 }
 
-// Before do retention, load retention info from rocksdb to retention info structure in goroutines.
+// Before do retention, load retention info from pebble to retention info structure in goroutines.
 // Because loadRetentionInfo may need some time, so do this asynchronously. Finally start retention goroutine.
 func (ri *retentionInfo) startRetentionInfo() {
 	// var wg sync.WaitGroup
@@ -85,7 +86,7 @@ func (ri *retentionInfo) startRetentionInfo() {
 
 // retention do time ticker and trigger retention check and operation for each topic
 func (ri *retentionInfo) retention() error {
-	log.Debug("Rocksmq retention goroutine start!")
+	log.Debug("PebbleMQ retention goroutine start!")
 	// Do retention check every 6s
 	ticker := time.NewTicker(time.Duration(atomic.LoadInt64(&TickerTimeInSeconds) * int64(time.Second)))
 	defer ri.closeWg.Done()
@@ -93,11 +94,11 @@ func (ri *retentionInfo) retention() error {
 	for {
 		select {
 		case <-ri.closeCh:
-			log.Debug("Rocksmq retention finish!")
+			log.Debug("PebbleMQ retention finish!")
 			return nil
 		case t := <-ticker.C:
 			timeNow := t.Unix()
-			checkTime := atomic.LoadInt64(&RocksmqRetentionTimeInSecs) / 10
+			checkTime := atomic.LoadInt64(&PebbleMQRetentionTimeInSecs) / 10
 			ri.mutex.RLock()
 			ri.topicRetetionTime.Range(func(k, v interface{}) bool {
 				topic, _ := k.(string)
@@ -152,19 +153,14 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 			zap.Any("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
-	pageReadOpts := gorocksdb.NewDefaultReadOptions()
-	defer pageReadOpts.Destroy()
 	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic) + "/"
-
-	pageIter := rocksdbkv.NewRocksIteratorWithUpperBound(ri.kv.DB, typeutil.AddOne(pageMsgPrefix), pageReadOpts)
+	pageReadOpts := pebble.IterOptions{UpperBound: []byte(typeutil.AddOne(pageMsgPrefix))}
+	pageIter := pebblekv.NewPebbleIteratorWithUpperBound(ri.kv.DB, &pageReadOpts)
 	defer pageIter.Close()
 	pageIter.Seek([]byte(pageMsgPrefix))
 	for ; pageIter.Valid(); pageIter.Next() {
 		pKey := pageIter.Key()
-		pageID, err := parsePageID(string(pKey.Data()))
-		if pKey != nil {
-			pKey.Free()
-		}
+		pageID, err := parsePageID(string(pKey))
 		if err != nil {
 			return err
 		}
@@ -184,10 +180,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		if msgTimeExpiredCheck(ackedTs) {
 			pageEndID = pageID
 			pValue := pageIter.Value()
-			size, err := strconv.ParseInt(string(pValue.Data()), 10, 64)
-			if pValue != nil {
-				pValue.Free()
-			}
+			size, err := strconv.ParseInt(string(pValue), 10, 64)
 			if err != nil {
 				return err
 			}
@@ -207,15 +200,9 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 
 	for ; pageIter.Valid(); pageIter.Next() {
 		pValue := pageIter.Value()
-		size, err := strconv.ParseInt(string(pValue.Data()), 10, 64)
-		if pValue != nil {
-			pValue.Free()
-		}
+		size, err := strconv.ParseInt(string(pValue), 10, 64)
 		pKey := pageIter.Key()
-		pKeyStr := string(pKey.Data())
-		if pKey != nil {
-			pKey.Free()
-		}
+		pKeyStr := string(pKey)
 		if err != nil {
 			return err
 		}
@@ -249,20 +236,16 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 	fixedAckedTsKey := constructKey(AckedTsTitle, topic)
 
-	pageReadOpts := gorocksdb.NewDefaultReadOptions()
-	defer pageReadOpts.Destroy()
 	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic) + "/"
+	pageReadOpts := pebble.IterOptions{UpperBound: []byte(typeutil.AddOne(pageMsgPrefix))}
 	// ensure the iterator won't iterate to other topics
-	pageIter := rocksdbkv.NewRocksIteratorWithUpperBound(ri.kv.DB, typeutil.AddOne(pageMsgPrefix), pageReadOpts)
+	pageIter := pebblekv.NewPebbleIteratorWithUpperBound(ri.kv.DB, &pageReadOpts)
 	defer pageIter.Close()
 	pageIter.Seek([]byte(pageMsgPrefix))
 	var ackedSize int64
 	for ; pageIter.Valid(); pageIter.Next() {
 		key := pageIter.Key()
-		pageID, err := parsePageID(string(key.Data()))
-		if key != nil {
-			key.Free()
-		}
+		pageID, err := parsePageID(string(key))
 		if err != nil {
 			return -1, err
 		}
@@ -281,10 +264,7 @@ func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 
 		// Get page size
 		val := pageIter.Value()
-		size, err := strconv.ParseInt(string(val.Data()), 10, 64)
-		if val != nil {
-			val.Free()
-		}
+		size, err := strconv.ParseInt(string(val), 10, 64)
 		if err != nil {
 			return -1, err
 		}
@@ -297,23 +277,24 @@ func (ri *retentionInfo) calculateTopicAckedSize(topic string) (int64, error) {
 }
 
 func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
-	writeBatch := gorocksdb.NewWriteBatch()
-	defer writeBatch.Destroy()
+	writeOpts := pebble.WriteOptions{}
+	writeBatch := ri.kv.DB.NewBatch()
+	defer writeBatch.Close()
 
 	pageMsgPrefix := constructKey(PageMsgSizeTitle, topic)
 	fixedAckedTsKey := constructKey(AckedTsTitle, topic)
 	pageStartIDKey := pageMsgPrefix + "/"
 	pageEndIDKey := pageMsgPrefix + "/" + strconv.FormatInt(pageEndID+1, 10)
-	writeBatch.DeleteRange([]byte(pageStartIDKey), []byte(pageEndIDKey))
+	writeBatch.DeleteRange([]byte(pageStartIDKey), []byte(pageEndIDKey), &writeOpts)
 
 	pageTsPrefix := constructKey(PageTsTitle, topic)
 	pageTsStartIDKey := pageTsPrefix + "/"
 	pageTsEndIDKey := pageTsPrefix + "/" + strconv.FormatInt(pageEndID+1, 10)
-	writeBatch.DeleteRange([]byte(pageTsStartIDKey), []byte(pageTsEndIDKey))
+	writeBatch.DeleteRange([]byte(pageTsStartIDKey), []byte(pageTsEndIDKey), &writeOpts)
 
 	ackedStartIDKey := fixedAckedTsKey + "/"
 	ackedEndIDKey := fixedAckedTsKey + "/" + strconv.FormatInt(pageEndID+1, 10)
-	writeBatch.DeleteRange([]byte(ackedStartIDKey), []byte(ackedEndIDKey))
+	writeBatch.DeleteRange([]byte(ackedStartIDKey), []byte(ackedEndIDKey), &writeOpts)
 
 	ll, ok := topicMu.Load(topic)
 	if !ok {
@@ -331,26 +312,22 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 		return err
 	}
 
-	writeOpts := gorocksdb.NewDefaultWriteOptions()
-	defer writeOpts.Destroy()
-	err = ri.kv.DB.Write(writeOpts, writeBatch)
+	err = writeBatch.Commit(&writeOpts)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// DeleteMessages in rocksdb by range of [startID, endID)
-func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) error {
+// DeleteMessages in pebble by range of [startID, endID)
+func DeleteMessages(db *pebble.DB, topic string, startID, endID UniqueID) error {
 	// Delete msg by range of startID and endID
+	writeOpts := pebble.WriteOptions{}
 	startKey := path.Join(topic, strconv.FormatInt(startID, 10))
 	endKey := path.Join(topic, strconv.FormatInt(endID+1, 10))
-	writeBatch := gorocksdb.NewWriteBatch()
-	defer writeBatch.Destroy()
-	writeBatch.DeleteRange([]byte(startKey), []byte(endKey))
-	opts := gorocksdb.NewDefaultWriteOptions()
-	defer opts.Destroy()
-	err := db.Write(opts, writeBatch)
+	writeBatch := db.NewBatch()
+	writeBatch.DeleteRange([]byte(startKey), []byte(endKey), &writeOpts)
+	err := writeBatch.Commit(&writeOpts)
 	if err != nil {
 		return err
 	}
@@ -360,15 +337,15 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 }
 
 func msgTimeExpiredCheck(ackedTs int64) bool {
-	if RocksmqRetentionTimeInSecs < 0 {
+	if PebbleMQRetentionTimeInSecs < 0 {
 		return false
 	}
-	return ackedTs+atomic.LoadInt64(&RocksmqRetentionTimeInSecs) < time.Now().Unix()
+	return ackedTs+atomic.LoadInt64(&PebbleMQRetentionTimeInSecs) < time.Now().Unix()
 }
 
 func msgSizeExpiredCheck(deletedAckedSize, ackedSize int64) bool {
-	if RocksmqRetentionSizeInMB < 0 {
+	if PebbleMQRetentionSizeInMB < 0 {
 		return false
 	}
-	return ackedSize-deletedAckedSize > atomic.LoadInt64(&RocksmqRetentionSizeInMB)*MB
+	return ackedSize-deletedAckedSize > atomic.LoadInt64(&PebbleMQRetentionSizeInMB)*MB
 }

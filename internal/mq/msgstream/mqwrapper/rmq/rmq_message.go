@@ -12,34 +12,34 @@
 package rmq
 
 import (
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/pebblemq/client"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
 
 // Check rmqMessage implements ConsumerMessage
 var _ mqwrapper.Message = (*rmqMessage)(nil)
 
-// rmqMessage wraps the message for rocksmq
+// rmqMessage wraps the message for pebblemq
 type rmqMessage struct {
 	msg client.Message
 }
 
-// Topic returns the topic name of rocksmq message
+// Topic returns the topic name of pebblemq message
 func (rm *rmqMessage) Topic() string {
 	return rm.msg.Topic
 }
 
-// Properties returns the properties of rocksmq message
+// Properties returns the properties of pebblemq message
 func (rm *rmqMessage) Properties() map[string]string {
 	return nil
 }
 
-// Payload returns the payload of rocksmq message
+// Payload returns the payload of pebblemq message
 func (rm *rmqMessage) Payload() []byte {
 	return rm.msg.Payload
 }
 
-// ID returns the id of rocksmq message
+// ID returns the id of pebblemq message
 func (rm *rmqMessage) ID() mqwrapper.MessageID {
 	return &rmqID{messageID: rm.msg.MsgID}
 }

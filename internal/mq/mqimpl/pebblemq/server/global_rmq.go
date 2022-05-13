@@ -30,24 +30,24 @@ import (
 	"go.uber.org/zap"
 )
 
-// Rmq is global rocksmq instance that will be initialized only once
-var Rmq *rocksmq
+// Rmq is global pebblemq instance that will be initialized only once
+var Rmq *pebblemq
 
-// once is used to init global rocksmq
+// once is used to init global pebblemq
 var once sync.Once
 
-// Params provide params that rocksmq needs
+// Params provide params that pebblemq needs
 var params paramtable.BaseTable
 
-// InitRmq is deprecate implementation of global rocksmq. will be removed later
-func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
+// InitRmq is deprecate implementation of global pebblemq. will be removed later
+func InitRmq(pebbleName string, idAllocator allocator.GIDAllocator) error {
 	var err error
-	Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
+	Rmq, err = NewPebbleMQ(pebbleName, idAllocator)
 	return err
 }
 
-// InitRocksMQ init global rocksmq single instance
-func InitRocksMQ(path string) error {
+// InitPebbleMQ init global pebblemq single instance
+func InitPebbleMQ(path string) error {
 	var finalErr error
 	once.Do(func() {
 		params.Init()
@@ -67,43 +67,43 @@ func InitRocksMQ(path string) error {
 			}
 		}
 
-		rawRmqPageSize, err := params.Load("rocksmq.rocksmqPageSize")
+		rawRmqPageSize, err := params.Load("pebblemq.pageSize")
 		if err == nil && rawRmqPageSize != "" {
 			rmqPageSize, err := strconv.ParseInt(rawRmqPageSize, 10, 64)
 			if err == nil {
-				atomic.StoreInt64(&RocksmqPageSize, rmqPageSize)
+				atomic.StoreInt64(&PebbleMQPageSize, rmqPageSize)
 			} else {
-				log.Warn("rocksmq.rocksmqPageSize is invalid, using default value 2G")
+				log.Warn("pebblemq.pageSize is invalid, using default value 2G")
 			}
 		}
-		rawRmqRetentionTimeInMinutes, err := params.Load("rocksmq.retentionTimeInMinutes")
+		rawRmqRetentionTimeInMinutes, err := params.Load("pebblemq.retentionTimeInMinutes")
 		if err == nil && rawRmqRetentionTimeInMinutes != "" {
 			rawRmqRetentionTimeInMinutes, err := strconv.ParseInt(rawRmqRetentionTimeInMinutes, 10, 64)
 			if err == nil {
-				atomic.StoreInt64(&RocksmqRetentionTimeInSecs, rawRmqRetentionTimeInMinutes*60)
+				atomic.StoreInt64(&PebbleMQRetentionTimeInSecs, rawRmqRetentionTimeInMinutes*60)
 			} else {
-				log.Warn("rocksmq.retentionTimeInMinutes is invalid, using default value")
+				log.Warn("pebblemq.retentionTimeInMinutes is invalid, using default value")
 			}
 		}
-		rawRmqRetentionSizeInMB, err := params.Load("rocksmq.retentionSizeInMB")
+		rawRmqRetentionSizeInMB, err := params.Load("pebblemq.retentionSizeInMB")
 		if err == nil && rawRmqRetentionSizeInMB != "" {
 			rawRmqRetentionSizeInMB, err := strconv.ParseInt(rawRmqRetentionSizeInMB, 10, 64)
 			if err == nil {
-				atomic.StoreInt64(&RocksmqRetentionSizeInMB, rawRmqRetentionSizeInMB)
+				atomic.StoreInt64(&PebbleMQRetentionSizeInMB, rawRmqRetentionSizeInMB)
 			} else {
-				log.Warn("rocksmq.retentionSizeInMB is invalid, using default value 0")
+				log.Warn("pebblemq.retentionSizeInMB is invalid, using default value 0")
 			}
 		}
-		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
-			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
-		Rmq, finalErr = NewRocksMQ(path, nil)
+		log.Debug("", zap.Any("rawRmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
+			zap.Any("PebbleMQRetentionSizeInMB", PebbleMQRetentionSizeInMB), zap.Any("PebbleMQPageSize", PebbleMQPageSize))
+		Rmq, finalErr = NewPebbleMQ(path, nil)
 	})
 	return finalErr
 }
 
-// CloseRocksMQ is used to close global rocksmq
-func CloseRocksMQ() {
-	log.Debug("Close Rocksmq!")
+// ClosePebbleMQ is used to close global pebblemq
+func ClosePebbleMQ() {
+	log.Debug("Close PebbleMQ!")
 	if Rmq != nil && Rmq.store != nil {
 		Rmq.Close()
 	}
