@@ -576,7 +576,10 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 	var triggerTask task
 
 	processInternalTaskFn := func(activateTasks []task, triggerTask task) {
-		log.Debug("scheduleLoop: num of child task", zap.Int("num child task", len(activateTasks)))
+		log.Debug("scheduleLoop: num of child task",
+			zap.Int("num child task", len(activateTasks)),
+			zap.Int64("trigger task ID", triggerTask.getTaskID()),
+		)
 		for _, childTask := range activateTasks {
 			if childTask != nil {
 				log.Debug("scheduleLoop: add an activate task to activateChan", zap.Int64("taskID", childTask.getTaskID()))

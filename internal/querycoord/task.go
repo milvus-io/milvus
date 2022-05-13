@@ -2283,7 +2283,9 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 
 			log.Debug("removing offline nodes from replicas and segments...",
 				zap.Int("len(replicas)", len(replicas)),
-				zap.Int("len(segments)", len(segments)))
+				zap.Int("len(segments)", len(segments)),
+				zap.Int64("trigger task ID", lbt.getTaskID()),
+			)
 			wg := sync.WaitGroup{}
 			for _, replica := range replicas {
 				wg.Add(1)
