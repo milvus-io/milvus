@@ -57,10 +57,6 @@ func (m *GrpcRootCoordClient) SelectUser(ctx context.Context, in *milvuspb.Selec
 	return &milvuspb.SelectUserResponse{}, m.Err
 }
 
-func (m *GrpcRootCoordClient) SelectResource(ctx context.Context, in *milvuspb.SelectResourceRequest, opts ...grpc.CallOption) (*milvuspb.SelectResourceResponse, error) {
-	return &milvuspb.SelectResourceResponse{}, m.Err
-}
-
 func (m *GrpcRootCoordClient) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

@@ -10,6 +10,11 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/util"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 
 	"github.com/golang/protobuf/proto"
@@ -576,6 +581,367 @@ func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 	}
 
 	return usernames, nil
+}
+
+func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
+	err := kc.Txn.Save(k, "")
+	if err != nil {
+		log.Error("fail to create role", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
+	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, roleName)
+	err := kc.Txn.Remove(k)
+	if err != nil {
+		log.Error("fail to drop role", zap.String("key", k), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", userEntity.Name, roleEntity.Name))
+	var err error
+	if operateType == milvuspb.OperateUserRoleType_AddUserToRole {
+		err = kc.Txn.Save(k, "")
+		if err != nil {
+			log.Error("fail to add user to role", zap.String("key", k), zap.Error(err))
+		}
+	} else if operateType == milvuspb.OperateUserRoleType_RemoveUserFromRole {
+		err = kc.Txn.Remove(k)
+		if err != nil {
+			log.Error("fail to remove user from role", zap.String("key", k), zap.Error(err))
+		}
+	} else {
+		err = fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
+	}
+	return err
+}
+
+func (kc *Catalog) SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	var results []*milvuspb.RoleResult
+
+	roleToUsers := make(map[string][]string)
+	if includeUserInfo {
+		roleMappingKey := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")
+		keys, _, err := kc.Txn.LoadWithPrefix(roleMappingKey)
+		if err != nil {
+			log.Error("fail to load role mappings", zap.String("key", roleMappingKey), zap.Error(err))
+			return results, err
+		}
+
+		for _, key := range keys {
+			roleMappingInfos := typeutil.AfterN(key, roleMappingKey+"/", "/")
+			if len(roleMappingInfos) != 2 {
+				log.Warn("invalid role mapping key", zap.String("key", key))
+				continue
+			}
+			username := roleMappingInfos[0]
+			roleName := roleMappingInfos[1]
+			roleToUsers[roleName] = append(roleToUsers[roleName], username)
+		}
+	}
+
+	appendRoleResult := func(roleName string) {
+		var users []*milvuspb.UserEntity
+		for _, username := range roleToUsers[roleName] {
+			users = append(users, &milvuspb.UserEntity{Name: username})
+		}
+		results = append(results, &milvuspb.RoleResult{
+			Role:  &milvuspb.RoleEntity{Name: roleName},
+			Users: users,
+		})
+	}
+
+	if entity == nil {
+		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, "")
+		keys, _, err := kc.Txn.LoadWithPrefix(roleKey)
+		if err != nil {
+			log.Error("fail to load roles", zap.String("key", roleKey), zap.Error(err))
+			return results, err
+		}
+		for _, key := range keys {
+			infoArr := typeutil.AfterN(key, roleKey+"/", "/")
+			if len(infoArr) != 1 || len(infoArr[0]) == 0 {
+				log.Warn("invalid role key", zap.String("key", key))
+				continue
+			}
+			appendRoleResult(infoArr[0])
+		}
+	} else {
+		if funcutil.IsEmptyString(entity.Name) {
+			return results, fmt.Errorf("role name in the role entity is empty")
+		}
+		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
+		_, err := kc.Txn.Load(roleKey)
+		if err != nil {
+			log.Error("fail to load a role", zap.String("key", roleKey), zap.Error(err))
+			return results, err
+		}
+		appendRoleResult(entity.Name)
+	}
+
+	return results, nil
+}
+
+func (kc *Catalog) getRolesByUsername(tenant string, username string) ([]string, error) {
+	var roles []string
+	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, username)
+	keys, _, err := kc.Txn.LoadWithPrefix(k)
+	if err != nil {
+		log.Error("fail to load role mappings by the username", zap.String("key", k), zap.Error(err))
+		return roles, err
+	}
+	for _, key := range keys {
+		roleMappingInfos := typeutil.AfterN(key, k+"/", "/")
+		if len(roleMappingInfos) != 1 {
+			log.Warn("invalid role mapping key", zap.String("key", key))
+			continue
+		}
+		roles = append(roles, roleMappingInfos[0])
+	}
+	return roles, nil
+}
+
+// getUserResult get the user result by the username. And never return the error because the error means the user isn't added to a role.
+func (kc *Catalog) getUserResult(tenant string, username string, includeRoleInfo bool) (*milvuspb.UserResult, error) {
+	result := &milvuspb.UserResult{User: &milvuspb.UserEntity{Name: username}}
+	if !includeRoleInfo {
+		return result, nil
+	}
+	roleNames, err := kc.getRolesByUsername(tenant, username)
+	if err != nil {
+		log.Warn("fail to get roles by the username", zap.Error(err))
+		return result, err
+	}
+	var roles []*milvuspb.RoleEntity
+	for _, roleName := range roleNames {
+		roles = append(roles, &milvuspb.RoleEntity{Name: roleName})
+	}
+	result.Roles = roles
+	return result, nil
+}
+
+func (kc *Catalog) SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	var (
+		usernames []string
+		err       error
+		results   []*milvuspb.UserResult
+	)
+
+	appendUserResult := func(username string) error {
+		result, err := kc.getUserResult(tenant, username, includeRoleInfo)
+		if err != nil {
+			return err
+		}
+		results = append(results, result)
+		return nil
+	}
+
+	if entity == nil {
+		usernames, err = kc.ListCredentials(ctx)
+		if err != nil {
+			return results, err
+		}
+	} else {
+		if funcutil.IsEmptyString(entity.Name) {
+			return results, fmt.Errorf("username in the user entity is empty")
+		}
+		_, err = kc.GetCredential(ctx, entity.Name)
+		if err != nil {
+			return results, err
+		}
+		usernames = append(usernames, entity.Name)
+	}
+	for _, username := range usernames {
+		err = appendUserResult(username)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return results, nil
+}
+
+func (kc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	privilegeName := entity.Grantor.Privilege.Name
+	k := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
+
+	curGrantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{}
+	v, err := kc.Txn.Load(k)
+	if err != nil {
+		log.Warn("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+		if funcutil.IsRevoke(operateType) {
+			return err
+		}
+		if !funcutil.IsKeyNotExistError(err) {
+			return err
+		}
+		curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities, &milvuspb.GrantorEntity{
+			Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+			User:      &milvuspb.UserEntity{Name: entity.Grantor.User.Name},
+		})
+	} else {
+		err = proto.Unmarshal([]byte(v), curGrantPrivilegeEntity)
+		if err != nil {
+			log.Error("fail to unmarshal the grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+			return err
+		}
+		isExisted := false
+		dropIndex := -1
+
+		for entityIndex, grantorEntity := range curGrantPrivilegeEntity.Entities {
+			if grantorEntity.Privilege.Name == privilegeName {
+				isExisted = true
+				dropIndex = entityIndex
+				break
+			}
+		}
+		if !isExisted && funcutil.IsGrant(operateType) {
+			curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities, &milvuspb.GrantorEntity{
+				Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				User:      &milvuspb.UserEntity{Name: entity.Grantor.User.Name},
+			})
+		} else if isExisted && funcutil.IsGrant(operateType) {
+			return nil
+		} else if !isExisted && funcutil.IsRevoke(operateType) {
+			return fmt.Errorf("fail to revoke the privilege because the privilege isn't granted for the role, key: /%s", k)
+		} else if isExisted && funcutil.IsRevoke(operateType) {
+			curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities[:dropIndex], curGrantPrivilegeEntity.Entities[dropIndex+1:]...)
+		}
+	}
+
+	if funcutil.IsRevoke(operateType) && len(curGrantPrivilegeEntity.Entities) == 0 {
+		err = kc.Txn.Remove(k)
+		if err != nil {
+			log.Error("fail to remove the grant privilege entity", zap.String("key", k), zap.Error(err))
+			return err
+		}
+		return nil
+	}
+
+	saveValue, err := proto.Marshal(curGrantPrivilegeEntity)
+	if err != nil {
+		log.Error("fail to marshal the grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+		return fmt.Errorf("fail to marshal grant info, key:%s, err:%w", k, err)
+	}
+	err = kc.Txn.Save(k, string(saveValue))
+	if err != nil {
+		log.Error("fail to save the grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	var entities []*milvuspb.GrantEntity
+
+	var k string
+	appendGrantEntity := func(v string, object string, objectName string) error {
+		grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{}
+		err := proto.Unmarshal([]byte(v), grantPrivilegeEntity)
+		if err != nil {
+			log.Error("fail to unmarshal the grant privilege entity", zap.String("key", k), zap.Error(err))
+			return err
+		}
+		for _, grantorEntity := range grantPrivilegeEntity.Entities {
+			entities = append(entities, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: entity.Role.Name},
+				Object:     &milvuspb.ObjectEntity{Name: object},
+				ObjectName: objectName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: grantorEntity.User.Name},
+					Privilege: &milvuspb.PrivilegeEntity{Name: util.PrivilegeNameForAPI(grantorEntity.Privilege.Name)},
+				},
+			})
+		}
+		return nil
+	}
+
+	if !funcutil.IsEmptyString(entity.ObjectName) && entity.Object != nil && !funcutil.IsEmptyString(entity.Object.Name) {
+		k = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
+		v, err := kc.Txn.Load(k)
+		if err != nil {
+			log.Error("fail to load the grant privilege entity", zap.String("key", k), zap.Error(err))
+			return entities, err
+		}
+		err = appendGrantEntity(v, entity.Object.Name, entity.ObjectName)
+		if err != nil {
+			return entities, err
+		}
+	} else {
+		k = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, entity.Role.Name)
+		keys, values, err := kc.Txn.LoadWithPrefix(k)
+		if err != nil {
+			log.Error("fail to load grant privilege entities", zap.String("key", k), zap.Error(err))
+			return entities, err
+		}
+		for i, key := range keys {
+			grantInfos := typeutil.AfterN(key, k+"/", "/")
+			if len(grantInfos) != 2 {
+				log.Warn("invalid grant key", zap.String("key", key))
+				continue
+			}
+			err = appendGrantEntity(values[i], grantInfos[0], grantInfos[1])
+			if err != nil {
+				return entities, err
+			}
+		}
+	}
+
+	return entities, nil
+}
+
+func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+	var grantInfoStrs []string
+	k := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+	keys, values, err := kc.Txn.LoadWithPrefix(k)
+	if err != nil {
+		log.Error("fail to load all grant privilege entities", zap.String("key", k), zap.Error(err))
+		return []string{}, err
+	}
+
+	for i, key := range keys {
+		grantInfos := typeutil.AfterN(key, k+"/", "/")
+		if len(grantInfos) != 3 {
+			log.Warn("invalid grant key", zap.String("key", key))
+			continue
+		}
+		grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{}
+		err = proto.Unmarshal([]byte(values[i]), grantPrivilegeEntity)
+		if err != nil {
+			log.Warn("fail to unmarshal the grant privilege entity", zap.String("key", key), zap.Error(err))
+			continue
+		}
+		for _, grantorInfo := range grantPrivilegeEntity.Entities {
+			grantInfoStrs = append(grantInfoStrs,
+				funcutil.PolicyForPrivilege(grantInfos[0], grantInfos[1], grantInfos[2], grantorInfo.Privilege.Name))
+		}
+	}
+	return grantInfoStrs, nil
+}
+
+func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
+	var userRoles []string
+	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, "")
+	keys, _, err := kc.Txn.LoadWithPrefix(k)
+	if err != nil {
+		log.Error("fail to load all user-role mappings", zap.String("key", k), zap.Error(err))
+		return []string{}, err
+	}
+
+	for _, key := range keys {
+		userRolesInfos := typeutil.AfterN(key, k+"/", "/")
+		if len(userRolesInfos) != 2 {
+			log.Warn("invalid user-role key", zap.String("key", key))
+			continue
+		}
+		userRoles = append(userRoles, funcutil.EncodeUserRoleCache(userRolesInfos[0], userRolesInfos[1]))
+	}
+	return userRoles, nil
 }
 
 func (kc *Catalog) Close() {

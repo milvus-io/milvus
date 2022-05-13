@@ -12,6 +12,8 @@ require (
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
+	github.com/casbin/casbin/v2 v2.44.2
+	github.com/casbin/json-adapter/v2 v2.0.0
 	github.com/confluentinc/confluent-kafka-go v1.9.1
 	github.com/containerd/cgroups v1.0.2
 	github.com/gin-gonic/gin v1.7.7
@@ -49,6 +51,7 @@ require (
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	google.golang.org/grpc v1.46.0
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
+	google.golang.org/protobuf v1.28.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	stathat.com/c/consistent v1.0.0
 )
@@ -60,6 +63,7 @@ require (
 	github.com/AthenZ/athenz v1.10.15 // indirect
 	github.com/DataDog/zstd v1.4.6-0.20210211175136-c6db21d202f4 // indirect
 	github.com/JohnCGriffin/overflow v0.0.0-20211019200055-46fa312c352c // indirect
+	github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b // indirect
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
@@ -172,7 +176,6 @@ require (
 	gonum.org/v1/gonum v0.9.3 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20220503193339-ba3ae3f07e29 // indirect
-	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/ini.v1 v1.62.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

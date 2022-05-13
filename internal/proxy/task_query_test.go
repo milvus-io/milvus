@@ -56,7 +56,7 @@ func TestQueryTask_all(t *testing.T) {
 	qc.Start()
 	defer qc.Stop()
 
-	err = InitMetaCache(rc, qc, mgr)
+	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{

@@ -118,7 +118,7 @@ func TestLevelGetterAndSetter(t *testing.T) {
 }
 
 func TestUpdateLogLevelThroughHttp(t *testing.T) {
-	httpServer := &http.Server{Addr: ":9081"}
+	httpServer := &http.Server{Addr: ":9081", ReadHeaderTimeout: time.Second * 3}
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			Fatal(err.Error())

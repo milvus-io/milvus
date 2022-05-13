@@ -239,3 +239,41 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 	err = pcm.InvalidateCredentialCache(ctx, nil)
 	assert.Error(t, err)
 }
+
+func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
+	Params.Init()
+	ctx := context.Background()
+
+	core, err := NewCore(ctx, nil)
+	assert.Nil(t, err)
+	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer cli.Close()
+	core.etcdCli = cli
+
+	pcm := newProxyClientManager(core)
+
+	ch := make(chan struct{})
+	pcm.helper = proxyClientManagerHelper{
+		afterConnect: func() { ch <- struct{}{} },
+	}
+	err = pcm.RefreshPolicyInfoCache(ctx, nil)
+	assert.NoError(t, err)
+
+	core.SetNewProxyClient(
+		func(se *sessionutil.Session) (types.Proxy, error) {
+			return &proxyMock{}, nil
+		},
+	)
+
+	session := &sessionutil.Session{
+		ServerID: 100,
+		Address:  "localhost",
+	}
+	pcm.AddProxyClient(session)
+	<-ch
+
+	err = pcm.RefreshPolicyInfoCache(ctx, nil)
+	assert.NoError(t, err)
+
+}

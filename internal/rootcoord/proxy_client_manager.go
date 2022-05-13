@@ -207,3 +207,26 @@ func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 	}
 	return group.Wait()
 }
+
+func (p *proxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	if len(p.proxyClient) == 0 {
+		log.Warn("proxy client is empty, RefreshPrivilegeInfoCache will not send to any client")
+		return nil
+	}
+
+	group := &errgroup.Group{}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			_, err := v.RefreshPolicyInfoCache(ctx, req)
+			if err != nil {
+				return fmt.Errorf("RefreshPolicyInfoCache failed, proxyID = %d, err = %s", k, err)
+			}
+			return nil
+		})
+	}
+	return group.Wait()
+}
