@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -58,8 +59,11 @@ func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {
 	}
 	shardClusterService.clusters.Store(defaultDMLChannel, shardCluster)
 
-	qs := newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
+	qs, err := newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
 		historical, streaming, localCM, remoteCM, false)
+	if err != nil {
+		return nil, err
+	}
 	qs.deltaChannel = defaultDeltaChannel
 
 	err = qs.watchDMLTSafe()
@@ -80,6 +84,41 @@ func updateQueryShardTSafe(qs *queryShard, timestamp Timestamp) error {
 		return err
 	}
 	return qs.historical.tSafeReplica.setTSafe(defaultDeltaChannel, timestamp)
+}
+
+func TestNewQueryShard_IllegalCases(t *testing.T) {
+	ctx := context.Background()
+	tSafe := newTSafeReplica()
+	historical, err := genSimpleHistorical(ctx, tSafe)
+	require.NoError(t, err)
+
+	streaming, err := genSimpleStreaming(ctx, tSafe)
+	require.NoError(t, err)
+
+	localCM, err := genLocalChunkManager()
+	require.NoError(t, err)
+
+	remoteCM, err := genRemoteChunkManager(ctx)
+	require.NoError(t, err)
+
+	shardCluster := NewShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel,
+		&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
+	shardClusterService := &ShardClusterService{
+		clusters: sync.Map{},
+	}
+	shardClusterService.clusters.Store(defaultDMLChannel, shardCluster)
+
+	_, err = newQueryShard(ctx, defaultCollectionID-1, defaultDMLChannel, defaultReplicaID, shardClusterService,
+		historical, streaming, localCM, remoteCM, false)
+	assert.Error(t, err)
+
+	_, err = newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
+		historical, streaming, nil, remoteCM, false)
+	assert.Error(t, err)
+
+	_, err = newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
+		historical, streaming, localCM, nil, false)
+	assert.Error(t, err)
 }
 
 func TestQueryShard_Close(t *testing.T) {

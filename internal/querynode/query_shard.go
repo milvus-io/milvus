@@ -62,8 +62,6 @@ type queryShard struct {
 	startTickerOnce   sync.Once
 	ticker            *time.Ticker // timed ticker for trigger timeout check
 
-	localChunkManager  storage.ChunkManager
-	remoteChunkManager storage.ChunkManager
 	vectorChunkManager *storage.VectorChunkManager
 	localCacheEnabled  bool
 	localCacheSize     int64
@@ -80,7 +78,27 @@ func newQueryShard(
 	localChunkManager storage.ChunkManager,
 	remoteChunkManager storage.ChunkManager,
 	localCacheEnabled bool,
-) *queryShard {
+) (*queryShard, error) {
+
+	collection, err := streaming.replica.getCollectionByID(collectionID)
+	if err != nil {
+		return nil, err
+	}
+	if localChunkManager == nil {
+		return nil, fmt.Errorf("can not create vector chunk manager for local chunk manager is nil")
+	}
+	if remoteChunkManager == nil {
+		return nil, fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil")
+	}
+	vectorChunkManager, err := storage.NewVectorChunkManager(localChunkManager, remoteChunkManager,
+		&etcdpb.CollectionMeta{
+			ID:     collectionID,
+			Schema: collection.schema,
+		}, Params.QueryNodeCfg.CacheMemoryLimit, localCacheEnabled)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	qs := &queryShard{
 		ctx:                ctx,
@@ -91,10 +109,7 @@ func newQueryShard(
 		clusterService:     clusterService,
 		historical:         historical,
 		streaming:          streaming,
-		localChunkManager:  localChunkManager,
-		remoteChunkManager: remoteChunkManager,
-		localCacheEnabled:  localCacheEnabled,
-		localCacheSize:     Params.QueryNodeCfg.CacheMemoryLimit,
+		vectorChunkManager: vectorChunkManager,
 
 		watcherCond: sync.NewCond(&sync.Mutex{}),
 	}
@@ -104,7 +119,7 @@ func newQueryShard(
 	}
 	qs.deltaChannel = deltaChannel
 
-	return qs
+	return qs, nil
 }
 
 // Close cleans query shard
@@ -721,24 +736,6 @@ func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*int
 		return nil, err
 	}
 	defer plan.delete()
-
-	// TODO: init vector chunk manager at most once
-	if q.vectorChunkManager == nil {
-		if q.localChunkManager == nil {
-			return nil, fmt.Errorf("can not create vector chunk manager for local chunk manager is nil")
-		}
-		if q.remoteChunkManager == nil {
-			return nil, fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil")
-		}
-		q.vectorChunkManager, err = storage.NewVectorChunkManager(q.localChunkManager, q.remoteChunkManager,
-			&etcdpb.CollectionMeta{
-				ID:     collection.id,
-				Schema: collection.schema,
-			}, q.localCacheSize, q.localCacheEnabled)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	if req.IsShardLeader {
 		cluster, ok := q.clusterService.getShardCluster(req.GetDmlChannel())

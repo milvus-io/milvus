@@ -45,3 +45,26 @@ func TestQueryShardService(t *testing.T) {
 	err = qss.removeQueryShard("vchan2")
 	assert.Error(t, err)
 }
+
+func TestQueryShardService_InvalidChunkManager(t *testing.T) {
+	qn, err := genSimpleQueryNode(context.Background())
+	require.NoError(t, err)
+
+	qss := newQueryShardService(context.Background(), qn.historical, qn.streaming, qn.ShardClusterService, qn.factory)
+
+	lcm := qss.localChunkManager
+	qss.localChunkManager = nil
+
+	err = qss.addQueryShard(0, "vchan", 0)
+	assert.Error(t, err)
+
+	qss.localChunkManager = lcm
+
+	rcm := qss.remoteChunkManager
+	qss.remoteChunkManager = nil
+
+	err = qss.addQueryShard(0, "vchan", 0)
+	assert.Error(t, err)
+
+	qss.remoteChunkManager = rcm
+}
