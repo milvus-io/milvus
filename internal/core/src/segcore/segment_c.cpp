@@ -134,14 +134,13 @@ Insert(CSegmentInterface c_segment,
        int64_t size,
        const int64_t* row_ids,
        const uint64_t* timestamps,
-       const char* data_info) {
+       const uint8_t* data_info,
+       const uint64_t data_info_len) {
     try {
         auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
-        auto proto = std::string(data_info);
-        Assert(!proto.empty());
         auto insert_data = std::make_unique<milvus::InsertData>();
-        auto suc = google::protobuf::TextFormat::ParseFromString(proto, insert_data.get());
-        AssertInfo(suc, "unmarshal field data string failed");
+        auto suc = insert_data->ParseFromArray(data_info, data_info_len);
+        AssertInfo(suc, "failed to parse insert data from records");
 
         segment->Insert(reserved_offset, size, row_ids, timestamps, insert_data.get());
         return milvus::SuccessCStatus();
@@ -162,14 +161,16 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
 }
 
 CStatus
-Delete(
-    CSegmentInterface c_segment, int64_t reserved_offset, int64_t size, const char* ids, const uint64_t* timestamps) {
+Delete(CSegmentInterface c_segment,
+       int64_t reserved_offset,
+       int64_t size,
+       const uint8_t* ids,
+       const uint64_t ids_size,
+       const uint64_t* timestamps) {
     auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-    auto proto = std::string(ids);
-    Assert(!proto.empty());
     auto pks = std::make_unique<milvus::proto::schema::IDs>();
-    auto suc = google::protobuf::TextFormat::ParseFromString(proto, pks.get());
-    AssertInfo(suc, "unmarshal field data string failed");
+    auto suc = pks->ParseFromArray(ids, ids_size);
+    AssertInfo(suc, "failed to parse pks from ids");
     try {
         auto res = segment->Delete(reserved_offset, size, pks.get(), timestamps);
         return milvus::SuccessCStatus();
@@ -192,10 +193,8 @@ LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_in
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        auto proto = std::string(load_field_data_info.blob);
-        Assert(!proto.empty());
         auto field_data = std::make_unique<milvus::DataArray>();
-        auto suc = google::protobuf::TextFormat::ParseFromString(proto, field_data.get());
+        auto suc = field_data->ParseFromArray(load_field_data_info.blob, load_field_data_info.blob_size);
         AssertInfo(suc, "unmarshal field data string failed");
         auto load_info =
             LoadFieldDataInfo{load_field_data_info.field_id, field_data.get(), load_field_data_info.row_count};
@@ -211,10 +210,8 @@ LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_re
     try {
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         AssertInfo(segment_interface != nullptr, "segment conversion failed");
-        auto proto = std::string(deleted_record_info.primary_keys);
-        Assert(!proto.empty());
         auto pks = std::make_unique<milvus::proto::schema::IDs>();
-        auto suc = google::protobuf::TextFormat::ParseFromString(proto, pks.get());
+        auto suc = pks->ParseFromArray(deleted_record_info.primary_keys, deleted_record_info.primary_keys_size);
         AssertInfo(suc, "unmarshal field data string failed");
         auto load_info =
             LoadDeletedRecordInfo{deleted_record_info.timestamps, pks.get(), deleted_record_info.row_count};
