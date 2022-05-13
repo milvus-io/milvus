@@ -783,180 +783,159 @@ class TestNewIndexBase(TestcaseBase):
             collection_w.drop_index(index_name=index_name)
         assert len(collection_w.collection.indexes)==0
 
-
-class TestIndexBase:
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        log.info(request.param)
-        # if str(connect._cmd("mode")) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in CPU mode")
-        return copy.deepcopy(request.param)
-
-    @pytest.fixture(
-        scope="function",
-        params=[
-            1,
-            10,
-            1111
-        ],
-    )
-    def get_nq(self, request):
-        yield request.param
-
-    
     """
-    ******************************************************************
-      The following cases are used to test `drop_index` function
-    ******************************************************************
+       ******************************************************************
+         The following cases are used to test `drop_index` function
+       ******************************************************************
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_index(self, connect, collection, get_simple_index):
+    def test_drop_index(self, get_simple_index):
         """
         target: test drop index interface
         method: create collection and add entities in it, create index, call drop index
         expected: return code 0, and default index param
         """
-        connect.create_index(collection, field_name, get_simple_index)
-        connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, "")
-        assert not index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        if get_simple_index["index_type"] != "FLAT":
+            collection_w.create_index(ct.default_float_vec_field_name, get_simple_index, index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 1
+            collection_w.drop_index(index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     # TODO #7372
-    def test_drop_index_repeatedly(self, connect, collection, get_simple_index):
+    def test_drop_index_repeatedly(self, get_simple_index):
         """
         target: test drop index repeatedly
         method: create index, call drop index, and drop again
         expected: return code 0
         """
-        connect.create_index(collection, field_name, get_simple_index)
-        connect.drop_index(collection, field_name)
-        connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, "")
-        assert not index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        if get_simple_index["index_type"] != "FLAT":
+            collection_w.create_index(ct.default_float_vec_field_name, get_simple_index, index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 1
+            collection_w.drop_index(index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 0
+            collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
+                                             check_items={ct.err_code: 0, ct.err_msg: "Index doesn\'t exist."})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index_without_connect(self, dis_connect, collection):
+    def test_drop_index_without_connect(self):
         """
         target: test drop index without connection
         method: drop index, and check if drop successfully
         expected: raise exception
         """
-        with pytest.raises(Exception) as e:
-            dis_connect.drop_index(collection, field_name)
 
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_index_collection_not_existed(self, connect):
-        """
-        target: test drop index interface when collection name not existed
-        method: create collection and add entities in it, create index,
-                make sure the collection name not in index, and then drop it
-        expected: return code not equals to 0, drop index failed
-        """
-        collection_name = gen_unique_str(uid)
-        with pytest.raises(Exception) as e:
-            connect.drop_index(collection_name, field_name)
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_index_collection_not_create(self, connect, collection):
-        """
-        target: test drop index interface when index not created
-        method: create collection and add entities in it, create index
-        expected: return code not equals to 0, drop index failed
-        """
-        # no create index
-        connect.drop_index(collection, field_name)
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name=ct.default_index_name)
+        self.connection_wrap.remove_connection(ct.default_alias)
+        collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
+                                check_items={ct.err_code: 0, ct.err_msg: "should create connect first."})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_create_drop_index_repeatedly(self, connect, collection, get_simple_index):
+    def test_create_drop_index_repeatedly(self, get_simple_index):
         """
         target: test create / drop index repeatedly, use the same index params
         method: create index, drop index, four times
         expected: return code 0
         """
-        for i in range(4):
-            connect.create_index(collection, field_name, get_simple_index)
-            connect.drop_index(collection, field_name)
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        if get_simple_index["index_type"] != "FLAT":
+            for i in range(4):
+                collection_w.create_index(ct.default_float_vec_field_name, get_simple_index,
+                                          index_name=ct.default_index_name)
+                assert len(collection_w.indexes) == 1
+                collection_w.drop_index(index_name=ct.default_index_name)
+                assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index_ip(self, connect, collection, get_simple_index):
+    def test_drop_index_ip(self, get_simple_index):
         """
         target: test drop index interface
         method: create collection and add entities in it, create index, call drop index
         expected: return code 0, and default index param
         """
-        # result = connect.insert(collection, entities)
         get_simple_index["metric_type"] = "IP"
-        connect.create_index(collection, field_name, get_simple_index)
-        connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, "")
-        assert not index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        if get_simple_index["index_type"] != "FLAT":
+            collection_w.create_index(ct.default_float_vec_field_name, get_simple_index,
+                                      index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 1
+            collection_w.drop_index(index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index_repeatedly_ip(self, connect, collection, get_simple_index):
+    def test_drop_index_repeatedly_ip(self, get_simple_index):
         """
         target: test drop index repeatedly
         method: create index, call drop index, and drop again
         expected: return code 0
         """
         get_simple_index["metric_type"] = "IP"
-        connect.create_index(collection, field_name, get_simple_index)
-        connect.drop_index(collection, field_name)
-        connect.drop_index(collection, field_name)
-        index = connect.describe_index(collection, "")
-        assert not index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        if get_simple_index["index_type"] != "FLAT":
+            collection_w.create_index(ct.default_float_vec_field_name, get_simple_index,
+                                      index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 1
+            collection_w.drop_index(index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 0
+            collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
+                                    check_items={ct.err_code: 0, ct.err_msg: "Index doesn\'t exist."})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index_without_connect_ip(self, dis_connect, collection):
+    def test_drop_index_without_connect_ip(self):
         """
         target: test drop index without connection
         method: drop index, and check if drop successfully
         expected: raise exception
         """
-        with pytest.raises(Exception) as e:
-            dis_connect.drop_index(collection, field_name)
+
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        collection_w.create_index(ct.default_float_vec_field_name, default_ip_index_params, index_name=ct.default_index_name)
+        self.connection_wrap.remove_connection(ct.default_alias)
+        collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
+                                check_items={ct.err_code: 0, ct.err_msg: "should create connect first."})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index_collection_not_create_ip(self, connect, collection):
-        """
-        target: test drop index interface when index not created
-        method: create collection and add entities in it, create index
-        expected: return code not equals to 0, drop index failed
-        """
-        # result = connect.insert(collection, entities)
-        # no create index
-        connect.drop_index(collection, field_name)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_create_drop_index_repeatedly_ip(self, connect, collection, get_simple_index):
+    def test_create_drop_index_repeatedly_ip(self, get_simple_index):
         """
         target: test create / drop index repeatedly, use the same index params
         method: create index, drop index, four times
         expected: return code 0
         """
         get_simple_index["metric_type"] = "IP"
-        for i in range(4):
-            connect.create_index(collection, field_name, get_simple_index)
-            connect.drop_index(collection, field_name)
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        if get_simple_index["index_type"] != "FLAT":
+            for i in range(4):
+                collection_w.create_index(ct.default_float_vec_field_name,get_simple_index, index_name=ct.default_index_name)
+                assert len(collection_w.indexes) == 1
+                collection_w.drop_index(index_name=ct.default_index_name)
+                assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_create_PQ_without_nbits(self, connect, collection):
+    def test_create_PQ_without_nbits(self):
         """
         target: test create PQ index
         method: create PQ index without nbits
         expected: create successfully
         """
         PQ_index = {"index_type": "IVF_PQ", "params": {"nlist": 128, "m": 16}, "metric_type": "L2"}
-        result = connect.insert(collection, default_entities)
-        connect.create_index(collection, field_name, PQ_index)
-        index = connect.describe_index(collection, "")
-        create_target_index(PQ_index, field_name)
-        assert index == PQ_index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        collection_w.create_index(ct.default_float_vec_field_name, PQ_index, index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 1
 
 
 class TestIndexBinary:
