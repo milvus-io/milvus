@@ -17,9 +17,9 @@
 package mock
 
 import (
-	"context"
-
 	"google.golang.org/grpc"
+
+	"context"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -177,4 +177,40 @@ func (m *RootCoordClient) ListCredUsers(ctx context.Context, in *milvuspb.ListCr
 
 func (m *RootCoordClient) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 	return &rootcoordpb.GetCredentialResponse{}, m.Err
+}
+
+func (m *RootCoordClient) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *RootCoordClient) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *RootCoordClient) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *RootCoordClient) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest, opts ...grpc.CallOption) (*milvuspb.SelectRoleResponse, error) {
+	return &milvuspb.SelectRoleResponse{}, m.Err
+}
+
+func (m *RootCoordClient) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest, opts ...grpc.CallOption) (*milvuspb.SelectUserResponse, error) {
+	return &milvuspb.SelectUserResponse{}, m.Err
+}
+
+func (m *RootCoordClient) SelectResource(ctx context.Context, req *milvuspb.SelectResourceRequest, opts ...grpc.CallOption) (*milvuspb.SelectResourceResponse, error) {
+	return &milvuspb.SelectResourceResponse{}, m.Err
+}
+
+func (m *RootCoordClient) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *RootCoordClient) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest, opts ...grpc.CallOption) (*milvuspb.SelectGrantResponse, error) {
+	return &milvuspb.SelectGrantResponse{}, m.Err
+}
+
+func (m *RootCoordClient) ListPolicy(ctx context.Context, req *internalpb.ListPolicyRequest, opts ...grpc.CallOption) (*internalpb.ListPolicyResponse, error) {
+	return &internalpb.ListPolicyResponse{}, m.Err
 }

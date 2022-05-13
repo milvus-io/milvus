@@ -281,4 +281,17 @@ message ClearCredUsersCacheRequest {
 message CredentialInfo {
   string username = 1;
   string encrypted_password = 2;
+  string tenant = 3;
+  bool is_super = 4;
+}
+
+message ListPolicyRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+}
+
+message ListPolicyResponse {
+  // Contain error_code and reason
+  common.Status status = 1;
+  repeated string policy_infos = 2;
 }
