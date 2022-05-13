@@ -582,7 +582,8 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		log.Warn("Search failed, failed to get query shard", zap.String("dml channel", req.GetDmlChannel()), zap.Error(err))
 		return &internalpb.SearchResults{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				// NotShardLeader will make proxy refresh the shard leader cache
+				ErrorCode: commonpb.ErrorCode_NotShardLeader,
 				Reason:    err.Error(),
 			},
 		}, nil
