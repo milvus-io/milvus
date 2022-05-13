@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -38,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -408,6 +410,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = GetContext(ctx, "root:123456")
 	localMsg := true
 	factory := dependency.NewDefaultFactory(localMsg)
 	alias := "TestProxy"
@@ -2122,6 +2125,11 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, deleteResp.ErrorCode)
 	})
 
+	testProxyRole(ctx, wg, t, proxy)
+	testProxyPrivilege(ctx, wg, t, proxy)
+	testProxyResource(ctx, wg, t, proxy)
+	testProxyRefreshPolicyInfoCache(ctx, wg, t, proxy)
+
 	// proxy unhealthy
 	//
 	//notStateCode := "not state code"
@@ -2405,6 +2413,11 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
+
+	testProxyRoleUnhealthy(ctx, wg, t, proxy)
+	testProxyPrivilegeUnhealthy(ctx, wg, t, proxy)
+	testProxyResourceUnhealthy(ctx, wg, t, proxy)
+	testProxyRefreshPolicyInfoCacheUnhealthy(ctx, wg, t, proxy)
 
 	proxy.UpdateStateCode(internalpb.StateCode_Healthy)
 
@@ -2922,10 +2935,550 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	testProxyRoleTimeout(shortCtx, wg, t, proxy)
+	testProxyPrivilegeTimeout(shortCtx, wg, t, proxy)
+	testProxyResourceTimeout(shortCtx, wg, t, proxy)
+
 	testServer.gracefulStop()
 
 	wg.Wait()
 	cancel()
+}
+
+func testProxyRole(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	wg.Add(1)
+	t.Run("Create Role", func(t *testing.T) {
+		defer wg.Done()
+
+		entity := &milvuspb.RoleEntity{Name: " "}
+		resp, _ := proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: entity})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		entity.Name = "unit_test"
+		resp, _ = proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: entity})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: entity})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: entity.Name})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("Drop Role", func(t *testing.T) {
+		defer wg.Done()
+
+		resp, _ := proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: " "})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		username := "root"
+		roleName := "unit_test"
+
+		roleEntity := &milvuspb.RoleEntity{Name: roleName}
+		roleResp, _ := proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: roleEntity})
+		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
+
+		privilegeRequest := &milvuspb.OperatePrivilegeRequest{
+			Type: milvuspb.OperatePrivilegeType_Grant,
+			Entity: &milvuspb.GrantEntity{
+				ResourceName: "col1",
+				Resource:     &milvuspb.ResourceEntity{Type: commonpb.ResourceType_Collection.String()},
+				Principal: &milvuspb.PrincipalEntity{
+					PrincipalType: util.RolePrincipalType,
+					Principal: &milvuspb.PrincipalEntity_Role{
+						Role: &milvuspb.RoleEntity{Name: roleName},
+					},
+				},
+				Grantor: &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.Create}},
+			},
+		}
+		privilegeResp, _ := proxy.OperatePrivilege(ctx, privilegeRequest)
+		assert.Equal(t, commonpb.ErrorCode_Success, privilegeResp.ErrorCode)
+
+		userResp, _ := proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
+		assert.Equal(t, commonpb.ErrorCode_Success, userResp.Status.ErrorCode)
+		roleNumOfUser := len(userResp.Results[0].Roles)
+
+		roleResp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{
+			Username: username,
+			RoleName: roleName,
+			Type:     milvuspb.OperateUserRoleType_AddUserToRole,
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
+
+		resp, _ = proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: roleName})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		privilegeRequest.Type = milvuspb.OperatePrivilegeType_Revoke
+		privilegeResp, _ = proxy.OperatePrivilege(ctx, privilegeRequest)
+		assert.Equal(t, commonpb.ErrorCode_Success, privilegeResp.ErrorCode)
+
+		roleResp, _ = proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: roleName})
+		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
+
+		userResp, _ = proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
+		assert.Equal(t, commonpb.ErrorCode_Success, userResp.Status.ErrorCode)
+		assert.Equal(t, roleNumOfUser, len(userResp.Results[0].Roles))
+	})
+
+	wg.Add(1)
+	t.Run("Operate User Role", func(t *testing.T) {
+		defer wg.Done()
+
+		username := "root"
+		roleName := "public"
+		// AddUserToRole
+		resp, _ := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "  "})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: "  "})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "not_existed", RoleName: roleName})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: "not_existed"})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: roleName})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		resp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: username, RoleName: roleName, Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("Select Role", func(t *testing.T) {
+		defer wg.Done()
+
+		resp, _ := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		roleNum := len(resp.Results)
+
+		roleName := "unit_test"
+		roleResp, _ := proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: roleName}})
+		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
+
+		resp, _ = proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, roleNum+1, len(resp.Results))
+
+		roleResp, _ = proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: roleName})
+		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
+
+		resp, _ = proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "admin"}, IncludeUserInfo: true})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(resp.Results))
+		assert.NotEqual(t, 0, len(resp.Results[0].Users))
+	})
+
+	wg.Add(1)
+	t.Run("Select User", func(t *testing.T) {
+		defer wg.Done()
+
+		entity := &milvuspb.UserEntity{Name: "  "}
+		resp, _ := proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: entity})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		entity.Name = "not_existed"
+		resp, _ = proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: entity})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		entity.Name = "root"
+		resp, _ = proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: entity})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(resp.Results))
+
+		resp, _ = proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: entity, IncludeRoleInfo: true})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(resp.Results))
+		assert.NotEqual(t, 0, len(resp.Results[0].Roles))
+	})
+}
+
+func testProxyRoleUnhealthy(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	testProxyRoleFail(ctx, wg, t, proxy, "unhealthy")
+}
+
+func testProxyRoleTimeout(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	testProxyRoleFail(ctx, wg, t, proxy, "timeout")
+}
+
+func testProxyRoleFail(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy, reason string) {
+	roleName := "xxx"
+
+	wg.Add(1)
+	t.Run(fmt.Sprintf("CreateRole fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: roleName}})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run(fmt.Sprintf("DropRole fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: roleName})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run(fmt.Sprintf("OperateUserRole fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "root", RoleName: "public"})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run(fmt.Sprintf("SelectRole fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run(fmt.Sprintf("SelectUser fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+}
+
+func testProxyPrivilege(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	wg.Add(1)
+	t.Run("Operate Privilege, Select Grant", func(t *testing.T) {
+		defer wg.Done()
+
+		// GrantPrivilege
+		req := &milvuspb.OperatePrivilegeRequest{}
+		resp, _ := proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity = &milvuspb.GrantEntity{}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Grantor = &milvuspb.GrantorEntity{}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Grantor.Privilege = &milvuspb.PrivilegeEntity{}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Grantor.Privilege.Name = util.All
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Resource = &milvuspb.ResourceEntity{}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Resource.Type = commonpb.ResourceType_Collection.String()
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.ResourceName = "col1"
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Principal = &milvuspb.PrincipalEntity{}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Principal.PrincipalType = util.UserPrincipalType
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Principal = &milvuspb.PrincipalEntity{
+			PrincipalType: util.UserPrincipalType,
+			Principal: &milvuspb.PrincipalEntity_User{
+				User: &milvuspb.UserEntity{Name: "root"},
+			},
+		}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Grantor.Privilege.Name = "not existed"
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		req.Entity.Grantor.Privilege.Name = util.All
+
+		req.Entity.Resource.Type = "not existed"
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		req.Entity.Resource.Type = commonpb.ResourceType_Collection.String()
+
+		req.Entity.Principal.PrincipalType = "not existed"
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		req.Entity.Principal.PrincipalType = util.UserPrincipalType
+
+		originPrincipal := req.Entity.Principal
+		req.Entity.Principal = &milvuspb.PrincipalEntity{
+			PrincipalType: util.UserPrincipalType,
+			Principal: &milvuspb.PrincipalEntity_User{
+				User: &milvuspb.UserEntity{Name: "not existed"},
+			},
+		}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Entity.Principal = &milvuspb.PrincipalEntity{
+			PrincipalType: util.RolePrincipalType,
+			Principal: &milvuspb.PrincipalEntity_Role{
+				Role: &milvuspb.RoleEntity{Name: "not existed"},
+			},
+		}
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		req.Entity.Principal = originPrincipal
+
+		roleReq := &milvuspb.OperatePrivilegeRequest{
+			Entity: &milvuspb.GrantEntity{
+				Principal: &milvuspb.PrincipalEntity{
+					PrincipalType: util.RolePrincipalType,
+					Principal: &milvuspb.PrincipalEntity_Role{
+						Role: &milvuspb.RoleEntity{Name: "public"},
+					},
+				},
+				Resource:     &milvuspb.ResourceEntity{Type: commonpb.ResourceType_Collection.String()},
+				ResourceName: "col1",
+				Grantor:      &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.Create}},
+			},
+			Type: milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// select grant
+		selectReq := &milvuspb.SelectGrantRequest{}
+		results, _ := proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity = &milvuspb.GrantEntity{}
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity.Resource = &milvuspb.ResourceEntity{}
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity.Resource.Type = commonpb.ResourceType_Collection.String()
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity.ResourceName = "col1"
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity.Principal = &milvuspb.PrincipalEntity{}
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity.Principal.PrincipalType = util.RolePrincipalType
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity.Principal = &milvuspb.PrincipalEntity{
+			PrincipalType: util.RolePrincipalType,
+			Principal: &milvuspb.PrincipalEntity_Role{
+				Role: &milvuspb.RoleEntity{Name: "public"},
+			},
+		}
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(results.Entities))
+
+		selectReq.Entity.Principal = &milvuspb.PrincipalEntity{
+			PrincipalType: util.UserPrincipalType,
+			Principal: &milvuspb.PrincipalEntity_User{
+				User: &milvuspb.UserEntity{Name: "root"},
+			},
+		}
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(results.Entities))
+
+		selectReq.Entity.Resource.Type = "not existed"
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+		selectReq.Entity.Resource.Type = commonpb.ResourceType_Collection.String()
+
+		selectReq.Entity.Principal.PrincipalType = "not existed"
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+		selectReq.Entity.Principal.PrincipalType = util.RolePrincipalType
+
+		originSelectPrincipal := selectReq.Entity.Principal
+		selectReq.Entity.Principal = &milvuspb.PrincipalEntity{
+			PrincipalType: util.UserPrincipalType,
+			Principal: &milvuspb.PrincipalEntity_User{
+				User: &milvuspb.UserEntity{Name: "not existed"},
+			},
+		}
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+
+		selectReq.Entity.Principal = &milvuspb.PrincipalEntity{
+			PrincipalType: util.RolePrincipalType,
+			Principal: &milvuspb.PrincipalEntity_Role{
+				Role: &milvuspb.RoleEntity{Name: "not existed"},
+			},
+		}
+		results, _ = proxy.SelectGrant(ctx, selectReq)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+		selectReq.Entity.Principal = originSelectPrincipal
+
+		results, _ = proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+			Entity: &milvuspb.GrantEntity{
+				Principal: &milvuspb.PrincipalEntity{
+					PrincipalType: util.RolePrincipalType,
+					Principal: &milvuspb.PrincipalEntity_Role{
+						Role: &milvuspb.RoleEntity{Name: "public"},
+					},
+				},
+			},
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(results.Entities))
+
+		results, _ = proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+			Entity: &milvuspb.GrantEntity{
+				Principal: &milvuspb.PrincipalEntity{
+					PrincipalType: util.UserPrincipalType,
+					Principal: &milvuspb.PrincipalEntity_User{
+						User: &milvuspb.UserEntity{Name: "root"},
+					},
+				},
+			},
+		})
+		assert.Equal(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(results.Entities))
+
+		req.Type = milvuspb.OperatePrivilegeType_Revoke
+		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq.Type = milvuspb.OperatePrivilegeType_Revoke
+		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+}
+
+func testProxyPrivilegeUnhealthy(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	testProxyPrivilegeFail(ctx, wg, t, proxy, "unhealthy")
+}
+
+func testProxyPrivilegeTimeout(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	testProxyPrivilegeFail(ctx, wg, t, proxy, "timeout")
+}
+
+func testProxyPrivilegeFail(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy, reason string) {
+	wg.Add(1)
+	t.Run(fmt.Sprintf("Operate Grant fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{
+			Entity: &milvuspb.GrantEntity{
+				Principal: &milvuspb.PrincipalEntity{
+					PrincipalType: util.UserPrincipalType,
+					Principal: &milvuspb.PrincipalEntity_User{
+						User: &milvuspb.UserEntity{Name: "root"},
+					},
+				},
+				ResourceName: "col1",
+				Resource:     &milvuspb.ResourceEntity{Type: commonpb.ResourceType_Collection.String()},
+				Grantor:      &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.All}},
+			},
+		})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run(fmt.Sprintf("SelectGrant fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+
+		resp, _ := proxy.SelectGrant(ctx, &milvuspb.SelectGrantRequest{
+			Entity: &milvuspb.GrantEntity{
+				Principal: &milvuspb.PrincipalEntity{
+					PrincipalType: util.UserPrincipalType,
+					Principal: &milvuspb.PrincipalEntity_User{
+						User: &milvuspb.UserEntity{Name: "root"},
+					},
+				},
+			},
+		})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+}
+
+func testProxyResource(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	wg.Add(1)
+	t.Run("SelectResource", func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.SelectResource(ctx, &milvuspb.SelectResourceRequest{})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(resp.Results))
+
+		resp, _ = proxy.SelectResource(ctx, &milvuspb.SelectResourceRequest{IncludePrivilegeInfo: true})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotEqual(t, 0, len(resp.Results))
+		assert.NotEqual(t, 0, len(resp.Results[0].Privileges))
+
+		resp, _ = proxy.SelectResource(ctx, &milvuspb.SelectResourceRequest{Entity: &milvuspb.ResourceEntity{}})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		resp, _ = proxy.SelectResource(ctx, &milvuspb.SelectResourceRequest{Entity: &milvuspb.ResourceEntity{Type: "not existed"}})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+}
+
+func testProxyResourceUnhealthy(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	testProxyResourceFail(ctx, wg, t, proxy, "unhealthy")
+}
+
+func testProxyResourceTimeout(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	testProxyResourceFail(ctx, wg, t, proxy, "timeout")
+}
+
+func testProxyResourceFail(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy, reason string) {
+	wg.Add(1)
+	t.Run(fmt.Sprintf("SelectResource fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.SelectResource(ctx, &milvuspb.SelectResourceRequest{})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+}
+
+func testProxyRefreshPolicyInfoCache(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	wg.Add(1)
+	t.Run("RefreshPolicyInfoCache", func(t *testing.T) {
+		defer wg.Done()
+
+		resp, err := proxy.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheAdd),
+			OpKey:  "cache1",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+}
+
+func testProxyRefreshPolicyInfoCacheUnhealthy(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy) {
+	testProxyRefreshPolicyInfoCacheFail(ctx, wg, t, proxy, "unhealthy")
+}
+
+func testProxyRefreshPolicyInfoCacheFail(ctx context.Context, wg sync.WaitGroup, t *testing.T, proxy *Proxy, reason string) {
+	wg.Add(1)
+	t.Run(fmt.Sprintf("RefreshPolicyInfoCache fail, %s", reason), func(t *testing.T) {
+		defer wg.Done()
+		resp, _ := proxy.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+			OpType: int32(typeutil.CacheAdd),
+			OpKey:  "cache1",
+		})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
 }
 
 func Test_GetCompactionState(t *testing.T) {

@@ -13,6 +13,8 @@ require (
 	github.com/apache/pulsar-client-go/oauth2 v0.0.0-20201120111947-b8bd55bc02bd // indirect
 	github.com/apache/thrift v0.15.0
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
+	github.com/casbin/casbin/v2 v2.44.2
+	github.com/casbin/json-adapter/v2 v2.0.0
 	github.com/confluentinc/confluent-kafka-go v1.8.2
 	github.com/containerd/cgroups v1.0.2
 	github.com/facebookgo/ensure v0.0.0-20200202191622-63f1cf65ac4c // indirect
@@ -52,10 +54,11 @@ require (
 	go.uber.org/atomic v1.7.0
 	go.uber.org/automaxprocs v1.4.0
 	go.uber.org/zap v1.17.0
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect
 	golang.org/x/exp v0.0.0-20211216164055-b2b84827b756
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	google.golang.org/grpc v1.44.0
+	google.golang.org/protobuf v1.28.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	stathat.com/c/consistent v1.0.0
 )

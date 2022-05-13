@@ -12,17 +12,28 @@
 package metricsinfo
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
+func isLinux() bool {
+	return runtime.GOOS == "linux"
+}
+
 func TestInContainer(t *testing.T) {
+	if !isLinux() {
+		return
+	}
 	_, err := inContainer()
 	assert.NoError(t, err)
 }
 
 func TestGetContainerMemLimit(t *testing.T) {
+	if !isLinux() {
+		return
+	}
 	limit, err := getContainerMemLimit()
 	assert.NoError(t, err)
 	assert.True(t, limit > 0)
@@ -30,6 +41,9 @@ func TestGetContainerMemLimit(t *testing.T) {
 }
 
 func TestGetContainerMemUsed(t *testing.T) {
+	if !isLinux() {
+		return
+	}
 	used, err := getContainerMemUsed()
 	assert.NoError(t, err)
 	assert.True(t, used > 0)

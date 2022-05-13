@@ -20,12 +20,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/kv"
+	kvi "github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 )
 
-var _ kv.BaseKV = (*RocksdbKV)(nil)
+var _ kvi.BaseKV = (*RocksdbKV)(nil)
 
 // RocksdbKV is KV implemented by rocksdb
 type RocksdbKV struct {

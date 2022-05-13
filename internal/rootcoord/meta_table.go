@@ -1083,3 +1083,90 @@ func (mt *MetaTable) ListCredentialUsernames() (*milvuspb.ListCredUsersResponse,
 	}
 	return &milvuspb.ListCredUsersResponse{Usernames: usernames}, nil
 }
+
+// CreateRole create role
+func (mt *MetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) error {
+	if IsEmptyString(entity.Name) {
+		return fmt.Errorf("the role name in the role info is empty")
+	}
+	return mt.catalog.CreateRole(mt.ctx, tenant, entity)
+}
+
+// DropRole drop role info
+func (mt *MetaTable) DropRole(tenant string, roleName string) error {
+	return mt.catalog.DropRole(mt.ctx, tenant, roleName)
+}
+
+// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
+func (mt *MetaTable) OperateUserRole(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	if IsEmptyString(userEntity.Name) {
+		return fmt.Errorf("username in the user entity is empty")
+	}
+	if IsEmptyString(roleEntity.Name) {
+		return fmt.Errorf("role name in the role entity is empty")
+	}
+
+	return mt.catalog.OperateUserRole(mt.ctx, tenant, userEntity, roleEntity, operateType)
+}
+
+// SelectRole select role.
+// Enter the role condition by the entity param. And this param is nil, which means selecting all roles.
+// Get all users that are added to the role by setting the includeUserInfo param to true.
+func (mt *MetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	return mt.catalog.SelectRole(mt.ctx, tenant, entity, includeUserInfo)
+}
+
+// SelectUser select user.
+// Enter the user condition by the entity param. And this param is nil, which means selecting all users.
+// Get all roles that are added the user to by setting the includeRoleInfo param to true.
+func (mt *MetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	return mt.catalog.SelectUser(mt.ctx, tenant, entity, includeRoleInfo)
+}
+
+// OperatePrivilege grant or revoke privilege by setting the operateType param
+func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	if IsEmptyString(entity.ResourceName) {
+		return fmt.Errorf("the resource name in the grant entity is empty")
+	}
+	if entity.Resource == nil || IsEmptyString(entity.Resource.Type) {
+		return fmt.Errorf("the resource type in the grant entity is empty")
+	}
+	if entity.Principal == nil || IsEmptyString(entity.Principal.PrincipalType) {
+		return fmt.Errorf("the principal type in the grant entity is empty")
+	}
+
+	principalName := model.GetPrincipalName(entity)
+	if IsEmptyString(principalName) {
+		return fmt.Errorf("the principal name in the grant entity is empty")
+	}
+	if entity.Grantor == nil {
+		return fmt.Errorf("the grantor in the grant entity is empty")
+	}
+	if entity.Grantor.Privilege == nil || IsEmptyString(entity.Grantor.Privilege.Name) {
+		return fmt.Errorf("the privilege name in the grant entity is empty")
+	}
+	if entity.Grantor.User == nil || IsEmptyString(entity.Grantor.User.Name) {
+		return fmt.Errorf("the grantor name in the grant entity is empty")
+	}
+
+	return mt.catalog.OperatePrivilege(mt.ctx, tenant, entity, operateType)
+}
+
+// SelectGrant select grant
+// The principal entity MUST be not empty in the grant entity
+// The resource entity and the resource name are optional, and the two params should be not empty together when you select some grants about the resource kind.
+func (mt *MetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	var entities []*milvuspb.GrantEntity
+	if entity.Principal == nil || IsEmptyString(entity.Principal.PrincipalType) {
+		return entities, fmt.Errorf("the principal type in the grant entity is empty")
+	}
+	principalName := model.GetPrincipalName(entity)
+	if IsEmptyString(principalName) {
+		return entities, fmt.Errorf("the principal name in the grant entity is empty")
+	}
+	return mt.catalog.SelectGrant(mt.ctx, tenant, entity)
+}
+
+func (mt *MetaTable) ListPolicy(tenant string) []string {
+	return mt.catalog.ListPolicy(mt.ctx, tenant)
+}

@@ -485,46 +485,37 @@ func (s *Server) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUs
 }
 
 func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.CreateRole(ctx, request)
 }
 
 func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.DropRole(ctx, request)
 }
 
 func (s *Server) OperateUserRole(ctx context.Context, request *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.OperateUserRole(ctx, request)
 }
 
 func (s *Server) SelectRole(ctx context.Context, request *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.SelectRole(ctx, request)
 }
 
 func (s *Server) SelectUser(ctx context.Context, request *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.SelectUser(ctx, request)
 }
 
 func (s *Server) SelectResource(ctx context.Context, request *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.SelectResource(ctx, request)
 }
 
-func (s *Server) OperatePrivilege(ctx context.Context, info *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) OperatePrivilege(ctx context.Context, request *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	return s.rootCoord.OperatePrivilege(ctx, request)
 }
 
 func (s *Server) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.SelectGrant(ctx, request)
 }
 
 func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	return s.rootCoord.ListPolicy(ctx, request)
 }

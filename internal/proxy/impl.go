@@ -23,6 +23,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+
 	"github.com/milvus-io/milvus/internal/util"
 
 	"go.uber.org/zap"
@@ -3594,6 +3596,11 @@ func (node *Proxy) checkHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
+func (node *Proxy) checkHealthyAndReturnCode() (internalpb.StateCode, bool) {
+	code := node.stateCode.Load().(internalpb.StateCode)
+	return code, code == internalpb.StateCode_Healthy
+}
+
 //unhealthyStatus returns the proxy not healthy status
 func unhealthyStatus() *commonpb.Status {
 	return &commonpb.Status{
@@ -3705,6 +3712,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	logutil.Logger(ctx).Debug("received request to invalidate credential cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
 
 	username := request.Username
 	if globalMetaCache != nil {
@@ -3726,6 +3736,9 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	logutil.Logger(ctx).Debug("received request to update credential cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
 
 	credInfo := &internalpb.CredentialInfo{
 		Username:          request.Username,
@@ -3748,6 +3761,9 @@ func (node *Proxy) ClearCredUsersCache(ctx context.Context, request *internalpb.
 	ctx = logutil.WithModule(ctx, moduleName)
 	logutil.Logger(ctx).Debug("received request to clear credential usernames cache",
 		zap.String("role", typeutil.ProxyRole))
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
 
 	if globalMetaCache != nil {
 		globalMetaCache.ClearCredUsers() // no need to return error, though credential may be not cached
@@ -3762,7 +3778,14 @@ func (node *Proxy) ClearCredUsersCache(ctx context.Context, request *internalpb.
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
-	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	log.Debug("CreateCredential", zap.String("role", typeutil.ProxyRole), zap.String("username", req.Username))
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+	// validate root permission
+	if isValid, status := node.validateRootPermission(ctx); !isValid {
+		return status, nil
+	}
 	// validate params
 	username := req.Username
 	if err := ValidateUsername(username); err != nil {
@@ -3794,6 +3817,21 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 			Reason:    "encrypt password fail key:" + req.Username,
 		}, nil
 	}
+	// validate user num
+	usernames, err := globalMetaCache.GetCredUsernames(ctx)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	if len(usernames) >= Params.ProxyCfg.MaxUserNum {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CreateCredentialFailure,
+			Reason:    fmt.Sprintf("too many users, current user num: %d, max user num: %d", len(usernames), Params.ProxyCfg.MaxUserNum),
+		}, nil
+	}
+
 	credInfo := &internalpb.CredentialInfo{
 		Username:          req.Username,
 		EncryptedPassword: encryptedPassword,
@@ -3810,7 +3848,10 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 }
 
 func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
-	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	log.Debug("UpdateCredential", zap.String("role", typeutil.ProxyRole), zap.String("username", req.Username))
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
 	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
 	if err != nil {
 		log.Error("decode old password fail", zap.String("username", req.Username), zap.Error(err))
@@ -3875,7 +3916,15 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 }
 
 func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	log.Debug("DeleteCredential", zap.String("role", typeutil.ProxyRole), zap.String("username", req.Username))
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+	// validate root permission
+	if isValid, status := node.validateRootPermission(ctx); !isValid {
+		return status, nil
+	}
+
 	if req.Username == util.UserRoot {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_DeleteCredentialFailure,
@@ -3894,7 +3943,11 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 }
 
 func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	log.Debug("ListCredUsers", zap.String("role", typeutil.RootCoordRole))
+	log.Debug("ListCredUsers", zap.String("role", typeutil.ProxyRole))
+	if !node.checkHealthy() {
+		return &milvuspb.ListCredUsersResponse{Status: unhealthyStatus()}, nil
+	}
+
 	// get from cache
 	usernames, err := globalMetaCache.GetCredUsernames(ctx)
 	if err != nil {
@@ -3929,47 +3982,395 @@ func (node *Proxy) SendRetrieveResult(ctx context.Context, req *internalpb.Retri
 	}, nil
 }
 
-func (node *Proxy) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) validateRootPermission(ctx context.Context) (bool, *commonpb.Status) {
+	err := ValidateRootPermission(ctx)
+	if err != nil {
+		log.Error("fail to validate root permission", zap.Error(err))
+		return false, &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_PermissionDenied,
+			Reason:    err.Error(),
+		}
+	}
+	return true, nil
 }
 
-func (node *Proxy) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	log.Debug("CreateRole", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+
+	var roleName string
+	if req.Entity != nil {
+		roleName = req.Entity.Name
+	}
+	if err := ValidateRoleName(roleName); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, err
+	}
+
+	if isValid, status := node.validateRootPermission(ctx); !isValid {
+		return status, errorutil.PermissionDenyError()
+	}
+
+	result, err := node.rootCoord.CreateRole(ctx, req)
+	if err != nil {
+		log.Error("fail to create role", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, err
+	}
+	return result, nil
 }
 
-func (node *Proxy) OperateUserRole(ctx context.Context, request *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	log.Debug("DropRole", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return errorutil.UnhealthyStatus(code), nil
+	}
+	if err := ValidateRoleName(req.RoleName); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, err
+	}
+	if isValid, status := node.validateRootPermission(ctx); !isValid {
+		return status, errorutil.PermissionDenyError()
+	}
+	result, err := node.rootCoord.DropRole(ctx, req)
+	if err != nil {
+		log.Error("fail to drop role", zap.String("role_name", req.RoleName), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, err
+	}
+	return result, nil
 }
 
-func (node *Proxy) SelectRole(ctx context.Context, request *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	log.Debug("OperateUserRole", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+	if err := ValidateUsername(req.Username); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, err
+	}
+	if err := ValidateRoleName(req.RoleName); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, err
+	}
+	if isValid, status := node.validateRootPermission(ctx); !isValid {
+		return status, errorutil.PermissionDenyError()
+	}
+
+	result, err := node.rootCoord.OperateUserRole(ctx, req)
+	if err != nil {
+		log.Error("fail to operate user role", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, err
+	}
+	return result, nil
 }
 
-func (node *Proxy) SelectUser(ctx context.Context, request *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	log.Debug("SelectRole", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return &milvuspb.SelectRoleResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+	}
+
+	if req.Role != nil {
+		if err := ValidateRoleName(req.Role.Name); err != nil {
+			return &milvuspb.SelectRoleResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_IllegalArgument,
+					Reason:    err.Error(),
+				},
+			}, err
+		}
+	}
+	if isValid, status := node.validateRootPermission(ctx); !isValid {
+		return &milvuspb.SelectRoleResponse{
+			Status: status,
+		}, errorutil.PermissionDenyError()
+	}
+
+	result, err := node.rootCoord.SelectRole(ctx, req)
+	if err != nil {
+		log.Error("fail to select role", zap.Error(err))
+		return &milvuspb.SelectRoleResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+	return result, nil
 }
 
-func (node *Proxy) SelectResource(ctx context.Context, request *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	log.Debug("SelectUser", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return &milvuspb.SelectUserResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+	}
+
+	if req.User != nil {
+		if err := ValidateUsername(req.User.Name); err != nil {
+			return &milvuspb.SelectUserResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_IllegalArgument,
+					Reason:    err.Error(),
+				},
+			}, err
+		}
+	}
+	curUser, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return &milvuspb.SelectUserResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+	isSelf := req.User != nil && req.User.Name == curUser
+	if isValid, status := node.validateRootPermission(ctx); !isValid && !isSelf {
+		return &milvuspb.SelectUserResponse{
+			Status: status,
+		}, errorutil.PermissionDenyError()
+	}
+
+	result, err := node.rootCoord.SelectUser(ctx, req)
+	if err != nil {
+		log.Error("fail to select user", zap.Error(err))
+		return &milvuspb.SelectUserResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+	return result, nil
 }
 
-func (node *Proxy) OperatePrivilege(ctx context.Context, request *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) SelectResource(ctx context.Context, req *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
+	log.Debug("SelectResource", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return &milvuspb.SelectResourceResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+	}
+
+	if req.Entity != nil {
+		if err := ValidateResourceName(req.Entity.Type); err != nil {
+			return &milvuspb.SelectResourceResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_IllegalArgument,
+					Reason:    err.Error(),
+				},
+			}, err
+		}
+	}
+	result, err := node.rootCoord.SelectResource(ctx, req)
+	if err != nil {
+		log.Error("ResourceList fail", zap.Error(err))
+		return &milvuspb.SelectResourceResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+	return result, nil
 }
 
-func (node *Proxy) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) getPrincipalName(entity *milvuspb.PrincipalEntity) string {
+	if entity == nil {
+		return ""
+	}
+
+	var principalName string
+	if entity.GetUser() != nil {
+		principalName = entity.GetUser().Name
+	} else if entity.GetRole() != nil {
+		principalName = entity.GetRole().Name
+	}
+
+	return principalName
 }
 
-func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) error {
+	if req.Entity == nil {
+		return fmt.Errorf("the entity in the request is nil")
+	}
+	if req.Entity.Grantor == nil {
+		return fmt.Errorf("the grantor entity in the grant entity is nil")
+	}
+	if req.Entity.Grantor.Privilege == nil {
+		return fmt.Errorf("the privilege entity in the grantor entity is nil")
+	}
+	if err := ValidatePrivilege(req.Entity.Grantor.Privilege.Name); err != nil {
+		return err
+	}
+	if req.Entity.Resource == nil {
+		return fmt.Errorf("the resource entity in the grant entity is nil")
+	}
+	if err := ValidateResourceType(req.Entity.Resource.Type); err != nil {
+		return err
+	}
+	if err := ValidateResourceName(req.Entity.ResourceName); err != nil {
+		return err
+	}
+	if req.Entity.Principal == nil {
+		return fmt.Errorf("the principal entity in the grant entity is nil")
+	}
+	if err := ValidatePrincipalType(req.Entity.Principal.PrincipalType); err != nil {
+		return err
+	}
+	if err := ValidatePrincipalName(node.getPrincipalName(req.Entity.Principal)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	log.Debug("OperatePrivilege", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+	if isValid, status := node.validateRootPermission(ctx); !isValid {
+		return status, errorutil.PermissionDenyError()
+	}
+	if err := node.validPrivilegeParams(req); err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    err.Error(),
+		}, err
+	}
+	curUser, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, err
+	}
+	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
+	result, err := node.rootCoord.OperatePrivilege(ctx, req)
+	if err != nil {
+		log.Error("fail to operate privilege", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, err
+	}
+	return result, nil
+}
+
+func (node *Proxy) validGrantParams(req *milvuspb.SelectGrantRequest) error {
+	if req.Entity == nil {
+		return fmt.Errorf("the grant entity in the request is nil")
+	}
+
+	if req.Entity.Resource != nil {
+		if err := ValidateResourceType(req.Entity.Resource.Type); err != nil {
+			return err
+		}
+
+		if err := ValidateResourceName(req.Entity.ResourceName); err != nil {
+			return err
+		}
+	}
+
+	if req.Entity.Principal == nil {
+		return fmt.Errorf("the principal entity in the grant entity is nil")
+	}
+
+	if err := ValidatePrincipalType(req.Entity.Principal.PrincipalType); err != nil {
+		return err
+	}
+
+	if err := ValidatePrincipalName(node.getPrincipalName(req.Entity.Principal)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	log.Debug("SelectGrant", zap.String("role", typeutil.ProxyRole), zap.String("req", fmt.Sprintf("%v", req)))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return &milvuspb.SelectGrantResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+	}
+	curUser, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		return &milvuspb.SelectGrantResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+
+	isSelf := req.Entity != nil &&
+		req.Entity.Principal != nil &&
+		req.Entity.Principal.PrincipalType == util.UserPrincipalType &&
+		req.Entity.Principal.GetUser() != nil &&
+		curUser == req.Entity.Principal.GetUser().Name
+	if isValid, _ := node.validateRootPermission(ctx); !isValid && !isSelf {
+		return &milvuspb.SelectGrantResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_PermissionDenied,
+				Reason:    "the current user doesn't have the permission to execute this api ",
+			},
+		}, errorutil.PermissionDenyError()
+	}
+
+	if err = node.validGrantParams(req); err != nil {
+		return &milvuspb.SelectGrantResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_IllegalArgument,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+
+	result, err := node.rootCoord.SelectGrant(ctx, req)
+	if err != nil {
+		log.Error("fail to select grant", zap.Error(err))
+		return &milvuspb.SelectGrantResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, err
+	}
+	return result, nil
+}
+
+func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	log.Debug("RefreshPrivilegeInfoCache", zap.String("role", typeutil.ProxyRole))
+	if code, ok := node.checkHealthyAndReturnCode(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+
+	if globalMetaCache != nil {
+		globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{
+			OpType: typeutil.CacheOpType(req.OpType),
+			OpKey:  req.OpKey,
+		})
+	}
+	log.Debug("RefreshPrivilegeInfoCache success", zap.String("role", typeutil.ProxyRole))
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }

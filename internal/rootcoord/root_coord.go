@@ -30,6 +30,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -1105,6 +1108,23 @@ func (c *Core) Init() error {
 		if initError != nil {
 			return
 		}
+
+		// create default roles, including admin, public
+		if initError = c.MetaTable.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: util.RoleAdmin}); initError != nil {
+			return
+		}
+		if initError = c.MetaTable.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: util.RolePublic}); initError != nil {
+			return
+		}
+
+		// create default rolemapping, root -> admin
+		if initError = c.MetaTable.OperateUserRole(util.DefaultTenant,
+			&milvuspb.UserEntity{Name: util.UserRoot},
+			&milvuspb.RoleEntity{Name: util.RoleAdmin},
+			milvuspb.OperateUserRoleType_AddUserToRole); initError != nil {
+			return
+		}
+		log.Debug("RootCoord init user root done")
 	})
 	if initError != nil {
 		log.Debug("RootCoord init error", zap.Error(initError))
@@ -2623,11 +2643,21 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 
+	usersInfo, err := c.MetaTable.ListCredentialUsernames()
+	if err != nil {
+		log.Error("CreateCredential get credential username list failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", credInfo.Username), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "CreateCredential failed, fail to get credential username list to check the user number, error: "+err.Error()), nil
+	}
+	if len(usersInfo.Usernames) >= Params.ProxyCfg.MaxUserNum {
+		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "unable to add user because the number of users has reached the limit"), nil
+	}
+
 	if cred, _ := c.MetaTable.getCredential(credInfo.Username); cred != nil {
 		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "user already exists:"+credInfo.Username), nil
 	}
 	// update proxy's local cache
-	err := c.ClearCredUsersCache(ctx)
+	err = c.ClearCredUsersCache(ctx)
 	if err != nil {
 		log.Error("CreateCredential clear credential username list cache failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
@@ -2774,4 +2804,485 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 // This is just a temporary solution.
 func heuristicSegmentsReady(currCount int, expectedCount int) bool {
 	return currCount >= expectedCount-2 || float64(currCount)/float64(expectedCount) >= 0.8
+}
+
+// CreateRole create role
+// - check the node health
+// - check if the role is existed
+// - check if the role num has reached the limit
+// - create the role by the metatable api
+func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	method := "CreateRole"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+	entity := in.Entity
+	if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err == nil {
+		return failStatus(commonpb.ErrorCode_CreateRoleFailure, "role already exists:"+entity.Name), nil
+	}
+
+	results, err := c.MetaTable.SelectRole(util.DefaultTenant, nil, false)
+	if err != nil {
+		log.Error("fail to select roles", zap.String("role", typeutil.RootCoordRole), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_CreateRoleFailure, "fail to select roles to check the role number, error: "+err.Error()), err
+	}
+	if len(results) >= Params.ProxyCfg.MaxRoleNum {
+		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "unable to add role because the number of roles has reached the limit"), nil
+	}
+
+	err = c.MetaTable.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name})
+	if err != nil {
+		log.Error("fail to create role", zap.String("role", typeutil.RootCoordRole),
+			zap.String("role_name", entity.Name), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "Create role failed: "+err.Error()), err
+	}
+
+	log.Debug("CreateRole success", zap.String("role", typeutil.RootCoordRole), zap.String("role_name", entity.Name))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfRoles.Inc()
+
+	return succStatus(), nil
+}
+
+// DropRole drop role
+// - check the node health
+// - check if the role name is existed
+// - check if the role has some grant info
+// - get all role mapping of this role
+// - drop these role mappings
+// - drop the role by the metatable api
+func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	method := "DropRole"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+	if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
+		log.Error("the role isn't existed", zap.String("role_name", in.RoleName), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, fmt.Sprintf("the role isn't existed, role name: %s", in.RoleName)), err
+	}
+
+	grantEntities, err := c.MetaTable.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
+		Principal: &milvuspb.PrincipalEntity{
+			PrincipalType: util.RolePrincipalType,
+			Principal: &milvuspb.PrincipalEntity_Role{
+				Role: &milvuspb.RoleEntity{Name: in.RoleName},
+			},
+		},
+	})
+	if len(grantEntities) != 0 {
+		log.Error("fail to drop the role that it has privileges. Use REVOKE API to revoke privileges", zap.String("role_name", in.RoleName), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, fmt.Sprintf("fail to drop the role that it has privileges. Use REVOKE API to remove privileges. role name: %s", in.RoleName)), fmt.Errorf("fail to drop the role that it has privileges")
+	}
+	roleResults, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, true)
+	if err != nil {
+		log.Error("fail to select a role by role name", zap.String("role_name", in.RoleName), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, fmt.Sprintf("fail to select a role by the role name, role name: %s, error: %s", in.RoleName, err.Error())), err
+	}
+	log.Debug("role to user info", zap.Int("counter", len(roleResults)))
+	for _, roleResult := range roleResults {
+		for index, userEntity := range roleResult.Users {
+			if err = c.MetaTable.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: userEntity.Name}, &milvuspb.RoleEntity{Name: roleResult.Role.Name}, milvuspb.OperateUserRoleType_RemoveUserFromRole); err != nil {
+				log.Error("fail to remove user from role", zap.String("role_name", roleResult.Role.Name), zap.String("username", userEntity.Name), zap.Int("current_index", index), zap.Error(err))
+				return failStatus(commonpb.ErrorCode_OperateUserRoleFailure,
+					fmt.Sprintf("fail to remove user to role, role name: %s, username: %s, current_index: %d, error: %s", roleResult.Role.Name, userEntity.Name, index, err.Error())), err
+			}
+		}
+	}
+	if err = c.MetaTable.DropRole(util.DefaultTenant, in.RoleName); err != nil {
+		log.Error("fail to drop the role", zap.String("role_name", in.RoleName), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, fmt.Sprintf("fail to drop the role, role name: %s, error: %s", in.RoleName, err.Error())), err
+	}
+
+	log.Debug("DropRole success", zap.String("role", typeutil.RootCoordRole), zap.String("role_name", in.RoleName))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfRoles.Dec()
+	return succStatus(), nil
+}
+
+// OperateUserRole operate the relationship between a user and a role
+// - check the node health
+// - check if the role is valid
+// - check if the user is valid
+// - operate the user-role by the metatable api
+// - update the policy cache
+func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	method := "OperateUserRole-" + in.Type.String()
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+
+	if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
+		log.Error("fail to check the role name", zap.String("role_name", in.RoleName), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure,
+			fmt.Sprintf("fail to check the role name, error: %s", err.Error())), err
+	}
+	if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
+		log.Error("fail to check the username", zap.String("username", in.Username), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure,
+			fmt.Sprintf("fail to check the username, error: %s", err.Error())), err
+	}
+	if err := c.MetaTable.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type); err != nil {
+		log.Error("fail to operate user to role", zap.String("role_name", in.RoleName), zap.String("username", in.Username), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure,
+			fmt.Sprintf("fail to operate user to role, error: %s", err.Error())), err
+	}
+
+	var opType int32
+	if in.Type == milvuspb.OperateUserRoleType_AddUserToRole {
+		opType = int32(typeutil.CacheAdd)
+	} else if in.Type == milvuspb.OperateUserRoleType_RemoveUserFromRole {
+		opType = int32(typeutil.CacheRemove)
+	}
+	c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: opType,
+		OpKey:  funcutil.PolicyForRole(in.Username, in.RoleName),
+	})
+
+	log.Debug("OperateUserRole success", zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return succStatus(), nil
+}
+
+// SelectRole select role
+// - check the node health
+// - check if the role is valid when this param is provided
+// - select role by the metatable api
+func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	method := "SelectRole"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.SelectRoleResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+	}
+
+	if in.Role != nil {
+		if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.Role.Name}, false); err != nil {
+			log.Error("fail to select the role to check the role name", zap.String("role_name", in.Role.Name), zap.Error(err))
+			return &milvuspb.SelectRoleResponse{
+				Status: failStatus(commonpb.ErrorCode_SelectRoleFailure,
+					fmt.Sprintf("fail to select the role to check the role name, error: %s", err.Error())),
+			}, err
+		}
+	}
+	roleResults, err := c.MetaTable.SelectRole(util.DefaultTenant, in.Role, in.IncludeUserInfo)
+	if err != nil {
+		log.Error("fail to select the role", zap.Error(err))
+		return &milvuspb.SelectRoleResponse{
+			Status: failStatus(commonpb.ErrorCode_SelectRoleFailure,
+				fmt.Sprintf("fail to select the role, error: %s", err.Error())),
+		}, err
+	}
+
+	log.Debug("SelectRole success", zap.String("role", typeutil.RootCoordRole))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.SelectRoleResponse{
+		Status:  succStatus(),
+		Results: roleResults,
+	}, nil
+}
+
+// SelectUser select user
+// - check the node health
+// - check if the user is valid when this param is provided
+// - select user by the metatable api
+func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	method := "SelectUser"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.SelectUserResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+	}
+
+	if in.User != nil {
+		if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.User.Name}, false); err != nil {
+			log.Error("fail to select the user to check the username", zap.String("username", in.User.Name), zap.Error(err))
+			return &milvuspb.SelectUserResponse{
+				Status: failStatus(commonpb.ErrorCode_SelectUserFailure,
+					fmt.Sprintf("fail to select the user to check the username, error: %s", err.Error())),
+			}, err
+		}
+	}
+	userResults, err := c.MetaTable.SelectUser(util.DefaultTenant, in.User, in.IncludeRoleInfo)
+	if err != nil {
+		log.Error("fail to select the user", zap.Error(err))
+		return &milvuspb.SelectUserResponse{
+			Status: failStatus(commonpb.ErrorCode_SelectUserFailure,
+				fmt.Sprintf("fail to select the user, error: %s", err.Error())),
+		}, err
+	}
+
+	log.Debug("SelectUser success", zap.String("role", typeutil.RootCoordRole))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.SelectUserResponse{
+		Status:  succStatus(),
+		Results: userResults,
+	}, nil
+}
+
+// SelectResource select resource
+// - check the node health
+// - get the resource info
+//  	- if the IncludePrivilegeInfo param is true, use the `util.GetResourceTypes()`
+//		- if the IncludePrivilegeInfo param is false, use the `util.GetResourcePrivileges()`
+// 		- Tips: because the supported resource type only includes Collection, this kind of information doesn't store in the etcd
+func (c *Core) SelectResource(ctx context.Context, in *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
+	method := "ResourceList"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.SelectResourceResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+	}
+
+	if in.Entity != nil {
+		resourceType := in.Entity.Type
+		if _, ok := util.GetResourcePrivileges()[resourceType]; !ok {
+			return &milvuspb.SelectResourceResponse{Status: failStatus(commonpb.ErrorCode_IllegalArgument,
+				fmt.Sprintf("the resource type is invalid, current type: %s, valid types: %#v", resourceType, util.GetResourceTypes()))}, fmt.Errorf("the resource type is invalid")
+		}
+	}
+
+	var condition string
+	if in.Entity != nil {
+		condition = in.Entity.Type
+	}
+	checkCondition := func(resourceType string) bool {
+		return IsEmptyString(condition) || resourceType == condition
+	}
+
+	var resultResults []*milvuspb.ResourceResult
+	if !in.IncludePrivilegeInfo {
+		resourceTypes := util.GetResourceTypes()
+		for _, resourceType := range resourceTypes {
+			if checkCondition(resourceType) {
+				resultResults = append(resultResults, &milvuspb.ResourceResult{Resource: &milvuspb.ResourceEntity{Type: resourceType}})
+			}
+		}
+	} else {
+		resourcePrivileges := util.GetResourcePrivileges()
+		for resourceType, resourcePrivileges := range resourcePrivileges {
+			if !checkCondition(resourceType) {
+				continue
+			}
+			var privilegeEntities []*milvuspb.PrivilegeEntity
+			for _, resourcePrivilege := range resourcePrivileges {
+				privilegeEntities = append(privilegeEntities, &milvuspb.PrivilegeEntity{Name: resourcePrivilege})
+			}
+			resultResults = append(resultResults, &milvuspb.ResourceResult{Resource: &milvuspb.ResourceEntity{Type: resourceType}, Privileges: privilegeEntities})
+		}
+	}
+
+	log.Debug("ResourceList success", zap.String("role", typeutil.RootCoordRole))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.SelectResourceResponse{
+		Status:  succStatus(),
+		Results: resultResults,
+	}, nil
+}
+
+func (c *Core) isValidPrincipal(entity *milvuspb.PrincipalEntity) error {
+	if entity == nil {
+		return fmt.Errorf("the principal entity is nil")
+	}
+	if entity.PrincipalType == util.RolePrincipalType {
+		if entity.GetRole() == nil {
+			return fmt.Errorf("the role entity in the principal entity is nil")
+		}
+		if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.GetRole().Name}, false); err != nil {
+			return err
+		}
+	} else if entity.PrincipalType == util.UserPrincipalType {
+		if entity.GetUser() == nil {
+			return fmt.Errorf("the user entity in the principal entity is nil")
+		}
+		if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.GetUser().Name}, false); err != nil {
+			return err
+		}
+	} else {
+		return fmt.Errorf("the princaipal type is invalid in the principal entity, the valid values:[%s, %s], the current value: %s", util.RolePrincipalType, util.UserPrincipalType, entity.PrincipalType)
+	}
+	return nil
+}
+
+func (c *Core) isValidResource(entity *milvuspb.ResourceEntity) error {
+	if entity == nil {
+		return fmt.Errorf("the resource entity is nil")
+	}
+	if _, ok := commonpb.ResourceType_value[entity.Type]; !ok {
+		return fmt.Errorf("the resource type in the resource entity is invalid, current value: %s. Get the valid value by the SelectResource api", entity.Type)
+	}
+	return nil
+}
+
+func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity) error {
+	if entity == nil {
+		return fmt.Errorf("the grantor entity is nil")
+	}
+	if entity.User == nil {
+		return fmt.Errorf("the user entity in the grantor entity is nil")
+	}
+	if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.GetUser().Name}, false); err != nil {
+		return err
+	}
+	if entity.Privilege == nil {
+		return fmt.Errorf("the privilege entity in the grantor entity is nil")
+	}
+	if _, ok := util.ResourcePrivilegeAPIValue[entity.Privilege.Name]; !ok {
+		return fmt.Errorf("the privilege name in the privilege entity is invalid, current value: %s. Get the valid value by the SelectResource api", entity.Privilege.Name)
+	}
+	return nil
+}
+
+// OperatePrivilege operate the privilege, including grant and revoke
+// - check the node health
+// - check if the operating type is valid
+// - check if the entity is nil
+// - check if the params, including the resource entity, the principal entity, the grantor entity, is valid
+// - operate the privilege by the metatable api
+// - update the policy cache
+func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	method := "OperatePrivilege"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+	}
+	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure,
+				fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)),
+			fmt.Errorf("invalid operate privilege type")
+	}
+	if in.Entity == nil {
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, "the grant entity in the request is nil"), fmt.Errorf("the grant entity in the request is nil")
+	}
+	if err := c.isValidResource(in.Entity.Resource); err != nil {
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, fmt.Sprintf("error: %s", err.Error())), err
+	}
+	if err := c.isValidPrincipal(in.Entity.Principal); err != nil {
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, fmt.Sprintf("error: %s", err.Error())), err
+	}
+	if err := c.isValidGrantor(in.Entity.Grantor); err != nil {
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, fmt.Sprintf("error: %s", err.Error())), err
+	}
+
+	if err := c.MetaTable.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type); err != nil {
+		log.Error("fail to operate the privilege", zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, fmt.Sprintf("fail to operate the privilege, error: %s", err.Error())), err
+	}
+
+	var opType int32
+	if in.Type == milvuspb.OperatePrivilegeType_Grant {
+		opType = int32(typeutil.CacheAdd)
+	} else if in.Type == milvuspb.OperatePrivilegeType_Revoke {
+		opType = int32(typeutil.CacheRemove)
+	}
+	c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
+		OpType: opType,
+		OpKey:  funcutil.PolicyForPrivilege(model.GetPrincipalName(in.Entity), in.Entity.Resource.Type, in.Entity.ResourceName, in.Entity.Grantor.Privilege.Name),
+	})
+
+	log.Debug("OperatePrivilege success", zap.String("role", typeutil.RootCoordRole))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return succStatus(), nil
+}
+
+// SelectGrant select grant
+// - check the node health
+// - check if the principal entity is valid
+// - check if the resource entity which is provided by the user is valid
+// - select grant by the metatable api
+func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	method := "SelectGrant"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return &milvuspb.SelectGrantResponse{
+			Status: errorutil.UnhealthyStatus(code),
+		}, errorutil.UnhealthyError()
+	}
+	if in.Entity == nil {
+		return &milvuspb.SelectGrantResponse{
+			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, "the grant entity in the request is nil"),
+		}, fmt.Errorf("the grant entity in the request is nil")
+	}
+	if err := c.isValidPrincipal(in.Entity.Principal); err != nil {
+		return &milvuspb.SelectGrantResponse{
+			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, fmt.Sprintf("error: %s", err.Error())),
+		}, err
+	}
+	if in.Entity.Resource != nil {
+		if err := c.isValidResource(in.Entity.Resource); err != nil {
+			return &milvuspb.SelectGrantResponse{
+				Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, fmt.Sprintf("error: %s", err.Error())),
+			}, err
+		}
+	}
+
+	grantEntities, err := c.MetaTable.SelectGrant(util.DefaultTenant, in.Entity)
+	if err != nil {
+		log.Error("fail to select the grant", zap.Error(err))
+		return &milvuspb.SelectGrantResponse{
+			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure,
+				fmt.Sprintf("fail to select the grant, error: %s", err.Error())),
+		}, err
+	}
+
+	log.Debug("OperatePrivilege success", zap.String("role", typeutil.RootCoordRole))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.SelectGrantResponse{
+		Status:   succStatus(),
+		Entities: grantEntities,
+	}, nil
+}
+
+func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+	method := "PolicyList"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+	log.Debug(method, zap.String("role", typeutil.RootCoordRole), zap.String("in", fmt.Sprintf("%v", in)))
+
+	if code, ok := c.checkHealthy(); !ok {
+		return &internalpb.ListPolicyResponse{
+			Status: errorutil.UnhealthyStatus(code),
+		}, errorutil.UnhealthyError()
+	}
+
+	policies := c.MetaTable.ListPolicy(util.DefaultTenant)
+
+	log.Debug("PolicyList success", zap.String("role", typeutil.RootCoordRole))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &internalpb.ListPolicyResponse{
+		Status:      succStatus(),
+		PolicyInfos: policies,
+	}, nil
 }

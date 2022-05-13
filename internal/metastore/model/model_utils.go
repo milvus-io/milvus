@@ -1,9 +1,13 @@
 package model
 
 import (
+	"strings"
+
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util"
 )
 
 func ConvertToFieldSchemaPB(field *Field) *schemapb.FieldSchema {
@@ -234,4 +238,53 @@ func ConvertToCredentialPB(cred *Credential) *internalpb.CredentialInfo {
 		Username:          cred.Username,
 		EncryptedPassword: cred.EncryptedPassword,
 	}
+}
+
+func IsEmptyString(str string) bool {
+	return str == ""
+}
+
+func RemoveInvalidSeparator(str string) string {
+	return strings.TrimRight(strings.Replace(str, "//", "/", 1), "/")
+}
+
+func IsRevoke(operateType milvuspb.OperatePrivilegeType) bool {
+	return operateType == milvuspb.OperatePrivilegeType_Revoke
+}
+
+func IsGrant(operateType milvuspb.OperatePrivilegeType) bool {
+	return operateType == milvuspb.OperatePrivilegeType_Grant
+}
+
+func GetPrincipalName(entity *milvuspb.GrantEntity) string {
+	var principalName string
+	if entity.Principal == nil {
+		return principalName
+	}
+	if entity.Principal.GetUser() != nil && !IsEmptyString(entity.Principal.GetUser().Name) {
+		principalName = entity.Principal.GetUser().Name
+	} else if entity.Principal.GetRole() != nil && !IsEmptyString(entity.Principal.GetRole().Name) {
+		principalName = entity.Principal.GetRole().Name
+	}
+	return principalName
+}
+
+func GetPrincipalEntity(principalType string, principalName string) *milvuspb.PrincipalEntity {
+	var principalEntity *milvuspb.PrincipalEntity
+	if principalType == util.UserPrincipalType {
+		principalEntity = &milvuspb.PrincipalEntity{
+			PrincipalType: principalType,
+			Principal: &milvuspb.PrincipalEntity_User{
+				User: &milvuspb.UserEntity{Name: principalName},
+			},
+		}
+	} else if principalType == util.RolePrincipalType {
+		principalEntity = &milvuspb.PrincipalEntity{
+			PrincipalType: principalType,
+			Principal: &milvuspb.PrincipalEntity_Role{
+				Role: &milvuspb.RoleEntity{Name: principalName},
+			},
+		}
+	}
+	return principalEntity
 }

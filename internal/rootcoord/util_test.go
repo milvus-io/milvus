@@ -128,3 +128,17 @@ func Test_DecodeMsgPositions(t *testing.T) {
 	err = DecodeMsgPositions("null", &mpOut)
 	assert.Nil(t, err)
 }
+
+func Test_IsEmptyString(t *testing.T) {
+	assert.Equal(t, IsEmptyString(""), true)
+
+	assert.Equal(t, IsEmptyString("hello"), false)
+}
+
+func Test_RemoveInvalidSeparator(t *testing.T) {
+	assert.Equal(t, "a/b/c", RemoveInvalidSeparator("a/b//c"))
+
+	assert.Equal(t, "a/b/c", RemoveInvalidSeparator("a/b/c/"))
+
+	assert.Equal(t, "a/b", RemoveInvalidSeparator("a/b//"))
+}

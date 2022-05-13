@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -67,6 +68,10 @@ type Cache interface {
 	UpdateCredential(credInfo *internalpb.CredentialInfo)
 	GetCredUsernames(ctx context.Context) ([]string, error)
 	ClearCredUsers()
+
+	GetPolicyInfo(ctx context.Context) []string
+	RefreshPolicyInfo(op typeutil.CacheOp)
+	InitPolicyInfo(info []string)
 }
 
 type collectionInfo struct {
@@ -109,8 +114,10 @@ type MetaCache struct {
 	collInfo         map[string]*collectionInfo
 	credMap          map[string]*internalpb.CredentialInfo // cache for credential, lazy load
 	credUsernameList []string                              // no need initialize when NewMetaCache
+	policyInfos      map[string]interface{}                // privileges cache
 	mu               sync.RWMutex
 	credMut          sync.RWMutex
+	privilegeMut     sync.RWMutex
 	shardMgr         *shardClientMgr
 }
 
@@ -118,23 +125,33 @@ type MetaCache struct {
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
-func InitMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord, shardMgr *shardClientMgr) error {
+func InitMetaCache(ctx context.Context, rootCoord types.RootCoord, queryCoord types.QueryCoord, shardMgr *shardClientMgr) error {
 	var err error
 	globalMetaCache, err = NewMetaCache(rootCoord, queryCoord, shardMgr)
 	if err != nil {
 		return err
 	}
+
+	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
+	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+	if err != nil {
+		log.Error("PolicyList fail", zap.Error(err))
+		return err
+	}
+	globalMetaCache.InitPolicyInfo(resp.PolicyInfos)
+	log.Debug("PolicyList success", zap.Strings("policy_infos", resp.PolicyInfos))
 	return nil
 }
 
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord, shardMgr *shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:  rootCoord,
-		queryCoord: queryCoord,
-		collInfo:   map[string]*collectionInfo{},
-		credMap:    map[string]*internalpb.CredentialInfo{},
-		shardMgr:   shardMgr,
+		rootCoord:   rootCoord,
+		queryCoord:  queryCoord,
+		collInfo:    map[string]*collectionInfo{},
+		credMap:     map[string]*internalpb.CredentialInfo{},
+		shardMgr:    shardMgr,
+		policyInfos: map[string]interface{}{},
 	}, nil
 }
 
@@ -682,5 +699,37 @@ func (m *MetaCache) ClearShards(collectionName string) {
 	// delete refcnt in shardClientMgr
 	if ok {
 		_ = m.shardMgr.UpdateShardLeaders(info.shardLeaders, nil)
+	}
+}
+
+func (m *MetaCache) InitPolicyInfo(info []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.policyInfos = util.StringSet(info)
+}
+
+func (m *MetaCache) GetPolicyInfo(ctx context.Context) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return util.StringList(m.policyInfos)
+}
+
+func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if op.OpKey == "" {
+		log.Warn("empty op key")
+		return
+	}
+	switch op.OpType {
+	case typeutil.CacheAdd:
+		m.policyInfos[op.OpKey] = nil
+	case typeutil.CacheRemove:
+		delete(m.policyInfos, op.OpKey)
+	default:
+		log.Warn("invalid opType", zap.Int("op_type", int(op.OpType)))
 	}
 }

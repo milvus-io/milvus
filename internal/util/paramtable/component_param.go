@@ -443,6 +443,8 @@ type proxyConfig struct {
 	MaxShardNum              int32
 	MaxDimension             int64
 	GinLogging               bool
+	MaxUserNum               int
+	MaxRoleNum               int
 
 	// required from QueryCoord
 	SearchResultChannelNames   []string
@@ -470,6 +472,8 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.initMaxTaskNum()
 	p.initGinLogging()
+	p.initMaxUserNum()
+	p.initMaxRoleNum()
 }
 
 // InitAlias initialize Alias member.
@@ -568,6 +572,24 @@ func (p *proxyConfig) GetNodeID() UniqueID {
 		return val.(UniqueID)
 	}
 	return 0
+}
+
+func (p *proxyConfig) initMaxUserNum() {
+	str := p.Base.LoadWithDefault("proxy.maxUserNum", "100")
+	maxUserNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxUserNum = int(maxUserNum)
+}
+
+func (p *proxyConfig) initMaxRoleNum() {
+	str := p.Base.LoadWithDefault("proxy.maxRoleNum", "10")
+	maxRoleNum, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxRoleNum = int(maxRoleNum)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

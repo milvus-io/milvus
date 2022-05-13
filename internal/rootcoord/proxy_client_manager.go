@@ -234,3 +234,28 @@ func (p *proxyClientManager) ClearCredUsersCache(ctx context.Context, request *i
 	}
 	return group.Wait()
 }
+
+func (p *proxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	defer func() {
+		if err := recover(); err != nil {
+			log.Debug("call RefreshPrivilegeInfoCache panic", zap.Any("msg", err))
+		}
+	}()
+
+	if len(p.proxyClient) == 0 {
+		log.Warn("proxy client is empty, RefreshPrivilegeInfoCache will not send to any client")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+
+	for _, f := range p.proxyClient {
+		sta, err := f.RefreshPolicyInfoCache(ctx, req)
+		return sta, err
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}

@@ -45,3 +45,8 @@ func After(str string, sub string) string {
 	}
 	return str[adjustedPos:]
 }
+
+// AfterN Split slices After(str) into all substrings separated by sep
+func AfterN(str string, sub string, sep string) []string {
+	return strings.Split(After(str, sub), sep)
+}

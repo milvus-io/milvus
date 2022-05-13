@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 
@@ -116,4 +117,12 @@ func DecodeMsgPositions(str string, msgPositions *[]*msgstream.MsgPosition) erro
 		return nil
 	}
 	return json.Unmarshal([]byte(str), msgPositions)
+}
+
+func IsEmptyString(str string) bool {
+	return str == ""
+}
+
+func RemoveInvalidSeparator(str string) string {
+	return strings.TrimRight(strings.Replace(str, "//", "/", 1), "/")
 }

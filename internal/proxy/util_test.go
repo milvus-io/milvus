@@ -17,12 +17,18 @@
 package proxy
 
 import (
+	"context"
+	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/metadata"
 )
 
 func TestValidateCollectionName(t *testing.T) {
@@ -615,4 +621,88 @@ func TestReplaceID2Name(t *testing.T) {
 	srcStr := "collection 432682805904801793 has not been loaded to memory or load failed"
 	dstStr := "collection default_collection has not been loaded to memory or load failed"
 	assert.Equal(t, dstStr, ReplaceID2Name(srcStr, int64(432682805904801793), "default_collection"))
+}
+
+func TestValidateName(t *testing.T) {
+	Params.InitOnce()
+	nameType := "Test"
+	validNames := []string{
+		"abc",
+		"_123abc",
+	}
+	for _, name := range validNames {
+		assert.Nil(t, validateName(name, nameType))
+		assert.Nil(t, ValidateRoleName(name))
+		assert.Nil(t, ValidateResourceName(name))
+		assert.Nil(t, ValidateResourceType(name))
+		assert.Nil(t, ValidatePrincipalName(name))
+		assert.Nil(t, ValidatePrincipalType(name))
+		assert.Nil(t, ValidatePrivilege(name))
+	}
+
+	longName := make([]byte, 256)
+	for i := 0; i < len(longName); i++ {
+		longName[i] = 'a'
+	}
+	invalidNames := []string{
+		" ",
+		"123abc",
+		"$abc",
+		"_12 ac",
+		" ",
+		"",
+		string(longName),
+		"中文",
+	}
+
+	for _, name := range invalidNames {
+		assert.NotNil(t, validateName(name, nameType))
+		assert.NotNil(t, ValidateRoleName(name))
+		assert.NotNil(t, ValidateResourceType(name))
+		assert.NotNil(t, ValidatePrincipalName(name))
+		assert.NotNil(t, ValidatePrincipalType(name))
+		assert.NotNil(t, ValidatePrivilege(name))
+	}
+	assert.NotNil(t, ValidateResourceName(" "))
+	assert.NotNil(t, ValidateResourceName(string(longName)))
+}
+
+func GetContext(ctx context.Context, originValue string) context.Context {
+	authKey := strings.ToLower(util.HeaderAuthorize)
+	authValue := crypto.Base64Encode(originValue)
+	contextMap := map[string]string{
+		authKey: authValue,
+	}
+	md := metadata.New(contextMap)
+	return metadata.NewIncomingContext(ctx, md)
+}
+
+func TestGetCurUserFromContext(t *testing.T) {
+	_, err := GetCurUserFromContext(context.Background())
+	assert.NotNil(t, err)
+
+	_, err = GetCurUserFromContext(metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{})))
+	assert.NotNil(t, err)
+
+	_, err = GetCurUserFromContext(GetContext(context.Background(), "123456"))
+	assert.NotNil(t, err)
+
+	root := "root"
+	password := "123456"
+	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+	assert.Nil(t, err)
+	assert.Equal(t, "root", username)
+}
+
+func TestValidateRootPermission(t *testing.T) {
+	err := ValidateRootPermission(context.Background())
+	assert.NotNil(t, err)
+
+	root := "root"
+	password := "123456"
+	err = ValidateRootPermission(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+	assert.Nil(t, err)
+
+	err = ValidateRootPermission(GetContext(context.Background(), fmt.Sprintf("%s%s%s", "test", util.CredentialSeperator, password)))
+	assert.NotNil(t, err)
 }

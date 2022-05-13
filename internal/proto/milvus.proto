@@ -1040,7 +1040,7 @@ message SelectUserResponse {
   // Not useful for now
   common.Status status = 1;
   // user result array
-  repeated UserResult result = 2;
+  repeated UserResult results = 2;
 }
 
 message ResourceEntity {
@@ -1085,6 +1085,10 @@ message PrincipalEntity {
 message GrantorEntity {
   UserEntity user = 1;
   PrivilegeEntity privilege = 2;
+}
+
+message GrantPrivilegeEntity {
+  repeated GrantorEntity entities = 1;
 }
 
 message GrantEntity {

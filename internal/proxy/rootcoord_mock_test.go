@@ -1061,6 +1061,42 @@ func (coord *RootCoordMock) GetCredential(ctx context.Context, req *rootcoordpb.
 	return &rootcoordpb.GetCredentialResponse{}, nil
 }
 
+func (coord *RootCoordMock) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *RootCoordMock) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *RootCoordMock) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *RootCoordMock) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	return &milvuspb.SelectRoleResponse{}, nil
+}
+
+func (coord *RootCoordMock) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	return &milvuspb.SelectUserResponse{}, nil
+}
+
+func (coord *RootCoordMock) SelectResource(ctx context.Context, req *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
+	return &milvuspb.SelectResourceResponse{}, nil
+}
+
+func (coord *RootCoordMock) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+func (coord *RootCoordMock) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	return &milvuspb.SelectGrantResponse{}, nil
+}
+
+func (coord *RootCoordMock) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+	return &internalpb.ListPolicyResponse{}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 type DescribeIndexFunc func(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
@@ -1127,6 +1163,10 @@ func (m *mockRootCoord) DropCollection(ctx context.Context, request *milvuspb.Dr
 		return m.DropCollectionFunc(ctx, request)
 	}
 	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+	return &internalpb.ListPolicyResponse{}, nil
 }
 
 func newMockRootCoord() *mockRootCoord {
