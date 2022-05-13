@@ -349,7 +349,7 @@ func constructSearchRequest(
 func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	var err error
 
-	// schema is empty, though won't happened in system
+	// schema is empty, though won't happen in system
 	case1 := insertTask{
 		schema: &schemapb.CollectionSchema{
 			Name:        "TestInsertTask_checkLengthOfFieldsData",
