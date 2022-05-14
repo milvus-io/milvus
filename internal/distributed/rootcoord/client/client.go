@@ -422,6 +422,20 @@ func (c *Client) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Releas
 	return ret.(*commonpb.Status), err
 }
 
+// InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
+func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(rootcoordpb.RootCoordClient).InvalidateCollectionMetaCache(ctx, in)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}
+
 // SegmentFlushCompleted check whether segment flush is completed
 func (c *Client) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

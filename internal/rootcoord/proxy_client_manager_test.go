@@ -21,10 +21,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestProxyClientManager_GetProxyClients(t *testing.T) {
@@ -93,11 +95,17 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 
 	pcm := newProxyClientManager(core)
 
-	pcm.InvalidateCollectionMetaCache(ctx, nil)
+	ch := make(chan struct{})
+	pcm.helper = proxyClientManagerHelper{
+		afterConnect: func() { ch <- struct{}{} },
+	}
+
+	err = pcm.InvalidateCollectionMetaCache(ctx, nil)
+	assert.NoError(t, err)
 
 	core.SetNewProxyClient(
 		func(se *sessionutil.Session) (types.Proxy, error) {
-			return nil, nil
+			return &proxyMock{}, nil
 		},
 	)
 
@@ -107,8 +115,25 @@ func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
 	}
 
 	pcm.AddProxyClient(session)
+	<-ch
 
-	pcm.InvalidateCollectionMetaCache(ctx, nil)
+	err = pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+		CollectionName: "collection0",
+	})
+	assert.NoError(t, err)
+
+	// test releaseDQLMessageStream failed
+	for _, v := range pcm.proxyClient {
+		v.(*proxyMock).returnError = true
+	}
+	err = pcm.InvalidateCollectionMetaCache(ctx, nil)
+	assert.Error(t, err)
+
+	for _, v := range pcm.proxyClient {
+		v.(*proxyMock).returnGrpcError = true
+	}
+	err = pcm.InvalidateCollectionMetaCache(ctx, nil)
+	assert.Error(t, err)
 }
 
 func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
@@ -129,11 +154,12 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 		afterConnect: func() { ch <- struct{}{} },
 	}
 
-	pcm.ReleaseDQLMessageStream(ctx, nil)
+	err = pcm.ReleaseDQLMessageStream(ctx, nil)
+	assert.NoError(t, err)
 
 	core.SetNewProxyClient(
 		func(se *sessionutil.Session) (types.Proxy, error) {
-			return nil, nil
+			return &proxyMock{}, nil
 		},
 	)
 
@@ -145,7 +171,21 @@ func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
 	pcm.AddProxyClient(session)
 	<-ch
 
-	assert.Panics(t, func() { pcm.ReleaseDQLMessageStream(ctx, nil) })
+	err = pcm.ReleaseDQLMessageStream(ctx, nil)
+	assert.NoError(t, err)
+
+	// test releaseDQLMessageStream failed
+	for _, v := range pcm.proxyClient {
+		v.(*proxyMock).returnError = true
+	}
+	err = pcm.ReleaseDQLMessageStream(ctx, nil)
+	assert.Error(t, err)
+
+	for _, v := range pcm.proxyClient {
+		v.(*proxyMock).returnGrpcError = true
+	}
+	err = pcm.ReleaseDQLMessageStream(ctx, nil)
+	assert.Error(t, err)
 }
 
 func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
@@ -161,11 +201,17 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 
 	pcm := newProxyClientManager(core)
 
-	pcm.InvalidateCredentialCache(ctx, nil)
+	ch := make(chan struct{})
+	pcm.helper = proxyClientManagerHelper{
+		afterConnect: func() { ch <- struct{}{} },
+	}
+
+	err = pcm.InvalidateCredentialCache(ctx, nil)
+	assert.NoError(t, err)
 
 	core.SetNewProxyClient(
 		func(se *sessionutil.Session) (types.Proxy, error) {
-			return nil, nil
+			return &proxyMock{}, nil
 		},
 	)
 
@@ -175,6 +221,21 @@ func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
 	}
 
 	pcm.AddProxyClient(session)
+	<-ch
 
-	pcm.InvalidateCredentialCache(ctx, nil)
+	err = pcm.InvalidateCredentialCache(ctx, nil)
+	assert.NoError(t, err)
+
+	// test releaseDQLMessageStream failed
+	for _, v := range pcm.proxyClient {
+		v.(*proxyMock).returnError = true
+	}
+	err = pcm.InvalidateCredentialCache(ctx, nil)
+	assert.Error(t, err)
+
+	for _, v := range pcm.proxyClient {
+		v.(*proxyMock).returnGrpcError = true
+	}
+	err = pcm.InvalidateCredentialCache(ctx, nil)
+	assert.Error(t, err)
 }

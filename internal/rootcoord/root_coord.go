@@ -69,6 +69,8 @@ import (
 // UniqueID is an alias of typeutil.UniqueID.
 type UniqueID = typeutil.UniqueID
 
+const InvalidCollectionID = UniqueID(0)
+
 // ------------------ struct -----------------------
 
 // DdOperation used to save ddMsg into etcd
@@ -965,7 +967,20 @@ func (c *Core) RemoveIndex(ctx context.Context, collName string, indexName strin
 }
 
 // ExpireMetaCache will call invalidate collection meta cache
-func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, ts typeutil.Timestamp) {
+func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, collectionID UniqueID, ts typeutil.Timestamp) error {
+	// if collectionID is specified, invalidate all the collection meta cache with the specified collectionID and return
+	if collectionID != InvalidCollectionID {
+		req := proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: ts,
+				SourceID:  c.session.ServerID,
+			},
+			CollectionID: collectionID,
+		}
+		return c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+	}
+
+	// if only collNames are specified, invalidate the collection meta cache with the specified collectionName
 	for _, collName := range collNames {
 		req := proxypb.InvalidateCollMetaCacheRequest{
 			Base: &commonpb.MsgBase{
@@ -976,8 +991,13 @@ func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, ts typeu
 			},
 			CollectionName: collName,
 		}
-		c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+		err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
+		if err != nil {
+			// TODO: try to expire all or directly return err?
+			return err
+		}
 	}
+	return nil
 }
 
 // Register register rootcoord at etcd
@@ -1187,6 +1207,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	invalidateCache := false
 	var ts typeutil.Timestamp
 	var collName string
+	var collectionID UniqueID
 
 	switch ddOp.Type {
 	// TODO remove create collection resend
@@ -1216,6 +1237,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 				return err
 			}
 			invalidateCache = true
+			collectionID = ddReq.CollectionID
 		} else {
 			log.Debug("collection has been removed, skip re-send DropCollection",
 				zap.String("collection name", collName))
@@ -1236,6 +1258,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 				return err
 			}
 			invalidateCache = true
+			collectionID = ddReq.CollectionID
 		} else {
 			log.Debug("partition has been created, skip re-send CreatePartition",
 				zap.String("collection name", collName), zap.String("partition name", ddReq.PartitionName))
@@ -1256,6 +1279,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 				return err
 			}
 			invalidateCache = true
+			collectionID = ddReq.CollectionID
 		} else {
 			log.Debug("partition has been removed, skip re-send DropPartition",
 				zap.String("collection name", collName), zap.String("partition name", ddReq.PartitionName))
@@ -1265,7 +1289,9 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 	}
 
 	if invalidateCache {
-		c.ExpireMetaCache(ctx, []string{collName}, ts)
+		if err = c.ExpireMetaCache(ctx, nil, collectionID, ts); err != nil {
+			return err
+		}
 	}
 
 	// Update DDOperation in etcd
@@ -2041,7 +2067,23 @@ func (c *Core) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseD
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
-	return c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
+	err := c.proxyClientManager.ReleaseDQLMessageStream(ctx, in)
+	if err != nil {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+	return succStatus(), nil
+}
+
+// InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
+func (c *Core) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
+	}
+	err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, in)
+	if err != nil {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+	return succStatus(), nil
 }
 
 // SegmentFlushCompleted check whether segment flush has completed

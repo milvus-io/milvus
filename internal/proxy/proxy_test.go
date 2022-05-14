@@ -1632,6 +1632,15 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		assert.Equal(t, "", resp.Reason)
+
+		// release collection cache
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.Equal(t, "", resp.Reason)
 	})
 
 	wg.Add(1)
@@ -1913,6 +1922,14 @@ func TestProxy(t *testing.T) {
 			Base:         nil,
 			DbID:         0,
 			CollectionID: collectionID,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		// release collection load cache
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base:           nil,
+			CollectionName: collectionName,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -3016,7 +3033,10 @@ func TestProxy_Import(t *testing.T) {
 	msgStreamFactory := newSimpleMockMsgStreamFactory()
 	rc.Start()
 	defer rc.Stop()
-	err := InitMetaCache(rc)
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	err := InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 	rc.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{

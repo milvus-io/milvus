@@ -245,7 +245,7 @@ func (node *Proxy) Init() error {
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("init meta cache", zap.String("role", typeutil.ProxyRole))
-	if err := InitMetaCache(node.rootCoord); err != nil {
+	if err := InitMetaCache(node.rootCoord, node.queryCoord); err != nil {
 		log.Warn("failed to init meta cache", zap.Error(err), zap.String("role", typeutil.ProxyRole))
 		return err
 	}

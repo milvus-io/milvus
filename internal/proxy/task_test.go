@@ -1090,8 +1090,11 @@ func TestDropCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 
 	master := newMockGetChannelsService()
 	query := newMockGetChannelsService()
@@ -1175,8 +1178,11 @@ func TestHasCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestHasCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1257,8 +1263,11 @@ func TestDescribeCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1316,8 +1325,11 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1377,8 +1389,11 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 	ctx := context.Background()
-	InitMetaCache(rc)
+	InitMetaCache(rc, qc)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1639,10 +1654,13 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 
 	ctx := context.Background()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -1892,10 +1910,13 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
 
 	ctx := context.Background()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)

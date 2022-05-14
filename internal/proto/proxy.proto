@@ -28,6 +28,7 @@ message InvalidateCollMetaCacheRequest {
   common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;
+  int64 collectionID = 4;
 }
 
 message ReleaseDQLMessageStreamRequest {
