@@ -4,7 +4,10 @@ import (
 	"fmt"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -62,6 +65,7 @@ func (h *Handlers) RegisterRoutesTo(router gin.IRouter) {
 	router.GET("/persist/state", wrapHandler(h.handleGetFlushState))
 	router.GET("/persist/segment-info", wrapHandler(h.handleGetPersistentSegmentInfo))
 	router.GET("/query-segment-info", wrapHandler(h.handleGetQuerySegmentInfo))
+	router.GET("/replicas", wrapHandler(h.handleGetReplicas))
 
 	router.GET("/metrics", wrapHandler(h.handleGetMetrics))
 	router.POST("/load-balance", wrapHandler(h.handleLoadBalance))
@@ -71,6 +75,13 @@ func (h *Handlers) RegisterRoutesTo(router gin.IRouter) {
 
 	router.POST("/import", wrapHandler(h.handleImport))
 	router.GET("/import/state", wrapHandler(h.handleGetImportState))
+	router.GET("/import/tasks", wrapHandler(h.handleListImportTasks))
+
+	router.POST("/credential", wrapHandler(h.handleCreateCredential))
+	router.PATCH("/credential", wrapHandler(h.handleUpdateCredential))
+	router.DELETE("/credential", wrapHandler(h.handleDeleteCredential))
+	router.GET("/credential/users", wrapHandler(h.handleListCredUsers))
+
 }
 
 func (h *Handlers) handleGetHealth(c *gin.Context) (interface{}, error) {
@@ -87,13 +98,47 @@ func (h *Handlers) handleDummy(c *gin.Context) (interface{}, error) {
 	return h.proxy.Dummy(c, &req)
 }
 
+type WrappedCreateCollectionRequest struct {
+	// Not useful for now
+	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	// Not useful for now
+	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	// The unique collection name in milvus.(Required)
+	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
+	// The serialized `schema.CollectionSchema`(Required)
+	Schema schemapb.CollectionSchema `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
+	// Once set, no modification is allowed (Optional)
+	// https://github.com/milvus-io/milvus/issues/6690
+	ShardsNum int32 `protobuf:"varint,5,opt,name=shards_num,json=shardsNum,proto3" json:"shards_num,omitempty"`
+	// The consistency level that the collection used, modification is not supported now.
+	ConsistencyLevel commonpb.ConsistencyLevel `protobuf:"varint,6,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
+}
+
 func (h *Handlers) handleCreateCollection(c *gin.Context) (interface{}, error) {
-	req := milvuspb.CreateCollectionRequest{}
-	err := shouldBind(c, &req)
+	// About why we uses WrappedCreateCollectionRequest:
+	// Milvus uses `bytes` as the type of `schema` field,
+	// while the bytes has to be serialized by proto.Marshal.
+	// It's very inconvenient for an HTTP clien to do this,
+	// so we change the type to a struct,
+	// and does the conversion for user.
+	wrappedReq := WrappedCreateCollectionRequest{}
+	err := shouldBind(c, &wrappedReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
-	return h.proxy.CreateCollection(c, &req)
+	schemaProto, err := proto.Marshal(&wrappedReq.Schema)
+	if err != nil {
+		return nil, fmt.Errorf("%w: marshal schema failed: %v", errBadRequest, err)
+	}
+	req := &milvuspb.CreateCollectionRequest{
+		Base:             wrappedReq.Base,
+		DbName:           wrappedReq.DbName,
+		CollectionName:   wrappedReq.CollectionName,
+		Schema:           schemaProto,
+		ShardsNum:        wrappedReq.ShardsNum,
+		ConsistencyLevel: wrappedReq.ConsistencyLevel,
+	}
+	return h.proxy.CreateCollection(c, req)
 }
 
 func (h *Handlers) handleDropCollection(c *gin.Context) (interface{}, error) {
@@ -375,6 +420,15 @@ func (h *Handlers) handleGetQuerySegmentInfo(c *gin.Context) (interface{}, error
 	return h.proxy.GetQuerySegmentInfo(c, &req)
 }
 
+func (h *Handlers) handleGetReplicas(c *gin.Context) (interface{}, error) {
+	req := milvuspb.GetReplicasRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.GetReplicas(c, &req)
+}
+
 func (h *Handlers) handleGetMetrics(c *gin.Context) (interface{}, error) {
 	req := milvuspb.GetMetricsRequest{}
 	err := shouldBind(c, &req)
@@ -436,4 +490,49 @@ func (h *Handlers) handleGetImportState(c *gin.Context) (interface{}, error) {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
 	return h.proxy.GetImportState(c, &req)
+}
+
+func (h *Handlers) handleListImportTasks(c *gin.Context) (interface{}, error) {
+	req := milvuspb.ListImportTasksRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.ListImportTasks(c, &req)
+}
+
+func (h *Handlers) handleCreateCredential(c *gin.Context) (interface{}, error) {
+	req := milvuspb.CreateCredentialRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.CreateCredential(c, &req)
+}
+
+func (h *Handlers) handleUpdateCredential(c *gin.Context) (interface{}, error) {
+	req := milvuspb.UpdateCredentialRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.UpdateCredential(c, &req)
+}
+
+func (h *Handlers) handleDeleteCredential(c *gin.Context) (interface{}, error) {
+	req := milvuspb.DeleteCredentialRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.DeleteCredential(c, &req)
+}
+
+func (h *Handlers) handleListCredUsers(c *gin.Context) (interface{}, error) {
+	req := milvuspb.ListCredUsersRequest{}
+	err := shouldBind(c, &req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	return h.proxy.ListCredUsers(c, &req)
 }
