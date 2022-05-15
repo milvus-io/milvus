@@ -37,6 +37,11 @@ etcd:
     # Embedded Etcd only.
     # please adjust in embedded Milvus: /tmp/milvus/etcdData/
     dir: default.etcd
+  ssl:
+    enabled: false
+    tlsCert: /root/milvus/etcd-ssl/etcd-client.pem
+    tlsKey: /root/milvus/etcd-ssl/etcd-client-key.pem
+    tlsCACert: /root/milvus/etcd-ssl/ca.pem
 
 # please adjust in embedded Milvus: /tmp/milvus/data/
 localStorage:
