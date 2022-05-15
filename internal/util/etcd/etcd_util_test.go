@@ -48,4 +48,27 @@ func TestEtcd(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, resp.Count < 1)
 	assert.Equal(t, string(resp.Kvs[0].Value), "value")
+
+	Params.EtcdCfg.UseEmbedEtcd = false
+	Params.EtcdCfg.EtcdUseSSL = true
+	Params.EtcdCfg.EtcdTLSMinVersion = "1.3"
+	Params.EtcdCfg.EtcdTLSCACert = "../../../configs/cert/ca.pem"
+	Params.EtcdCfg.EtcdTLSCert = "../../../configs/cert/client.pem"
+	Params.EtcdCfg.EtcdTLSKey = "../../../configs/cert/client.key"
+	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+
+	Params.EtcdCfg.EtcdTLSMinVersion = "some not right word"
+	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
+	assert.NotNil(t, err)
+
+	Params.EtcdCfg.EtcdTLSMinVersion = "1.2"
+	Params.EtcdCfg.EtcdTLSCACert = "wrong/file"
+	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
+	assert.NotNil(t, err)
+
+	Params.EtcdCfg.EtcdTLSCACert = "../../../configs/cert/ca.pem"
+	Params.EtcdCfg.EtcdTLSCert = "wrong/file"
+	assert.NotNil(t, err)
+
 }
