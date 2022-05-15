@@ -39,7 +39,7 @@ default_search_exp = "int64 >= 0"
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_search_ip_params =ct.default_search_ip_params
-
+default_search_binary_params = ct.default_search_binary_params
 
 class TestIndexParams(TestcaseBase):
     """ Test case of index interface """
@@ -937,201 +937,145 @@ class TestNewIndexBase(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, PQ_index, index_name=ct.default_index_name)
         assert len(collection_w.indexes) == 1
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_index_collection_not_create_ip(self):
+        """
+        target: test drop index interface when index not created
+        method: create collection and add entities in it, create index
+        expected: return code not equals to 0, drop index failed
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        collection_w.drop_index(index_name=default_field_name, check_task=CheckTasks.err_res,
+                                check_items={ct.err_code: 0, ct.err_msg: "Index doesn\'t exist."})
 
-class TestIndexBinary:
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in CPU mode")
+
+class TestNewIndexBinary(TestcaseBase):
+
+    def get_simple_index(self, request):
+        log.info(request.param)
         return copy.deepcopy(request.param)
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_binary_index()
-    )
-    def get_jaccard_index(self, request, connect):
-        if request.param["index_type"] in binary_support():
-            request.param["metric_type"] = "JACCARD"
-            return request.param
-        else:
-            pytest.skip("Skip index")
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_binary_index()
-    )
-    def get_l2_index(self, request, connect):
-        request.param["metric_type"] = "L2"
-        return request.param
-
-    @pytest.fixture(
-        scope="function",
-        params=[
-            1,
-            10,
-            1111
-        ],
-    )
-    def get_nq(self, request):
-        yield request.param
-
     """
-    ******************************************************************
-      The following cases are used to test `create_index` function
-    ******************************************************************
+        ******************************************************************
+          The following cases are used to test `create_index` function
+        ******************************************************************
     """
 
     @pytest.mark.tags(CaseLabel.L2)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index(self, connect, binary_collection, get_jaccard_index):
+    def test_create_index(self):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        result = connect.insert(binary_collection, default_binary_entities)
-        connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        binary_index = connect.describe_index(binary_collection, "")
-        create_target_index(get_jaccard_index, binary_field_name)
-        assert binary_index == get_jaccard_index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        df, _ = cf.gen_default_binary_dataframe_data()
+        collection_w.insert(data=df)
+        collection_w.create_index(default_string_field_name, default_string_index_params, index_name=binary_field_name)
+        assert collection_w.has_index(index_name=binary_field_name)[0] == True
 
     @pytest.mark.tags(CaseLabel.L0)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_partition(self, connect, binary_collection, get_jaccard_index):
+    def test_create_index_partition(self):
         """
         target: test create index interface
         method: create collection, create partition, and add entities in it, create index
         expected: return search success
         """
-        connect.create_partition(binary_collection, default_tag)
-        result = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
-        connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        binary_index = connect.describe_index(binary_collection, "")
-        create_target_index(get_jaccard_index, binary_field_name)
-        assert binary_index == get_jaccard_index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
+        df, _ = cf.gen_default_binary_dataframe_data()
+        ins_res, _ = partition_w.insert(df)
+        assert len(ins_res.primary_keys) == len(df)
+        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params, index_name=binary_field_name)
+        assert collection_w.has_index(index_name=binary_field_name)[0] == True
+        assert len(collection_w.indexes) == 1
 
     @pytest.mark.tags(CaseLabel.L0)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_search_with_query_vectors(self, connect, binary_collection, get_jaccard_index, get_nq):
+    def test_create_index_search_with_query_vectors(self):
         """
         target: test create index interface, search with more query vectors
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        nq = get_nq
-        result = connect.insert(binary_collection, default_binary_entities)
-        connect.flush([binary_collection])
-        connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        connect.load_collection(binary_collection)
-        search_param = get_search_param(get_jaccard_index["index_type"], metric_type="JACCARD")
-        params, _ = gen_search_vectors_params(binary_field_name, default_binary_entities, default_top_k, nq,
-                                              search_params=search_param, metric_type="JACCARD")
-        log.info(params)
-        res = connect.search(binary_collection, **params)
-        assert len(res) == nq
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        df, _ = cf.gen_default_binary_dataframe_data()
+        collection_w.insert(data=df)
+        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params,  index_name=binary_field_name)
+        collection_w.load()
+        _, vectors = cf.gen_binary_vectors(default_nq, default_dim)
+        collection_w.search(vectors[:default_nq], binary_field_name,
+                            default_search_binary_params, default_limit,
+                            default_search_exp)
 
     # @pytest.mark.timeout(BUILD_TIMEOUT)
     @pytest.mark.tags(CaseLabel.L2)
-    def test_create_index_invalid_metric_type_binary(self, connect, binary_collection, get_l2_index):
+    def test_create_index_invalid_metric_type_binary(self):
         """
         target: test create index interface with invalid metric type
         method: add entities into binary collection, flush, create index with L2 metric type.
         expected: return create_index failure
         """
-        # insert 6000 vectors
-        result = connect.insert(binary_collection, default_binary_entities)
-        connect.flush([binary_collection])
-        with pytest.raises(Exception) as e:
-            res = connect.create_index(binary_collection, binary_field_name, get_l2_index)
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        binary_index_params = {'index_type': 'BIN_IVF_FLAT', 'metric_type': 'L2', 'params': {'nlist': 64}}
+        collection_w.create_index(default_binary_vec_field_name, binary_index_params,
+                                  index_name=binary_field_name, check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 0, ct.err_msg: "Invalid metric_type: L2, which does not match the index type: BIN_IVF_FLAT"})
 
     """
-    ******************************************************************
-      The following cases are used to test `describe_index` function
-    ***************************************************************
+        ******************************************************************
+          The following cases are used to test `drop_index` function
+        ******************************************************************
     """
-
-    @pytest.mark.skip("repeat with test_create_index binary")
-    def _test_get_index_info(self, connect, binary_collection, get_jaccard_index):
-        """
-        target: test describe index interface
-        method: create collection and add entities in it, create index, call describe index
-        expected: return code 0, and index instructure
-        """
-        result = connect.insert(binary_collection, default_binary_entities)
-        connect.flush([binary_collection])
-        connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        stats = connect.get_collection_stats(binary_collection)
-        assert stats["row_count"] == default_nb
-        for partition in stats["partitions"]:
-            segments = partition["segments"]
-            if segments:
-                for segment in segments:
-                    for file in segment["files"]:
-                        if "index_type" in file:
-                            assert file["index_type"] == get_jaccard_index["index_type"]
-
-    @pytest.mark.skip("repeat with test_create_index_partition binary")
-    def _test_get_index_info_partition(self, connect, binary_collection, get_jaccard_index):
-        """
-        target: test describe index interface
-        method: create collection, create partition and add entities in it, create index, call describe index
-        expected: return code 0, and index instructure
-        """
-        connect.create_partition(binary_collection, default_tag)
-        result = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
-        connect.flush([binary_collection])
-        connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        stats = connect.get_collection_stats(binary_collection)
-        log.info(stats)
-        assert stats["row_count"] == default_nb
-        assert len(stats["partitions"]) == 2
-        for partition in stats["partitions"]:
-            segments = partition["segments"]
-            if segments:
-                for segment in segments:
-                    for file in segment["files"]:
-                        if "index_type" in file:
-                            assert file["index_type"] == get_jaccard_index["index_type"]
-
-    """
-    ******************************************************************
-      The following cases are used to test `drop_index` function
-    ******************************************************************
-    """
-
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_index(self, connect, binary_collection, get_jaccard_index):
+    def test_drop_index(self):
         """
         target: test drop index interface
         method: create collection and add entities in it, create index, call drop index
         expected: return code 0, and default index param
         """
-        connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        stats = connect.get_collection_stats(binary_collection)
-        log.info(stats)
-        connect.drop_index(binary_collection, binary_field_name)
-        binary_index = connect.describe_index(binary_collection, "")
-        assert not binary_index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        df, _ = cf.gen_default_binary_dataframe_data()
+        collection_w.insert(data=df)
+        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params, index_name=binary_field_name)
+        assert len(collection_w.indexes) == 1
+        collection_w.drop_index(index_name=binary_field_name)
+        assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_drop_index_partition(self, connect, binary_collection, get_jaccard_index):
+    def test_drop_index_partition(self):
         """
         target: test drop index interface
         method: create collection, create partition and add entities in it,
                 create index on collection, call drop collection index
         expected: return code 0, and default index param
         """
-        connect.create_partition(binary_collection, default_tag)
-        result = connect.insert(binary_collection, default_binary_entities, partition_name=default_tag)
-        connect.flush([binary_collection])
-        connect.create_index(binary_collection, binary_field_name, get_jaccard_index)
-        connect.drop_index(binary_collection, binary_field_name)
-        binary_index = connect.describe_index(binary_collection, "")
-        assert not binary_index
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
+        df, _ = cf.gen_default_binary_dataframe_data()
+        ins_res, _ = partition_w.insert(df)
+        assert len(ins_res.primary_keys) == len(df)
+        collection_w.create_index(default_binary_vec_field_name, default_binary_index_params,
+                                  index_name=binary_field_name)
+        assert collection_w.has_index(index_name=binary_field_name)[0] == True
+        assert len(collection_w.indexes) == 1
+        collection_w.drop_index(index_name=binary_field_name)
+        assert collection_w.has_index(index_name=binary_field_name)[0] == False
+        assert len(collection_w.indexes) == 0
 
 
 class TestIndexInvalid(object):
@@ -1186,91 +1130,71 @@ class TestIndexInvalid(object):
         with pytest.raises(Exception) as e:
             connect.create_index(collection, field_name, get_index)
 
+class TestNewIndexAsync(TestcaseBase):
+    @pytest.fixture(scope="function", params=[False, True])
+    def _async(self, request):
+        yield request.param
 
-class TestIndexAsync:
-    @pytest.fixture(scope="function", autouse=True)
-    def skip_http_check(self, args):
-        if args["handler"] == "HTTP":
-            pytest.skip("skip in http mode")
-
+    def call_back(self):
+        assert True
     """
-    ******************************************************************
-      The following cases are used to test `create_index` function
-    ******************************************************************
-    """
-
-    @pytest.fixture(
-        scope="function",
-        params=gen_simple_index()
-    )
-    def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in CPU mode")
-        return copy.deepcopy(request.param)
-
-    def check_result(self, res):
-        log.info("In callback check search result")
-        log.info(res)
-
-    """
-    ******************************************************************
-      The following cases are used to test `create_index` function
-    ******************************************************************
+       ******************************************************************
+         The following cases are used to test `create_index` function
+       ******************************************************************
     """
 
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index(self, connect, collection, get_simple_index):
+    def test_create_index(self, _async):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        result = connect.insert(collection, default_entities)
-        log.info("start index")
-        future = connect.create_index(collection, field_name, get_simple_index, _async=True)
-        log.info("before result")
-        res = future.result()
-        # TODO:
-        log.info(res)
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        res, _ = collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                  index_name=ct.default_index_name, _async=_async)
+        if _async:
+            res.done()
+            assert len(collection_w.indexes) == 1
 
     @pytest.mark.tags(CaseLabel.L0)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_drop(self, connect, collection):
+    def test_create_index_drop(self, _async):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        result = connect.insert(collection, default_entities)
-        connect.create_index(collection, field_name, default_index, _async=True)
-        connect.drop_collection(collection)
-        with pytest.raises(Exception, match=f'DescribeIndex failed: collection {collection} not found'):
-            connect.describe_index(collection, "")
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_create_index_with_invalid_collection_name(self, connect):
-        collection_name = " "
-        with pytest.raises(Exception) as e:
-            future = connect.create_index(collection_name, field_name, default_index, _async=True)
-            res = future.result()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        res, _ = collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                           index_name=ct.default_index_name, _async=_async)
+        if _async:
+            res.done()
+            assert len(collection_w.indexes) == 1
+        collection_w.drop_index(index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L0)
     # @pytest.mark.timeout(BUILD_TIMEOUT)
-    def test_create_index_callback(self, connect, collection, get_simple_index):
+    def test_create_index_callback(self):
         """
         target: test create index interface
         method: create collection and add entities in it, create index
         expected: return search success
         """
-        result = connect.insert(collection, default_entities)
-        log.info("start index")
-        future = connect.create_index(collection, field_name, get_simple_index, _async=True,
-                                      _callback=self.check_result)
-        log.info("before result")
-        res = future.result()
-        # TODO:
-        log.info(res)
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        res, _ = collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
+                                           index_name=ct.default_index_name, _async=True,
+                                           _callback=self.call_back())
 
 
 class  TestIndexString(TestcaseBase):
