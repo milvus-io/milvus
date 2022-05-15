@@ -61,11 +61,15 @@ type EtcdConfig struct {
 	Base *BaseTable
 
 	// --- ETCD ---
-	Endpoints    []string
-	MetaRootPath string
-	KvRootPath   string
-	EtcdLogLevel string
-	EtcdLogPath  string
+	Endpoints     []string
+	MetaRootPath  string
+	KvRootPath    string
+	EtcdLogLevel  string
+	EtcdLogPath   string
+	EtcdUseSSL    bool
+	EtcdTlsCert   string
+	EtcdTlsKey    string
+	EtcdTlsCACert string
 
 	// --- Embed ETCD ---
 	UseEmbedEtcd bool
@@ -90,6 +94,10 @@ func (p *EtcdConfig) LoadCfgToMemory() {
 	p.initKvRootPath()
 	p.initEtcdLogLevel()
 	p.initEtcdLogPath()
+	p.initEtcdUseSSL()
+	p.initEtcdTlsCert()
+	p.initEtcdTlsKey()
+	p.initEtcdTlsCACert()
 }
 
 func (p *EtcdConfig) initUseEmbedEtcd() {
@@ -147,6 +155,22 @@ func (p *EtcdConfig) initEtcdLogLevel() {
 
 func (p *EtcdConfig) initEtcdLogPath() {
 	p.EtcdLogPath = p.Base.LoadWithDefault("etcd.log.path", defaultEtcdLogPath)
+}
+
+func (p *EtcdConfig) initEtcdUseSSL() {
+	p.EtcdUseSSL = p.Base.ParseBool("etcd.ssl.enabled", false)
+}
+
+func (p *EtcdConfig) initEtcdTlsCert() {
+	p.EtcdTlsCert = p.Base.LoadWithDefault("etcd.ssl.tlsCert", "")
+}
+
+func (p *EtcdConfig) initEtcdTlsKey() {
+	p.EtcdTlsKey = p.Base.LoadWithDefault("etcd.ssl.tlsKey", "")
+}
+
+func (p *EtcdConfig) initEtcdTlsCACert() {
+	p.EtcdTlsCACert = p.Base.LoadWithDefault("etcd.ssl.tlsCACert", "")
 }
 
 type LocalStorageConfig struct {
