@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
 	"testing"
@@ -406,6 +407,7 @@ func TestMinIOCM(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, p, "")
 	})
+
 	t.Run("test Mmap", func(t *testing.T) {
 		testMmapRoot := path.Join(testMinIOKVRoot, "mmap")
 		ctx, cancel := context.WithCancel(context.Background())
@@ -425,5 +427,45 @@ func TestMinIOCM(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, r)
 
+	})
+
+	t.Run("test Prefix", func(t *testing.T) {
+		testPrefix := path.Join(testMinIOKVRoot, "prefix")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		require.NoError(t, err)
+		defer testCM.RemoveWithPrefix(testPrefix)
+
+		pathB := path.Join("a", "b")
+
+		key := path.Join(testPrefix, pathB)
+		value := []byte("a")
+
+		err = testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		pathC := path.Join("a", "c")
+		key = path.Join(testPrefix, pathC)
+		err = testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		pathPrefix := path.Join(testPrefix, "a")
+		r, err := testCM.ListWithPrefix(pathPrefix)
+		assert.NoError(t, err)
+		assert.Equal(t, len(r), 2)
+
+		testCM.RemoveWithPrefix(testPrefix)
+		r, err = testCM.ListWithPrefix(pathPrefix)
+		assert.NoError(t, err)
+		assert.Equal(t, len(r), 0)
+
+		// test wrong prefix
+		b := make([]byte, 2048)
+		pathWrong := path.Join(testPrefix, string(b))
+		_, err = testCM.ListWithPrefix(pathWrong)
+		assert.Error(t, err)
+		fmt.Println(err)
 	})
 }

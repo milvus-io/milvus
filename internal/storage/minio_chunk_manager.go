@@ -72,9 +72,9 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 			return err
 		}
 		if !bucketExists {
-			log.Debug("minio chunk manager new minio client", zap.Any("Check bucket", "bucket not exist"))
+			log.Info("minio chunk manager new minio client", zap.Any("Check bucket", "bucket not exist"))
 			if c.createBucket {
-				log.Debug("minio chunk manager create minio bucket.", zap.Any("bucket name", c.bucketName))
+				log.Info("minio chunk manager create minio bucket.", zap.Any("bucket name", c.bucketName))
 				return minIOClient.MakeBucket(ctx, c.bucketName, minio.MakeBucketOptions{})
 			}
 			return fmt.Errorf("bucket %s not Existed", c.bucketName)
@@ -91,14 +91,18 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 		Client:     minIOClient,
 		bucketName: c.bucketName,
 	}
-	log.Debug("minio chunk manager new minio client success.")
+	log.Info("minio chunk manager new minio client success.")
 
 	return mcm, nil
 }
 
 // Path returns the path of minio data if exists.
 func (mcm *MinioChunkManager) Path(filePath string) (string, error) {
-	if !mcm.Exist(filePath) {
+	exist, err := mcm.Exist(filePath)
+	if err != nil {
+		return "", err
+	}
+	if !exist {
 		return "", errors.New("minio file manage cannot be found with filePath:" + filePath)
 	}
 	return filePath, nil
@@ -106,15 +110,18 @@ func (mcm *MinioChunkManager) Path(filePath string) (string, error) {
 
 // Reader returns the path of minio data if exists.
 func (mcm *MinioChunkManager) Reader(filePath string) (FileReader, error) {
-	if !mcm.Exist(filePath) {
-		return nil, errors.New("minio file manage cannot be found with filePath:" + filePath)
+	reader, err := mcm.Client.GetObject(mcm.ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
+	if err != nil {
+		log.Warn("failed to get object", zap.String("path", filePath), zap.Error(err))
+		return nil, err
 	}
-	return mcm.Client.GetObject(mcm.ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
+	return reader, nil
 }
 
 func (mcm *MinioChunkManager) Size(filePath string) (int64, error) {
 	objectInfo, err := mcm.Client.StatObject(mcm.ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
 	if err != nil {
+		log.Warn("failed to stat object", zap.String("path", filePath), zap.Error(err))
 		return 0, err
 	}
 
@@ -126,6 +133,7 @@ func (mcm *MinioChunkManager) Write(filePath string, content []byte) error {
 	_, err := mcm.Client.PutObject(mcm.ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{})
 
 	if err != nil {
+		log.Warn("failed to put object", zap.String("path", filePath), zap.Error(err))
 		return err
 	}
 
@@ -149,20 +157,34 @@ func (mcm *MinioChunkManager) MultiWrite(kvs map[string][]byte) error {
 }
 
 // Exist checks whether chunk is saved to minio storage.
-func (mcm *MinioChunkManager) Exist(filePath string) bool {
+func (mcm *MinioChunkManager) Exist(filePath string) (bool, error) {
 	_, err := mcm.Client.StatObject(mcm.ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
-	return err == nil
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return false, nil
+		}
+		log.Warn("failed to stat object", zap.String("path", filePath), zap.Error(err))
+		return false, err
+	}
+	return true, nil
 }
 
 // Read reads the minio storage data if exists.
 func (mcm *MinioChunkManager) Read(filePath string) ([]byte, error) {
 	object, err := mcm.Client.GetObject(mcm.ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
 	if err != nil {
+		log.Warn("failed to get object", zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 	defer object.Close()
 
-	return ioutil.ReadAll(object)
+	data, err := ioutil.ReadAll(object)
+	if err != nil {
+		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+		return nil, err
+	}
+	return data, nil
 }
 
 func (mcm *MinioChunkManager) MultiRead(keys []string) ([][]byte, error) {
@@ -189,7 +211,6 @@ func (mcm *MinioChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte,
 	}
 	objectsValues, err := mcm.MultiRead(objectsKeys)
 	if err != nil {
-		log.Error(fmt.Sprintf("MinIO load with prefix error. path = %s", prefix), zap.Error(err))
 		return nil, nil, err
 	}
 
@@ -209,21 +230,32 @@ func (mcm *MinioChunkManager) ReadAt(filePath string, off int64, length int64) (
 	opts := minio.GetObjectOptions{}
 	err := opts.SetRange(off, off+length-1)
 	if err != nil {
+		log.Warn("failed to set range", zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 
 	object, err := mcm.Client.GetObject(mcm.ctx, mcm.bucketName, filePath, opts)
 	if err != nil {
+		log.Warn("failed to get object", zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 	defer object.Close()
-	return ioutil.ReadAll(object)
+	data, err := ioutil.ReadAll(object)
+	if err != nil {
+		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+		return nil, err
+	}
+	return data, nil
 }
 
 // Remove deletes an object with @key.
-func (mcm *MinioChunkManager) Remove(key string) error {
-	err := mcm.Client.RemoveObject(mcm.ctx, mcm.bucketName, key, minio.RemoveObjectOptions{})
-	return err
+func (mcm *MinioChunkManager) Remove(filePath string) error {
+	err := mcm.Client.RemoveObject(mcm.ctx, mcm.bucketName, filePath, minio.RemoveObjectOptions{})
+	if err != nil {
+		log.Warn("failed to remove object", zap.String("path", filePath), zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // MultiRemove deletes a objects with @keys.
@@ -243,18 +275,10 @@ func (mcm *MinioChunkManager) MultiRemove(keys []string) error {
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *MinioChunkManager) RemoveWithPrefix(prefix string) error {
-	objectsCh := make(chan minio.ObjectInfo)
-
-	go func() {
-		defer close(objectsCh)
-
-		for object := range mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
-			objectsCh <- object
-		}
-	}()
-
-	for rErr := range mcm.Client.RemoveObjects(mcm.ctx, mcm.bucketName, objectsCh, minio.RemoveObjectsOptions{GovernanceBypass: true}) {
+	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
+	for rErr := range mcm.Client.RemoveObjects(mcm.ctx, mcm.bucketName, objects, minio.RemoveObjectsOptions{GovernanceBypass: true}) {
 		if rErr.Err != nil {
+			log.Warn("failed to remove objects", zap.String("prefix", prefix), zap.Error(rErr.Err))
 			return rErr.Err
 		}
 	}
@@ -262,11 +286,14 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(prefix string) error {
 }
 
 func (mcm *MinioChunkManager) ListWithPrefix(prefix string) ([]string, error) {
-	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix})
-
+	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
 	var objectsKeys []string
 
 	for object := range objects {
+		if object.Err != nil {
+			log.Warn("failed to list with prefix", zap.String("prefix", prefix), zap.Error(object.Err))
+			return nil, object.Err
+		}
 		objectsKeys = append(objectsKeys, object.Key)
 	}
 	return objectsKeys, nil
