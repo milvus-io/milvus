@@ -17,6 +17,10 @@
 package etcd
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"github.com/pkg/errors"
+	"io/ioutil"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -28,6 +32,9 @@ func GetEtcdClient(cfg *paramtable.EtcdConfig) (*clientv3.Client, error) {
 	if cfg.UseEmbedEtcd {
 		return GetEmbedEtcdClient()
 	}
+	if cfg.EtcdUseSSL {
+		return GetRemoteEtcdSSLClient(cfg.Endpoints, cfg.EtcdTlsCert, cfg.EtcdTlsKey, cfg.EtcdTlsCACert)
+	}
 	return GetRemoteEtcdClient(cfg.Endpoints)
 }
 
@@ -37,4 +44,28 @@ func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 	})
+}
+
+func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string, caCertFile string) (*clientv3.Client, error) {
+	var cfg clientv3.Config
+	cfg.Endpoints = endpoints
+	cfg.DialTimeout = 5 * time.Second
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, errors.Wrap(err, "load etcd cert key pair error")
+	}
+	caCert, err := ioutil.ReadFile(caCertFile)
+	if err != nil {
+		return nil, errors.Wrapf(err, "load etcd CACert file error, filename = %s", caCertFile)
+	}
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+	cfg.TLS = &tls.Config{
+		Certificates: []tls.Certificate{
+			cert,
+		},
+		RootCAs: caCertPool,
+	}
+	return clientv3.New(cfg)
 }
