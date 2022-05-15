@@ -4,6 +4,7 @@ import time
 from time import sleep
 from delayed_assert import expect
 from base.collection_wrapper import ApiCollectionWrapper
+from base.utility_wrapper import ApiUtilityWrapper
 from common import common_func as cf
 from common import common_type as ct
 from chaos import constants
@@ -34,14 +35,16 @@ class Checker:
        b. count operations and success rate
     """
 
-    def __init__(self):
+    def __init__(self, collection_name=None, shards_num=2):
         self._succ = 0
         self._fail = 0
         self.rsp_times = []
         self.average_time = 0
         self.c_wrap = ApiCollectionWrapper()
-        self.c_wrap.init_collection(name=cf.gen_unique_str('Checker_'),
+        c_name = collection_name if collection_name is not None else cf.gen_unique_str('Checker_')
+        self.c_wrap.init_collection(name=c_name,
                                     schema=cf.gen_default_collection_schema(),
+                                    shards_num=shards_num,
                                     timeout=timeout,
                                     enable_traceback=enable_traceback)
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH),
@@ -75,9 +78,9 @@ class Checker:
 class SearchChecker(Checker):
     """check search operations in a dependent thread"""
 
-    def __init__(self):
-        super().__init__()
-        self.c_wrap.load(enable_traceback=enable_traceback)  # do load before search
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1):
+        super().__init__(collection_name=collection_name, shards_num=shards_num)
+        self.c_wrap.load(replica_number=replica_number)  # do load before search
 
     def keep_running(self):
         while True:
@@ -105,8 +108,8 @@ class SearchChecker(Checker):
 class InsertFlushChecker(Checker):
     """check Insert and flush operations in a dependent thread"""
 
-    def __init__(self, flush=False):
-        super().__init__()
+    def __init__(self, collection_name=None, flush=False, shards_num=2):
+        super().__init__(collection_name=collection_name, shards_num=shards_num)
         self._flush = flush
         self.initial_entities = self.c_wrap.num_entities
 
@@ -203,9 +206,9 @@ class IndexChecker(Checker):
 class QueryChecker(Checker):
     """check query operations in a dependent thread"""
 
-    def __init__(self):
-        super().__init__()
-        self.c_wrap.load(enable_traceback=enable_traceback)  # load before query
+    def __init__(self, collection_name=None, shards_num=2, replica_number=1):
+        super().__init__(collection_name=collection_name, shards_num=shards_num)
+        self.c_wrap.load(replica_number=replica_number)  # do load before query
 
     def keep_running(self):
         while True:
@@ -226,6 +229,49 @@ class QueryChecker(Checker):
             else:
                 self._fail += 1
             sleep(constants.WAIT_PER_OP / 10)
+
+
+class BulkLoadChecker(Checker):
+    """check bulk load operations in a dependent thread"""
+
+    def __init__(self,):
+        super().__init__()
+        self.utility_wrap = ApiUtilityWrapper()
+        self.schema = cf.gen_default_collection_schema()
+        self.files = ["/tmp/test_data.json"]
+        self.failed_tasks = []
+
+    def update(self, files=None, schema=None):
+        if files:
+            self.files = files
+        if schema:
+            self.schema = schema
+
+    def keep_running(self):
+        while True:
+            c_name = cf.gen_unique_str("BulkLoadChecker_")
+            self.c_wrap.init_collection(name=c_name, schema=self.schema)
+            # import data
+            t0 = time.time()
+            task_ids, res_1 = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                          partition_name='',
+                                                          row_based=True,
+                                                          files=self.files)
+            log.info(f"bulk load task ids:{task_ids}")
+            completed, res_2 = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+                                                                                timeout=30)
+            t1 = time.time() - t0
+            if completed and res_1 and res_2:
+                self.rsp_times.append(t1 - t0)
+                self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
+                self._succ += 1
+                log.debug(f"bulk load success, time: {t1 - t0:.4f}, average_time: {self.average_time:4f}")                         
+            else:
+                self._fail += 1
+                self.failed_tasks.append(c_name)
+                sleep(constants.WAIT_PER_OP / 10)
+
+
 
 
 def assert_statistic(checkers, expectations={}):
