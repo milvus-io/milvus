@@ -50,7 +50,7 @@ class TestConnectionParams(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=DefaultConfig.DEFAULT_USING)
 
         # No check for **kwargs
-        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, _kwargs=[1, 2],
+        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=1,
                                      check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 0, ct.err_msg: cem.NoHostPort})
 
