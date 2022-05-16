@@ -381,11 +381,52 @@ func (kv *RocksdbKV) DeleteRange(startKey, endKey string) error {
 }
 
 // MultiRemoveWithPrefix is used to remove a batch of key-values with the same prefix
-func (kv *RocksdbKV) MultiRemoveWithPrefix(keys []string) error {
-	panic("not implement")
+func (kv *RocksdbKV) MultiRemoveWithPrefix(prefixes []string) error {
+	if kv.DB == nil {
+		return errors.New("rocksdb instance is nil when do RemoveWithPrefix")
+	}
+	writeBatch := gorocksdb.NewWriteBatch()
+	defer writeBatch.Destroy()
+	kv.prepareRemovePrefix(prefixes, writeBatch)
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
+	return err
 }
 
 // MultiSaveAndRemoveWithPrefix is used to execute a batch operators with the same prefix
 func (kv *RocksdbKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
-	panic("not implement")
+	if kv.DB == nil {
+		return errors.New("Rocksdb instance is nil when do MultiSaveAndRemove")
+	}
+	writeBatch := gorocksdb.NewWriteBatch()
+	defer writeBatch.Destroy()
+	for k, v := range saves {
+		writeBatch.Put([]byte(k), []byte(v))
+	}
+	kv.prepareRemovePrefix(removals, writeBatch)
+	err := kv.DB.Write(kv.WriteOptions, writeBatch)
+	return err
+}
+
+func (kv *RocksdbKV) prepareRemovePrefix(prefixes []string, writeBatch *gorocksdb.WriteBatch) {
+	// check if any empty prefix, if yes then we delete whole table, no more data should be remained
+	for _, prefix := range prefixes {
+		if len(prefix) == 0 {
+			// better to use drop column family, but as we use default column family, we just delete ["",lastKey+1)
+			readOpts := gorocksdb.NewDefaultReadOptions()
+			defer readOpts.Destroy()
+			iter := NewRocksIterator(kv.DB, readOpts)
+			defer iter.Close()
+			// seek to the last key
+			iter.SeekToLast()
+			if iter.Valid() {
+				writeBatch.DeleteRange([]byte(prefix), []byte(typeutil.AddOne(string(iter.Key().Data()))))
+				return
+			}
+		}
+	}
+	// if no empty prefix, prepare range deletion in write batch
+	for _, prefix := range prefixes {
+		prefixEnd := typeutil.AddOne(prefix)
+		writeBatch.DeleteRange([]byte(prefix), []byte(prefixEnd))
+	}
 }

@@ -190,6 +190,73 @@ func TestRocksdbKV_Prefix(t *testing.T) {
 
 }
 
+func TestRocksdbKV_Txn(t *testing.T) {
+	name := "/tmp/rocksdb"
+	rocksdbKV, err := rocksdbkv.NewRocksdbKV(name)
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(name)
+	defer rocksdbKV.Close()
+	// Need to call RemoveWithPrefix
+	defer rocksdbKV.RemoveWithPrefix("")
+
+	kvs := map[string]string{
+		"abcd":    "123",
+		"abdd":    "1234",
+		"abddqqq": "1234555",
+	}
+	err = rocksdbKV.MultiSave(kvs)
+	assert.NoError(t, err)
+
+	keys, vals, err := rocksdbKV.LoadWithPrefix("")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 3)
+	assert.Equal(t, len(vals), 3)
+
+	removePrefix := []string{"abc", "abd"}
+	rocksdbKV.MultiRemoveWithPrefix(removePrefix)
+
+	keys, vals, err = rocksdbKV.LoadWithPrefix("")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 0)
+	assert.Equal(t, len(vals), 0)
+
+	err = rocksdbKV.MultiSave(kvs)
+	assert.NoError(t, err)
+	keys, vals, err = rocksdbKV.LoadWithPrefix("")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 3)
+	assert.Equal(t, len(vals), 3)
+
+	// test delete the whole table
+	removePrefix = []string{"", "hello"}
+	rocksdbKV.MultiRemoveWithPrefix(removePrefix)
+
+	keys, vals, err = rocksdbKV.LoadWithPrefix("")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 0)
+	assert.Equal(t, len(vals), 0)
+
+	err = rocksdbKV.MultiSave(kvs)
+	assert.NoError(t, err)
+	keys, vals, err = rocksdbKV.LoadWithPrefix("")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 3)
+	assert.Equal(t, len(vals), 3)
+
+	// test remove and save
+	removePrefix = []string{"abc", "abd"}
+	kvs2 := map[string]string{
+		"abfad": "12345",
+	}
+	rocksdbKV.MultiSaveAndRemoveWithPrefix(kvs2, removePrefix)
+	keys, vals, err = rocksdbKV.LoadWithPrefix("")
+	assert.NoError(t, err)
+	assert.Equal(t, len(keys), 1)
+	assert.Equal(t, len(vals), 1)
+}
+
 func TestRocksdbKV_Goroutines(t *testing.T) {
 	name := "/tmp/rocksdb"
 	rocksdbkv, err := rocksdbkv.NewRocksdbKV(name)
