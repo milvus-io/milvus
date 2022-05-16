@@ -2068,9 +2068,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 			log.Info("loadBalanceTask: add a childTask", zap.Int32("task type", int32(internalTask.msgType())), zap.Any("task", internalTask))
 		}
 		log.Info("loadBalanceTask: assign child task done", zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
-	}
-
-	if lbt.triggerCondition == querypb.TriggerCondition_LoadBalance {
+	} else if lbt.triggerCondition == querypb.TriggerCondition_LoadBalance {
 		if err := lbt.checkForManualLoadBalance(); err != nil {
 			lbt.setResultInfo(err)
 			return err
@@ -2084,7 +2082,6 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 
 		balancedSegmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 		balancedSegmentIDs := make([]UniqueID, 0)
-
 		for _, nodeID := range lbt.SourceNodeIDs {
 			nodeExist := lbt.cluster.hasNode(nodeID)
 			if !nodeExist {
@@ -2159,20 +2156,18 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						continue
 					}
 
-					for _, replica := range segmentInfo.ReplicaIds {
-						segmentBingLog := segmentID2Binlog[segmentID]
-						segmentLoadInfo := lbt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, collectionInfo.Schema)
-						msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
-						msgBase.MsgType = commonpb.MsgType_LoadSegments
-						loadSegmentReq := &querypb.LoadSegmentsRequest{
-							Base:         msgBase,
-							Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
-							Schema:       collectionInfo.Schema,
-							CollectionID: collectionID,
-							ReplicaID:    replica,
-						}
-						loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
+					segmentBingLog := segmentID2Binlog[segmentID]
+					segmentLoadInfo := lbt.broker.generateSegmentLoadInfo(ctx, collectionID, partitionID, segmentBingLog, true, collectionInfo.Schema)
+					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
+					msgBase.MsgType = commonpb.MsgType_LoadSegments
+					loadSegmentReq := &querypb.LoadSegmentsRequest{
+						Base:         msgBase,
+						Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+						Schema:       collectionInfo.Schema,
+						CollectionID: collectionID,
+						ReplicaID:    lbt.replicaID,
 					}
+					loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 				}
 
 				for _, info := range dmChannelInfos {
