@@ -19,6 +19,7 @@ package grpcproxy
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -789,261 +790,365 @@ func Test_NewServer(t *testing.T) {
 	server.queryCoordClient = &MockQueryCoord{}
 	server.dataCoordClient = &MockDataCoord{}
 
+	var wg sync.WaitGroup
 	t.Run("Run", func(t *testing.T) {
+		wg.Add(1)
 		err = server.Run()
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetComponentStates(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetStatisticsChannel(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("InvalidateCollectionMetaCache", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.InvalidateCollectionMetaCache(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ReleaseDQLMessageStream", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ReleaseDQLMessageStream(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("CreateCollection", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.CreateCollection(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("DropCollection", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.DropCollection(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("HasCollection", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.HasCollection(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("LoadCollection", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.LoadCollection(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ReleaseCollection", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ReleaseCollection(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("DescribeCollection", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.DescribeCollection(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetCollectionStatistics", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetCollectionStatistics(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ShowCollections", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ShowCollections(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("CreatePartition", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.CreatePartition(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("DropPartition", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.DropPartition(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("HasPartition", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.HasPartition(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("LoadPartitions", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.LoadPartitions(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ReleasePartitions", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ReleasePartitions(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetPartitionStatistics", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetPartitionStatistics(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ShowPartitions", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ShowPartitions(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("CreateIndex", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.CreateIndex(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("DropIndex", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.DropIndex(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("DescribeIndex", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.DescribeIndex(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetIndexBuildProgress", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetIndexBuildProgress(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetIndexState", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetIndexState(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("Insert", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.Insert(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("Delete", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.Delete(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("Search", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.Search(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("Flush", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.Flush(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("Query", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.Query(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("CalcDistance", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.CalcDistance(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetDdChannel", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetDdChannel(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetPersistentSegmentInfo", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetPersistentSegmentInfo(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetQuerySegmentInfo", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetQuerySegmentInfo(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("Dummy", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.Dummy(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("RegisterLink", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.RegisterLink(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetMetrics(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("LoadBalance", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.LoadBalance(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("CreateAlias", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.CreateAlias(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("DropAlias", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.DropAlias(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("AlterAlias", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.AlterAlias(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetCompactionState", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetCompactionState(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ManualCompaction", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ManualCompaction(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("GetCompactionStateWithPlans", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.GetCompactionStateWithPlans(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("CreateCredential", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.CreateCredential(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("UpdateCredential", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.UpdateCredential(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("DeleteCredential", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.DeleteCredential(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ListCredUsers", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ListCredUsers(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("InvalidateCredentialCache", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.InvalidateCredentialCache(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("UpdateCredentialCache", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.UpdateCredentialCache(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
 	t.Run("ClearCredUsersCache", func(t *testing.T) {
+		wg.Add(1)
 		_, err := server.ClearCredUsersCache(ctx, nil)
 		assert.Nil(t, err)
+		wg.Done()
 	})
 
+	wg.Wait()
 	err = server.Stop()
 	assert.Nil(t, err)
 
