@@ -655,7 +655,7 @@ SegmentSealedImpl::Delete(int64_t reserved_offset, int64_t size, const IdArray* 
     }
     deleted_record_.timestamps_.set_data_raw(reserved_offset, sort_timestamps.data(), size);
     deleted_record_.pks_.set_data_raw(reserved_offset, sort_pks.data(), size);
-    deleted_record_.ack_responder_.AddSegment(reserved_offset, size);
+    deleted_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + size);
     return Status::OK();
 }
 
