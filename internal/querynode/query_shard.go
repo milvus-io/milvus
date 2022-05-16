@@ -46,6 +46,7 @@ type queryShard struct {
 	cancel context.CancelFunc
 
 	collectionID UniqueID
+	collection   *Collection // quick reference from meta
 	channel      Channel
 	deltaChannel Channel
 	replicaID    int64
@@ -104,6 +105,7 @@ func newQueryShard(
 		ctx:                ctx,
 		cancel:             cancel,
 		collectionID:       collectionID,
+		collection:         collection,
 		channel:            channel,
 		replicaID:          replicaID,
 		clusterService:     clusterService,
@@ -237,7 +239,7 @@ func (q *queryShard) getNewTSafe(tp tsType) (Timestamp, error) {
 	return t, nil
 }
 
-func (q *queryShard) waitUntilServiceable(ctx context.Context, guaranteeTs Timestamp, tp tsType) {
+func (q *queryShard) waitUntilServiceable(ctx context.Context, guaranteeTs Timestamp, tp tsType) error {
 	st := q.getServiceableTime(tp)
 	log.Debug("serviceable check start", zap.String("tsType", tp.String()), zap.Uint64("guarantee ts", guaranteeTs), zap.Uint64("serviceable ts", st), zap.String("channel", q.channel))
 	serviceable := func() bool {
@@ -252,12 +254,16 @@ func (q *queryShard) waitUntilServiceable(ctx context.Context, guaranteeTs Times
 		q.watcherCond.Wait()
 		if err := ctx.Err(); err != nil {
 			log.Warn("waitUntilServiceable timeout", zap.Uint64("serviceable ts", st), zap.Uint64("guarantee ts", guaranteeTs), zap.String("channel", q.channel))
-			// TODO: implement timeout logic
-			return
+			return ctx.Err()
+		}
+
+		if _, released := q.collection.getReleaseTime(); released {
+			return fmt.Errorf("collection %d is released before timestamp serviceable", q.collectionID)
 		}
 		st = q.getServiceableTime(tp)
 	}
 	log.Debug("wait serviceable ts done", zap.String("tsType", tp.String()), zap.Uint64("guarantee ts", guaranteeTs), zap.Uint64("serviceable ts", st), zap.String("channel", q.channel))
+	return nil
 }
 
 func (q *queryShard) getServiceableTime(tp tsType) Timestamp {
@@ -313,22 +319,15 @@ func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*i
 		return nil, errors.New("search context timeout")
 	}
 
-	// lock historic meta-replica
-	q.historical.replica.queryRLock()
-	defer q.historical.replica.queryRUnlock()
-
-	// lock streaming meta-replica for shard leader
-	if req.IsShardLeader {
-		q.streaming.replica.queryRLock()
-		defer q.streaming.replica.queryRUnlock()
-	}
-
-	// check if collection has been released
-	collection, err := q.historical.replica.getCollectionByID(collectionID)
+	// check if collection has been released, check streaming since it's released first
+	_, err := q.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return nil, err
 	}
-	if req.GetReq().GetGuaranteeTimestamp() >= collection.getReleaseTime() {
+
+	q.collection.RLock() // locks the collectionPtr
+	defer q.collection.RUnlock()
+	if _, released := q.collection.getReleaseTime(); released {
 		log.Warn("collection release before search", zap.Int64("collectionID", collectionID))
 		return nil, fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", collectionID)
 	}
@@ -337,20 +336,20 @@ func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*i
 	var plan *SearchPlan
 	if req.Req.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := req.Req.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(collection, expr)
+		plan, err = createSearchPlanByExpr(q.collection, expr)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		dsl := req.Req.Dsl
-		plan, err = createSearchPlan(collection, dsl)
+		plan, err = createSearchPlan(q.collection, dsl)
 		if err != nil {
 			return nil, err
 		}
 	}
 	defer plan.delete()
 
-	schemaHelper, err := typeutil.CreateSchemaHelper(collection.schema)
+	schemaHelper, err := typeutil.CreateSchemaHelper(q.collection.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -412,8 +411,16 @@ func (q *queryShard) searchLeader(ctx context.Context, req *querypb.SearchReques
 
 	go func() {
 		defer wg.Done()
+
 		guaranteeTs := req.GetReq().GetGuaranteeTimestamp()
-		q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDML) // wait until guarantee timestamp >= service timestamp
+		tsErr := q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDML) // wait until guarantee timestamp >= service timestamp
+		if tsErr != nil {
+			err = tsErr
+			log.Warn("failed to wait serviceable ts", zap.Error(err))
+			cancel()
+			return
+		}
+
 		// shard leader queries its own streaming data
 		// TODO add context
 		sResults, _, _, sErr := q.streaming.search(searchRequests, collectionID, partitionIDs, req.DmlChannel, plan, timestamp)
@@ -520,10 +527,14 @@ func (q *queryShard) searchFollower(ctx context.Context, req *querypb.SearchRequ
 	segmentIDs := req.GetSegmentIDs()
 	// hold request until guarantee timestamp >= service timestamp
 	guaranteeTs := req.GetReq().GetGuaranteeTimestamp()
-	q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDelta)
+	err := q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDelta)
+	if err != nil {
+		log.Warn("failed to wati serviceable ts", zap.Error(err))
+		return nil, err
+	}
 
 	// validate segmentIDs in request
-	err := q.historical.validateSegmentIDs(segmentIDs, collectionID, partitionIDs)
+	err = q.historical.validateSegmentIDs(segmentIDs, collectionID, partitionIDs)
 	if err != nil {
 		log.Warn("segmentIDs in search request fails validation", zap.Int64s("segmentIDs", segmentIDs))
 		return nil, err
@@ -710,23 +721,16 @@ func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*int
 		return nil, errors.New("search context timeout")
 	}
 
-	// lock historic meta-replica
-	q.historical.replica.queryRLock()
-	defer q.historical.replica.queryRUnlock()
-
-	// lock streaming meta-replica for shard leader
-	if req.IsShardLeader {
-		q.streaming.replica.queryRLock()
-		defer q.streaming.replica.queryRUnlock()
-	}
-
-	// check if collection has been released
+	// check if collection has been released, check streaming since it's released first
 	collection, err := q.streaming.replica.getCollectionByID(collectionID)
 	if err != nil {
 		return nil, err
 	}
 
-	if req.GetReq().GetGuaranteeTimestamp() >= collection.getReleaseTime() {
+	q.collection.RLock()
+	defer q.collection.RUnlock()
+
+	if _, released := q.collection.getReleaseTime(); released {
 		log.Warn("collection release before query", zap.Int64("collectionID", collectionID))
 		return nil, fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", collectionID)
 	}
@@ -774,7 +778,16 @@ func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*int
 			defer wg.Done()
 			// hold request until guarantee timestamp >= service timestamp
 			guaranteeTs := req.GetReq().GetGuaranteeTimestamp()
-			q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDML)
+			tsErr := q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDML)
+			if tsErr != nil {
+				err = tsErr
+				log.Warn("failed to wait serviceable ts", zap.Error(err))
+				cancel()
+				return
+			}
+
+			q.collection.RLock()
+			defer q.collection.RUnlock()
 			// shard leader queries its own streaming data
 			// TODO add context
 			sResults, _, _, sErr := q.streaming.retrieve(collectionID, partitionIDs, plan, func(segment *Segment) bool { return segment.vChannelID == q.channel })
@@ -816,7 +829,14 @@ func (q *queryShard) query(ctx context.Context, req *querypb.QueryRequest) (*int
 
 	// hold request until guarantee timestamp >= service timestamp
 	guaranteeTs := req.GetReq().GetGuaranteeTimestamp()
-	q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDelta)
+	err = q.waitUntilServiceable(ctx, guaranteeTs, tsTypeDelta)
+	if err != nil {
+		log.Warn("failed to wait servicable ts", zap.Error(err))
+		return nil, err
+	}
+
+	q.collection.RLock()
+	defer q.collection.RUnlock()
 
 	// validate segmentIDs in request
 	err = q.historical.validateSegmentIDs(segmentIDs, collectionID, partitionIDs)

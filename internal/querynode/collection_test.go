@@ -126,9 +126,10 @@ func TestCollection_releaseTime(t *testing.T) {
 
 	collection := newCollection(collectionID, schema)
 	t0 := Timestamp(1000)
-	collection.setReleaseTime(t0)
-	t1 := collection.getReleaseTime()
+	collection.setReleaseTime(t0, true)
+	t1, released := collection.getReleaseTime()
 	assert.Equal(t, t0, t1)
+	assert.True(t, released)
 }
 
 func TestCollection_loadType(t *testing.T) {

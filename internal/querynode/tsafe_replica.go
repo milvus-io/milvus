@@ -94,6 +94,10 @@ func (t *tSafeReplica) removeTSafe(vChannel Channel) {
 	log.Info("remove tSafe replica",
 		zap.String("vChannel", vChannel),
 	)
+	tsafe, ok := t.tSafes[vChannel]
+	if ok {
+		tsafe.close()
+	}
 	delete(t.tSafes, vChannel)
 }
 

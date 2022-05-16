@@ -93,3 +93,10 @@ func (ts *tSafe) set(t Timestamp) {
 	//	zap.Any("channel", ts.channel),
 	//	zap.Any("t", m.t))
 }
+
+// close calls the close method of internal watcher if any
+func (ts *tSafe) close() {
+	if ts.watcher != nil {
+		ts.watcher.close()
+	}
+}

@@ -20,7 +20,9 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -160,6 +162,56 @@ func TestQueryShard_Search(t *testing.T) {
 		_, err = qs.search(context.Background(), request)
 		assert.NoError(t, err)
 	})
+
+	t.Run("search timeout", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		r := proto.Clone(req).(*internalpb.SearchRequest)
+		r.GuaranteeTimestamp = Timestamp(100)
+		request := &querypb.SearchRequest{
+			Req:           r,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
+		}
+
+		_, err = qs.search(ctx, request)
+		assert.Error(t, err)
+	})
+
+	t.Run("search wait timeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		r := proto.Clone(req).(*internalpb.SearchRequest)
+		r.GuaranteeTimestamp = Timestamp(100)
+		request := &querypb.SearchRequest{
+			Req:           r,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
+		}
+
+		_, err = qs.search(ctx, request)
+		assert.Error(t, err)
+	})
+
+	t.Run("search collection released", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := proto.Clone(req).(*internalpb.SearchRequest)
+		r.GuaranteeTimestamp = Timestamp(100)
+		request := &querypb.SearchRequest{
+			Req:           r,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
+		}
+
+		qs.collection.setReleaseTime(100, true)
+
+		_, err = qs.search(ctx, request)
+		assert.Error(t, err)
+	})
 }
 
 func TestQueryShard_Query(t *testing.T) {
@@ -207,6 +259,56 @@ func TestQueryShard_Query(t *testing.T) {
 		_, err := qs.query(context.Background(), request)
 		assert.NoError(t, err)
 	})
+
+	t.Run("query timeout", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		r := proto.Clone(req).(*internalpb.RetrieveRequest)
+		r.GuaranteeTimestamp = Timestamp(100)
+		request := &querypb.QueryRequest{
+			Req:           r,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
+		}
+
+		_, err = qs.query(ctx, request)
+		assert.Error(t, err)
+	})
+
+	t.Run("query wait timeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		r := proto.Clone(req).(*internalpb.RetrieveRequest)
+		r.GuaranteeTimestamp = Timestamp(100)
+		request := &querypb.QueryRequest{
+			Req:           r,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
+		}
+
+		_, err = qs.query(ctx, request)
+		assert.Error(t, err)
+	})
+
+	t.Run("query collection released", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := proto.Clone(req).(*internalpb.RetrieveRequest)
+		r.GuaranteeTimestamp = Timestamp(100)
+		request := &querypb.QueryRequest{
+			Req:           r,
+			IsShardLeader: true,
+			DmlChannel:    defaultDMLChannel,
+			SegmentIDs:    []int64{},
+		}
+		qs.collection.setReleaseTime(100, true)
+
+		_, err = qs.query(ctx, request)
+		assert.Error(t, err)
+	})
+
 }
 
 func TestQueryShard_waitNewTSafe(t *testing.T) {
@@ -230,9 +332,29 @@ func TestQueryShard_WaitUntilServiceable(t *testing.T) {
 	qs, err := genSimpleQueryShard(context.Background())
 	assert.NoError(t, err)
 
-	err = updateQueryShardTSafe(qs, 1000)
-	assert.NoError(t, err)
-	qs.waitUntilServiceable(context.Background(), 1000, tsTypeDML)
+	t.Run("normal success", func(t *testing.T) {
+		err = updateQueryShardTSafe(qs, 1000)
+		require.NoError(t, err)
+
+		err = qs.waitUntilServiceable(context.Background(), 1000, tsTypeDML)
+		assert.NoError(t, err)
+	})
+
+	t.Run("context timeout", func(t *testing.T) {
+		err = updateQueryShardTSafe(qs, 1000)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err = qs.waitUntilServiceable(ctx, 1001, tsTypeDML)
+		assert.Error(t, err)
+	})
+
+	t.Run("collection released", func(t *testing.T) {
+		qs.collection.setReleaseTime(1000, true)
+		err = qs.waitUntilServiceable(context.Background(), 1001, tsTypeDML)
+		assert.Error(t, err)
+	})
 }
 
 func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32, topks []int64) *schemapb.SearchResultData {

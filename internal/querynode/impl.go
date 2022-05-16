@@ -458,6 +458,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
+	// collection lock is not needed since we guarantee not query/search will be dispatch from leader
 	for _, id := range in.SegmentIDs {
 		err := node.historical.replica.removeSegment(id)
 		if err != nil {
