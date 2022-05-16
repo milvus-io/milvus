@@ -102,9 +102,25 @@ func TestShardClusterService_HandoffVChannelSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+
 	//TODO change shardCluster to interface to mock test behavior
-	assert.NotPanics(t, func() {
-		err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{})
-		assert.NoError(t, err)
+	t.Run("normal case", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{})
+			assert.NoError(t, err)
+		})
+
 	})
+
+	t.Run("error case", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{
+				OfflineSegments: []*querypb.SegmentInfo{
+					{SegmentID: 1, NodeID: 3, CollectionID: defaultCollectionID, DmChannel: defaultDMLChannel, NodeIds: []UniqueID{3}},
+				},
+			})
+			assert.Error(t, err)
+		})
+	})
+
 }
